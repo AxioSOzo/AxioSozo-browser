@@ -1,0 +1,13 @@
+--- a/src/zen/toolkit/common/cocoa/ZenShareInternal.mm
++++ b/src/zen/toolkit/common/cocoa/ZenShareInternal.mm
+@@ -49,7 +49,9 @@
+   nsAutoCString pageUrlAsStringTemp;
+   if (aUrl) {
+     nsresult rv = aUrl->GetSpec(pageUrlAsStringTemp);
+-    MOZ_ASSERT(NS_SUCCEEDED(rv));
++    if (NS_FAILED(rv)) {
++      return rv;
++    }
+   } else {
+     pageUrlAsStringTemp.SetIsVoid(true);
+   }

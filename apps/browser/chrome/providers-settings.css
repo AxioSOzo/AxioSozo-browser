@@ -1,0 +1,26 @@
+/* Trusted settings surface; no styles are injected into websites. */
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; background: Canvas; color: CanvasText; }
+body { margin: 0; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 28px 32px; }
+header, .refresh-row, .instance { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+p { line-height: 1.5; margin: 8px 0; }
+.intro { margin: 16px 0 24px; }
+.refresh-row { margin-bottom: 8px; }
+.provider, .configuration { border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent); padding: 16px 0; }
+.provider p { margin: 4px 0; }
+.detail, .status { color: color-mix(in srgb, CanvasText 72%, Canvas); font-size: 12px; }
+code { display: block; font: 11px ui-monospace, monospace; overflow-wrap: anywhere; margin-top: 5px; }
+button, input, select { font: inherit; box-sizing: border-box; padding: 7px 10px; border: 1px solid color-mix(in srgb, CanvasText 28%, transparent); border-radius: 5px; background: Field; color: FieldText; }
+button { cursor: pointer; white-space: nowrap; }
+button:disabled, input:disabled { opacity: .6; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+form { display: grid; grid-template-columns: 160px minmax(100px, 1fr); gap: 10px 12px; align-items: center; margin-top: 14px; }
+form button { grid-column: 2; justify-self: start; }
+label { font-size: 12px; }
+ul { list-style: none; padding: 0; }
+.instance { margin: 12px 0; }
+.instance strong { font-size: 13px; font-weight: 500; }
+#settings-status { min-height: 1.5em; }
+@media (max-width: 520px) { main { padding: 20px; } form { grid-template-columns: 1fr; } form button { grid-column: 1; } }

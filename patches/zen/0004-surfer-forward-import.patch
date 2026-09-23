@@ -1,0 +1,22 @@
+--- a/node_modules/@zen-browser/surfer/dist/commands/patches/git-patch.js
++++ b/node_modules/@zen-browser/surfer/dist/commands/patches/git-patch.js
+@@ -11,17 +11,8 @@
+ const constants_1 = require("../../constants");
+ const log_1 = require("../../log");
+ async function apply(path) {
+-    try {
+-        await (0, execa_1.default)('git', ['apply', '-R', ...constants_1.PATCH_ARGS, path], {
+-            cwd: constants_1.ENGINE_DIR,
+-        });
+-    }
+-    catch {
+-        // If the patch has already been applied, we want to revert it. Because
+-        // there is no good way to check this we are just going to catch and
+-        // discard the error
+-        undefined;
+-    }
++    // AxioSozo verifies a pristine stage before the sole forward import.
++    // Repeat setup validates the resulting hashes instead of reversing patches.
+     const { stdout, exitCode } = await (0, execa_1.default)('git', ['apply', ...constants_1.PATCH_ARGS, path], { cwd: constants_1.ENGINE_DIR });
+     if (exitCode != 0)
+         log_1.log.error(stdout);

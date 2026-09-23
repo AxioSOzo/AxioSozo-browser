@@ -1,0 +1,24 @@
+[
+  {
+    "path": "build/moz.configure/toolchain.configure",
+    "before_sha256": "54fc5ebb39a8969af24722c0685023100e7545a5daa0dd596009b414a264f1e5",
+    "after_sha256": "034759edfee18a4807d1db0a391836b81fbb835e74f18ff7679b160e1646c7a2",
+    "replacements": [
+      [
+        "            elif retcode != 0:\n                return None\n\n            elif \"mold\" in stdout:\n",
+        "            elif retcode != 0 and target.kernel == \"Darwin\" and linker in (None, \"ld64\"):\n                # Xcode 26 no longer emits LD_PRINT_OPTIONS for --version.\n                # Recognize its explicit linker identity, never a generic error.\n                probe = cmd_base + linker_flag + [\"-Wl,-v\"] + toolchain_flags\n                _, ld_stdout, ld_stderr = get_cmd_output(*probe, env=env)\n                prefix = \"@(#)PROGRAM:ld PROJECT:ld-\"\n                if not any(\n                    line.startswith(prefix) and line[len(prefix):].split(\".\")[0].isdigit()\n                    for line in (ld_stdout + \"\\n\" + ld_stderr).splitlines()\n                ):\n                    return None\n                kind = \"ld64\"\n\n            elif retcode != 0:\n                return None\n\n            elif \"mold\" in stdout:\n"
+      ]
+    ]
+  },
+  {
+    "path": "servo/components/style/queries/feature_expression.rs",
+    "before_sha256": "6156ef9c58adacccdca363ac9a9209b9b868d94d2ab3560a383f55bdab58f4d5",
+    "after_sha256": "badc15746588fc27eddb00136e1c992583306970aef4ff37feade680c09d7919",
+    "replacements": [
+      [
+        "    String(AtomString),\n",
+        "    /// A string value used by Zen preference queries.\n    String(AtomString),\n"
+      ]
+    ]
+  }
+]

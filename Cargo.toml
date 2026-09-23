@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/browser-core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.94"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+strip = true
+lto = "thin"

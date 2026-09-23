@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:axiosozo:contracts:v1",
+  "title": "AxioSozo trusted process boundary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "request_id",
+    "session_id",
+    "token",
+    "body"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "request_id": {
+      "$ref": "#/$defs/id"
+    },
+    "session_id": {
+      "$ref": "#/$defs/id"
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "body": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
+              "const": "capabilities"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "engine",
+            "engine_instance",
+            "native_target_id",
+            "identity",
+            "private_mode"
+          ],
+          "properties": {
+            "method": {
+              "const": "create_target"
+            },
+            "engine": {
+              "enum": [
+                "gecko",
+                "chromium"
+              ]
+            },
+            "engine_instance": {
+              "$ref": "#/$defs/id"
+            },
+            "native_target_id": {
+              "$ref": "#/$defs/id"
+            },
+            "identity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "private_mode": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "target",
+            "identity"
+          ],
+          "properties": {
+            "method": {
+              "const": "advance_document"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            },
+            "identity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "target",
+            "scopes",
+            "ttl_ms"
+          ],
+          "properties": {
+            "method": {
+              "const": "grant"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "items": {
+                "$ref": "#/$defs/scope"
+              }
+            },
+            "ttl_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "grant_id",
+            "target",
+            "scope"
+          ],
+          "properties": {
+            "method": {
+              "const": "authorize"
+            },
+            "grant_id": {
+              "$ref": "#/$defs/id"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            },
+            "scope": {
+              "$ref": "#/$defs/scope"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "target"
+          ],
+          "properties": {
+            "method": {
+              "const": "close_target"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
+              "const": "shutdown"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "target"
+          ],
+          "properties": {
+            "method": {
+              "const": "register_target"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "previous",
+            "target"
+          ],
+          "properties": {
+            "method": {
+              "const": "update_target"
+            },
+            "previous": {
+              "$ref": "#/$defs/target"
+            },
+            "target": {
+              "$ref": "#/$defs/target"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9_:/.-]+$"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tab_id",
+        "engine",
+        "engine_instance",
+        "native_target_id",
+        "identity",
+        "document_generation",
+        "navigation_generation",
+        "private_mode"
+      ],
+      "properties": {
+        "tab_id": {
+          "$ref": "#/$defs/id"
+        },
+        "engine": {
+          "enum": [
+            "gecko",
+            "chromium"
+          ]
+        },
+        "engine_instance": {
+          "$ref": "#/$defs/id"
+        },
+        "native_target_id": {
+          "$ref": "#/$defs/id"
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "document_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "navigation_generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "private_mode": {
+          "type": "boolean"
+        }
+      }
+    },
+    "scope": {
+      "enum": [
+        "observe",
+        "navigate",
+        "back",
+        "forward",
+        "reload",
+        "close",
+        "devtools"
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "path": "node_modules/@zen-browser/surfer/dist/commands/patches/git-patch.js",
+  "before_sha256": "d3d81983eda6f681dd340f76de6935923e27f3722879cf961fa335a4e87d7ff2",
+  "after_sha256": "8247e4eccba7d2372e52d17741058fd190140abf63de7faa9201c229663d6115",
+  "replacements": [
+    [
+      "    try {\n        await (0, execa_1.default)('git', ['apply', '-R', ...constants_1.PATCH_ARGS, path], {\n            cwd: constants_1.ENGINE_DIR,\n        });\n    }\n    catch {\n        // If the patch has already been applied, we want to revert it. Because\n        // there is no good way to check this we are just going to catch and\n        // discard the error\n        undefined;\n    }\n",
+      "    // AxioSozo verifies a pristine stage before the sole forward import.\n    // Repeat setup validates the resulting hashes instead of reversing patches.\n"
+    ]
+  ]
+}

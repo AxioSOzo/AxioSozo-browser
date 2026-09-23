@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "reviewed_at": "2026-09-22",
+  "upstream": {
+    "url": "https://github.com/pingdotgg/t3code.git",
+    "sha": "b5a0f810108d42ca8635b5a3d75a6e885bb3a254",
+    "remote": "upstream",
+    "license": "MIT",
+    "license_file": "packages/provider-host/vendor/t3/LICENSE",
+    "license_sha256": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43",
+    "sparse_paths": [
+      "apps/server/src/provider",
+      "packages/effect-codex-app-server",
+      "docs/internals",
+      "apps/server/package.json"
+    ]
+  },
+  "extracted": [
+    {
+      "original_path": "apps/server/src/provider/acp/AcpStderr.ts",
+      "original_file_sha256": "16aeceb7b17eaea0b716887e5e89e18dad3011717fe599b99b987df03372d2a0",
+      "local_path": "packages/provider-host/vendor/t3/AcpStderr.ts",
+      "local_sha256": "16aeceb7b17eaea0b716887e5e89e18dad3011717fe599b99b987df03372d2a0",
+      "changes": "Entire dependency-free TypeScript module; unchanged.",
+      "tests": "tests/providers.test.mjs: bounded stderr and redaction regressions"
+    },
+    {
+      "original_path": "apps/server/src/provider/providerSnapshot.ts",
+      "original_file_sha256": "73ec920499b5a0d80e3a2c8cdd011ee46849de5125d61898fc688294717e35ad",
+      "local_path": "packages/provider-host/vendor/t3/version.ts",
+      "local_sha256": "d335a12481cab591cf84abc98b1becdec6229674e9e59fd0d8067cf204e8f92f",
+      "changes": "Extracted parseGenericCliVersion only; added MIT provenance comment.",
+      "tests": "tests/providers.test.mjs: version metadata parsing"
+    },
+    {
+      "original_path": "apps/server/src/provider/ProviderDriver.ts",
+      "original_file_sha256": "f736eb12700cf17abfa7984ac96ab8958e973dd711eecb910484e3b1f8d3223a",
+      "local_path": "packages/provider-host/vendor/t3/identity.ts",
+      "local_sha256": "98cd5d6199b23296d41919d9346f58b1c4e388e8133d5fd25d8b3e928a5cdb80",
+      "changes": "Extracted defaultProviderContinuationIdentity; replaced upstream branded type aliases with local string types; runtime logic unchanged.",
+      "tests": "tests/providers.test.mjs: account/instance isolation and resume"
+    }
+  ],
+  "audited_not_copied": [
+    {
+      "path": "package.json",
+      "sha256": "81c24b3fbcf447445ed0ea80237a08f3fc7fea22b42c337f27338c053a8a573c"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "80440f7ffe6bb965a9b8b46ece7a180706dfcaa243b0e72f8e4ef5aaeff8dfff"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sha256": "1cfe943948494f3752380e82a1a05aa4d58a1d746329e3c080112a9b58c4a83d"
+    },
+    {
+      "path": "apps/server/package.json",
+      "sha256": "6d0815899db84a2fcd177655b6b8cfe11da0adef90ef35230bfda10b3b261578"
+    },
+    {
+      "path": "apps/server/src/provider/Services/ProviderAdapter.ts",
+      "sha256": "78f631a25cf691503ce24d0f47862de982a469e830d9ecebf32a31a873465868"
+    },
+    {
+      "path": "apps/server/src/provider/Layers/CodexAdapter.ts",
+      "sha256": "62bae4c7f4750efe8a1fac94cda8d838b572cb19b91df786db483f450ac4e5d4"
+    },
+    {
+      "path": "apps/server/src/provider/Layers/ClaudeAdapter.ts",
+      "sha256": "a1f66ade6e0ed3218f1abe6c774b6cc0c49d5f292c10ac421266d8d8f4ba4625"
+    },
+    {
+      "path": "apps/server/src/provider/AntigravityInstallation.ts",
+      "sha256": "2bf89c57d62ff563afd2606db47054457cd42aadc04fcbac07c962a7afe263a7"
+    },
+    {
+      "path": "apps/server/src/provider/antigravityAuthSupport.ts",
+      "sha256": "83ce761549516615c3405e7939d8eeefa62b4a6a2e1901164569c88c01bf8800"
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityAcpSupport.ts",
+      "sha256": "5e71cf56ae46755e309545b3f440cecdddaf68b5df89eb13a7cf69e4ff3c5b1b"
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/protocol.ts",
+      "sha256": "1095d256be8be351862a5cc86280bbb0512c4f576e4a324d818a5fe52c72da4a"
+    },
+    {
+      "path": "packages/effect-codex-app-server/package.json",
+      "sha256": "e784da0b6b877b4226437906c26f8418c3b7bbe8bb84cf4f5e3dee79b41b0e8a"
+    },
+    {
+      "path": "docs/internals/providers.md",
+      "sha256": "214c13013f48d43c912733fb53678739175b9dbe6e597cbe0451e4cd8b3625ff"
+    }
+  ],
+  "exclusions": [
+    "T3 server/frontends/Electron/mobile",
+    "T3 terminal/worktrees/remote service",
+    "provider installers and auth controllers",
+    "Claude Agent SDK query layer",
+    "Antigravity ACP file credential storage and global skills links",
+    "Effect runtime dependency graph"
+  ],
+  "new_code": "src/ adapters, discovery, transport, validation, decision, keychain, storage and sandbox; native/ Keychain helper, lifetime supervisor and sandbox fixture are locally authored. Only vendor/t3 entries are represented as copied upstream code.",
+  "runtime": {
+    "node": "24.14.0",
+    "external_dependencies": [],
+    "upstream_lifecycle_hooks_executed": false,
+    "upstream_tests_executed": false,
+    "extracted_subset_tests_executed": true
+  },
+  "codex_schema": {
+    "client_version": "0.155.1",
+    "command": "codex app-server generate-json-schema --out <task-owned temporary directory>",
+    "local_path": "packages/provider-host/schemas/codex-0.155.1.json",
+    "sha256": "f1f3591667d8dcf77352c04be5d0667153e492d1a378e4205d69e9af6f31c0c3",
+    "generation_exit_code": 0,
+    "source": "official Codex CLI installed on 2026-09-22; historical package metadata and --version agreed. Schema does not establish current 0.156.1 compatibility.",
+    "license": "Apache-2.0",
+    "generated_at": "2026-09-22"
+  },
+  "official_routes": {
+    "codex": "https://developers.openai.com/codex/app-server",
+    "claude-code": "https://code.claude.com/docs/en/headless",
+    "antigravity": "https://antigravity.google/docs/cli/headless/"
+  },
+  "jev": {
+    "url": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-1.13.0",
+    "docs": [
+      "https://docs.typesafe.ai/api",
+      "https://docs.typesafe.ai/models"
+    ],
+    "state": "fixed synthetic-1 only",
+    "live_tested": false
+  },
+  "status": {
+    "protocol_fixtures": "PASS",
+    "live_provider_integrations": "BLOCKED_AUTH",
+    "automatic_browser_control": "BLOCKED_ENV",
+    "reason": "Current Codex and Claude metadata mismatch retained fixture pins; actual protocols are UNTESTED. Native offline/no-fork fixture boundary is proven, but actual provider-client boundary/auth remain unverified; no live launcher enabled.",
+    "native_process_fixture": "PASS",
+    "keychain_negative_fixture": "PASS"
+  },
+  "native_boundary": {
+    "policy": "macos-seatbelt-offline-no-fork-v1",
+    "launcher": "packages/provider-host/native/sandbox-launcher.c",
+    "fixture": "packages/provider-host/native/sandbox-probe.c",
+    "broker": "packages/provider-host/src/sandbox.mjs",
+    "build_root": "$AXIOSOZO_BUILD_ROOT/providers (default /Volumes/AxioSozoBuild/providers)",
+    "interface": "sandbox-exec; deprecated by local macOS manual",
+    "live_clients_admitted": false,
+    "actual_client_compatibility_tested": false,
+    "official_documentation": [
+      "https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox",
+      "https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/EnablingAppSandbox.html",
+      "https://code.claude.com/docs/en/headless",
+      "https://www.antigravity.google/docs/sandbox?tab=cli"
+    ],
+    "runtime_tests": "PASS",
+    "runtime_test_scope": "Five native fixture tests only; no live provider launch or actual-client compatibility claim",
+    "evidence": "docs/evidence/providers-verification-20260923.json",
+    "test_log": "docs/evidence/providers-sandbox-final-20260923.log"
+  },
+  "browser_settings": {
+    "module": "apps/browser/chrome/ProviderSettings.sys.mjs",
+    "surface": "chrome://browser/content/axiosozo/providers-settings.xhtml",
+    "discovery_command": "provider-host discover",
+    "credential_storage_enabled": false,
+    "private_windows": "blocked before configuration/discovery",
+    "fixture_tests": 10,
+    "combined_fixture_tests": 47,
+    "real_browser_gui_tested": false,
+    "evidence": "docs/evidence/providers-settings-results.json",
+    "version_evidence": "docs/evidence/providers-version-results-20260923.json"
+  },
+  "verified_at": "2026-09-23",
+  "keychain_negative": {
+    "source": "packages/provider-host/native/keychain.m",
+    "define": "AXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1",
+    "search_list": "explicit empty CFArray; no existing keychain in query scope",
+    "mutations_enabled": false,
+    "actual_statuses": {
+      "missing": -25300,
+      "invalid_query": -50
+    },
+    "tests_passed": 5,
+    "production_helper_scope": "malformed store and unknown operation rejected before SecItem",
+    "successful_store_read_remove_tested": false,
+    "evidence": "docs/evidence/providers-keychain-negative-20260923.json"
+  },
+  "installed_metadata_20260923": {
+    "codex": {
+      "client_version": "0.156.1",
+      "fixture_version": "0.155.1",
+      "version_status": "VERSION_MISMATCH",
+      "protocol_status": "UNTESTED",
+      "source": "npm-package-metadata"
+    },
+    "claude-code": {
+      "client_version": "2.1.280",
+      "fixture_version": "2.1.278",
+      "version_status": "VERSION_MISMATCH",
+      "protocol_status": "UNTESTED",
+      "source": "native-installation-path"
+    },
+    "antigravity": {
+      "client_version": null,
+      "fixture_version": null,
+      "version_status": "UNTESTED",
+      "protocol_status": "UNTESTED"
+    },
+    "client_execution": false,
+    "auth_access": false,
+    "evidence": "docs/evidence/providers-version-results-20260923.json"
+  }
+}

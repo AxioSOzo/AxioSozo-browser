@@ -1,0 +1,22 @@
+--- a/build/moz.configure/toolchain.configure
++++ b/build/moz.configure/toolchain.configure
+@@ -1949,6 +1949,19 @@
+             env["LC_ALL"] = "C"
+             retcode, stdout, stderr = get_cmd_output(*cmd, env=env)
+             if retcode == 1 and "Logging ld64 options" in stderr:
++                kind = "ld64"
++
++            elif retcode != 0 and target.kernel == "Darwin" and linker in (None, "ld64"):
++                # Xcode 26 no longer emits LD_PRINT_OPTIONS for --version.
++                # Recognize its explicit linker identity, never a generic error.
++                probe = cmd_base + linker_flag + ["-Wl,-v"] + toolchain_flags
++                _, ld_stdout, ld_stderr = get_cmd_output(*probe, env=env)
++                prefix = "@(#)PROGRAM:ld PROJECT:ld-"
++                if not any(
++                    line.startswith(prefix) and line[len(prefix):].split(".")[0].isdigit()
++                    for line in (ld_stdout + "\n" + ld_stderr).splitlines()
++                ):
++                    return None
+                 kind = "ld64"
+ 
+             elif retcode != 0:

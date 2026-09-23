@@ -1,0 +1,109 @@
+[
+  {
+    "path": "src/zen/common/ZenPreloadedScripts.js",
+    "before_sha256": "be9a28b4b45e0dd508a7d611b21d1b0997ff7b6920f3a80284adc4eec6f8bfda",
+    "after_sha256": "1cd314340005a1583b6eae5227d2ff4a2b8fbb633226bcd393dee2c64f0e3119",
+    "replacements": [
+      [
+        "    \"chrome://browser/content/ZenStartup.mjs\",",
+        "    \"chrome://browser/content/ZenStartup.mjs\",\n    \"chrome://browser/content/axiosozo/AxioSozoStartup.mjs\","
+      ]
+    ]
+  },
+  {
+    "path": "src/zen/common/jar.inc.mn",
+    "before_sha256": "5c70b89bb41bbe1580a11387fe95d6dbcf83ff43bb0d6d264c280fd67e028a77",
+    "after_sha256": "9427914bd9b97cd90743c5d11366b98f7edf7a6b1c841e526037a06bbf2341e6",
+    "replacements": [
+      [
+        "        content/browser/ZenStartup.mjs",
+        "        content/browser/axiosozo/AxioSozoStartup.mjs                           (../../zen/common/axiosozo/AxioSozoStartup.mjs)\n        content/browser/axiosozo/GeckoEngineAdapter.sys.mjs                    (../../zen/common/axiosozo/GeckoEngineAdapter.sys.mjs)\n        content/browser/axiosozo/BrowserCoordinator.sys.mjs                   (../../zen/common/axiosozo/BrowserCoordinator.sys.mjs)\n        content/browser/axiosozo/ProviderSettings.sys.mjs (../../zen/common/axiosozo/ProviderSettings.sys.mjs)\n        content/browser/axiosozo/providers-settings.xhtml (../../zen/common/axiosozo/providers-settings.xhtml)\n        content/browser/axiosozo/providers-settings.css (../../zen/common/axiosozo/providers-settings.css)\n        content/browser/axiosozo/CEFEngineAdapter.sys.mjs (../../zen/common/axiosozo/CEFEngineAdapter.sys.mjs)\n        content/browser/axiosozo/CEFPresenter.sys.mjs (../../zen/common/axiosozo/CEFPresenter.sys.mjs)\n        content/browser/axiosozo/EngineProbeControls.sys.mjs (../../zen/common/axiosozo/EngineProbeControls.sys.mjs)\n\n        content/browser/ZenStartup.mjs"
+      ]
+    ]
+  },
+  {
+    "path": "prefs/zen/compact-mode.yaml",
+    "before_sha256": "b55721ee08c04cf2f532943fe72ef27643db419497aba136a2c4aa1ac5c177e7",
+    "after_sha256": "bfab8e8c13ce14289357c5a0f16be02dd9796c92e0088dcb11f5f453a20f0594",
+    "replacements": [
+      [
+        "- name: zen.view.compact.enable-at-startup\n  hidden: true\n  value: false\n",
+        "- name: zen.view.compact.enable-at-startup\n  hidden: true\n  value: true\n"
+      ]
+    ]
+  },
+  {
+    "path": "prefs/zen/welcome.yaml",
+    "before_sha256": "74a1a4925deb04e6fc3b9ebc57c7db479d85881aa07b90361fa5dfc6b5cf90e9",
+    "after_sha256": "74a1a4925deb04e6fc3b9ebc57c7db479d85881aa07b90361fa5dfc6b5cf90e9",
+    "replacements": [
+      [
+        "- name: zen.welcome-screen.seen\n  value: \"@cond\"\n  sticky: true\n  condition: \"!defined(MOZILLA_OFFICIAL)\"\n",
+        "- name: zen.welcome-screen.seen\n  value: \"@cond\"\n  sticky: true\n  condition: \"!defined(MOZILLA_OFFICIAL)\"\n"
+      ]
+    ]
+  },
+  {
+    "path": "configs/common/mozconfig",
+    "before_sha256": "0d39233b8a0af738b63f9f519ed999e8340ee714c3f348b94f755bbc892d10f4",
+    "after_sha256": "666dc9f97664a403f2887e9f49033349415f0cbce47b3ff7c0d731c7bbe8aef3",
+    "replacements": [
+      [
+        "# add API keys if it exists on a file\nif test -f \"$HOME/.zen-keys/safebrowsing.dat\"; then\n  ac_add_options --with-google-safebrowsing-api-keyfile=\"$HOME/.zen-keys/safebrowsing.dat\"\nfi\n\nif test -f \"$HOME/.zen-keys/mozilla.dat\"; then\n  ac_add_options --with-mozilla-api-keyfile=\"$HOME/.zen-keys/mozilla.dat\"\nfi\n\nif test -f \"$HOME/.zen-keys/google_location_service.dat\"; then\n  ac_add_options --with-google-location-service-api-keyfile=\"$HOME/.zen-keys/google_location_service.dat\"\nfi\n\n",
+        "# AxioSozo never reads personal Zen API key files during builds.\n\n"
+      ],
+      [
+        "ac_add_options --with-app-basename=Zen",
+        "ac_add_options --with-app-basename=AxioSozo"
+      ],
+      [
+        "export MOZ_APP_BASENAME=Zen",
+        "export MOZ_APP_BASENAME=AxioSozo"
+      ]
+    ]
+  },
+  {
+    "path": "surfer.json",
+    "before_sha256": "fd91ff5b74ad0f0789053bf279558f258d0afb98ecb083a5583e207c8647ccb8",
+    "after_sha256": "d8fa0af111771b0cd38449be897840e3c0dfff517ce3fe18e77e382fe3848c3b",
+    "replacements": [
+      [
+        "{\n  \"name\": \"Zen Browser\",\n  \"vendor\": \"Zen OSS Team\",\n  \"appId\": \"zen\",\n  \"binaryName\": \"zen\",\n  \"version\": {\n    \"product\": \"firefox\",\n    \"version\": \"156.0\",\n    \"candidate\": \"156.0\",\n    \"candidateBuild\": 1\n  },\n  \"buildOptions\": {\n    \"generateBranding\": true\n  },\n  \"addons\": {},\n  \"brands\": {\n    \"release\": {\n      \"backgroundColor\": \"#282A33\",\n      \"brandShorterName\": \"Zen\",\n      \"brandShortName\": \"Zen\",\n      \"brandFullName\": \"Zen Browser\",\n      \"release\": {\n        \"displayVersion\": \"1.22.3b\",\n        \"github\": {\n          \"repo\": \"zen-browser/desktop\"\n        },\n        \"archives\": {\n          \"windows\": \"windows.mar\",\n          \"macos-aarch64\": \"macos-aarch64.mar\",\n          \"linux\": \"linux.mar\",\n          \"macos-x64\": \"macos-x64.mar\",\n          \"windows-arm64\": \"windows-arm64.mar\",\n          \"linux-aarch64\": \"linux-aarch64.mar\"\n        }\n      }\n    },\n    \"twilight\": {\n      \"backgroundColor\": \"#282A33\",\n      \"brandShorterName\": \"Zen\",\n      \"brandShortName\": \"Twilight\",\n      \"brandFullName\": \"Zen Twilight\",\n      \"release\": {\n        \"displayVersion\": \"1.23t\",\n        \"github\": {\n          \"repo\": \"zen-browser/desktop\"\n        }\n      }\n    }\n  },\n  \"license\": {\n    \"ignoredFiles\": [\n      \".*\\\\.json\"\n    ],\n    \"licenseType\": \"MPL-2.0\"\n  },\n  \"updateHostname\": \"updates.zen-browser.app\"\n}",
+        "{\n  \"name\": \"AxioSozo Dev\",\n  \"vendor\": \"AxioSozo Local Development\",\n  \"appId\": \"nl.axiosozo.browser.dev\",\n  \"binaryName\": \"axiosozo-dev\",\n  \"version\": {\n    \"product\": \"firefox\",\n    \"version\": \"156.0\",\n    \"candidate\": \"156.0\",\n    \"candidateBuild\": 1\n  },\n  \"buildOptions\": {\n    \"generateBranding\": true\n  },\n  \"addons\": {},\n  \"brands\": {\n    \"release\": {\n      \"backgroundColor\": \"#282A33\",\n      \"brandShorterName\": \"Zen\",\n      \"brandShortName\": \"Zen\",\n      \"brandFullName\": \"Zen Browser\",\n      \"release\": {\n        \"displayVersion\": \"1.22.3b\",\n        \"github\": {\n          \"repo\": \"zen-browser/desktop\"\n        },\n        \"archives\": {\n          \"windows\": \"windows.mar\",\n          \"macos-aarch64\": \"macos-aarch64.mar\",\n          \"linux\": \"linux.mar\",\n          \"macos-x64\": \"macos-x64.mar\",\n          \"windows-arm64\": \"windows-arm64.mar\",\n          \"linux-aarch64\": \"linux-aarch64.mar\"\n        }\n      }\n    },\n    \"twilight\": {\n      \"backgroundColor\": \"#282A33\",\n      \"brandShorterName\": \"Zen\",\n      \"brandShortName\": \"Twilight\",\n      \"brandFullName\": \"Zen Twilight\",\n      \"release\": {\n        \"displayVersion\": \"1.23t\",\n        \"github\": {\n          \"repo\": \"zen-browser/desktop\"\n        }\n      }\n    },\n    \"axiosozo-dev\": {\n      \"backgroundColor\": \"#202124\",\n      \"brandShorterName\": \"AxioSozo\",\n      \"brandShortName\": \"AxioSozo Dev\",\n      \"brandFullName\": \"AxioSozo Dev\",\n      \"release\": {\n        \"displayVersion\": \"0.1a1\"\n      }\n    }\n  },\n  \"license\": {\n    \"ignoredFiles\": [\n      \".*\\\\.json\"\n    ],\n    \"licenseType\": \"MPL-2.0\"\n  },\n  \"updateHostname\": \"updates.axiosozo.invalid\"\n}\n"
+      ]
+    ]
+  },
+  {
+    "path": "package.json",
+    "before_sha256": "02aac5a68445d59c87cbfac158a0dd6c25f47024dd58b305429657893cf20bb7",
+    "after_sha256": "a9d8cf92848bfc889453de0e85f0b2e2dd06e31dd53498290513671b99f3f0c7",
+    "replacements": [
+      [
+        "cargo run --bin ffprefs",
+        "cargo run --locked --bin ffprefs"
+      ]
+    ]
+  },
+  {
+    "path": "package-lock.json",
+    "before_sha256": "24c6476f92c4f8e6ea419146e113ea8fdc4e1333a4fca188097fe4ed64b94f9c",
+    "after_sha256": "db1b40102bc0d19626a96e93d4d614e306b765a8a45e39b54897102afaa2f275",
+    "replacements": [
+      [
+        "git+ssh://git@github.com/trickypr/is-apple-silicon.git#5f75501a1d7566ba9f94174b6825d7bd9d302b6a",
+        "git+https://github.com/trickypr/is-apple-silicon.git#5f75501a1d7566ba9f94174b6825d7bd9d302b6a"
+      ]
+    ]
+  },
+  {
+    "path": "src/zen/toolkit/common/cocoa/ZenShareInternal.mm",
+    "before_sha256": "05526c8682b2fed8de40b0102ba2c08dbf036cac44eda97b87431dd6e0e66496",
+    "after_sha256": "1e8461e101fc955a3c9e9d13145880a42d3bbe308727928399bdc6b6a7a28dc1",
+    "replacements": [
+      [
+        "    nsresult rv = aUrl->GetSpec(pageUrlAsStringTemp);\n    MOZ_ASSERT(NS_SUCCEEDED(rv));\n",
+        "    nsresult rv = aUrl->GetSpec(pageUrlAsStringTemp);\n    if (NS_FAILED(rv)) {\n      return rv;\n    }\n"
+      ]
+    ]
+  }
+]

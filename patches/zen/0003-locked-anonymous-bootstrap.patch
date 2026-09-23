@@ -1,0 +1,22 @@
+--- a/package.json
++++ b/package.json
+@@ -29,7 +29,7 @@
+     "test": "python3 scripts/run_tests.py",
+     "test:dbg": "python3 scripts/run_tests.py --jsdebugger --debug-on-failure",
+     "test:gtest": "cd engine && ./mach gtest Zen*",
+-    "ffprefs": "cd tools/ffprefs && cargo run --bin ffprefs -- ../../",
++    "ffprefs": "cd tools/ffprefs && cargo run --locked --bin ffprefs -- ../../",
+     "lc": "surfer license-check",
+     "lc:fix": "surfer license-check --fix",
+     "use-moz-src": "cd engine && ./mach use-moz-src",
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -2263,7 +2263,7 @@
+     },
+     "node_modules/is-apple-silicon": {
+       "version": "1.0.1",
+-      "resolved": "git+ssh://git@github.com/trickypr/is-apple-silicon.git#5f75501a1d7566ba9f94174b6825d7bd9d302b6a",
++      "resolved": "git+https://github.com/trickypr/is-apple-silicon.git#5f75501a1d7566ba9f94174b6825d7bd9d302b6a",
+       "dev": true,
+       "license": "MIT"
+     },

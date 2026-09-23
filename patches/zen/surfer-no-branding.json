@@ -1,0 +1,13 @@
+{
+  "package": "@zen-browser/surfer",
+  "version": "1.14.9",
+  "path": "node_modules/@zen-browser/surfer/dist/commands/patches/command.js",
+  "before_sha256": "a0bd096819f718a1482edcfe6c76f73adb86c1abb9cc6273d76a89bafb635861",
+  "after_sha256": "2d728ffc56b650f4c51e77389732ce29003faa8b0065b180f4e8885f98fe5a69",
+  "replacements": [
+    [
+      "const brandingPatch = __importStar(require(\"./branding-patch\"));",
+      "const brandingPatch = process.env.SURFER_NO_BRANDING_PATCH === \"true\" ? null : __importStar(require(\"./branding-patch\"));"
+    ]
+  ]
+}

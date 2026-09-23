@@ -1,0 +1,124 @@
+diff --git a/configs/common/mozconfig b/configs/common/mozconfig
+index c4ecea4..a3d0753 100644
+--- a/configs/common/mozconfig
++++ b/configs/common/mozconfig
+@@ -4,12 +4,12 @@
+ 
+ # Browser branding
+ ac_add_options --with-app-name=${binName}
+-ac_add_options --with-app-basename=Zen
++ac_add_options --with-app-basename=AxioSozo
+ 
+ # Localization (Must be an absolute path)
+ ac_add_options --with-l10n-base="${topsrcdir}/browser/locales"
+ 
+-export MOZ_APP_BASENAME=Zen
++export MOZ_APP_BASENAME=AxioSozo
+ export MOZ_BRANDING_DIRECTORY=${brandingDir}
+ export MOZ_OFFICIAL_BRANDING_DIRECTORY=${brandingDir}
+ 
+@@ -37,18 +37,7 @@ if test "$SCCACHE_GHA_ENABLED" = "true"; then
+   mk_add_options 'export CCACHE_CPP2=yes'
+ fi
+ 
+-# add API keys if it exists on a file
+-if test -f "$HOME/.zen-keys/safebrowsing.dat"; then
+-  ac_add_options --with-google-safebrowsing-api-keyfile="$HOME/.zen-keys/safebrowsing.dat"
+-fi
+-
+-if test -f "$HOME/.zen-keys/mozilla.dat"; then
+-  ac_add_options --with-mozilla-api-keyfile="$HOME/.zen-keys/mozilla.dat"
+-fi
+-
+-if test -f "$HOME/.zen-keys/google_location_service.dat"; then
+-  ac_add_options --with-google-location-service-api-keyfile="$HOME/.zen-keys/google_location_service.dat"
+-fi
++# AxioSozo never reads personal Zen API key files during builds.
+ 
+ if test "$ZEN_RELEASE"; then
+ 
+diff --git a/prefs/zen/compact-mode.yaml b/prefs/zen/compact-mode.yaml
+index d7de3a4..1def971 100644
+--- a/prefs/zen/compact-mode.yaml
++++ b/prefs/zen/compact-mode.yaml
+@@ -43,4 +43,4 @@
+ # Do not edit manually
+ - name: zen.view.compact.enable-at-startup
+   hidden: true
+-  value: false
++  value: true
+diff --git a/src/zen/common/ZenPreloadedScripts.js b/src/zen/common/ZenPreloadedScripts.js
+index 6526838..e5458b8 100644
+--- a/src/zen/common/ZenPreloadedScripts.js
++++ b/src/zen/common/ZenPreloadedScripts.js
+@@ -14,6 +14,7 @@
+ 
+   let scripts = [
+     "chrome://browser/content/ZenStartup.mjs",
++    "chrome://browser/content/axiosozo/AxioSozoStartup.mjs",
+     "resource:///modules/zen/ZenSpaceManager.mjs",
+     "chrome://browser/content/zen-components/ZenCompactMode.mjs",
+     "chrome://browser/content/ZenUIManager.mjs",
+diff --git a/src/zen/common/jar.inc.mn b/src/zen/common/jar.inc.mn
+index bfddd27..238e443 100644
+--- a/src/zen/common/jar.inc.mn
++++ b/src/zen/common/jar.inc.mn
+@@ -6,6 +6,16 @@
+         content/browser/ZenPreloadedScripts.js                                  (../../zen/common/ZenPreloadedScripts.js)
+         content/browser/zen-sets.js                                             (../../zen/common/zen-sets.js)
+ 
++        content/browser/axiosozo/AxioSozoStartup.mjs                           (../../zen/common/axiosozo/AxioSozoStartup.mjs)
++        content/browser/axiosozo/GeckoEngineAdapter.sys.mjs                    (../../zen/common/axiosozo/GeckoEngineAdapter.sys.mjs)
++        content/browser/axiosozo/BrowserCoordinator.sys.mjs                   (../../zen/common/axiosozo/BrowserCoordinator.sys.mjs)
++        content/browser/axiosozo/ProviderSettings.sys.mjs (../../zen/common/axiosozo/ProviderSettings.sys.mjs)
++        content/browser/axiosozo/providers-settings.xhtml (../../zen/common/axiosozo/providers-settings.xhtml)
++        content/browser/axiosozo/providers-settings.css (../../zen/common/axiosozo/providers-settings.css)
++        content/browser/axiosozo/CEFEngineAdapter.sys.mjs (../../zen/common/axiosozo/CEFEngineAdapter.sys.mjs)
++        content/browser/axiosozo/CEFPresenter.sys.mjs (../../zen/common/axiosozo/CEFPresenter.sys.mjs)
++        content/browser/axiosozo/EngineProbeControls.sys.mjs (../../zen/common/axiosozo/EngineProbeControls.sys.mjs)
++
+         content/browser/ZenStartup.mjs                                          (../../zen/common/modules/ZenStartup.mjs)
+         content/browser/ZenUpdates.mjs                                          (../../zen/common/modules/ZenUpdates.mjs)
+         content/browser/ZenUIManager.mjs                                        (../../zen/common/modules/ZenUIManager.mjs)
+diff --git a/surfer.json b/surfer.json
+index 4fb25c0..9bc1e88 100644
+--- a/surfer.json
++++ b/surfer.json
+@@ -1,8 +1,8 @@
+ {
+-  "name": "Zen Browser",
+-  "vendor": "Zen OSS Team",
+-  "appId": "zen",
+-  "binaryName": "zen",
++  "name": "AxioSozo Dev",
++  "vendor": "AxioSozo Local Development",
++  "appId": "nl.axiosozo.browser.dev",
++  "binaryName": "axiosozo-dev",
+   "version": {
+     "product": "firefox",
+     "version": "156.0",
+@@ -45,6 +45,15 @@
+           "repo": "zen-browser/desktop"
+         }
+       }
++    },
++    "axiosozo-dev": {
++      "backgroundColor": "#202124",
++      "brandShorterName": "AxioSozo",
++      "brandShortName": "AxioSozo Dev",
++      "brandFullName": "AxioSozo Dev",
++      "release": {
++        "displayVersion": "0.1a1"
++      }
+     }
+   },
+   "license": {
+@@ -53,5 +62,5 @@
+     ],
+     "licenseType": "MPL-2.0"
+   },
+-  "updateHostname": "updates.zen-browser.app"
+-}
+\ No newline at end of file
++  "updateHostname": "updates.axiosozo.invalid"
++}

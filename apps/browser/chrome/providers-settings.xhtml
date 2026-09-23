@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Provider settings · AxioSozo</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src chrome:; form-action 'none'; base-uri 'none'" />
+    <link rel="stylesheet" href="chrome://browser/content/axiosozo/providers-settings.css" />
+  </head>
+  <body>
+    <main>
+      <header><h1>Provider settings</h1><button id="close" type="button">Close</button></header>
+      <p class="intro">Browsing works without a provider. Connections remain unavailable until their client and security boundary are verified.</p>
+      <div class="refresh-row"><h2>Installed clients</h2><button id="refresh" type="button">Refresh metadata</button></div>
+      <div id="providers"><p>Reading installation metadata…</p></div>
+      <section class="configuration" aria-labelledby="configuration-title">
+        <h2 id="configuration-title">Local configurations</h2>
+        <p>Each configuration has its own permanent instance ID. Adding one does not sign in or start a session.</p>
+        <p id="instances-empty">No configurations saved.</p><ul id="instances"></ul>
+        <form id="instance-form" autocomplete="off">
+          <label for="driver">Provider</label><select id="driver"><option value="codex">Codex</option><option value="claude-code">Claude Code</option><option value="antigravity">Antigravity</option></select>
+          <label for="instance-name">Configuration name</label><input id="instance-name" type="text" maxlength="64" required="required" placeholder="For example, Work" />
+          <button type="submit">Add configuration</button>
+        </form>
+      </section>
+      <section class="configuration" aria-labelledby="jev-title">
+        <h2 id="jev-title">Jev · optional</h2><p>Off. No key is required to browse. Keychain storage awaits native validation in this development build.</p>
+        <form id="jev-form" autocomplete="off">
+          <label for="jev-key">API key · macOS Keychain only</label><input id="jev-key" type="password" autocomplete="off" disabled="disabled" maxlength="4096" />
+          <button type="submit" disabled="disabled">Store key</button>
+        </form>
+      </section>
+      <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>
