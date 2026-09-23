@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateDiscovery, ProviderInstances, discoverForSettings, storeJevKey, openProviderSettings } from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
+import { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, storeJevKey, openProviderSettings } from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
 import { discover } from '../src/discovery.mjs';
 
 const discovery = () => ({ version: 1, providers: discover({ searchPath: '' }) });
@@ -58,6 +58,29 @@ test('Corrupt or credential-bearing saved configuration fails closed and is pres
   assert.throws(() => store.list(), /INVALID_INSTANCE_CONFIG/);
   assert.throws(() => store.add('codex', 'New'), /INVALID_INSTANCE_CONFIG/);
   assert.equal(prefs.value(), original);
+});
+
+test('zero, one, two and three enabled instances select at most one verified route', () => {
+  const prefs = preferences(); let sequence = 0;
+  const store = new ProviderInstances(prefs, () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`);
+  const ids = [store.add('codex', 'One'), store.add('claude-code', 'Two'), store.add('antigravity', 'Three')];
+  const ready = ids.map(item => ({ driver: item.driver, live_verified: true, status: 'READY' }));
+  assert.equal(providerRoute(store.state(), ready), null);
+  for (let count = 1; count <= 3; count++) {
+    store.setEnabled(ids[count - 1].instance_id, true);
+    store.setDefault(ids[0].instance_id);
+    assert.equal(providerRoute(store.state(), ready)?.instance.instance_id, ids[0].instance_id);
+    assert.equal(providerRoute(store.state(), validateDiscovery(discovery())), null);
+  }
+  store.setFallback([ids[1].instance_id, ids[2].instance_id]);
+  assert.equal(providerRoute(store.state(), ready, { failedInstanceId: ids[0].instance_id })?.instance.instance_id, ids[1].instance_id);
+  assert.equal(providerRoute(store.state(), ready, { failedInstanceId: ids[1].instance_id })?.instance.instance_id, ids[2].instance_id);
+  assert.equal(providerRoute(store.state(), ready, { failedInstanceId: ids[0].instance_id, mutating: true }), null);
+  store.setEnabled(ids[1].instance_id, false);
+  assert.deepEqual(store.state().fallbackIds, [ids[2].instance_id]);
+  store.setEnabled(ids[0].instance_id, false);
+  assert.equal(store.state().defaultId, null);
+  assert.equal(providerRoute(store.state(), ready), null);
 });
 
 test('Browser-owned discovery launches only fixed metadata command with no inherited environment', async () => {

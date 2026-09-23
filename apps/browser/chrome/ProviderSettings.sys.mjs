@@ -45,35 +45,90 @@ export function validateDiscovery(value) {
 /** Only nonsecret instance configuration belongs in the isolated dev profile. */
 export class ProviderInstances {
   constructor(prefs, uuid) { this.prefs = prefs; this.uuid = uuid; }
-  list() {
+  state() {
     let stored;
     try { stored = JSON.parse(this.prefs.getStringPref(PREF, '{"version":1,"instances":[]}')); }
     catch { throw new Error("INVALID_INSTANCE_CONFIG"); }
-    requireValue(stored?.version === 1 && Object.keys(stored).length === 2
-      && Array.isArray(stored.instances) && stored.instances.length <= 12, "INVALID_INSTANCE_CONFIG");
+    const legacy = stored?.version === 1 && Object.keys(stored).length === 2;
+    const current = stored?.version === 2 && Object.keys(stored).length === 5;
+    requireValue((legacy || current) && Array.isArray(stored.instances)
+      && stored.instances.length <= 12, "INVALID_INSTANCE_CONFIG");
     const seen = new Set();
-    return Object.freeze(stored.instances.map(item => {
+    const instances = Object.freeze(stored.instances.map(item => {
       requireValue(item && Object.keys(item).length === 3 && UUID.test(item.instance_id)
         && !seen.has(item.instance_id) && DRIVERS.includes(item.driver)
         && text(item.label, 64) && item.label.trim().length > 0, "INVALID_INSTANCE_CONFIG");
       seen.add(item.instance_id);
       return Object.freeze({ instance_id: item.instance_id, driver: item.driver, label: item.label });
     }));
+    const enabledIds = legacy ? [] : stored.enabledIds;
+    const defaultId = legacy ? null : stored.defaultId;
+    const fallbackIds = legacy ? [] : stored.fallbackIds;
+    requireValue(Array.isArray(enabledIds) && enabledIds.length <= 12
+      && enabledIds.every(id => seen.has(id)) && new Set(enabledIds).size === enabledIds.length
+      && (defaultId === null || enabledIds.includes(defaultId))
+      && Array.isArray(fallbackIds) && fallbackIds.length <= 11
+      && fallbackIds.every(id => enabledIds.includes(id) && id !== defaultId)
+      && new Set(fallbackIds).size === fallbackIds.length, "INVALID_INSTANCE_CONFIG");
+    return Object.freeze({ instances, enabledIds: Object.freeze([...enabledIds]), defaultId,
+      fallbackIds: Object.freeze([...fallbackIds]) });
   }
-  #save(instances) { this.prefs.setStringPref(PREF, JSON.stringify({ version: 1, instances })); }
+  list() { return this.state().instances; }
+  #save({ instances, enabledIds, defaultId, fallbackIds }) {
+    this.prefs.setStringPref(PREF, JSON.stringify({ version: 2, instances, enabledIds, defaultId, fallbackIds }));
+  }
   add(driver, label) {
     requireValue(DRIVERS.includes(driver) && text(label, 64) && label.trim().length > 0, "INVALID_INSTANCE_INPUT");
-    const instances = this.list(); requireValue(instances.length < 12, "INSTANCE_LIMIT");
+    const state = this.state(); const { instances } = state; requireValue(instances.length < 12, "INSTANCE_LIMIT");
     const instance_id = this.uuid();
     requireValue(UUID.test(instance_id) && !instances.some(item => item.instance_id === instance_id), "INVALID_INSTANCE_ID");
     const item = Object.freeze({ instance_id, driver, label: label.trim() });
-    this.#save([...instances, item]); return item;
+    this.#save({ ...state, instances: [...instances, item] }); return item;
   }
   remove(instanceId) {
     requireValue(UUID.test(instanceId), "INVALID_INSTANCE_ID");
-    const instances = this.list(); requireValue(instances.some(item => item.instance_id === instanceId), "UNKNOWN_INSTANCE");
-    this.#save(instances.filter(item => item.instance_id !== instanceId));
+    const state = this.state(); requireValue(state.instances.some(item => item.instance_id === instanceId), "UNKNOWN_INSTANCE");
+    this.#save({ instances: state.instances.filter(item => item.instance_id !== instanceId),
+      enabledIds: state.enabledIds.filter(id => id !== instanceId),
+      defaultId: state.defaultId === instanceId ? null : state.defaultId,
+      fallbackIds: state.fallbackIds.filter(id => id !== instanceId) });
   }
+  setEnabled(instanceId, enabled) {
+    requireValue(typeof enabled === "boolean", "INVALID_INSTANCE_INPUT");
+    const state = this.state(); requireValue(state.instances.some(item => item.instance_id === instanceId), "UNKNOWN_INSTANCE");
+    const enabledIds = enabled ? [...new Set([...state.enabledIds, instanceId])]
+      : state.enabledIds.filter(id => id !== instanceId);
+    this.#save({ ...state, enabledIds, defaultId: enabledIds.includes(state.defaultId) ? state.defaultId : null,
+      fallbackIds: state.fallbackIds.filter(id => enabledIds.includes(id)) });
+  }
+  setDefault(instanceId) {
+    const state = this.state();
+    requireValue(instanceId === null || state.enabledIds.includes(instanceId), "DEFAULT_PROVIDER_DISABLED");
+    this.#save({ ...state, defaultId: instanceId,
+      fallbackIds: state.fallbackIds.filter(id => id !== instanceId) });
+  }
+  setFallback(instanceIds) {
+    const state = this.state();
+    requireValue(Array.isArray(instanceIds) && instanceIds.length <= 11
+      && instanceIds.every(id => state.enabledIds.includes(id) && id !== state.defaultId)
+      && new Set(instanceIds).size === instanceIds.length, "INVALID_FALLBACK_ORDER");
+    this.#save({ ...state, fallbackIds: [...instanceIds] });
+  }
+}
+
+/** A new turn selects one instance. Live admission remains separately gated. */
+export function providerRoute(state, discovery, { failedInstanceId = null, mutating = false } = {}) {
+  const fallbackIndex = state.fallbackIds.indexOf(failedInstanceId);
+  const order = failedInstanceId === null ? [state.defaultId] :
+    mutating || (failedInstanceId !== state.defaultId && fallbackIndex < 0)
+      ? [] : state.fallbackIds.slice(fallbackIndex + 1);
+  for (const id of order) {
+    if (!id || !state.enabledIds.includes(id)) continue;
+    const instance = state.instances.find(item => item.instance_id === id);
+    const provider = discovery.find(item => item.driver === instance?.driver);
+    if (provider?.live_verified && provider.status === "READY") return Object.freeze({ instance, provider });
+  }
+  return null;
 }
 
 function nativeRuntime() {
@@ -147,17 +202,46 @@ export function initializeProviderSettings(win) {
   win.addEventListener("unload", () => { controller.abort(); byId("jev-key").value = ""; }, { once: true });
   const status = message => { byId("settings-status").textContent = message; };
   function renderInstances() {
+    const policy = store.state();
     const list = byId("instances"); list.replaceChildren();
-    for (const instance of store.list()) {
+    for (const instance of policy.instances) {
       const row = addText(document, list, "li", "", "instance");
       const summary = addText(document, row, "div", "");
       addText(document, summary, "strong", `${instance.label} · ${LABELS[instance.driver]}`);
       addText(document, summary, "code", instance.instance_id);
+      const controls = addText(document, row, "div", "", "instance-controls");
+      const enabledLabel = addText(document, controls, "label", "", "instance-toggle");
+      const enabled = addText(document, enabledLabel, "input", ""); enabled.type = "checkbox";
+      enabled.checked = policy.enabledIds.includes(instance.instance_id);
+      addText(document, enabledLabel, "span", "Enabled");
+      enabled.addEventListener("change", () => {
+        try { store.setEnabled(instance.instance_id, enabled.checked); renderInstances(); status("Local routing policy saved. Live route remains blocked until verified."); }
+        catch { renderInstances(); status("Enabled status could not be saved."); }
+      });
+      const useDefault = addText(document, controls, "button", policy.defaultId === instance.instance_id ? "Default" : "Set default");
+      useDefault.type = "button"; useDefault.disabled = !enabled.checked || policy.defaultId === instance.instance_id;
+      useDefault.addEventListener("click", () => {
+        try { store.setDefault(instance.instance_id); renderInstances(); status("Default for new sessions saved. Existing sessions stay bound."); }
+        catch { status("Default could not be changed."); }
+      });
+      const fallbackIndex = policy.fallbackIds.indexOf(instance.instance_id);
+      const fallback = addText(document, controls, "button", fallbackIndex >= 0 ? `Fallback ${fallbackIndex + 1} · remove` : "Add fallback");
+      fallback.type = "button"; fallback.disabled = !enabled.checked || policy.defaultId === instance.instance_id;
+      fallback.addEventListener("click", () => {
+        try {
+          store.setFallback(fallbackIndex >= 0 ? policy.fallbackIds.filter(id => id !== instance.instance_id)
+            : [...policy.fallbackIds, instance.instance_id]);
+          renderInstances(); status("Opt-in fallback order saved. Mutating actions are never replayed.");
+        } catch { status("Fallback order could not be changed."); }
+      });
       const remove = addText(document, row, "button", "Remove"); remove.type = "button";
       remove.setAttribute("aria-label", `Remove configuration ${instance.label}`);
       remove.addEventListener("click", () => { try { store.remove(instance.instance_id); renderInstances(); status("Configuration removed."); } catch { status("Configuration could not be changed."); } });
     }
     byId("instances-empty").hidden = list.childElementCount > 0;
+    byId("routing-summary").textContent = policy.defaultId
+      ? `Default: ${policy.instances.find(item => item.instance_id === policy.defaultId)?.label}. Fallback: ${policy.fallbackIds.length ? policy.fallbackIds.map(id => policy.instances.find(item => item.instance_id === id)?.label).join(" → ") : "off"}. Live access blocked.`
+      : "No default provider. Browser assistance is off; normal browsing works.";
   }
   async function refresh() {
     if (busy) return; busy = true; byId("refresh").disabled = true; status("Reading installation metadata…");
@@ -175,7 +259,13 @@ export function initializeProviderSettings(win) {
         addText(document, row, "p", `${provider.protocol} · live connection and browser control unverified`, "detail");
       }
       status("Metadata refreshed. No provider client was started.");
-    } catch { if (!controller.signal.aborted) status("Discovery unavailable. Start this development browser with ./dev and try again."); }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const code = /^[A-Z][A-Z0-9_]{2,80}$/u.test(error?.message ?? "") ? error.message : "DISCOVERY_FAILED";
+        status(`Discovery unavailable (${code}). No provider client was started.`);
+        console.error(`AxioSozo provider discovery ${code}`);
+      }
+    }
     finally { busy = false; if (!controller.signal.aborted) byId("refresh").disabled = false; }
   }
   byId("refresh").addEventListener("click", refresh);

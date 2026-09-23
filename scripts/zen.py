@@ -60,7 +60,9 @@ def unexpected_source_changes(destination=UPSTREAM):
                          'ls-files', '--others', '--exclude-standard', '-z'], destination)
     if tracked is None or untracked is None:
         return ['SOURCE_STATUS_UNAVAILABLE']
-    records = {item['path']: item for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text())}
+    records = {}
+    for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text()):
+        records.setdefault(item['path'], set()).update((item['before_sha256'], item['after_sha256']))
     generated = {'prefs/axiosozo.yaml': ROOT / 'apps/browser/chrome/defaults.yaml'}
     for source in chrome_sources():
         generated['src/zen/common/axiosozo/' + source.name] = source
@@ -82,8 +84,7 @@ def unexpected_source_changes(destination=UPSTREAM):
             continue
         path = destination / relative
         if relative in records and path.is_file():
-            item = records[relative]
-            if file_hash(path, 'sha256') in [item['before_sha256'], item['after_sha256']]:
+            if file_hash(path, 'sha256') in records[relative]:
                 continue
         if relative in generated and path.is_file():
             if path.read_bytes() == generated[relative].read_bytes() or file_hash(path, 'sha256') == previous.get(relative):
@@ -159,12 +160,15 @@ def overlay(destination):
 
 
 def apply_records(destination, manifest):
-    for item in manifest:
+    for index, item in enumerate(manifest):
         target = destination / item['path']
         text = target.read_text()
-        if hashlib.sha256(text.encode()).hexdigest() == item['after_sha256']:
+        current_hash = hashlib.sha256(text.encode()).hexdigest()
+        later_results = {later['after_sha256'] for later in manifest[index + 1:]
+                         if later['path'] == item['path']}
+        if current_hash == item['after_sha256'] or current_hash in later_results:
             continue
-        if hashlib.sha256(text.encode()).hexdigest() != item['before_sha256']:
+        if current_hash != item['before_sha256']:
             raise RuntimeError(f'PATCH_CONFLICT: {item["path"]}')
         for old, new in item['replacements']:
             if text.count(old) != 1:

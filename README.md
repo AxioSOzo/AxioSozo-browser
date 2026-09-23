@@ -92,6 +92,10 @@ The [architecture](docs/adr/001-architecture.md),
 [dual-engine decision](docs/adr/002-dual-engine.md),
 [upstream/licence notes](docs/UPSTREAMS.md) and
 [handoff 2 entrypoints](docs/IMPLEMENTATION_HANDOFF.md) define the remaining work.
+The current first-experience slice is tracked in
+[implementation status](docs/IMPLEMENTATION_STATUS.md),
+[UX flows](docs/UX_FLOWS.md), [capabilities](docs/CAPABILITY_MATRIX.md) and the
+[test walkthrough](docs/TEST_WALKTHROUGH.md).
 The original AxioSozo source is licensed under [MPL-2.0](LICENSE). Vendored
 components and upstream patches retain their respective notices; see
 [third-party notices](THIRD_PARTY_NOTICES.md).

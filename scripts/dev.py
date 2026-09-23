@@ -179,6 +179,7 @@ def test():
                component(PROVIDER, "keychain-positive-test"),
                component(ZEN, "check"),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
+               run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
                component(CEF, "test-native")]
     env = {**os.environ, "AXIOSOZO_CORE_BINARY": str(CORE), "PYTHONDONTWRITEBYTECODE": "1"}
     if build_result == 0 and core_ready():

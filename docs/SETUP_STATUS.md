@@ -5,6 +5,11 @@ starts. Real CEF frames, typing, local GET/back and a scoped engine switch work 
 its content area. E1 is experimental and E2 is manually proven only for the local
 fixture. General Chromium browsing and safety-critical browser UI are not certified.
 
+The 23 September first-experience continuation adds a trusted Zen chrome command layer and
+local save/search flow. Its per-flow evidence and new blockers are in
+[IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md). This does not upgrade E1/E2 or
+provider/Jev live readiness.
+
 ## Active continuation
 
 Wout has set an active goal to finish the original handoff using T9 capacity. The

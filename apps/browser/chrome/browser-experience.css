@@ -1,0 +1,35 @@
+/* MPL-2.0. Trusted browser chrome only. */
+#axiosozo-command-panel {
+  position: fixed; z-index: 2147483647; top: 54px; left: 50%;
+  transform: translateX(-50%); width: min(540px, calc(100vw - 40px));
+  box-sizing: border-box; border: 1px solid light-dark(#c8cbd1, #51545b);
+  border-radius: 11px; box-shadow: 0 16px 42px #0005;
+  background: light-dark(#fff, #202125);
+}
+#axiosozo-command-panel[hidden] { display: none; }
+#axiosozo-command-panel .axiosozo-panel-body {
+  width: 100%; max-height: min(460px, 70vh); overflow: auto;
+  box-sizing: border-box; padding: 16px; color: light-dark(#1d2026, #f0f1f3);
+  background: light-dark(#fff, #202125); font: 13px system-ui, sans-serif;
+}
+#axiosozo-command-panel .axiosozo-panel-header { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+#axiosozo-command-panel .axiosozo-input {
+  display: block; box-sizing: border-box; width: 100%; padding: 10px 12px;
+  border: 1px solid light-dark(#a7abb3, #616671); border-radius: 7px;
+  background: light-dark(#fff, #2b2d32); color: inherit; font: inherit;
+}
+#axiosozo-command-panel .axiosozo-input:focus-visible,
+#axiosozo-command-panel .axiosozo-result:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+#axiosozo-command-panel .axiosozo-route { color: light-dark(#555b65, #b9bdc4); font-size: 11px; min-height: 16px; margin: 8px 1px; }
+#axiosozo-command-panel .axiosozo-results { display: grid; gap: 3px; }
+#axiosozo-command-panel .axiosozo-result {
+  display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 2px 8px;
+  width: 100%; padding: 8px; border: 0; border-radius: 5px;
+  text-align: left; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+#axiosozo-command-panel .axiosozo-result:hover,
+#axiosozo-command-panel .axiosozo-result.selected { background: light-dark(#e8edf8, #343b49); }
+#axiosozo-command-panel .axiosozo-result-kind { grid-row: span 2; color: light-dark(#566273, #aeb9c9); font-size: 11px; }
+#axiosozo-command-panel .axiosozo-result-label,
+#axiosozo-command-panel .axiosozo-result-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#axiosozo-command-panel .axiosozo-result-detail { color: light-dark(#626872, #b5bac3); font-size: 11px; }

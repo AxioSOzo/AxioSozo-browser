@@ -5,6 +5,7 @@ import { attachCoordinator } from "chrome://browser/content/axiosozo/BrowserCoor
 import { openProviderSettings } from "chrome://browser/content/axiosozo/ProviderSettings.sys.mjs";
 import { CEFPresenter } from "chrome://browser/content/axiosozo/CEFPresenter.sys.mjs";
 import { installEngineProbeControls } from "chrome://browser/content/axiosozo/EngineProbeControls.sys.mjs";
+import { installBrowserExperience } from "chrome://browser/content/axiosozo/BrowserExperience.sys.mjs";
 
 // Loaded only by ZenPreloadedScripts in the trusted browser window.
 async function initialize() {
@@ -28,11 +29,13 @@ async function initialize() {
     },
     onFailure: () => console.error("AxioSozo Chromium fixture probe unavailable; Gecko tab retained"),
   });
+  const experience = installBrowserExperience(window, { engineProbe });
   // Intentionally no second URL bar, global content script, or model input channel.
   let coordinator = null;
-  window.AxioSozo = Object.freeze({ version: 1, engine: adapter, engineProbe,
+  window.AxioSozo = Object.freeze({ version: 2, engine: adapter, engineProbe, experience,
     get coordinator() { return coordinator; } });
   window.addEventListener("unload", () => {
+    experience.dispose();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });
