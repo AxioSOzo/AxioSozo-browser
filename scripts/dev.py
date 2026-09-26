@@ -30,6 +30,13 @@ CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
 
 
+def provider_node():
+    # Setup already verifies this project-local runtime. Do not make normal
+    # browser use depend on the developer's global Node installation.
+    pinned = storage.BUILD_ROOT / "toolchains/zen/node/bin/node"
+    return str(pinned) if pinned.is_file() else shutil.which("node") or ""
+
+
 def core_fingerprint():
     digest = hashlib.sha256()
     paths = [ROOT / "Cargo.toml", ROOT / "Cargo.lock", *sorted((ROOT / "crates").rglob("*.rs")),
@@ -101,7 +108,7 @@ def component(script, *args):
     if not script.is_file():
         print("BLOCKED_ENV: component entrypoint missing:", script.relative_to(ROOT), flush=True)
         return 2
-    command = "node" if script.suffix == ".mjs" else sys.executable
+    command = provider_node() if script.suffix == ".mjs" else sys.executable
     return run([command, script, *args])
 
 
@@ -199,15 +206,19 @@ def browser_environment():
     return {**os.environ, "AXIOSOZO_COORDINATOR_BINARY": str(CORE),
             "AXIOSOZO_BUILD_ROOT": str(storage.BUILD_ROOT),
             "AXIOSOZO_PROVIDER_HOST": str(PROVIDER),
-            "AXIOSOZO_PROVIDER_NODE": shutil.which("node") or "",
+            "AXIOSOZO_PROVIDER_NODE": provider_node(),
+            # A location only: the provider host must never inspect personal
+            # credentials. The audited official client owns authentication.
+            "AXIOSOZO_PROVIDER_HOME": str(Path.home()),
             "AXIOSOZO_DISCOVERY_PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "AXIOSOZO_ENGINE_SWITCHING": "0",
             "AXIOSOZO_CEF_BINARY": str(storage.BUILD_ROOT / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"),
             "AXIOSOZO_PYTHON": sys.executable}
 
 
 def browser_probe(kind):
     # E0 is a real native render test in this invocation, never a cached claim.
-    if kind == "engine-probe" and component(CEF, "run"):
+    if kind in {"engine-probe", "web-probe"} and component(CEF, "run"):
         print("PARTIAL_ENGINE_BLOCKED: E0 did not pass; no Zen embedding test was started.", flush=True)
         return 2
     if not core_ready() or component(ZEN, "ready"):
@@ -241,7 +252,9 @@ def daily(profile):
             # CEF's fixture profile is a child of this locked, app-owned session.
             # The native adapter validates this path against Gecko's actual ProfD.
             env["AXIOSOZO_SESSION_RUNTIME"] = str(session.path)
-            # Developer engine controls are available only in an owned probe.
+            # Native Chromium is started only by an explicit browser-chrome
+            # switch. Fixture probes retain their separate strict origin mode.
+            env["AXIOSOZO_ENGINE_SWITCHING"] = "1"
             env["AXIOSOZO_ENGINE_PROBE"] = "0"
             env.pop("AXIOSOZO_ENGINE_FIXTURE_ORIGIN", None)
             env.pop("AXIOSOZO_TLS_FIXTURE_URL", None)
@@ -256,7 +269,7 @@ def daily(profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "doctor", "setup", "check", "test", "smoke", "engine-probe", "provider-test", "jev-test"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "doctor", "setup", "check", "test", "smoke", "engine-probe", "web-probe", "provider-test", "jev-test"])
     parser.add_argument("provider", nargs="?", choices=["codex", "claude-code", "antigravity"])
     parser.add_argument("--profile", default="development")
     parser.add_argument("--authorized", action="store_true", help="explicit operator authorization for a synthetic live diagnostic; never used by setup/test")
@@ -272,7 +285,9 @@ def main():
     if args.provider:
         parser.error("provider argument is only valid with provider-test")
     commands = {"doctor": doctor, "setup": setup, "check": check, "test": test,
-                "engine-probe": lambda: browser_probe("engine-probe"), "jev-test": lambda: component(PROVIDER, "jev-test", *(["--authorized"] if args.authorized else [])),
+                "engine-probe": lambda: browser_probe("engine-probe"),
+                "web-probe": lambda: browser_probe("web-probe"),
+                "jev-test": lambda: component(PROVIDER, "jev-test", *(["--authorized"] if args.authorized else [])),
                 "run": lambda: daily(args.profile),
                 "smoke": lambda: browser_probe("smoke")}
     return commands[args.command]()

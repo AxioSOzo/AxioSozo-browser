@@ -13,6 +13,10 @@ import browser_probe
 
 
 class EntrypointGates(unittest.TestCase):
+    def test_component_environment_does_not_inherit_daily_engine_switch(self):
+        with patch.dict(os.environ, {"AXIOSOZO_ENGINE_SWITCHING": "1"}):
+            self.assertEqual(dev.browser_environment()["AXIOSOZO_ENGINE_SWITCHING"], "0")
+
     def test_failed_build_does_not_test_stale_binary(self):
         with patch.object(dev, "run", return_value=0) as run, \
              patch.object(dev, "build_core", return_value=1), \
@@ -31,6 +35,13 @@ class EntrypointGates(unittest.TestCase):
         component.assert_called_once_with(dev.CEF, "run")
         ready.assert_not_called()
         ensure.assert_not_called()
+
+    def test_web_probe_also_requires_actual_native_e0(self):
+        with patch.object(dev, "component", return_value=2) as component, \
+             patch.object(dev, "core_ready") as ready:
+            self.assertEqual(dev.browser_probe("web-probe"), 2)
+        component.assert_called_once_with(dev.CEF, "run")
+        ready.assert_not_called()
 
     def test_missing_custom_zen_never_creates_probe_profile(self):
         with patch.object(dev, "component", side_effect=[0, 20]) as component, \

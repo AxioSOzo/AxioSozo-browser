@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { CEFEngineAdapter, CEF_VERSION, CHROMIUM_VERSION, readAXCF,
   validateCEFTarget, validateSurface, fitCEFRenderSurface, validCEFSessionRuntime,
-  validateCEFInput, allowedFixtureURL } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey } from '../chrome/CEFPresenter.sys.mjs';
+  validateCEFInput, allowedFixtureURL, allowedWebURL } from '../chrome/CEFEngineAdapter.sys.mjs';
+import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey, transferableGeckoURL } from '../chrome/CEFPresenter.sys.mjs';
 
 // All packets in this file are visibly controlled protocol fixtures. They never
 // count as Chromium rendering, an engine integration, or screenshot evidence.
@@ -37,11 +37,11 @@ class Pipe {
   close(){this.closed=true;this.flush();}
 }
 function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRace=false,nativeInputError=null,
-  nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer}={}) {
+  nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200}={}) {
   const pipe = new Pipe(), writes=[], rendered=[], failures=[], events=[];
   let finished, current=full, frameID=1;
   const exit = new Promise(resolve => { finished=resolve; });
-  const event = value => pipe.push(packet(1,{version:1,...value}));
+  const event = value => { if(value.event==='navigation')current=value.target;pipe.push(packet(1,{version:1,...value})); };
   const sendFrame = (target=current,id=frameID++) => pipe.push(packet(2,frame(target,id),new Uint8Array(16)));
   const process = { stdout:{read:async count=>transformRead(await pipe.read(count))}, wait:()=>exit,
     kill:async()=>{pipe.close();finished({exitCode:-15});},
@@ -49,14 +49,15 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
       const command=JSON.parse(text);writes.push(command);
       if(command.method==='hello') event({event:'ready',cef:CEF_VERSION,chromium:CHROMIUM_VERSION,
         runtime_cef:CEF_VERSION.split('+')[0],runtime_chromium:CHROMIUM_VERSION,platform:'macosarm64',sandbox_configured:true,
-        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{fixture_only:true,devtools:false,private_mode:false,ime:false},...overrideReady});
+        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{fixture_only:browsingMode==='fixture',devtools:false,private_mode:false,ime:false,
+          ...(browsingMode==='web'?{edit:true,visibility:true,permissions:false,downloads:false,popups:false,accessibility:false}:{})},...overrideReady});
       else if(command.method==='frame_ack') return;
       else if(command.method==='create') {
         event({event:'accepted',request_id:command.request_id});
         event({event:'created',request_id:command.request_id,target:current});
         event({event:'completed',request_id:command.request_id,status:'success',target:current});
         event({event:'url',url:command.url,target:current});
-        event({event:'load',http_status:200,restored_from_history:false,target:current});
+        event({event:'load',http_status:createStatus,restored_from_history:false,target:current});
         if(autoFrame)sendFrame();
       } else if(command.method==='navigate') {
         event({event:'accepted',request_id:command.request_id,target:current});
@@ -88,7 +89,7 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
         event({event:'completed',request_id:command.request_id,status:'success',target:current});
       }
     }} };
-  const adapter=new CEFEngineAdapter(process,{token,pendingTarget:pending,timers,deadline:1000,
+  const adapter=new CEFEngineAdapter(process,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,
     onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)});
   return {adapter,pipe,writes,rendered,failures,events,sendFrame,event};
 }
@@ -234,6 +235,61 @@ test('fixture restrictions reject lookalike hosts, credentials, schemes and arbi
   assert.throws(()=>validateCEFTarget({...full,extra:true}),/INVALID/);
 });
 
+test('web mode is explicitly negotiated and permits only web URLs or the inert start page',async()=>{
+  for(const url of ['file:///secret','javascript:alert(1)','https://user:password@example.com/','https://example.com/\nsecret','data:text/html,hi']) {
+    assert.equal(allowedWebURL(url),false);
+  }
+  for(const url of ['http://example.com/','https://example.com/path?q=hello#part','about:blank']) assert.equal(allowedWebURL(url),true);
+  const f=fixture({browsingMode:'web'});await f.adapter.connect();
+  assert.equal(f.writes[0].browsing_mode,'web');assert.equal(f.adapter.capabilities().fixture_only,false);
+  await f.adapter.create('https://example.com/',{width:2,height:2,device_scale:1});
+  await f.adapter.navigate(f.adapter.target,'https://other.example/path?q=explicit');
+  assert.equal(f.adapter.status,'active');
+  assert.equal((await f.adapter.navigate(f.adapter.target,'file:///secret')).status,'unsupported');
+  await f.adapter.visibility(f.adapter.target,false);await f.adapter.edit(f.adapter.target,'paste');
+  assert.throws(()=>f.adapter.edit(f.adapter.target,'arbitrary'),/INVALID_EDIT_ACTION/);
+  assert.throws(()=>f.adapter.visibility(f.adapter.target,'false'),/INVALID_VISIBILITY/);
+  assert.deepEqual(f.writes.filter(value=>['edit','visibility'].includes(value.method)).map(value=>[value.method,value.action??value.visible]),[['visibility',false],['edit','paste']]);
+  await f.adapter.close();
+});
+
+test('web loads accept HTTP error documents and exact blank while requiring full negotiated safeguards',async()=>{
+  for(const [url,status] of [['https://example.com/missing',404],['about:blank',0]]) {
+    const f=fixture({browsingMode:'web',createStatus:status});await f.adapter.connect();
+    await f.adapter.create(url,{width:2,height:2,device_scale:1});assert.equal(f.rendered.length,1);await f.adapter.close();
+  }
+  const f=fixture({browsingMode:'web',overrideReady:{capabilities:{fixture_only:false,edit:true,visibility:true,devtools:false,private_mode:false,ime:false}}});
+  await assert.rejects(f.adapter.connect(),/UNVERIFIED_CEF_RUNTIME/);
+});
+
+test('web same-document loads revoke old targets and accept only a committed same origin',async()=>{
+  for(const destination of ['https://example.com/path#anchor','https://other.example/']) {
+    const f=fixture({browsingMode:'web'});await f.adapter.connect();
+    await f.adapter.create('https://example.com/path',{width:2,height:2,device_scale:1});
+    const previous=f.adapter.target, next={...previous,document_generation:2,navigation_generation:2};
+    f.event({event:'navigation',target:next});f.event({event:'url',url:destination,target:next});
+    f.event({event:'load',http_status:0,restored_from_history:false,same_document:true,target:next});f.sendFrame(next,2);
+    await tick();await tick();
+    assert.throws(()=>f.adapter.resolve(previous),/STALE_CEF_TARGET/);
+    if(destination.startsWith('https://example.com/')) { assert.equal(f.rendered.length,2);await f.adapter.close(); }
+    else assert.equal(f.adapter.status,'failed');
+  }
+});
+
+test('engine switch only transfers a matching GET history entry with no URL query or fragment',()=>{
+  const browser={currentURI:{spec:'https://example.com/page'},browsingContext:{activeSessionHistoryEntry:{URI:{spec:'https://example.com/page'},postData:null}}};
+  assert.equal(transferableGeckoURL(browser),'https://example.com/page');
+  for(const url of ['https://example.com/page?token=secret','https://example.com/page#secret','about:blank','file:///secret']) {
+    browser.currentURI.spec=url;browser.browsingContext.activeSessionHistoryEntry.URI.spec=url;
+    assert.equal(transferableGeckoURL(browser),null);
+  }
+  browser.currentURI.spec='https://example.com/page';browser.browsingContext.activeSessionHistoryEntry.URI.spec=browser.currentURI.spec;
+  browser.browsingContext.activeSessionHistoryEntry.postData={};assert.equal(transferableGeckoURL(browser),null);
+  browser.browsingContext.activeSessionHistoryEntry.postData=null;browser.browsingContext.activeSessionHistoryEntry.URI.spec='https://example.com/older';
+  assert.equal(transferableGeckoURL(browser),null);
+  delete browser.browsingContext;assert.equal(transferableGeckoURL(browser),null);
+});
+
 test('fullscreen scale selection keeps logical geometry and the bounded BGRA frame',()=>{
   assert.deepEqual(fitCEFRenderSurface({width:1000,height:700,device_scale:2}),
     {width:1000,height:700,device_scale:2});
@@ -348,8 +404,10 @@ function presenterFixture() {
   const tab={linkedBrowser:browser,label:'SYNTHETIC PROTOCOL FIXTURE',isConnected:true};
   let geckoTarget={...full,engine:'gecko',engine_instance:'gecko-fixture'};
   const original=()=>{};
-  const win={Services:{env:{get:()=>origin},io:{newURI:spec=>({spec})}},performance,devicePixelRatio:1,
-    document:{createElementNS:()=>{const node=element();nodes.push(node);return node;}},
+  const root=element();root.attributes=new Map();root.toggleAttribute=(key,value)=>{if(value)root.attributes.set(key,'');else root.attributes.delete(key);};root.removeAttribute=key=>root.attributes.delete(key);
+  const win={Services:{env:{get:()=>origin},io:{newURI:spec=>({spec})}},performance,devicePixelRatio:1,queueMicrotask,
+    document:{hidden:false,documentElement:root,createElementNS:()=>{const node=element();nodes.push(node);return node;},
+      addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:type=>listeners.delete(type)},
     ImageData:class{constructor(data,width,height){Object.assign(this,{data,width,height});}},
     ResizeObserver:class{constructor(callback){this.callback=callback;observers.push(this);}observe(){}disconnect(){}},getComputedStyle:()=>({position:'static'}),
     requestAnimationFrame:callback=>queueMicrotask(callback),
@@ -362,16 +420,21 @@ function presenterFixture() {
   };
   const gecko={find:()=>({}),target:()=>geckoTarget,resolve:value=>{assert.deepEqual(value,geckoTarget);}};
   let settle, hooks, closeCount=0;
-  const resizeCalls=[], inputCalls=[];
+  const resizeCalls=[], inputCalls=[], visibilityCalls=[], editCalls=[], launchCalls=[];
   const ready=new Promise((resolve,reject)=>{settle={resolve,reject};});
   const launch=async(_win,callbacks)=>{
-    hooks=callbacks;
-    return {target:full,surface:{width:2,height:2,device_scale:1},create:()=>ready,
+    hooks=callbacks;launchCalls.push(callbacks);
+    return {target:{...full,tab_id:callbacks.tabId},surface:{width:2,height:2,device_scale:1},create:url=>{callbacks.startURL=url;return ready;},
+      allowedURL:allowedWebURL,visibility:async(_target,visible)=>{visibilityCalls.push({tabId:callbacks.tabId,visible});return {status:'success'};},
+      edit:async(_target,action)=>{editCalls.push(action);return {status:'success'};},
       resize(_target,surface){resizeCalls.push(surface);this.surface=surface;return Promise.resolve({status:'success'});},
       input(_target,method,fields){inputCalls.push({method,fields});return Promise.resolve({status:'success'});},
       close:async()=>{closeCount++;}};
   };
-  return {win,gecko,launch,stack,browser,tab,listeners,original,nodes,settle,resizeCalls,inputCalls,
+  return {win,gecko,launch,stack,browser,tab,listeners,original,nodes,settle,resizeCalls,inputCalls,visibilityCalls,editCalls,launchCalls,
+    addTab:()=>{const nextStack={...element(),classList:{contains:value=>value==='browserStack'}};
+      const nextBrowser={...browser,style:{visibility:''},parentNode:nextStack};
+      return {linkedBrowser:nextBrowser,label:'SECOND FIXTURE',isConnected:true};},
     setGeometry:value=>{geometry=value;},triggerResize:()=>observers.at(-1).callback(),
     mutate:()=>{geckoTarget={...geckoTarget,document_generation:2};},
     paint:()=>hooks.onFrame(frame(),new ArrayBuffer(16)),get closeCount(){return closeCount;}};
@@ -470,5 +533,51 @@ test('stale native keyup racing history back preserves the live CEF presentation
   assert.equal(native.writes.some(value=>value.method==='close'||value.method==='shutdown'),false);
   assert.equal(failures.length,0);
   assert.equal(indicators.at(-1).reason,'Input discarded after navigation');
+  await presenter.dispose();
+});
+
+test('daily Chromium is lazy, retains per-tab surfaces, suspends hidden painting, and restores each Gecko owner',async()=>{
+  const f=presenterFixture(),second=f.addTab();
+  f.browser.docShellIsActive=true;second.linkedBrowser.docShellIsActive=false;
+  const geckoTargets=new Map([[f.browser,{...full,engine:'gecko',tab_id:'first',engine_instance:'gecko-fixture'}],
+    [second.linkedBrowser,{...full,engine:'gecko',tab_id:'second',engine_instance:'gecko-fixture'}]]);
+  f.gecko.find=browser=>({browser});f.gecko.target=record=>geckoTargets.get(record.browser);f.gecko.resolve=target=>assert.ok([...geckoTargets.values()].includes(target));
+  const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch,browsingMode:'web'});
+  assert.equal(f.launchCalls.length,0);
+  const firstSwitch=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await firstSwitch;await tick();
+  assert.equal(f.launchCalls[0].startURL,'about:blank','unverified old document is never replayed');
+  assert.equal(f.launchCalls[0].origin,'https://axiosozo.invalid');
+  assert.equal(f.browser.docShellIsActive,false);assert.ok(f.win.document.documentElement.attributes.has('axiosozo-cef-active'));
+  f.win.gBrowser.selectedTab=second;f.win.gBrowser.selectedBrowser=second.linkedBrowser;f.listeners.get('TabSelect')();await tick();
+  assert.equal(presenter.diagnostics().engine,'gecko');assert.deepEqual(presenter.owners(),['first']);
+  assert.deepEqual(f.visibilityCalls.at(-1),{tabId:'first',visible:false});
+  const firstRecord=presenter.records.get(f.tab),firstFrames=firstRecord.displayedFrames;
+  f.launchCalls[0].onFrame(frame(),new ArrayBuffer(16));assert.equal(firstRecord.displayedFrames,firstFrames);
+  await presenter.switchToChromium();await tick();assert.deepEqual(presenter.owners(),['first','second']);
+  assert.equal(f.closeCount,0);assert.equal(f.browser.style.visibility,'hidden');assert.equal(second.linkedBrowser.style.visibility,'hidden');
+  f.win.document.hidden=true;f.listeners.get('visibilitychange')();await tick();assert.deepEqual(f.visibilityCalls.at(-1),{tabId:'second',visible:false});
+  await presenter.switchToGecko();assert.deepEqual(presenter.owners(),['first']);assert.equal(second.linkedBrowser.style.visibility,'');
+  f.win.document.hidden=false;f.win.gBrowser.selectedTab=f.tab;f.win.gBrowser.selectedBrowser=f.browser;f.listeners.get('TabSelect')();await tick();
+  assert.equal(presenter.diagnostics().engine,'chromium');assert.equal(f.launchCalls.length,2);
+  const canvas=presenter.active.canvas;
+  canvas.handlers.get('keydown')({isTrusted:true,key:'v',code:'KeyV',keyCode:86,metaKey:true,buttons:0,preventDefault(){},stopPropagation(){}});
+  await tick();assert.deepEqual(f.editCalls,['paste']);assert.equal(f.inputCalls.length,0);
+  await assert.rejects(presenter.navigate('https://example.com/',{postData:{}}),/CEF_POST_REPLAY_BLOCKED/);
+  await presenter.dispose();assert.equal(f.closeCount,2);assert.equal(f.browser.docShellIsActive,true);
+  assert.equal(f.listeners.size,0);assert.equal(f.win.document.documentElement.attributes.has('axiosozo-cef-active'),false);
+});
+
+test('active media or capture cannot hide behind Chromium, including capture that starts after commit',async()=>{
+  for(const sharing of [{camera:true},{microphone:true},{screen:'Screen'}]) {
+    const f=presenterFixture();f.win.gBrowser.getTabSharingState=()=>sharing;
+    const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch,browsingMode:'web'});
+    await assert.rejects(presenter.switchToChromium(),/CEF_ACTIVE_CAPTURE_MUST_STOP/);
+    assert.equal(f.launchCalls.length,0);await presenter.dispose();
+  }
+  const f=presenterFixture();let sharing={};f.win.gBrowser.getTabSharingState=()=>sharing;
+  const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch,browsingMode:'web'});
+  const switching=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await switching;
+  sharing={microphone:true};f.listeners.get('TabAttrModified')({target:f.tab});await tick();
+  assert.equal(presenter.diagnostics().engine,'gecko');assert.equal(f.browser.style.visibility,'');assert.equal(f.closeCount,1);
   await presenter.dispose();
 });

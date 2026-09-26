@@ -46,9 +46,7 @@ for (const driver of DRIVERS) {
       const delta = waitFor(adapter, 'text_delta'); await adapter.start(input()); await delta;
       const completion = waitFor(adapter, 'turn_finished');
       assert.equal((await adapter.interrupt({ session_id: binding.session_id, turn_id: 'turn-a' })).status, 'accepted');
-      // Official Claude CLI has no stable distinct cancelled result in this
-      // fixture route; report failed, never fabricate successful completion.
-      assert.equal((await completion).status, driver === 'claude-code' ? 'failed' : 'cancelled');
+      assert.equal((await completion).status, 'cancelled');
     } finally { await adapter.close(); }
   });
   test(`${driver}: process crash is uncertain and reconnect never replays`, async () => {

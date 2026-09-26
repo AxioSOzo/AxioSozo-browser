@@ -5,7 +5,7 @@ import { installEngineProbeControls } from "../chrome/EngineProbeControls.sys.mj
 // Explicitly synthetic browser-chrome model. These are gate/lifecycle tests,
 // not evidence of a native engine, browser window or rendered frame.
 function fixture({ flag = "1", origin = "http://127.0.0.1:8910", privateMode = false,
-  url = "http://127.0.0.1:8910/engine.html", fail = false, delayed = false, renderReason = null } = {}) {
+  url = "http://127.0.0.1:8910/engine.html", fail = false, delayed = false, renderReason = null, daily = "" } = {}) {
   const calls = [];
   const children = [];
   const listeners = new Map();
@@ -16,7 +16,7 @@ function fixture({ flag = "1", origin = "http://127.0.0.1:8910", privateMode = f
     addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type),
     remove: () => children.splice(children.indexOf(button), 1) };
   const tab = { linkedBrowser: { currentURI: { spec: url } } };
-  const win = { Services: { env: { get: key => ({ AXIOSOZO_ENGINE_PROBE: flag, AXIOSOZO_ENGINE_FIXTURE_ORIGIN: origin })[key] ?? "" } },
+  const win = { Services: { env: { get: key => ({ AXIOSOZO_ENGINE_PROBE: flag, AXIOSOZO_ENGINE_FIXTURE_ORIGIN: origin, AXIOSOZO_ENGINE_SWITCHING: daily })[key] ?? "" } },
     document: { getElementById: () => ({ appendChild: child => children.push(child) }), createXULElement: () => button },
     gBrowser: { selectedTab: tab } };
   const target = { tab_id: "fixture-gecko-tab", engine: "gecko", identity: origin, private_mode: privateMode };
@@ -125,4 +125,18 @@ test("a pending native switch cannot create duplicate engine owners", async () =
   await assert.rejects(f.controls.switchToChromium(), /ENGINE_SWITCH_IN_PROGRESS/u);
   assert.deepEqual(f.calls, ["constructed", "switch"]);
   f.release(); await first; await f.controls.dispose();
+});
+
+test("daily mode is enabled independently of local fixture and remains lazy until a user switch",async()=>{
+  const f=fixture({flag:"",daily:"1",origin:"",url:"about:newtab"});
+  assert.deepEqual(f.calls,[]);assert.equal(f.controls.diagnostics().browsingMode,"web");
+  assert.equal(f.controls.diagnostics().fixtureOrigin,null);
+  assert.match(f.button.attributes.label,/Firefox.*Chromium/u);
+  assert.equal(f.controls.currentPage().url,"about:newtab");
+  await f.controls.switchToChromium();assert.deepEqual(f.calls,["constructed","switch"]);
+  assert.match(f.button.attributes.label,/Chromium.*Firefox/u);await f.controls.dispose();
+  const privateTab=fixture({flag:"",daily:"1",privateMode:true});
+  assert.equal(privateTab.controls.currentPage(),null);
+  await assert.rejects(privateTab.controls.switchToChromium(),/CEF_PRIVATE_OR_UNKNOWN_TAB/u);
+  assert.deepEqual(privateTab.calls,[]);await privateTab.controls.dispose();
 });

@@ -17,7 +17,7 @@ def new_evidence_directory(project, kind):
 
 
 def inspect_browser(*, kind, project, session_root, zen_script, environment, duration=600):
-    if kind not in {"smoke", "engine-probe"}:
+    if kind not in {"smoke", "engine-probe", "web-probe"}:
         raise ValueError("unknown browser probe")
     # zen.py accepts only [A-Za-z0-9-] for owned session profile names.
     # mkdtemp's random suffix may contain underscores, so use fixed hex here.
@@ -38,10 +38,12 @@ def inspect_browser(*, kind, project, session_root, zen_script, environment, dur
                 env = {**environment, "AXIOSOZO_SESSION_RUNTIME": str(session.path),
                        "AXIOSOZO_ENGINE_FIXTURE_ORIGIN": fixture.origin,
                        "AXIOSOZO_TLS_FIXTURE_URL": tls.url,
+                       "AXIOSOZO_ENGINE_SWITCHING": "1" if kind == "web-probe" else "0",
                        "AXIOSOZO_ENGINE_PROBE": "1" if kind == "engine-probe" else "0"}
                 result.update(fixture=fixture.identity(), certificate_fixture=tls.identity(),
                               profile=str(profile), session_id=session.session_id,
-                              developer_engine_action=kind == "engine-probe")
+                              developer_engine_action=kind in {"engine-probe", "web-probe"},
+                              chromium_mode="web" if kind == "web-probe" else "fixture" if kind == "engine-probe" else "disabled")
                 with (evidence / "browser-stdout.log").open("w") as out, (evidence / "browser-stderr.log").open("w") as err:
                     process = session.spawn([environment["AXIOSOZO_PYTHON"], str(zen_script), "run",
                                              "--profile", str(profile), "--url", fixture.url],

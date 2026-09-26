@@ -1,339 +1,216 @@
-# Provider foundation — verified 23 September 2026
+# Provider backend — 26 September 2026
 
-This is an **EXPERIMENTAL protocol module with fixture evidence**, not three
-verified live provider integrations. All three live routes return **BLOCKED_AUTH**;
-even explicit authorization alone cannot enable them until an OS process boundary
-is verified with the actual client. A native offline/no-fork boundary experiment is
-implemented separately; it does not launch providers. No client login, model turn, MCP server, provider install,
-account credential read, or Jev request was executed during this handoff.
+AxioSozo now has an on-demand JSONL host and production launch implementations for
+**Codex 0.157.1** and **Claude Code 2.1.283**. These are real official-client routes,
+not fixture fallback. **Model-turn verification is still pending.** The approved diagnostic reached
+Claude’s confined official authentication check, which could not use authentication;
+Codex stopped at its missing instance sign-in. No model request was sent.
+The browser starts a host only when the user sends a question and stops it when the
+panel closes or it has been idle for two minutes. Browsing requires no provider.
 
-| Component | Actual local state | Verified behavior | Remaining boundary |
-|---|---|---|---|
-| Codex | `0.156.1`, npm metadata; **VERSION_MISMATCH** against fixture `0.155.1` | Schema generated from 0.155.1 on 22 September; stdio request framing, initialize, thread/start, turn/start, text stream, deny approval, interrupt, thread/resume against fixture process | Current 0.156.1 protocol **UNTESTED**; official-client auth, safe native process launch |
-| Claude Code | `2.1.280`, native installation path metadata; **VERSION_MISMATCH** against fixture `2.1.278` | Official CLI stream-json shape; text, result, SIGINT delivery, process lifecycle against fixture | Current 2.1.280 protocol **UNTESTED**; auth, strong cancellation status, safe native process launch; resume unsupported |
-| Antigravity | `agy` exists as a native arm64 executable; version **unknown / UNTESTED** | Official agy stream-json shape; conversation ID, text, result, SIGINT delivery against fixture | Audited version, auth, native launch/config isolation; resume unsupported |
-| Jev | Optional, off | Fixed synthetic state, versioned choice schema, pinned model, deadline/cancel, malformed/oversized output rejection, no key means no fetch | Explicit authorized live diagnostic; user-added key; Keychain end-to-end storage test |
-| Keychain helper | Native arm64 build; separate negative and positive fixtures | Invalid production inputs rejected before SecItem; empty-search-list errors; JS null/error handling; synthetic private-keychain add/read/replace/delete round-trip | Production settings-to-helper round-trip and user-key service remain untested; settings action stays disabled |
-| Native process boundary | Experimental offline/no-fork fixture | Five real macOS OS tests: scoped IO, outside/config/symlink/shell/fork/network rejection, cancellation/deadline/parent-exit cleanup | Actual provider-client compatibility; supported production sandbox architecture |
+| Route | Implemented | Remaining validation |
+|---|---|---|
+| Codex | Native official app-server; isolated configuration and official-owned authentication; streamed replies, cancellation, bounded lifecycle | One-time official login in the browser's separate Codex home; actual macOS startup/auth/model turn |
+| Claude Code | Official headless client; isolated customization/cache; normal personal Pro/Max Keychain identity; empty tools/MCP; streamed replies and cancellation | Actual Keychain helper/startup/model turn in the confined process; managed/API routes intentionally unsupported |
+| Antigravity | Metadata discovery and documented JSONL protocol adapter fixtures | No verified startup configuration that disables inherited tools/hooks/MCP; installed binary version not independently established |
 
-See [module tests](evidence/providers-module-tests.log),
-[run results](evidence/providers-module-results.json),
-[discovery](evidence/providers-module-discovery.log), and
-[build/check](evidence/providers-module-check.log). Root integration runs may provide
-additional evidence. Older failed logs are preserved, including the exFAT AppleDouble
-test-file enumeration failure; the CLI now excludes `._*` metadata files.
+No live provider process, login UI or model request is part of metadata discovery,
+ordinary startup, fixture tests, or native sandbox tests. Never label the browser
+READY from fixture results. Real macOS E1/E2 and separately authorized live checks
+remain the integration gates.
 
-The 23 September run adds **42 passing module tests, five native sandbox tests and
-five native Keychain negative tests**, on macOS 26.6.2 arm64. Check/build exit codes
-are 0; all three provider gates and the unauthorised Jev gate still return 78.
-Exact commands, artifact/source hashes and logs are recorded in
-[latest verification](evidence/providers-verification-20260923.json) and
-[Keychain negative evidence](evidence/providers-keychain-negative-20260923.json).
+## Browser-to-host protocol
 
-The current metadata-only fixture suite has **48 passing module tests**. Fresh
-metadata shows the two explicit version mismatches above.
-The installed clients were not executed and their schemas were not regenerated:
-[version verification](evidence/providers-version-results-20260923.json),
-[metadata snapshot](evidence/providers-version-discovery-20260923.log). Earlier complete
-test logs remain historical evidence; they are not evidence for the updated clients.
+Launch the fixed Node runtime with `packages/provider-host/cli.mjs serve`. It uses
+owned stdin/stdout pipes only: no HTTP listener, websocket, debug port, native-message
+web-content entrypoint, shell command, or client startup before an explicit Send.
+The browser replaces the host environment with PATH for metadata discovery, LANG,
+HOME for official Claude authentication, and AXIOSOZO_BUILD_ROOT for external state.
+The host replaces the provider environment again with its own small allowlist.
 
-A further **positive native Keychain fixture passes** in its own fresh T9 directory:
-synthetic add/read/replace/delete and post-delete absence verification. This does not
-enable the production Keychain input or make a Jev network call. See
-[positive final evidence](evidence/providers-keychain-positive-final-20260923.json).
+Requests are one JSON object per line:
 
-## Commands and integration API
-
-Run from the repository root with Node **24.14.0**. No npm install or dependency
-lifecycle script is needed:
-
-```sh
-node packages/provider-host/cli.mjs discover
-node packages/provider-host/cli.mjs check
-node packages/provider-host/cli.mjs test
-node packages/provider-host/cli.mjs setup
-node packages/provider-host/cli.mjs sandbox-test
-node packages/provider-host/cli.mjs keychain-negative-test
-node packages/provider-host/cli.mjs keychain-positive-setup
-node packages/provider-host/cli.mjs keychain-positive-test
-node packages/provider-host/cli.mjs live codex
-node packages/provider-host/cli.mjs live claude-code
-node packages/provider-host/cli.mjs live antigravity
-node packages/provider-host/cli.mjs jev-test
+```json
+{"version":1,"id":"request-1","method":"session/open","params":{"driver":"codex","instance_id":"immutable-instance-uuid","session_id":"browser-session-uuid"}}
+{"version":1,"id":"request-2","method":"turn/start","params":{"session_id":"browser-session-uuid","turn_id":"browser-turn-uuid","text":"Hello"}}
+{"version":1,"id":"request-3","method":"turn/cancel","params":{"session_id":"browser-session-uuid","turn_id":"browser-turn-uuid"}}
+{"version":1,"id":"request-4","method":"session/close","params":{"session_id":"browser-session-uuid"}}
 ```
 
-`discover` reads executable locations and public installation metadata only. It never
-executes even `--version`: the audited Codex CLI attempted PATH-alias setup before
-printing help/version (the sandbox refused that write). It does not inspect personal
-configuration, browser profiles, authentication files, or Keychain. An existing binary
-does not establish either trusted provenance or authentication.
+Responses are `{version:1,id,result}` or `{version:1,id,error:{code,message}}`.
+Events are `{version:1,event:{...}}`; `text_delta` contains text and immutable session/
+turn IDs. `turn_finished` distinguishes completed, cancelled, failed and uncertain.
+Admission is not completion. `session_error` carries a bounded failure reason;
+`host_idle` precedes expected idle shutdown. Unexpected process exits are uncertain
+and mutating turns are never replayed. Request IDs cannot be reused.
 
-Discovery accepts at most 64 KiB from a regular npm `package.json` without following a
-metadata symlink. A malformed, oversized or redirected file yields an unknown version
-and no version-source claim; discovery still never starts a client. This is a bound on
-metadata parsing, not proof that a PATH executable is trustworthy. A deterministic
-hostile-metadata fixture checks this gate.
+One host owns one provider session, one turn at a time. Limits are 32 KiB prompt,
+64 KiB input line, 4 MiB streamed answer, 8 simultaneous control requests, 1,024
+request IDs, 120 seconds per turn and 120 seconds idle. Native broker lifetime is
+15 minutes. Closing the browser while startup is pending still reaps the owned
+client once it connects/fails. All protocol/parser limits remain in force.
 
-Discovery and preflight report `version_status` independently of authentication:
-`PINNED_METADATA_MATCH`, `VERSION_MISMATCH`, or `UNTESTED`. A match only means the
-metadata string equals the fixture pin; `protocol_status` remains `UNTESTED` for
-every actual client. Unknown versions and unpinned drivers fail closed. Prerelease
-and build suffixes are preserved, never truncated into a false match. An unauthorized
-preflight still returns `BLOCKED_AUTH` with these explicit version fields; even a
-caller claiming authorization/authentication receives `BLOCKED_ENV` for mismatch or
-unknown versions before the native launch boundary is considered. No client starts.
+`account_identity` is an opaque per-host binding, **not a claim that an email or
+account identifier was verified**. The host never copies subscription tokens,
+reads auth files, or migrates a session between provider instances. No model gets
+browser, shell, filesystem or approval authority through this API. Page title/URL
+is included only through the browser's explicit opt-in; webpage text is untrusted.
 
-Upgrading fixtures requires reviewing the exact new client/protocol, its supported
-launch configuration and execution side effects, then deliberately updating the pin,
-schema and protocol fixtures with evidence. Metadata discovery never regenerates a
-schema or silently replaces the user's installed client.
+`fixtures/host-peer.mjs` is a separate harness entrypoint using real owned synthetic
+subprocesses. It always labels results/events `TEST_FIXTURE`; the product `serve`
+command has no fixture switch or fallback.
 
-`check` validates JavaScript syntax, TypeScript strip parsing, and native syntax with
-warnings as errors. It is **not a TypeScript semantic typecheck**. `setup` mounts external
-storage and compiles the small Keychain helper, lifetime supervisor and native test
-fixture via `dev-external` and the root storage broker. Outputs live in
-`$AXIOSOZO_BUILD_ROOT/providers` (default `/Volumes/AxioSozoBuild/providers`). The
-storage broker must verify the T9-backed APFS volume; no internal fallback exists.
-No provider clients are installed. `sandbox-test` runs the separate macOS native
-fixture proof, including an explicitly unconfined synthetic baseline for comparison.
-`keychain-negative-test` runs only invalid production-helper inputs and the separately
-compiled empty-search-list fixture; it cannot store or delete an item. Run native
-tests through `dev-external python3 scripts/storage.py exec -- ...`, after the mounted
-T9 image is verified. If the host execution sandbox cannot apply a nested Seatbelt
-profile, report that restriction rather than treating it as a test success.
-`keychain-positive-setup` compiles one separate fixture only; coordinate its single
-compiler slot while a full browser build is active. `keychain-positive-test` creates
-and removes only a newly generated private test directory on T9, without changing
-the default keychain or its search list. It never calls the production helper.
-Exit codes: `0` success, `78` blocked, `64` unsupported CLI command, `1` failure.
+## Official clients and authentication
 
-`src/adapters.mjs` exports `ProviderAdapter`, `createFixtureAdapter`, `codexRequest`, and
-`livePreflight`. The adapter accepts an already-owned transport; there is deliberately
-no live process launcher. `createFixtureAdapter` launches only the fixed local test peer
-with `process.execPath`, a minimal environment, and `shell:false`. It is not a product
-provider and every normalized event has `label: TEST_FIXTURE`.
+**Codex:** exact upstream 0.157.1 request schemas are retained in
+`schemas/codex-0.157.1-requests.json`. They were downloaded from the official tagged
+source without running a client. The prior generated 0.155.1 schema remains for
+historical fixture regression tests. Discovery's fixture-version comparison does
+not decide live eligibility; `live.mjs` checks the independently audited live pin.
 
-`start` input is version 1 with browser-assigned `request_id`, `session_id`, `turn_id`,
-`instance_id`, `account_identity`, and a bounded `text`. Each normalized event gets a
-host-issued `event_id`. `binding` remains immutable. Codex native thread and turn IDs
-come only from its protocol responses. `accepted` is an admission acknowledgement;
-only `turn_finished` reports terminal outcome. An uncertain crash or mutating timeout
-blocks continuation and is never replayed. Codex resume performs `thread/resume`;
-Claude and Antigravity return `unsupported` for resume.
+0.157.1 rejects the former `untrusted` approval policy. The new route uses `never`,
+read-only sandbox configuration, disabled command/hooks/plugin/app/skill capabilities,
+no project instructions, and a host-controlled Codex home. Experimental
+`environments: []` and `dynamicTools: []` are validated as strictly empty arrays against
+the exact source because published stable schemas omit them. Empty environments
+remove environment-bound tool access; independent OS confinement still applies.
+Utility tools may remain in Codex; this is not a claim that its internal tool list
+is literally empty. [Tagged thread fields](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs),
+[tagged config schema](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/core/config.schema.json),
+[app-server documentation](https://developers.openai.com/codex/app-server).
 
-The coordinator must retain sole ownership of target policy and web-content context.
-This module exposes no HTTP/WebSocket/debug port and grants no shell, file, browser,
-or authorization tool to a model. Production process-owned IPC admission is an
-integration task; importing this class is not an OS sandbox.
+Each browser instance uses:
 
-## Upstream audit and retained code
+```text
+/Volumes/AxioSozoBuild/providers/runtime/codex/<instance-uuid>/codex-home
+```
 
-T3 is pinned to `b5a0f810108d42ca8635b5a3d75a6e885bb3a254`, with an unchanged sparse
-checkout and `upstream` remote. Only pure version parsing, bounded stderr redaction,
-and driver/instance continuation identity code was extracted into
-`packages/provider-host/vendor/t3`. The MIT notice is retained. Exact source paths,
-hashes, modifications, and tests are in [provider-provenance.json](provider-provenance.json).
-Streaming/protocol/lifecycle adapters here are new small code, informed by the audited
-T3 boundaries and official protocols; they are **not represented as copied full T3 adapters**.
+The official CLI owns its `auth.json`; AxioSozo only checks file existence and uses
+app-server `account/read` to establish whether official sign-in is available,
+discarding identifying fields. A missing file returns `CODEX_LOGIN_REQUIRED` and
+an exact command of this form for the user to run:
 
-The audited T3 Codex package has a useful `effect-codex-app-server` boundary, but it
-depends on Effect 4 release candidates and surrounding Effect services. Importing it
-would add a substantial dependency graph for this small module. T3's Claude adapter
-uses `@anthropic-ai/claude-agent-sdk` (lockfile `0.3.276`), coding tools, settings sources,
-and T3 MCP; that full adapter is not imported. T3's current Antigravity integration
-uses Google's distributed ACP server/harness and manages per-instance authentication
-profiles. Its file-based auth handling and global skill-directory links are not copied.
+```sh
+CODEX_HOME="/Volumes/AxioSozoBuild/providers/runtime/codex/<instance-uuid>/codex-home" codex login
+```
 
-The root `prepare` hook executes `effect-tsgo patch && vp config --no-agent`.
-`pnpm-workspace.yaml` permits lifecycle builds for Electron, esbuild, node-pty and sharp.
-Those hooks, dependency installs, the full T3 server, frontend, terminal, mobile app,
-worktrees, maintenance commands, installers, and auth controllers were **not run**.
+Run that command from the browser runtime directory or another empty directory.
+The browser never opens login automatically. Different CODEX_HOME values also
+change official Keychain identity; copying default-profile credentials is not a
+shortcut. [Official credential ownership](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/login/src/auth/storage.rs).
 
-## Official routes and authentication distinctions
+**Claude Code:** launch uses `--safe-mode --restricted --tools ""`, empty strict MCP
+configuration, disabled hooks/slash commands/Chrome integration, no permission
+prompts, no session persistence and JSONL input/output. Unlike bare mode, safe mode
+retains subscription authentication. The exact 2.1.283 implementation supports
+`CLAUDE_CONFIG_DIR` for isolated customization/output and
+`CLAUDE_SECURESTORAGE_CONFIG_DIR=""` to retain the default official auth identity.
+The latter is an audited internal interface, not a promised stable CLI contract;
+updates fail the exact-version check until reviewed.
+[CLI flags](https://code.claude.com/docs/en/cli-reference),
+[credential identity](https://code.claude.com/docs/en/authentication#credential-management).
 
-**Codex:** official app-server defaults to JSONL stdio. The protocol schema in
-`packages/provider-host/schemas/codex-0.155.1.json` was generated by the actually installed
-`codex app-server generate-json-schema --out ...` command on 22 September, not guessed
-from newer docs. The subsequently installed 0.156.1 client is not declared compatible
-with that retained 0.155.1 schema.
-Outgoing methods and fields are validated against that schema. `read-only` and
-`approvalPolicy: untrusted` are protocol fixture choices, not a claim that native
-hooks/configuration are contained. Credentials must remain owned by the official client.
-Sources: [app-server](https://developers.openai.com/codex/app-server),
-[Codex source/license](https://github.com/openai/codex).
+An on-demand, **network-denied** official `claude auth status` preflight retains
+only categorical admission facts: loggedIn=true, authMethod=claude.ai,
+apiProvider=firstParty, and subscriptionType pro/max. Other output is discarded.
+Managed-policy files/cache are rejected by metadata alone. Team/Enterprise, API
+keys and other credentials are unsupported because managed policy can install
+HTTP/model hooks even when ordinary hooks are disabled. The browser never emits
+email, organization, credentials or raw auth diagnostics.
+[Managed policies](https://code.claude.com/docs/en/server-managed-settings),
+[hook precedence](https://code.claude.com/docs/en/hooks#disable-or-remove-hooks).
 
-**Claude Code:** the unmodified official client and direct SDK/API use are separate
-routes. Current terms distinguish hosting the official binary from intermediating
-subscription tokens in another client. Sign-in must use Anthropic's flow. Current
-`--bare` mode skips hooks, MCP and project instructions **and also disables subscription
-OAuth/Keychain authentication**, requiring API authentication. It still includes coding
-tools unless explicitly removed. We therefore do not label a bare-mode SDK wrapper as
-subscription support, collect tokens, or ship T3's SDK configuration unchanged.
-Sources: [legal/authentication](https://code.claude.com/docs/en/legal-and-compliance),
-[headless and bare mode](https://code.claude.com/docs/en/headless),
-[CLI flags](https://code.claude.com/docs/en/cli-reference).
+macOS Claude reads and refreshes official credentials via `/usr/bin/security`.
+The sandbox permits that exact executable as a helper, with all inherited file and
+network constraints. Shell fallback remains denied; if direct official Keychain
+access fails, the route fails instead of broadening execution. Only the official
+client/security process handles tokens. No wrapper extracts them.
 
-**Antigravity:** official documentation now provides native `agy`, JSONL headless
-input/output, explicit conversation IDs and result statuses. This is separate from
-Gemini CLI and from T3's ACP installation. Normal `agy` launch can open a login browser
-when auth is absent, so discovery never runs it. The CLI's headless permission defaults
-can automatically allow workspace file operations; observing tool events cannot
-prevent them. Its `--sandbox` terminal option alone has not been proven to confine
-hooks, rules, sidecars, MCP or filesystem access. Sources:
-[install/auth](https://antigravity.google/docs/cli/install/),
-[headless protocol](https://antigravity.google/docs/cli/headless/),
-[separate SDK](https://antigravity.google/docs/sdk/overview/).
+**Antigravity:** `agy --input-format stream-json --output-format stream-json` is a
+real documented protocol. Native binary metadata/changelog inspection found a
+1.1.28 entry, which does not prove the installed executable's version. Headless
+mode auto-allows workspace file operations; terminal `--sandbox` is not an all-client
+boundary. No public no-tools/no-hooks/no-customizations option was found. Custom
+agent `tools: []` is a research candidate, but its empty-list semantics and inherited
+startup hooks/MCP have not been established. The route returns
+`ANTIGRAVITY_PROTOCOL_UNSUPPORTED`; this means safe integration is unavailable,
+not that the vendor has no streaming protocol.
+[Headless protocol](https://www.antigravity.google/docs/cli/headless/),
+[custom agent fields](https://www.antigravity.google/docs/subagents/).
 
-**Jev:** the optional `DecisionProvider` uses `POST https://api.typesafe.ai/v1/systemone`
-with pinned `jev-1.13.0`, a typed choice question and fixed synthetic service state.
-It validates model, choice, confidence, probabilities, deadline and context version.
-Results are diagnostic suggestions with `action_authorized:false`; uncertainty is a
-valid result. Requests never retry and cannot follow redirects. `jev-test` without
-`--authorized` returns `BLOCKED_AUTH` before Keychain/network access. Only an explicit
-authorized invocation may query the project-specific Keychain service; no environment
-API-key fallback exists. `MacKeychain.store` takes a user-supplied key through an owned
-stdin pipe, not argv/files; no key is present in this repository. Sources:
-[API](https://docs.typesafe.ai/api), [models](https://docs.typesafe.ai/models),
-[quickstart](https://docs.typesafe.ai/introduction/quickstart).
+## Native runtime and evidence
 
-## Trusted browser settings
+All generated state is on the verified T9-backed project volume. No dependencies,
+provider installers or T3 lifecycle scripts run. The Codex native executable is
+resolved using its official public npm package layout, bypassing the wrapper that
+forks; Claude uses its pinned user-owned native installation. Caller-supplied
+executables, cwd, environment, shell strings and credentials are rejected.
 
-The internal `ProviderSettings.sys.mjs` module opens the scriptless
-`chrome://browser/content/axiosozo/providers-settings.xhtml` settings dialog from an
-explicit browser-chrome action. It calls only the provider host's `discover` command
-using `AXIOSOZO_PROVIDER_NODE`, `AXIOSOZO_PROVIDER_HOST` and `AXIOSOZO_DISCOVERY_PATH`
-supplied by the development session. It replaces the child environment, bounds output,
-sets a five-second deadline, and reaps the owned metadata subprocess on close/failure.
-Metadata is validated, rendered with `textContent`, and cannot enable live capabilities.
-Nothing launches automatically when the browser starts.
+The native supervisor uses a separate owned process group. Parent pipe closure,
+SIGTERM/SIGINT, deadline and root-process exit terminate remaining group members;
+TERM escalates to KILL. It never kills by name. The actual profile denies arbitrary
+file contents and writes outside app runtime/auth scope. Codex denies fork; Claude
+permits fork with only its exact executable and `/usr/bin/security` admitted for
+exec. No shell, login opener, arbitrary helper or network listener is admitted.
+Outbound network is enabled only for the conversation stage, with normal TLS.
+Seatbelt via sandbox-exec is deprecated: this remains a development containment
+implementation, not a supported signed production XPC architecture.
 
-Configurations contain only a generated immutable UUID, one of the three driver IDs,
-and a user-chosen label in the development profile's `axiosozo.providers.instances.v1`
-preference. They contain no provider credentials or account tokens. Adding a
-configuration does not connect, authenticate or migrate a session. Private windows
-cannot open this persistent settings surface. The optional Jev password field and
-storage action are visibly disabled; its gated helper path uses private stdin and
-never preferences, argv or logs. No Keychain operation or live test is triggered.
+Validation commands (after mount-dev-storage) use external storage:
 
-Ten settings contract tests cover validation, capability/version rejection, configuration
-identity, malformed/credential-bearing saved data, subprocess output/deadline/cancel,
-web/private rejection and the disabled Keychain gate. The combined provider suite has
-48 passing tests after the metadata-read hardening. These are deterministic
-model/transport tests, **not a real browser GUI test**. See
-[settings evidence](evidence/providers-settings-results.json) and
-[settings tests](evidence/providers-settings-tests.log). The
-[earlier version-guard run](evidence/providers-version-tests-20260923.log)
-records 47 tests; the current suite is reproducible with
-`node packages/provider-host/cli.mjs test`.
+```sh
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- node packages/provider-host/cli.mjs setup
+node packages/provider-host/cli.mjs test
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- node --test packages/provider-host/tests/sandbox.os.mjs packages/provider-host/tests/live.os.mjs
+```
 
-## macOS subprocess boundary experiment
+The current module run passes **61 tests**, including actual owned fixture protocol
+streams, cancellation, cross-session rejection, malformed input, bounded host output,
+startup cleanup and exact current schema validation. Focused host/adapter tests also
+pass on the browser's pinned Node 22.22.3 runtime. All **10 native boundary tests passed**, including both execution policies,
+file/configuration/shell denial, the networking lane, liveness-socket identity and
+owned process-group cleanup. These are synthetic native fixtures, not actual
+provider evidence. Older records remain in
+[evidence/providers-verification-20260923.json](evidence/providers-verification-20260923.json).
 
-`src/sandbox.mjs` admits only the compiled `native/sandbox-probe.c` test executable;
-the binary and source hashes must match the build manifest. It accepts no arbitrary
-executable, environment, shell command or sandbox profile from callers. Its only
-writable scope is a new app-owned private fixture directory on the external build
-volume. A minimal explicit environment prevents inherited provider credentials,
-Node hooks, dynamic-loader settings and provider configuration variables.
+After separate explicit live authorization, a fixed diagnostic can be run:
 
-The deny-default Seatbelt profile allows that executable, system library loading,
-system metadata/sysctl reads and scoped fixture file contents. It denies network,
-fork and other executable paths. File metadata is intentionally readable globally;
-the claimed boundary concerns file contents and mutation, not metadata privacy.
-`native/sandbox-launcher.c` supervises the exact child using `waitpid`. The parent
-liveness pipe is not inherited by the fixture; EOF, cancellation and deadline
-cause TERM followed by KILL and reaping. No process-name killing is used. Because
-fork is denied, this design prevents descendants; it does not claim to clean up an
-arbitrary pre-existing child tree or survive a forcibly killed supervisor.
+```sh
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- node packages/provider-host/cli.mjs live claude-code --authorized
+```
 
-`tests/sandbox.os.mjs` compares the same actual syscalls before and after confinement:
-allowed read/write; outside read/write; symlink escape; synthetic Codex, Claude,
-MCP and instruction files; shell launch; fork; and a local fixture TCP connection.
-It also tests a SIGTERM-ignoring child on cancel/deadline and abrupt parent exit.
-These are native fixture tests, **not startup-hook tests of official clients**.
+Use `codex` for Codex and optionally `--instance-id=<browser-uuid>` to use its exact
+isolated profile. The default diagnostic instance is
+`00000000-0000-4000-8000-000000000001`. This is a dedicated diagnostic identity: signing
+into its home does not authenticate a browser instance with a different UUID.
+For browser use, select that browser instance UUID explicitly and authenticate
+its exact home. The diagnostic sends only `Reply exactly AXIOSOZO_OK`,
+prints completion/exact-match booleans and never dumps the reply, auth data or
+stderr. Without `--authorized` it exits 78 before any client is launched.
 
-Actual macOS results: every baseline operation succeeded. Under the broker, scoped
-read/write succeeded while all outside/config/symlink reads, outside writes, shell,
-fork and loopback networking returned `EPERM` (1). SIGTERM-ignoring children were
-killed and reaped on cancellation and deadline; abrupt parent exit also left no
-owned process. The final rebuilt artifacts passed all five tests:
-[native sandbox log](evidence/providers-sandbox-final-20260923.log).
+T3 retained code is limited to pure version parsing, stderr redaction and immutable
+continuation identity utilities with the MIT notice. A full T3 UI/server dependency
+graph is not installed. Existing Jev and Keychain fixture work remains optional and
+separate; no Jev network call, provider installation or authentication is needed to
+browse. Historical provenance is in [provider-provenance.json](provider-provenance.json).
 
-The current launcher uses the macOS `sandbox-exec` interface, which its system
-manual marks deprecated. It is an experimental proof, not a supported permanent
-provider-host architecture. Apple documents App Sandbox and signed XPC services
-for privilege separation; a product host needs a reviewed entitlement and IPC
-design plus official-client compatibility tests. Re-signing a provider client or
-copying subscription tokens is not an accepted shortcut. Sources:
-[App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox),
-[sandbox inheritance/XPC](https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/EnablingAppSandbox.html).
+## Approved live diagnostic outcome
 
-## Keychain negative evidence
+The 26 September approved fixed diagnostic stopped before any model request.
+Codex returned `CODEX_LOGIN_REQUIRED` without launching a client. Three Claude
+startup attempts reached the official network-denied auth-status command; the
+latest observed results were exit 1, valid categorical status, and loggedIn=false.
+That does **not** establish the normal CLI is signed out: the official implementation
+also reports false when its Keychain access fails under confinement. No login UI,
+page/project content, raw credentials or identity fields were exposed.
 
-The production helper was executed only with malformed store input and an unknown
-operation, both rejected before `SecItem` access. The same source is also compiled
-as `keychain-negative` with the build-time-only `AXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1`.
-That binary fixes a synthetic service/account, sets `kSecMatchSearchList` to an empty
-array, and rejects all store/delete commands. Apple defines that key as limiting
-searches to the supplied keychains; the current SDK header was inspected before use.
-There is no runtime switch to turn a production query into a test query, and neither
-the default keychain nor the search list is changed.
+Apple’s installed profiles identified missing Keychain Mach services. The confined
+Claude route now admits exactly `com.apple.SecurityServer` and
+`com.apple.securityd.xpc` in addition to its previous service list. Authentication
+remained unavailable. Automatic approval review rejected the proposed next retry
+with login-keychain database/security-preference reads because the fixed-prompt
+approval did not authorize that credential boundary. Those proposed file and IPC
+allowances were reverted; no retry followed the rejection.
 
-Real `SecItemCopyMatching` returned `errSecItemNotFound` (-25300), mapped to exit 44
-and JavaScript `null`. A malformed query returned `errSecParam` (-50), mapped to a
-failure. Both produced no stdout. The fixture rejects even unexpected success before
-emitting data. The production JS adapter returned errors for the fixture's blocked
-store/delete operations and made no plaintext fallback. All five tests passed:
-[native Keychain log](evidence/providers-keychain-negative-20260923.log).
-No user key, subscription token or existing account item was queried or changed.
-The production settings-to-helper route remains unverified. Source:
-[Apple search-list contract](https://developer.apple.com/documentation/security/ksecmatchsearchlist).
-
-## Positive isolated Keychain evidence
-
-`native/keychain-positive.m` uses the public file-keychain API solely in a test child.
-Those legacy creation/interaction APIs are deprecated but remain present in the
-current SDK; the fixture locally suppresses their deprecation diagnostic rather
-than changing production code. Apple publishes a creation guard that excludes private
-keychains from automatic default/search-list changes. The fixture's fixed basename
-is `axiosozo-synthetic.keychain`, inside a new private `positive-*` directory beneath
-`/Volumes/AxioSozoBuild/providers/keychain-runs`. It cannot name a login/System keychain.
-The caller does not query or change the user's default keychain or search list.
-Source: [Apple StorageManager private-keychain guard](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_keychain/lib/StorageManager.cpp#L108).
-
-Before creation, the child disables legacy user interaction and verifies its process
-setting is zero. It also uses an `LAContext` with interaction disabled. Every
-`SecItemAdd` supplies `kSecUseKeychain` with the new private keychain; every read,
-update and delete supplies a singleton `kSecMatchSearchList` containing that same
-reference. It generates random synthetic password/value bytes locally, compares the
-returned values in memory, and never logs key data. It neither changes a preference
-domain nor calls `SecKeychainDelete`; after the child locks its private keychain and
-exits, the parent removes only the new fixture directory.
-
-The actual macOS run returned success for create/add/read/replace/read/delete/lock.
-Read values matched both synthetic values; queries before insertion and after removal
-returned `errSecItemNotFound` (-25300). The exact native child was reaped and its
-directory removed. The first harness assertion incorrectly expected JSON `false`
-where the SDK's UInt8 `Boolean` became `0`; that failure is preserved. The corrected
-exact-zero assertion passed using the identical native binary:
-[initial log](evidence/providers-keychain-positive-20260923.log),
-[final log and artifact hashes](evidence/providers-keychain-positive-final-20260923.log),
-[single-file build](evidence/providers-keychain-positive-build-20260923.json).
-No personal account item or default-keychain contents were read, and no Jev request
-or production-helper operation occurred. The browser's production input remains off
-until its actual settings/helper integration is verified separately.
-
-## Handoff 2 requirements
-
-Extend the experimental native boundary to a reviewed, supported provider launch
-path with actual-client negative tests for native hooks, MCP, shell, file reads/writes
-outside granted scope, and process lifecycle. The offline/no-fork fixture does not
-establish actual-client compatibility. Then audit exact installed CLI versions, generate versioned protocol
-fixtures, determine safe auth-status probes, and request the separately authorized
-small live tests. Keep all advertised automation capabilities false until these pass.
-
-Keep `discover` connected to provider settings without launches. Add a Keychain-backed
-Jev settings action using `MacKeychain.store/remove`, after testing the production
-helper through a separate synthetic service and proving the browser-to-helper path.
-Finish strong Claude cancellation outcome handling
-and resumable lifecycle support for Claude/Antigravity. No one should need Jev or a
-provider account to browse normally.
+Safe structured results are recorded in
+[provider diagnostic evidence](../packages/provider-host/evidence/live-preflight-20260926.json).

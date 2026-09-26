@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "date": "2026-09-26",
+  "scope": "Explicitly approved fixed Reply exactly AXIOSOZO_OK diagnostics; no page/project content",
+  "codex": {
+    "command": "node packages/provider-host/cli.mjs live codex --authorized",
+    "host_exit_code": 78,
+    "status": "CODEX_LOGIN_REQUIRED",
+    "client_started": false,
+    "model_requests_sent": 0,
+    "instance_id": "00000000-0000-4000-8000-000000000001",
+    "official_home": "/Volumes/AxioSozoBuild/providers/runtime/codex/00000000-0000-4000-8000-000000000001/codex-home",
+    "binding_note": "Dedicated diagnostic UUID. It does not sign in a browser instance with a different UUID."
+  },
+  "claude_code": {
+    "command": "node packages/provider-host/cli.mjs live claude-code --authorized",
+    "confined_auth_attempts": 3,
+    "host_exit_code": 78,
+    "status": "BLOCKED_AUTH",
+    "model_requests_sent": 0,
+    "login_ui_opened": false,
+    "raw_credentials_read_by_host": false,
+    "observed_diagnostics": [
+      {
+        "native_pid": 36104,
+        "process_exit": 1,
+        "official_status_parsed": true,
+        "logged_in": false,
+        "sandbox_denial_reported": false
+      },
+      {
+        "native_pid": 37177,
+        "process_exit": 1,
+        "official_status_parsed": true,
+        "logged_in": false,
+        "sandbox_denial_reported": false
+      }
+    ],
+    "interpretation": "Official authentication unavailable under confinement. Claude collapses failed Keychain reads into absent credentials, so signed-out state is not established."
+  },
+  "accepted_runtime_fix": {
+    "official_helper_mach_lookup": [
+      "com.apple.SecurityServer",
+      "com.apple.securityd.xpc"
+    ],
+    "source": "/System/Library/Sandbox/Profiles/com.apple.remotemanagementd.sb:130"
+  },
+  "approval_rejection": {
+    "action": "Retry allowing the official helper scoped reads of login.keychain-db/security preferences and Keychain notification IPC",
+    "reason": "High-sensitivity credential boundary not specifically authorized by fixed live prompt approval",
+    "process_started": false,
+    "denied_allowances_reverted": true,
+    "retried_after_rejection": false
+  },
+  "remaining_gates": [
+    "Official Codex login for the intended immutable instance UUID",
+    "Reviewed official Claude Keychain access compatible with confinement",
+    "Actual fixed model reply; no model request reached a provider in these attempts"
+  ]
+}

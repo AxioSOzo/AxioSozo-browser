@@ -11,42 +11,47 @@ import { installBrowserExperience } from "chrome://browser/content/axiosozo/Brow
 async function initialize() {
   await window.gZenStartup.promiseInitialized;
   if (!Services.prefs.getBoolPref("axiosozo.foundation.enabled", true)) return;
+  document.documentElement.toggleAttribute("axiosozo-minimal-ui", Services.prefs.getBoolPref("axiosozo.minimal-ui", true));
   const adapter = new GeckoEngineAdapter(window);
   const badge = document.createXULElement("toolbarbutton");
   badge.id = "axiosozo-engine-indicator";
-  badge.setAttribute("label", "Gecko · Dev");
-  badge.setAttribute("tooltiptext", "Gecko development engine · Open provider settings");
-  badge.setAttribute("aria-label", "Active engine Gecko; open provider settings");
+  badge.setAttribute("label", "Firefox");
+  badge.setAttribute("tooltiptext", "Firefox engine · Open browser settings");
+  badge.setAttribute("aria-label", "Active engine Firefox; open browser settings");
+  badge.setAttribute("engine", "gecko");
   badge.addEventListener("command", () => openProviderSettings(window));
   document.getElementById("nav-bar-customization-target").appendChild(badge);
   const engineProbe = installEngineProbeControls(window, adapter, {
     Presenter: CEFPresenter,
     onEngineChange(state) {
-      const label = state.engine === "chromium" ? `Chromium ${state.version} · Experimental` : "Gecko · Dev";
+      const label = state.engine === "chromium" ? `Experimental Chromium ${state.version}` : "Firefox";
       badge.setAttribute("label", label);
-      badge.setAttribute("aria-label", label + "; open provider settings");
-      badge.setAttribute("tooltiptext", label + " · Open provider settings");
+      badge.setAttribute("aria-label", label + "; open browser settings");
+      badge.setAttribute("tooltiptext", label + " · Open browser settings");
+      badge.setAttribute("engine", state.engine === "chromium" ? "chromium" : "gecko");
     },
-    onFailure: () => console.error("AxioSozo Chromium fixture probe unavailable; Gecko tab retained"),
+    onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
   const experience = installBrowserExperience(window, { engineProbe });
-  // Intentionally no second URL bar, global content script, or model input channel.
-  let coordinator = null;
-  window.AxioSozo = Object.freeze({ version: 2, engine: adapter, engineProbe, experience,
+  // Browser startup performs no provider discovery and starts no model client.
+  // The optional privileged-action coordinator is also created only on demand.
+  let coordinator = null; let coordinatorStarting = null; let disposed = false;
+  const ensureCoordinator = () => {
+    if (disposed) return Promise.reject(new Error("WINDOW_CLOSED"));
+    if (coordinator) return Promise.resolve(coordinator);
+    if (!coordinatorStarting) coordinatorStarting = attachCoordinator(window, adapter, {
+      isTargetActive: target => engineProbe?.isGeckoTargetActive(target) ?? true,
+    }).then(connection => { coordinator = connection; return connection; })
+      .finally(() => { coordinatorStarting = null; });
+    return coordinatorStarting;
+  };
+  window.AxioSozo = Object.freeze({ version: 3, engine: adapter, engineProbe, experience, ensureCoordinator,
     get coordinator() { return coordinator; } });
   window.addEventListener("unload", () => {
-    experience.dispose();
+    disposed = true; experience.dispose();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });
-  attachCoordinator(window, adapter, {
-    isTargetActive: target => engineProbe?.isGeckoTargetActive(target) ?? true,
-  }).then(connection => { coordinator = connection; }).catch(error => {
-    // Log only our bounded error codes. Subprocess exceptions can include paths
-    // or untrusted output, and must never expose the bootstrapped IPC token.
-    const code = /^[A-Z][A-Z0-9_]{2,80}$/u.test(error?.message ?? "")
-      ? error.message : "UNCLASSIFIED_ATTACH_FAILURE";
-    console.error(`AxioSozo coordinator unavailable (${code}); normal browsing remains available`);
-  });
+
 }
 window.addEventListener("MozBeforeInitialXULLayout", () => { initialize().catch(console.error); }, { once: true });

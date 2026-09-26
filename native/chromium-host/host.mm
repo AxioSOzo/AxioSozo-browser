@@ -24,6 +24,7 @@ IMPORT(cef_initialize); IMPORT(cef_execute_process); IMPORT(cef_shutdown);
 IMPORT(cef_run_message_loop); IMPORT(cef_quit_message_loop); IMPORT(cef_browser_host_create_browser);
 IMPORT(cef_api_hash); IMPORT(cef_version_info);
 IMPORT(cef_string_userfree_utf16_free);
+IMPORT(cef_request_context_create_context);
 static void* framework;
 template<class T> static void symbol(T& out, const char* name) {
   out = reinterpret_cast<T>(dlsym(framework, name));
@@ -36,6 +37,7 @@ static void loadFramework(NSString* path) {
   LOAD(cef_initialize); LOAD(cef_execute_process); LOAD(cef_shutdown);
   LOAD(cef_run_message_loop); LOAD(cef_quit_message_loop); LOAD(cef_browser_host_create_browser); LOAD(cef_api_hash); LOAD(cef_version_info);
   LOAD(cef_string_userfree_utf16_free);
+  LOAD(cef_request_context_create_context);
   const char* apiHash = p_cef_api_hash(CEF_API_VERSION, 0);
   if (!apiHash || strcmp(apiHash, CEF_API_HASH_PLATFORM) != 0 || p_cef_version_info(0)!=CEF_VERSION_MAJOR || p_cef_version_info(1)!=CEF_VERSION_MINOR || p_cef_version_info(2)!=CEF_VERSION_PATCH || p_cef_version_info(4)!=CHROME_VERSION_MAJOR || p_cef_version_info(5)!=CHROME_VERSION_MINOR || p_cef_version_info(6)!=CHROME_VERSION_BUILD || p_cef_version_info(7)!=CHROME_VERSION_PATCH) { fprintf(stderr,"CEF API version rejected\n"); exit(70); }
 }
@@ -47,6 +49,7 @@ static NSString* ns(const cef_string_t* s) { return s ? [[NSString alloc] initWi
 static NSString* evidence;
 static std::u16string initialURL;
 static cef_browser_t* browser = nullptr;
+static cef_request_context_t* isolatedContext = nullptr;
 static bool closed=false, loaded=false, inputObserved=false, navigated=false;
 static int width=900,height=650,frames=0;
 static double deviceScale=2.0;
@@ -56,6 +59,7 @@ static NSDictionary* target;
 static NSString* streamToken;
 static NSString* streamInstance;
 static NSString* fixtureOrigin;
+static bool webBrowsing=false;
 static NSMutableSet* requestIds;
 static NSString* navigationRequest;
 static NSString* createRequest;
@@ -100,6 +104,8 @@ static Ref<cef_permission_handler_t> permissions;
 static Ref<cef_resource_request_handler_t> resources;
 static Ref<cef_download_handler_t> downloads;
 static Ref<cef_context_menu_handler_t> contextMenu;
+static Ref<cef_dialog_handler_t> dialogs;
+static Ref<cef_jsdialog_handler_t> jsDialogs;
 static void saveFrame(const void* buffer,int w,int h) {
   if (!captureName || w<=0 || h<=0 || w>4096 || h>4096 || w!=int(ceil(width*deviceScale)) || h!=int(ceil(height*deviceScale))) return;
   NSBitmapImageRep* rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nil pixelsWide:w pixelsHigh:h bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:w*4 bitsPerPixel:32];
@@ -128,11 +134,16 @@ static void configure() {
   client.api.get_request_handler=[](cef_client_t*){return request.retain();};
   client.api.get_permission_handler=[](cef_client_t*){return permissions.retain();};
   processHandler.api.on_context_initialized=[](cef_browser_process_handler_t*){
+    // Never use or share a persistent Chromium profile. An explicit non-global
+    // context keeps all page cookies/cache in memory for this one owned target.
+    cef_request_context_settings_t contextSettings{};contextSettings.size=sizeof(contextSettings);
+    isolatedContext=p_cef_request_context_create_context(&contextSettings,nullptr);
+    if(!isolatedContext){event(@"error",@{@"code":@"isolated_context_failed"});streamClosing=true;return;}
     if(streaming){streamReady=true;streamReadyEvent();return;}
     cef_window_info_t wi{};wi.size=sizeof(wi);wi.windowless_rendering_enabled=1;wi.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
     cef_browser_settings_t settings{};settings.size=sizeof(settings);settings.windowless_frame_rate=20;
     auto url=view(initialURL);
-    int accepted=p_cef_browser_host_create_browser(&wi,&client.api,&url,&settings,nullptr,nullptr);
+    int accepted=p_cef_browser_host_create_browser(&wi,&client.api,&url,&settings,nullptr,isolatedContext);
     event(@"create_accepted",@{@"accepted":@(accepted)});
   };
   lifespan.api.on_after_created=[](cef_life_span_handler_t*,cef_browser_t*b){browser=b;b->base.add_ref(&b->base);event(@"created",@{@"nativeTargetId":@(b->get_identifier(b))});};
@@ -210,6 +221,7 @@ int main(int argc,char**argv){@autoreleasepool{
   [tick invalidate];
   if(!streaming)event(@"message_loop_returned",@{@"closed":@(closed)});
   if(!closed)return exitStatus?exitStatus:75; // Outer supervisor cleans only this process group.
+  if(isolatedContext){isolatedContext->base.base.release(&isolatedContext->base.base);isolatedContext=nullptr;}
   p_cef_shutdown();
   if(!streaming)event(@"shutdown_returned",@{});
   if(exitStatus)return exitStatus;

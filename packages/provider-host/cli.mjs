@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readdirSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { discover, DRIVERS } from './src/discovery.mjs';
 import { livePreflight } from './src/adapters.mjs';
@@ -10,6 +10,8 @@ import { DecisionProvider, DIAGNOSTIC_STATE } from './src/decision.mjs';
 import { MacKeychain } from './src/keychain.mjs';
 import { providerBuildRoot } from './src/storage.mjs';
 import { SANDBOX_POLICY } from './src/sandbox.mjs';
+import { createLiveAdapter, LIVE_POLICY } from './src/live.mjs';
+import { serveStdio } from './src/host.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const [command = 'discover', driver, ...flags] = process.argv.slice(2);
@@ -27,7 +29,8 @@ function sourceFiles(directory) {
 }
 function nativeRun(args) { return run('/Users/wout/.local/bin/dev-external', ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
 try {
-  if (command === 'discover') print({ version: 1, discovery: 'metadata-only; no client execution', providers: discover() });
+  if (command === 'serve') await serveStdio({ createAdapter: createLiveAdapter });
+  else if (command === 'discover') print({ version: 1, discovery: 'metadata-only; no client execution', providers: discover() });
   else if (command === 'check') {
     for (const source of sourceFiles(root)) if (!run(process.execPath, ['--check', source])) break;
     if (!process.exitCode && process.platform === 'darwin' && run('/Users/wout/.local/bin/mount-dev-storage', [])) {
@@ -76,12 +79,40 @@ try {
         if (nativeRun(['-Wall', '-Wextra', '-Werror', '-O2', source, '-o', binary])) artifacts[name] = { binary_sha256: hash(binary), source_sha256: hash(source) };
       }
       if (!process.exitCode) {
+        const source = path.join(root, 'native/sandbox-launcher.c'); const binary = path.join(providerBuildRoot(), 'live-launcher');
+        if (nativeRun(['-Wall', '-Wextra', '-Werror', '-O2', '-DAXIOSOZO_MAX_LIFETIME_MS=900000', source, '-o', binary])) {
+          artifacts['live-launcher'] = { binary_sha256: hash(binary), source_sha256: hash(source), policy: LIVE_POLICY };
+        }
+      }
+      if (!process.exitCode) {
         writeFileSync(path.join(providerBuildRoot(), 'native-build.json'), JSON.stringify({ version: 1, policy: SANDBOX_POLICY, artifacts }, null, 2) + '\n', { mode: 0o600 });
         print({ status: 'PASS', helper, sandbox_artifacts: Object.keys(artifacts), keychain_credential_operations: 'not executed' });
       }
     }
   } else if (command === 'live') {
-    livePreflight(driver, { authorized: flags.includes('--authorized'), authenticated: false });
+    if (!flags.includes('--authorized')) livePreflight(driver);
+    const instanceFlag = flags.find(flag => flag.startsWith('--instance-id='));
+    if (flags.some(flag => flag !== '--authorized' && flag !== instanceFlag)) throw Object.assign(new Error('Unknown live diagnostic option'), { code: 'INVALID_INPUT' });
+    const binding = { instance_id: instanceFlag?.slice('--instance-id='.length) ?? '00000000-0000-4000-8000-000000000001',
+      session_id: randomUUID(), account_identity: `official-client-${randomUUID()}` };
+    let adapter, timer;
+    try {
+      adapter = await createLiveAdapter(driver, binding);
+      let answer = '', terminal;
+      const completed = new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error('Fixed diagnostic timed out'), { code: 'TIMEOUT' })), 120000);
+        adapter.on('event', event => {
+          if (event.type === 'text_delta') answer = (answer + event.text).slice(0, 256);
+          if (event.type === 'turn_finished') { terminal = event; resolve(); }
+        });
+      });
+      await adapter.start({ version: 1, ...binding, request_id: randomUUID(), turn_id: randomUUID(), text: 'Reply exactly AXIOSOZO_OK' });
+      await completed;
+      const passed = terminal.status === 'completed' && answer.trim() === 'AXIOSOZO_OK';
+      print({ version: 1, driver, status: passed ? 'PASS' : 'FAIL', diagnostic: 'fixed AXIOSOZO_OK prompt',
+        completed: terminal.status === 'completed', exact_reply: answer.trim() === 'AXIOSOZO_OK', live_verified: passed });
+      if (!passed) process.exitCode = 1;
+    } finally { clearTimeout(timer); if (adapter) await adapter.close(); }
   } else if (command === 'jev-test') {
     // Root command must carry explicit live authorization. Normal startup does
     // not even read Keychain, and no API-key environment fallback exists.
@@ -91,6 +122,10 @@ try {
     const result = await new DecisionProvider({ keyStore: new MacKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
     print(result); if (result.reason !== 'validated') process.exitCode = 78;
   } else {
-    print({ status: 'UNSUPPORTED', command, usage: 'discover | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;
+    print({ status: 'UNSUPPORTED', command, usage: 'discover | serve | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;
   }
-} catch (error) { print({ status: error.code?.startsWith('BLOCKED_') ? error.code : 'FAIL', reason: error.code ?? 'COMMAND_ERROR', message: error.code?.startsWith('BLOCKED_') ? error.message : 'Provider command failed; no credentials logged', version_status: error.version_status, client_version: error.client_version, fixture_version: error.fixture_version, protocol_status: error.protocol_status }); process.exitCode = error.code?.startsWith('BLOCKED_') ? 78 : 1; }
+} catch (error) {
+  const blocked = error.code?.startsWith('BLOCKED_') || ['CODEX_LOGIN_REQUIRED', 'ANTIGRAVITY_PROTOCOL_UNSUPPORTED', 'UNSUPPORTED'].includes(error.code);
+  print({ status: blocked ? error.code : 'FAIL', reason: error.code ?? 'COMMAND_ERROR', message: blocked ? error.message : 'Provider command failed; no credentials logged', diagnostic: error.diagnostic, version_status: error.version_status, client_version: error.client_version, fixture_version: error.fixture_version, protocol_status: error.protocol_status });
+  process.exitCode = blocked ? 78 : 1;
+}

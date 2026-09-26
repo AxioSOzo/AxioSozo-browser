@@ -191,6 +191,11 @@ function addText(document, parent, tag, value, className) {
   const node = document.createElementNS("http://www.w3.org/1999/xhtml", tag);
   node.textContent = value; if (className) node.className = className; parent.append(node); return node;
 }
+/** Presentation only: tone never alters the verbatim status code text. */
+function addBadge(document, parent, code) {
+  const tone = /^BLOCKED/u.test(code) ? "blocked" : /MISMATCH/u.test(code) ? "warning" : "neutral";
+  return addText(document, parent, "span", code, `badge ${tone}`);
+}
 
 export function initializeProviderSettings(win) {
   const document = win.document;
@@ -206,27 +211,41 @@ export function initializeProviderSettings(win) {
     const list = byId("instances"); list.replaceChildren();
     for (const instance of policy.instances) {
       const row = addText(document, list, "li", "", "instance");
-      const summary = addText(document, row, "div", "");
-      addText(document, summary, "strong", `${instance.label} · ${LABELS[instance.driver]}`);
-      addText(document, summary, "code", instance.instance_id);
+      const summary = addText(document, row, "div", "", "instance-summary");
+      addText(document, summary, "strong", instance.label, "instance-label");
+      addText(document, summary, "span", LABELS[instance.driver], "instance-driver");
+      addText(document, summary, "code", instance.instance_id, "instance-id");
+      if (instance.driver === "codex") {
+        const root = runtime.env("AXIOSOZO_BUILD_ROOT");
+        if (text(root) && root.startsWith("/Volumes/")) {
+          const profile = `${root}/providers/runtime/codex/${instance.instance_id}/codex-home`;
+          // Display only a quoted, locally-derived command; never execute login from settings.
+          const quoted = "'" + profile.replaceAll("'", "'\"'\"'") + "'";
+          addText(document, summary, "span", "After the first Send prepares this separate browser profile, sign in once with the official Codex client:", "section-note");
+          addText(document, summary, "code", `CODEX_HOME=${quoted} codex login`, "path");
+        }
+      }
       const controls = addText(document, row, "div", "", "instance-controls");
       const enabledLabel = addText(document, controls, "label", "", "instance-toggle");
       const enabled = addText(document, enabledLabel, "input", ""); enabled.type = "checkbox";
       enabled.checked = policy.enabledIds.includes(instance.instance_id);
       addText(document, enabledLabel, "span", "Enabled");
       enabled.addEventListener("change", () => {
-        try { store.setEnabled(instance.instance_id, enabled.checked); renderInstances(); status("Local routing policy saved. Live route remains blocked until verified."); }
+        try { store.setEnabled(instance.instance_id, enabled.checked); renderInstances(); status("Default-provider preference saved. A client starts only when you send a question."); }
         catch { renderInstances(); status("Enabled status could not be saved."); }
       });
-      const useDefault = addText(document, controls, "button", policy.defaultId === instance.instance_id ? "Default" : "Set default");
+      const isDefault = policy.defaultId === instance.instance_id;
+      const useDefault = addText(document, controls, "button", isDefault ? "Default" : "Set default", isDefault ? "small current" : "small");
       useDefault.type = "button"; useDefault.disabled = !enabled.checked || policy.defaultId === instance.instance_id;
       useDefault.addEventListener("click", () => {
         try { store.setDefault(instance.instance_id); renderInstances(); status("Default for new sessions saved. Existing sessions stay bound."); }
         catch { status("Default could not be changed."); }
       });
+      /* Automatic replay stays off for conversations; preserve stored fallback preferences. */
       const fallbackIndex = policy.fallbackIds.indexOf(instance.instance_id);
-      const fallback = addText(document, controls, "button", fallbackIndex >= 0 ? `Fallback ${fallbackIndex + 1} · remove` : "Add fallback");
-      fallback.type = "button"; fallback.disabled = !enabled.checked || policy.defaultId === instance.instance_id;
+      const fallback = addText(document, controls, "button", fallbackIndex >= 0 ? `Fallback ${fallbackIndex + 1} · remove` : "Add fallback",
+        fallbackIndex >= 0 ? "small active" : "small");
+      fallback.hidden = true; fallback.type = "button"; fallback.disabled = !enabled.checked || policy.defaultId === instance.instance_id;
       fallback.addEventListener("click", () => {
         try {
           store.setFallback(fallbackIndex >= 0 ? policy.fallbackIds.filter(id => id !== instance.instance_id)
@@ -234,40 +253,64 @@ export function initializeProviderSettings(win) {
           renderInstances(); status("Opt-in fallback order saved. Mutating actions are never replayed.");
         } catch { status("Fallback order could not be changed."); }
       });
-      const remove = addText(document, row, "button", "Remove"); remove.type = "button";
+      const remove = addText(document, row, "button", "Remove", "small remove"); remove.type = "button";
       remove.setAttribute("aria-label", `Remove configuration ${instance.label}`);
       remove.addEventListener("click", () => { try { store.remove(instance.instance_id); renderInstances(); status("Configuration removed."); } catch { status("Configuration could not be changed."); } });
     }
     byId("instances-empty").hidden = list.childElementCount > 0;
     byId("routing-summary").textContent = policy.defaultId
-      ? `Default: ${policy.instances.find(item => item.instance_id === policy.defaultId)?.label}. Fallback: ${policy.fallbackIds.length ? policy.fallbackIds.map(id => policy.instances.find(item => item.instance_id === id)?.label).join(" → ") : "off"}. Live access blocked.`
-      : "No default provider. Browser assistance is off; normal browsing works.";
+      ? `Default: ${policy.instances.find(item => item.instance_id === policy.defaultId)?.label}. Automatic fallback is off. Select a provider in Ask AI to start a conversation.`
+      : "Select a provider in Ask AI. No default configuration is needed.";
   }
   async function refresh() {
     if (busy) return; busy = true; byId("refresh").disabled = true; status("Reading installation metadata…");
+    byId("providers").setAttribute("aria-busy", "true");
     try {
       const providers = await discoverForSettings(runtime, controller.signal);
       if (controller.signal.aborted) return;
       const list = byId("providers"); list.replaceChildren();
       for (const provider of providers) {
-        const row = addText(document, list, "section", "", "provider");
-        addText(document, row, "h2", LABELS[provider.driver]);
-        addText(document, row, "p", provider.installed ? `Installed · ${provider.client_version ?? "version unknown"}` : "Client not found");
-        if (provider.executable) addText(document, row, "code", provider.executable);
-        addText(document, row, "p", `Authentication unknown · ${provider.status}`, "status");
-        addText(document, row, "p", `${provider.version_status} · pinned fixture ${provider.fixture_version ?? "unknown"} · client protocol UNTESTED`, "detail");
-        addText(document, row, "p", `${provider.protocol} · live connection and browser control unverified`, "detail");
+        const row = addText(document, list, "section", "", provider.installed ? "provider" : "provider missing");
+        const head = addText(document, row, "div", "", "provider-head");
+        addText(document, head, "h3", LABELS[provider.driver]);
+        if (provider.installed) addText(document, head, "span", provider.client_version ?? "version unknown", provider.client_version ? "version" : "version unknown");
+        addText(document, head, "span", provider.installed ? "Installed" : "Client not found", "install-state");
+        if (provider.executable) addText(document, row, "code", provider.executable, "path");
+        const facts = addText(document, row, "dl", "", "facts");
+        const fact = (term, build) => { addText(document, facts, "dt", term); build(addText(document, facts, "dd", "")); };
+        fact("Connection", dd => addText(document, dd, "span", provider.driver === "antigravity"
+          ? "Unavailable in this build — Antigravity startup and tool isolation have not been verified. Select Codex or Claude Code."
+          : provider.installed ? "Connection is attempted when you Send. Client compatibility, authentication and the security boundary are checked then."
+            : "Install the official client before sending a question."));
+        fact("Authentication", dd => addText(document, dd, "span", "Not checked by installation discovery."));
+        fact("Browser actions", dd => addText(document, dd, "span", "Unavailable. AI receives only your question and any page reference you explicitly share."));
+        const fixture = addText(document, row, "details", "", "fixture-details");
+        addText(document, fixture, "summary", "Older offline fixture metadata");
+        addText(document, fixture, "p", "This comparison describes the offline test fixture, not live client compatibility. Live connection results appear in Ask AI after you Send.", "section-note");
+        const metadata = addText(document, fixture, "p", "", "section-note");
+        addBadge(document, metadata, provider.version_status);
+        addText(document, metadata, "span", ` fixture version ${provider.fixture_version ?? "not pinned"}; live protocol not checked during discovery.`);
+        addText(document, fixture, "code", provider.protocol, "path");
       }
       status("Metadata refreshed. No provider client was started.");
     } catch (error) {
       if (!controller.signal.aborted) {
         const code = /^[A-Z][A-Z0-9_]{2,80}$/u.test(error?.message ?? "") ? error.message : "DISCOVERY_FAILED";
         status(`Discovery unavailable (${code}). No provider client was started.`);
+        const list = byId("providers"); list.replaceChildren();
+        addText(document, list, "p", "Installation metadata could not be read. ", "placeholder error");
+        addBadge(document, list.firstChild, code);
         console.error(`AxioSozo provider discovery ${code}`);
       }
     }
-    finally { busy = false; if (!controller.signal.aborted) byId("refresh").disabled = false; }
+    finally { busy = false; if (!controller.signal.aborted) { byId("refresh").disabled = false; byId("providers").removeAttribute("aria-busy"); } }
   }
+  byId("browser-preferences").addEventListener("click", () => {
+    win.opener.openTrustedLinkIn("about:preferences#privacy", "tab"); win.close();
+  });
+  byId("browser-addons").addEventListener("click", () => {
+    win.opener.openTrustedLinkIn("about:addons", "tab"); win.close();
+  });
   byId("refresh").addEventListener("click", refresh);
   byId("instance-form").addEventListener("submit", event => {
     event.preventDefault();
@@ -281,8 +324,11 @@ export function initializeProviderSettings(win) {
     finally { secret = ""; }
   });
   byId("close").addEventListener("click", () => win.close());
-  try { renderInstances(); } catch { byId("instances-empty").textContent = "Saved instance configuration is invalid; it was preserved for recovery."; }
-  refresh();
+  try { renderInstances(); } catch {
+    const invalid = byId("instances-empty"); invalid.className = "placeholder error";
+    invalid.textContent = "Saved instance configuration is invalid; it was preserved for recovery.";
+  }
+  status("Provider clients start only when you send a question from Ask AI.");
 }
 
 /** Called only from a user action in the trusted browser chrome. */

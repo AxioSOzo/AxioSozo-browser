@@ -1,5 +1,11 @@
 # Browser experience implementation status — 23 September 2026
 
+**26 September continuation:** the provider host/panel, lazy startup, per-tab
+Chromium web-mode code and quieter Zen defaults have now been implemented.
+See [provider/engine progress](PROVIDER_ENGINE_PROGRESS.md) for current changes,
+fresh checks and the remaining live-authentication/Keychain gates. The table below
+is the retained 23 September GUI baseline, not the latest implementation inventory.
+
 **PARTIAL_ENGINE_BLOCKED. Not READY.** The pinned Zen/Firefox 156.0 app runs on
 this Apple Silicon Mac. The independent Gecko navigation, local save and
 environment slices are usable. General Chromium browsing, live provider help,

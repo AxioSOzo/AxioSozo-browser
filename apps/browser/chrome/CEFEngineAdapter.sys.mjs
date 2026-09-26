@@ -17,15 +17,30 @@ const id = value => typeof value === "string" && /^[a-zA-Z0-9_:/.-]{1,128}$/u.te
 const uint = value => Number.isSafeInteger(value) && value >= 0;
 export const sameCEFTarget = (a, b) => TARGET_KEYS.every(key => a?.[key] === b?.[key]);
 
-export function validateCEFTarget(value, { pending = false } = {}) {
+export function validateCEFTarget(value, { pending = false, browsingMode = "fixture" } = {}) {
   if (!hasKeys(value, pending ? PENDING_KEYS : TARGET_KEYS)
       || !id(value.tab_id) || !id(value.engine_instance)
       || !uint(value.document_generation) || !uint(value.navigation_generation)
-      || value.private_mode !== false || !validFixtureOrigin(value.identity)
+      || value.private_mode !== false || !(browsingMode === "web" ? validWebOrigin(value.identity) : validFixtureOrigin(value.identity))
       || (!pending && (value.engine !== "chromium" || !id(value.native_target_id)))) {
     throw new Error("INVALID_CEF_TARGET");
   }
   return Object.freeze({ ...value });
+}
+
+export function validWebOrigin(origin) {
+  if (!allowedWebURL(origin) || origin === "about:blank") return false;
+  return new URL(origin).origin === origin;
+}
+
+/** Explicit browser navigation only; never accepts credentials or external schemes. */
+export function allowedWebURL(value) {
+  if (typeof value !== "string" || value.length > 4096 || /[\u0000-\u0020\u007f]/u.test(value)) return false;
+  if (value === "about:blank") return true;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !!url.hostname && !url.username && !url.password;
+  } catch { return false; }
 }
 
 export function validFixtureOrigin(origin) {
@@ -131,7 +146,7 @@ export async function readAXCF(pipe) {
         || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
         || metadata.format !== "BGRA8") throw new Error("INVALID_AXCF_FRAME");
-    validateCEFTarget(metadata.target);
+    validateCEFTarget(metadata.target, { browsingMode: "web" });
   }
   // Allocate/read large pixels only after both framing and metadata are checked.
   const pixels = size ? await pipe.read(size) : new ArrayBuffer(0);
@@ -143,7 +158,7 @@ const EVENT_FIELDS = {
   ready: ["cef", "chromium", "runtime_cef", "runtime_chromium", "platform", "sandbox_configured", "engine_instance", "render_path", "capabilities"],
   created: ["request_id"], accepted: ["request_id"], completed: ["request_id", "status", "reason"],
   navigation: [], loading: ["loading", "can_go_back", "can_go_forward"],
-  title: ["title"], url: ["url"], closed: [], error: ["request_id", "code", "native_code"], load: ["http_status", "restored_from_history"],
+  title: ["title"], url: ["url"], closed: [], error: ["request_id", "code", "native_code"], load: ["http_status", "restored_from_history", "same_document"],
 };
 
 // Preserve only our fixed diagnostic codes. Never display native payloads,
@@ -164,11 +179,14 @@ export class CEFEngineAdapter {
   #process; #token; #pending; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #inputQueue = [];
   #committedURLs = new Set(); #currentURL = null;
+  #previousURL = null; #previousLoaded = false;
   #readyWait; #frameWait; #lastFrame = 0; #ended = false; #closing = false; #created = false; #loaded = false; #ready = false;
-  constructor(process, { token, pendingTarget, timers, deadline = 15000,
+  constructor(process, { token, pendingTarget, timers, deadline = 15000, browsingMode = "fixture",
     onEvent = () => {}, onFrame = () => {}, onFailure = () => {} }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
-    this.#pending = validateCEFTarget(pendingTarget, { pending: true });
+    if (!["fixture", "web"].includes(browsingMode)) throw new Error("INVALID_CEF_MODE");
+    this.browsingMode = browsingMode;
+    this.#pending = validateCEFTarget(pendingTarget, { pending: true, browsingMode });
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.onEvent = onEvent; this.onFrame = onFrame; this.onFailure = onFailure;
     this.target = null; this.surface = null; this.status = "starting"; this.nativeClosed = false;
@@ -178,7 +196,7 @@ export class CEFEngineAdapter {
   capabilities() {
     return Object.freeze({ version: 1, engine: "chromium", navigation: true,
       observation: ["url", "title", "loading"], content_capture: false, developer_tools: false,
-      fixture_only: true, private_mode: false, ime: false, experimental: true });
+      fixture_only: this.browsingMode === "fixture", private_mode: false, ime: false, experimental: true });
   }
   #waiter(label) {
     let resolve, reject;
@@ -201,7 +219,8 @@ export class CEFEngineAdapter {
       if (this.status === "failed") console.error("AXIOSOZO_CEF_EXIT", JSON.stringify({ exitCode:result.exitCode }));
     }, () => this.#fail("CEF_PROCESS_FAILURE"));
     await this.#write({ version: 1, method: "hello", token: this.#token,
-      engine_instance: this.instance, fixture_origin: this.#pending.identity });
+      engine_instance: this.instance, fixture_origin: this.#pending.identity,
+      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}) });
     await this.#readyWait.promise;
     this.status = "connected";
     return this;
@@ -224,7 +243,8 @@ export class CEFEngineAdapter {
   }
   #request(method, fields = {}, target = this.target, acknowledge = false) {
     if (this.#ended || (this.#closing && !["frame_ack", "shutdown"].includes(method))) return Promise.reject(new Error("CEF_UNAVAILABLE"));
-    if (++this.#sequence > 100000 || (!acknowledge && this.#requests.size >= MAX_INFLIGHT_REQUESTS)) return Promise.reject(new Error("CEF_REQUEST_LIMIT"));
+    if (++this.#sequence > (this.browsingMode === "web" ? Number.MAX_SAFE_INTEGER : 100000)
+        || (!acknowledge && this.#requests.size >= MAX_INFLIGHT_REQUESTS)) return Promise.reject(new Error("CEF_REQUEST_LIMIT"));
     const request_id = `cef-${this.#sequence}`;
     const value = { version: 1, method, request_id, token: this.#token, ...fields };
     if (method !== "shutdown") value.target = target;
@@ -249,7 +269,7 @@ export class CEFEngineAdapter {
     for (const item of this.#inputQueue.splice(0)) item.reject(error);
   }
   #adopt(target, type) {
-    const next = validateCEFTarget(target);
+    const next = validateCEFTarget(target, { browsingMode: this.browsingMode });
     for (const key of ["tab_id", "engine_instance", "identity", "private_mode"]) {
       if (next[key] !== this.#pending[key]) throw new Error("FOREIGN_CEF_TARGET");
     }
@@ -262,6 +282,7 @@ export class CEFEngineAdapter {
       if (type === "navigation") {
         if (next.document_generation !== this.target.document_generation + 1
             || next.navigation_generation !== this.target.navigation_generation + 1) throw new Error("INVALID_CEF_GENERATION");
+        this.#previousURL = this.#currentURL; this.#previousLoaded = this.#loaded;
         this.#loaded = false;
       } else if (!sameCEFTarget(next, this.target)) throw new Error("STALE_CEF_EVENT");
     }
@@ -312,7 +333,10 @@ export class CEFEngineAdapter {
             || value.runtime_cef !== CEF_VERSION.split("+")[0] || value.runtime_chromium !== CHROMIUM_VERSION
             || value.engine_instance !== this.instance || value.platform !== "macosarm64"
             || value.render_path !== "native-osr-bgra" || value.sandbox_configured !== true
-            || value.capabilities?.fixture_only !== true || value.capabilities?.devtools !== false
+            || value.capabilities?.fixture_only !== (this.browsingMode === "fixture") || value.capabilities?.devtools !== false
+            || (this.browsingMode === "web" && (value.capabilities?.edit !== true || value.capabilities?.visibility !== true
+              || value.capabilities?.permissions !== false || value.capabilities?.downloads !== false
+              || value.capabilities?.popups !== false || value.capabilities?.accessibility !== false))
             || value.capabilities?.private_mode !== false || value.capabilities?.ime !== false) throw new Error("UNVERIFIED_CEF_RUNTIME");
         this.#ready = true; this.#readyWait.resolve(value);
       } else if (value.target) {
@@ -338,7 +362,7 @@ export class CEFEngineAdapter {
       if (value.event === "title" && (typeof value.title !== "string" || value.title.length > 1024)) throw new Error("INVALID_CEF_TITLE");
       if (value.event === "loading" && ![value.loading, value.can_go_back, value.can_go_forward].every(item => typeof item === "boolean")) throw new Error("INVALID_CEF_LOADING");
       if (value.event === "url") {
-        if (!allowedFixtureURL(value.url, this.#pending.identity)) throw new Error("INVALID_CEF_URL");
+        if (!this.allowedURL(value.url)) throw new Error("INVALID_CEF_URL");
         this.#currentURL = value.url;
       }
       if (value.event === "load") {
@@ -346,8 +370,21 @@ export class CEFEngineAdapter {
         const pendingHistory = [...this.#requests.values()].some(request => ["back", "forward"].includes(request.method));
         const restored = value.http_status === 0 && value.restored_from_history && pendingHistory && this.#committedURLs.has(this.#currentURL);
         if (value.restored_from_history && !restored) throw new Error("INVALID_CEF_HISTORY_RESTORE");
-        this.#loaded = value.http_status === 200 || restored;
-        if (value.http_status === 200 && this.#currentURL) this.#committedURLs.add(this.#currentURL);
+        const sameDocument = value.same_document === true && this.browsingMode === "web"
+          && value.http_status === 0 && !value.restored_from_history && this.#previousLoaded
+          && allowedWebURL(this.#previousURL) && allowedWebURL(this.#currentURL)
+          && new URL(this.#previousURL).origin === new URL(this.#currentURL).origin;
+        if (value.same_document !== undefined && !sameDocument) throw new Error("INVALID_CEF_LOAD");
+        const loaded = this.browsingMode === "web"
+          ? (value.http_status >= 200 && value.http_status <= 599)
+            || (value.http_status === 0 && this.#currentURL === "about:blank" && !value.restored_from_history)
+          : value.http_status === 200;
+        this.#loaded = loaded || restored || sameDocument;
+        if ((loaded || sameDocument) && this.#currentURL) {
+          this.#committedURLs.add(this.#currentURL);
+          // Bound history verification memory; old HTTP0 restores fail closed.
+          if (this.#committedURLs.size > 1024) this.#committedURLs.delete(this.#committedURLs.values().next().value);
+        }
         if (!this.#loaded) this.#frameWait?.reject(new Error("CEF_FIXTURE_LOAD_FAILED"));
       }
       if (value.event === "closed") this.nativeClosed = true;
@@ -357,12 +394,12 @@ export class CEFEngineAdapter {
     }
   }
   resolve(target) {
-    if (!this.target || !sameCEFTarget(validateCEFTarget(target), this.target)) throw new Error("STALE_CEF_TARGET");
+    if (!this.target || !sameCEFTarget(validateCEFTarget(target, { browsingMode: this.browsingMode }), this.target)) throw new Error("STALE_CEF_TARGET");
     if (this.#ended || this.#closing) throw new Error("CEF_UNAVAILABLE");
     return this.target;
   }
   async create(url, surface) {
-    if (this.#created || this.status !== "connected" || !allowedFixtureURL(url, this.#pending.identity)) throw new Error("INVALID_CEF_CREATE");
+    if (this.#created || this.status !== "connected" || !this.allowedURL(url)) throw new Error("INVALID_CEF_CREATE");
     this.surface = validateSurface(surface);
     this.#frameWait = this.#waiter("CEF_FIRST_FRAME");
     const result = await this.#request("create", { url, ...this.surface }, this.#pending);
@@ -374,9 +411,10 @@ export class CEFEngineAdapter {
   }
   navigate(target, url) {
     this.resolve(target);
-    if (!allowedFixtureURL(url, this.#pending.identity)) return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    if (!this.allowedURL(url)) return Promise.resolve({ status: "unsupported", reason: "UNSUPPORTED_URL" });
     return this.#request("navigate", { url });
   }
+  allowedURL(url) { return this.browsingMode === "web" ? allowedWebURL(url) : allowedFixtureURL(url, this.#pending.identity); }
   back(target) { this.resolve(target); return this.#request("back"); }
   forward(target) { this.resolve(target); return this.#request("forward"); }
   reload(target) { this.resolve(target); return this.#request("reload"); }
@@ -394,6 +432,18 @@ export class CEFEngineAdapter {
     this.resolve(target);
     if (typeof focused !== "boolean") throw new Error("INVALID_FOCUS");
     return this.#request("focus", { focused });
+  }
+  visibility(target, visible) {
+    this.resolve(target);
+    if (typeof visible !== "boolean") throw new Error("INVALID_VISIBILITY");
+    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    return this.#request("visibility", { visible });
+  }
+  edit(target, action) {
+    this.resolve(target);
+    if (!["copy", "cut", "paste", "select_all", "undo", "redo"].includes(action)) throw new Error("INVALID_EDIT_ACTION");
+    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    return this.#request("edit", { action });
   }
   input(target, method, fields) {
     this.resolve(target);
@@ -447,7 +497,7 @@ export class CEFEngineAdapter {
 }
 
 /** Actual Firefox process API. Only project-owned runtime paths are allowed. */
-export async function launchCEF(win, { tabId, origin, onEvent, onFrame, onFailure }) {
+export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure }) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
   const root = Services.env.get("AXIOSOZO_BUILD_ROOT");
@@ -455,7 +505,9 @@ export async function launchCEF(win, { tabId, origin, onEvent, onFrame, onFailur
   const command = Services.env.get("AXIOSOZO_CEF_BINARY");
   if (!/^\/Volumes\/[a-zA-Z0-9_-]+$/u.test(root) || command !== `${root}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`
       || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path)
-      || origin !== Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") || !validFixtureOrigin(origin) || !id(tabId)) {
+      || !id(tabId) || !(browsingMode === "web"
+        ? Services.env.get("AXIOSOZO_ENGINE_SWITCHING") === "1" && validWebOrigin(origin)
+        : browsingMode === "fixture" && origin === Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") && validFixtureOrigin(origin))) {
     throw new Error("CEF_PROJECT_RUNTIME_UNAVAILABLE");
   }
   const instance = Services.uuid.generateUUID().toString().replace(/[{}]/gu, "");
@@ -476,7 +528,7 @@ export async function launchCEF(win, { tabId, origin, onEvent, onFrame, onFailur
   // path, on normal close or crash; never remove another session's profile.
   const cleanup = () => IOUtils.remove(profile, { recursive: true });
   process.wait().then(cleanup, cleanup).catch(() => onFailure(new Error("CEF_PROFILE_CLEANUP_FAILED")));
-  const adapter = new CEFEngineAdapter(process, { token, timers,
+  const adapter = new CEFEngineAdapter(process, { token, timers, browsingMode,
     pendingTarget: { tab_id: tabId, engine_instance: instance, identity: origin,
       document_generation: 1, navigation_generation: 1, private_mode: false },
     onEvent, onFrame, onFailure });

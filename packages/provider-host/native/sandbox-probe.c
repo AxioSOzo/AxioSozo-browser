@@ -30,7 +30,16 @@ static int spawn_shell(const char *target) {
 }
 int main(int argc, char **argv) {
   if (argc < 2) return 64;
+  const int lifetime_fd_hidden = fcntl(3, F_GETFD) < 0;
   setvbuf(stdout, NULL, _IONBF, 0);
+  if (!strcmp(argv[1], "tree") && argc == 4) {
+    pid_t helper = -1; char *const args[] = {argv[2], "hold", NULL};
+    int result = posix_spawn(&helper, args[0], NULL, NULL, args, environ);
+    if (result) return result;
+    printf("{\"label\":\"TEST_FIXTURE\",\"pid\":%d,\"helper_pid\":%d}\n", getpid(), helper);
+    if (!strcmp(argv[3], "exit")) { usleep(100000); return 0; }
+    signal(SIGTERM, SIG_IGN); for (;;) pause();
+  }
   if (!strcmp(argv[1], "hold")) {
     signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN);
     printf("{\"label\":\"TEST_FIXTURE\",\"pid\":%d,\"lifetime_fd_hidden\":%s}\n", getpid(), fcntl(3, F_GETFD) < 0 ? "true" : "false");
@@ -58,6 +67,6 @@ int main(int argc, char **argv) {
     if (connect(sock, (struct sockaddr *)&address, sizeof(address))) network_error = errno;
     close(sock);
   }
-  printf("{\"label\":\"TEST_FIXTURE\",\"pid\":%d,\"allowed_read\":%d,\"allowed_write\":%d,\"outside_read\":%d,\"outside_write\":%d,\"symlink_read\":%d,\"codex_config\":%d,\"claude_hooks\":%d,\"mcp_config\":%d,\"instructions\":%d,\"shell\":%d,\"fork\":%d,\"network\":%d,\"lifetime_fd_hidden\":%s}\n", getpid(), allowed_read, allowed_write, denied_read, denied_write, symlink_read, codex_config, claude_hooks, mcp_config, instructions, shell, fork_error, network_error, fcntl(3, F_GETFD) < 0 ? "true" : "false");
+  printf("{\"label\":\"TEST_FIXTURE\",\"pid\":%d,\"allowed_read\":%d,\"allowed_write\":%d,\"outside_read\":%d,\"outside_write\":%d,\"symlink_read\":%d,\"codex_config\":%d,\"claude_hooks\":%d,\"mcp_config\":%d,\"instructions\":%d,\"shell\":%d,\"fork\":%d,\"network\":%d,\"lifetime_fd_hidden\":%s}\n", getpid(), allowed_read, allowed_write, denied_read, denied_write, symlink_read, codex_config, claude_hooks, mcp_config, instructions, shell, fork_error, network_error, lifetime_fd_hidden ? "true" : "false");
   return 0;
 }

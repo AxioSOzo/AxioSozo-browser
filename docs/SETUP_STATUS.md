@@ -1,5 +1,9 @@
 # Setup status — 23 September 2026
 
+The latest [26 September provider/engine continuation](PROVIDER_ENGINE_PROGRESS.md)
+adds the live-launch implementation and web-mode switching code. Its runtime
+validation remains incomplete; the results below are the prior native baseline.
+
 **Overall: PARTIAL_ENGINE_BLOCKED. NOT READY.** The custom arm64 Zen app builds and
 starts. Real CEF frames, typing, local GET/back and a scoped engine switch work in
 its content area. E1 is experimental and E2 is manually proven only for the local

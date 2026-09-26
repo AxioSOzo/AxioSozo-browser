@@ -1,9 +1,19 @@
+<img src="assets/brand/browser-logo-v1/axiosozo-browser-icon-v1-1024.png" alt="AxioSozo browser logo" width="128" align="right">
+
 # AxioSozo browser — handoff 1
 
+The [26 September continuation](docs/PROVIDER_ENGINE_PROGRESS.md) adds direct
+provider conversation wiring, per-tab Chromium web-mode code, lazy process startup
+and simpler Zen defaults. Approved live checks stopped before model requests:
+Codex needs login for its separate profile and Claude authentication is unavailable
+under confinement. The CEF Keychain runtime gate also remains unresolved; this is
+a development prototype.
+
 **PARTIAL_ENGINE_BLOCKED; not READY.** The custom Zen/Firefox app builds and runs
-on macOS Apple Silicon. Its experimental CEF surface renders real Chromium frames
-and accepts input in the same window; local-fixture switching works. General
-Chromium browsing remains blocked by unverified safety and accessibility flows.
+on macOS Apple Silicon. Its experimental CEF surface has rendered real Chromium
+frames and accepted input in the same window in earlier fixture runs. The current
+runtime is blocked on a shared Keychain request; general browsing, safety and
+accessibility flows still need validation.
 See [current status](docs/SETUP_STATUS.md) for the exact scope and remaining gates.
 The raw development evidence contains machine-specific logs and stays local;
 [the evidence note](docs/evidence/README.md) explains this public-source boundary.
@@ -48,12 +58,13 @@ archive hashes; network-enabled setup fetches only verified upstream URLs.
 | `./dev test` | Deterministic Rust, IPC/lifecycle, provider/Jev, fixture and real CEF stream tests |
 | `./dev smoke` | Owned Zen fixture/TLS inspection session; GUI assertions require observing that run |
 | `./dev engine-probe` | Fresh E0, then owned Zen fixture session with explicit experimental switch |
-| `./dev provider-test codex` | Separate live preflight; currently BLOCKED_AUTH without authorization |
-| `./dev provider-test claude-code` | Separate official Claude route; currently BLOCKED_AUTH |
-| `./dev provider-test antigravity` | Separate official `agy` route; currently BLOCKED_AUTH |
+| `./dev web-probe` | Fresh E0, then owned HTTP/TLS fixture session using experimental Chromium web mode |
+| `./dev provider-test codex --authorized` | Approved fixed diagnostic only; its dedicated profile currently requires login |
+| `./dev provider-test claude-code --authorized` | Approved fixed diagnostic only; authentication is unavailable under confinement |
+| `./dev provider-test antigravity --authorized` | Reports unsupported startup isolation; no live request |
 | `./dev jev-test` | Optional synthetic decision diagnostic; key and explicit authorization required |
 
-CEF154's signed native host has passed E0 with 26 real OSR frames, input, 2× Retina
+In the 23 September baseline, CEF154's signed native host passed E0 with 26 real OSR frames, input, 2× Retina
 resize, local GET navigation/back and clean shutdown. The authenticated AXCF pipe
 passed a separate eight-frame native test with stale-target rejection and exact
 generation changes on a browser-cache return. A separate manual macOS GUI probe
@@ -65,9 +76,11 @@ exits20 because it has no automated GUI assertions; no integrated screenshot fil
 was saved. The local CEF result binds the native source hashes, build stamp and
 process-cleanup evidence.
 
-Provider discovery reads metadata only. Installed Codex 0.156.1 and Claude Code
-2.1.280 currently differ from the pinned fixture-tested adapter versions; every
-real client protocol is marked `UNTESTED`. No client, login UI, MCP server, hook,
+Provider discovery reads metadata only. The current Codex 0.157.1 and Claude Code
+2.1.283 routes use reviewed official-client protocols with isolated customization
+and bounded streaming conversations. Live authentication and model responses have
+not been verified. Antigravity remains unavailable because its startup/tool isolation
+has not been established. No client, login UI, MCP server, hook,
 paid model or Jev network request is started by discovery, setup or deterministic
 tests. Provider fixtures are visibly `TEST_FIXTURE`; they do not certify live auth.
 Jev is optional, and a Keychain failure never falls back to plaintext storage.
@@ -99,7 +112,7 @@ The current first-experience slice is tracked in
 The original AxioSozo source is licensed under [MPL-2.0](LICENSE). Vendored
 components and upstream patches retain their respective notices; see
 [third-party notices](THIRD_PARTY_NOTICES.md).
-Chromium's IME, clipboard, downloads, permissions, certificate dialogs,
+Chromium's IME, downloads, permissions, certificate dialogs,
 accessibility and crash recovery remain explicit release gates. Fullscreen fixture
 rendering now works with a bounded 1.5× CEF render scale on this 5K display;
 general-site fullscreen and safety UI are not certified.

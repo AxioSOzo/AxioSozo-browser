@@ -66,7 +66,7 @@ def png(path, width, height, bgra):
 
 
 class Session:
-    def __init__(self, origin, directory):
+    def __init__(self, origin, directory, browsing_mode=None, timeout=15):
         self.origin, self.directory = origin, directory
         self.profile = Path(tempfile.mkdtemp(prefix='cef-profile-stream-', dir=probe.BASE))
         os.chmod(self.profile, 0o700)
@@ -78,10 +78,15 @@ class Session:
         self.token = secrets.token_hex(32)
         self.instance = 'cef-fixture-' + secrets.token_hex(8)
         self.counter = 0
+        self.browsing_mode = browsing_mode
+        self.timeout = timeout
         self.target = None
         self.events, self.frames = [], 0
-        self.write(dict(version=1, method='hello', token=self.token, engine_instance=self.instance,
-                        fixture_origin=origin))
+        hello = dict(version=1, method='hello', token=self.token, engine_instance=self.instance,
+                     fixture_origin=origin)
+        if browsing_mode:
+            hello['browsing_mode'] = browsing_mode
+        self.write(hello)
 
     def write(self, item):
         data = (json.dumps(item, separators=(',', ':')) + '\n').encode()
@@ -91,15 +96,15 @@ class Session:
 
     def command(self, method, target=None, **fields):
         self.counter += 1
-        request_id = 'request-' + str(self.counter)
+        request_id = ('cef-' if self.browsing_mode == 'web' else 'request-') + str(self.counter)
         item = dict(version=1, method=method, request_id=request_id, token=self.token, **fields)
         if method != 'shutdown':
             item['target'] = self.target if target is None else target
         self.write(item)
         return request_id
 
-    def until(self, predicate, seconds=15, capture=None):
-        deadline = time.monotonic() + seconds
+    def until(self, predicate, seconds=None, capture=None):
+        deadline = time.monotonic() + (self.timeout if seconds is None else seconds)
         while True:
             kind, item, pixels = read_packet(self.process.stdout, deadline)
             if kind == 1:
@@ -121,12 +126,23 @@ class Session:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 self.process.wait(timeout=12)
         finally:
-            probe.cleanup_group(self.process)
+            self.cleanup_error = None
+            try:
+                probe.cleanup_group(self.process)
+            except OSError as error:
+                # Keep failure evidence even if macOS refuses a signal during
+                # helper teardown. Never remove a possibly live profile.
+                self.cleanup_error = type(error).__name__ + ': ' + str(error)
             self.process.stdout.close()
             self.error.close()
             (self.directory / 'events.json').write_text(json.dumps(self.events, indent=2) + '\n')
-            self.profile_removed = probe.remove_created_profile(self.profile, self.process,
-                                                                prefix='cef-profile-stream-')
+            self.profile_removed = False
+            if self.cleanup_error is None:
+                try:
+                    self.profile_removed = probe.remove_created_profile(self.profile, self.process,
+                                                                        prefix='cef-profile-stream-')
+                except OSError as error:
+                    self.cleanup_error = type(error).__name__ + ': ' + str(error)
 
 
 def run():

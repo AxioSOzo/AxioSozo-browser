@@ -15,7 +15,7 @@ export function exactKeys(value, allowed) {
   requireValue(object(value) && Object.keys(value).every(key => allowed.includes(key)), 'INVALID_INPUT', 'Unknown input field');
 }
 export function prompt(value) {
-  requireValue(typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= 4096, 'INVALID_INPUT', 'Prompt must contain 1–4096 bytes');
+  requireValue(typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= 32768, 'INVALID_INPUT', 'Prompt must contain 1–32768 bytes');
   return value;
 }
 
@@ -29,7 +29,7 @@ export function matchesSchema(value, schema, root, depth = 0) {
     const resolved = schema.$ref.slice(2).split('/').reduce((node, key) => node?.[key.replaceAll('~1', '/').replaceAll('~0', '~')], root);
     return !!resolved && matchesSchema(value, resolved, root, depth + 1);
   }
-  const supported = new Set(['$schema', '$id', 'title', 'description', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly', 'type', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const', 'oneOf', 'anyOf', 'allOf', 'minimum', 'maximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'pattern', 'format']);
+  const supported = new Set(['$schema', '$id', '$defs', 'definitions', 'title', 'description', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly', 'type', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const', 'oneOf', 'anyOf', 'allOf', 'minimum', 'maximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'pattern', 'format']);
   if (Object.keys(schema).some(key => !supported.has(key))) return false;
   if (schema.enum && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) return false;
   if ('const' in schema && JSON.stringify(schema.const) !== JSON.stringify(value)) return false;
