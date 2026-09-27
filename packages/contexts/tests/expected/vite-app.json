@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "name": "vite-app",
+  "kind": "web",
+  "kind_source": {
+    "source": "package.json scripts.dev (vite)",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:5173/",
+      "source": "Vite default port (package.json scripts.dev)",
+      "guess": true
+    }
+  ],
+  "services": [
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5173/",
+      "port": 5173,
+      "source": "Vite default port (package.json scripts.dev)",
+      "guess": true
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/vite-app",
+      "kind": "repository",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/vite-app/issues",
+      "kind": "issues",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/vite-app/actions",
+      "kind": "ci",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/vite-app/releases",
+      "kind": "releases",
+      "source": ".git/config remote origin",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "vite"
+  ],
+  "files_read": [
+    "package.json",
+    ".git/config"
+  ],
+  "refused": [],
+  "warnings": []
+}

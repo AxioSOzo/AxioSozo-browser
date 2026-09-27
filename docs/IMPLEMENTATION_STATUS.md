@@ -1,5 +1,7 @@
 # Browser experience implementation status — 23 September 2026
 
+**27 September, Handoff 3 M1:** contexts, projects, dev loop, site rules and the `about:axiosozo` Overview are implemented on Gecko and exercised in the real app on a synthetic profile (27 PASS, 2 NOT_VERIFIED, 1 BLOCKED). E1/E2, live Jev and signed distribution remain blocked. See [Handoff 3 status](HANDOFF_3_STATUS.md). Not READY.
+
 **26 September, Zen reset and per-tab engines (branch `zen-reset`):** the frontend is
 stock Zen again. Every Zen look-and-feel overlay patch was retired
 (`patches/zen/retired.json`), and the command palette, toolbar chips and shortcut

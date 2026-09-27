@@ -1,5 +1,8 @@
 # AxioSozo browser — 3D logo v1
 
+> **Replaced.** The browser now uses [app icon v2](../browser-logo-v2/README.md).
+> Running this folder's `build_icons.py` would put the v1 icons back.
+
 ![AxioSozo browser mark, three-quarter render](axiosozo-browser-mark-v1-preview.png)
 
 This is the browser version of the [AxioSozo 3D symbol](../axiosozo-symbol-v1/README.md).

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, BLANK_IDENTITY } from '../chrome/CEFEngineAdapter.sys.mjs';
 import { CEFPresenter, keyboardRoute } from '../chrome/CEFPresenter.sys.mjs';
+import { installEngineProbeControls } from '../chrome/EngineProbeControls.sys.mjs';
 
 // Visibly controlled protocol fixtures for one shared web host. They never count
 // as Chromium rendering, an engine integration, or screenshot evidence.
@@ -407,4 +408,48 @@ test('a page that closes itself leaves a reloadable Chromium tab, not a frozen o
   z.launched[0].callbacks.onEvent({ event: 'closed' });
   assert.equal(presenter.active.panelCode, 'engine_failed');
   await presenter.dispose();
+});
+
+// F6 hook over the real presenter with the synthetic Zen window above; no native engine.
+function preferenceControls(z, { enabled = true, launch = z.launch } = {}) {
+  z.win.Services.env = { get: key => (key === 'AXIOSOZO_ENGINE_SWITCHING' ? '1' : '') };
+  z.win.Services.prefs = { getBoolPref: (name, fallback) => (name === 'axiosozo.engine.preferences.enabled' ? enabled : fallback) };
+  z.win.document.getElementById ??= () => null; // no toolbar, tab menu or URL bar icon in this model
+  class Presenter extends CEFPresenter {
+    constructor(win, gecko, options) { super(win, gecko, { ...options, launch }); }
+  }
+  return installEngineProbeControls(z.win, z.gecko, { Presenter });
+}
+
+test('an engine preference moves a tab through the per-tab switch and back, starting Chromium only then', async () => {
+  const z = zenWindow();
+  const controls = preferenceControls(z);
+  assert.equal(z.launched.length, 0, 'installing the hook starts no Chromium engine');
+  assert.deepEqual(await controls.applyEnginePreference(z.first, 'chromium', { reason: 'context' }), { applied: true, engine: 'chromium' });
+  await settle();
+  assert.equal(z.launched.length, 1); assert.equal(controls.engineOf(z.first), 'chromium');
+  assert.deepEqual(z.launched[0].adapter.calls.slice(0, 2), [['create', 'about:blank'], ['navigate', 'https://example.com/start']]);
+  assert.deepEqual(await controls.applyEnginePreference(z.first, 'firefox'), { applied: true, engine: 'firefox' });
+  assert.equal(controls.engineOf(z.first), 'gecko'); assert.equal(z.custom.size, 0);
+  assert.deepEqual(z.first.linkedBrowser.loads, ['about:blank', 'https://example.com/start']);
+  // A background tab is only marked; it starts when shown, like the tab menu.
+  const second = z.makeTab('second', 'https://example.org/'); z.tabs.push(second);
+  assert.deepEqual(await controls.applyEnginePreference(second, 'chromium'), { applied: true, engine: 'chromium' });
+  assert.equal(z.launched.length, 1); assert.equal(z.custom.get('second:axiosozo-engine'), 'chromium');
+  await controls.dispose();
+});
+
+test('an engine preference that cannot start Chromium keeps the Firefox tab; the gate stays off by default', async () => {
+  const z = zenWindow();
+  const controls = preferenceControls(z, { launch: async () => { throw new Error('CEF_COMPONENT_UNAVAILABLE'); } });
+  assert.deepEqual(await controls.applyEnginePreference(z.first, 'chromium'), { applied: false, engine: 'chromium', error: 'SWITCH_FAILED' });
+  assert.equal(controls.engineOf(z.first), 'gecko'); assert.equal(z.win.gBrowser.selectedTab, z.first);
+  assert.equal(z.first.getAttribute('axiosozo-engine'), null); assert.equal(z.custom.size, 0);
+  assert.equal(z.first.linkedBrowser.currentURI.spec, 'https://example.com/start');
+  await controls.dispose();
+  const off = zenWindow();
+  const disabled = preferenceControls(off, { enabled: false });
+  assert.deepEqual(await disabled.applyEnginePreference(off.first, 'chromium'), { applied: false, engine: 'chromium', error: 'DISABLED' });
+  assert.equal(off.launched.length, 0); assert.equal(off.custom.size, 0);
+  await disabled.dispose();
 });

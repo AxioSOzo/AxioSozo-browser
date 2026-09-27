@@ -28,6 +28,7 @@ os.environ["AXIOSOZO_BUILD_ROOT"] = str(storage.BUILD_ROOT)
 ZEN = ROOT / "scripts" / "zen.py"
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
+RELEASE = ROOT / "scripts" / "release" / "preview.py"
 
 
 def provider_node():
@@ -169,7 +170,7 @@ def check():
     results = [run(["cargo", "fmt", "--all", "--", "--check"]),
                run(["cargo", "clippy", "--locked", "--offline", "--workspace", "--all-targets", "--jobs", "2", "--", "-D", "warnings"], build=True),
                component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check")]
-    for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("tests/test_*.py")]:
+    for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("scripts/release/*.py"), *ROOT.glob("tests/test_*.py")]:
         if path.name.startswith("._"):
             continue
         compile(path.read_bytes(), str(path), "exec")
@@ -187,6 +188,9 @@ def test():
                component(ZEN, "check"),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
                run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
+               # Handoff 3 contexts core: DOM-free logic and fixture repositories.
+               run(["node", "--test", *sorted(path for path in (ROOT / "packages/contexts/tests").glob("*.test.mjs")
+                                             if not path.name.startswith("._"))]),
                component(CEF, "test-native")]
     env = {**os.environ, "AXIOSOZO_CORE_BINARY": str(CORE), "PYTHONDONTWRITEBYTECODE": "1"}
     if build_result == 0 and core_ready():
@@ -269,7 +273,7 @@ def daily(profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "doctor", "setup", "check", "test", "smoke", "engine-probe", "web-probe", "provider-test", "jev-test"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "doctor", "setup", "check", "test", "smoke", "engine-probe", "web-probe", "provider-test", "jev-test", "release-check"])
     parser.add_argument("provider", nargs="?", choices=["codex", "claude-code", "antigravity"])
     parser.add_argument("--profile", default="development")
     parser.add_argument("--authorized", action="store_true", help="explicit operator authorization for a synthetic live diagnostic; never used by setup/test")
@@ -289,6 +293,8 @@ def main():
                 "web-probe": lambda: browser_probe("web-probe"),
                 "jev-test": lambda: component(PROVIDER, "jev-test", *(["--authorized"] if args.authorized else [])),
                 "run": lambda: daily(args.profile),
+                # Preview packaging plan only: never signs, notarizes or uploads.
+                "release-check": lambda: run([sys.executable, RELEASE, "--dry-run"], build=True),
                 "smoke": lambda: browser_probe("smoke")}
     return commands[args.command]()
 

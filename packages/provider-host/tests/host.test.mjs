@@ -68,7 +68,7 @@ test('Unknown fields cannot grant shell, executable, cwd, environment or credent
 });
 
 test('Malformed/oversized JSONL and EOF close host without starting clients', async () => {
-  for (const bytes of ['{bad}\n', 'x'.repeat(65537), '']) {
+  for (const bytes of ['{bad}\n', 'x'.repeat(73729), '']) {
     let launches = 0; const input = new PassThrough(), output = new PassThrough();
     const serving = serveStdio({ input, output, createAdapter: () => { launches++; } });
     input.end(bytes); await serving; assert.equal(launches, 0);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, storeJevKey, openProviderSettings } from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
+import { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, storeJevKey, jevKeyEntryEnabled, JEV_KEY_ENTRY_PREF, openProviderSettings } from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
 import { discover } from '../src/discovery.mjs';
 
 const discovery = () => ({ version: 1, providers: discover({ searchPath: '' }) });
@@ -115,6 +115,44 @@ for (const trigger of ['timeout', 'abort']) test(`An active metadata subprocess 
 test('Jev settings never access Keychain until native storage is explicitly verified', async () => {
   const fake = runtime(); await assert.rejects(storeJevKey('synthetic-key-not-real', fake), /KEYCHAIN_SETTINGS_NOT_VERIFIED/);
   assert.equal(fake.calls.length, 0);
+});
+
+// Fakes only: no Keychain helper runs. The pref is open decision 4 and defaults to false.
+const keyPrefs = value => ({ getBoolPref: (name, fallback) => { assert.equal(name, JEV_KEY_ENTRY_PREF); return value === undefined ? fallback : value; } });
+function keychainRuntime(exitCode = 0) {
+  const calls = [], stdin = []; let killed = 0, closed = 0;
+  const pipe = value => { let remaining = value; return { readString: async () => { const result = remaining; remaining = null; return result; } }; };
+  return { calls, stdin, killed: () => killed, closed: () => closed, timers: { setTimeout, clearTimeout },
+    env: key => ({ AXIOSOZO_BUILD_ROOT: '/Volumes/AxioSozoBuild', AXIOSOZO_DISCOVERY_PATH: '/metadata/path' })[key] ?? '',
+    spawn: async options => { calls.push(options); return { stdout: pipe('unexpected helper output'), stderr: pipe('helper diagnostics'),
+      stdin: { write: async value => { stdin.push(value); }, close: async () => { closed++; } }, kill: async () => { killed++; }, wait: async () => ({ exitCode }) }; },
+  };
+}
+test('Jev key entry stays disabled unless axiosozo.jev.keyEntry.enabled is true', async () => {
+  assert.equal(JEV_KEY_ENTRY_PREF, 'axiosozo.jev.keyEntry.enabled');
+  for (const prefs of [undefined, keyPrefs(undefined), keyPrefs(false), { getBoolPref: () => { throw new Error('pref service failure'); } }]) {
+    const fake = keychainRuntime();
+    await assert.rejects(storeJevKey('synthetic-key-not-real', fake, undefined, prefs), /KEYCHAIN_SETTINGS_NOT_VERIFIED/);
+    assert.equal(fake.calls.length, 0); assert.equal(jevKeyEntryEnabled(prefs), false);
+  }
+});
+test('Enabled Jev key entry sends the key only to the Keychain helper stdin and returns nothing', async () => {
+  const fake = keychainRuntime(); const secret = 'synthetic-key-not-real-0123';
+  assert.equal(await storeJevKey(secret, fake, undefined, keyPrefs(true)), undefined);
+  assert.deepEqual(fake.calls, [{ command: '/Volumes/AxioSozoBuild/providers/keychain', arguments: ['store'], environmentAppend: false,
+    environment: { PATH: '/metadata/path', LANG: 'C' }, stderr: 'pipe' }]);
+  assert.deepEqual(fake.stdin, [secret]); assert(!JSON.stringify(fake.calls).includes(secret));
+  assert(fake.closed() >= 1 && fake.killed() >= 1);
+  for (const invalid of ['short', 'line\nbreak', 'nul\0key', 'x'.repeat(4097), '\u00e9'.repeat(2049), 42]) {
+    const rejected = keychainRuntime();
+    await assert.rejects(storeJevKey(invalid, rejected, undefined, keyPrefs(true)), /INVALID_KEY/); assert.equal(rejected.calls.length, 0);
+  }
+  const failing = keychainRuntime(1);
+  await assert.rejects(storeJevKey(secret, failing, undefined, keyPrefs(true)), error => error.message === 'HELPER_FAILED' && !error.message.includes(secret));
+  for (const root of ['/tmp/build', '/Volumes/../tmp', 'relative']) {
+    const fake = keychainRuntime(); fake.env = key => key === 'AXIOSOZO_BUILD_ROOT' ? root : '';
+    await assert.rejects(storeJevKey(secret, fake, undefined, keyPrefs(true)), /KEYCHAIN_HELPER_UNAVAILABLE/); assert.equal(fake.calls.length, 0);
+  }
 });
 
 test('Web callers and private windows cannot open persistent provider settings', () => {

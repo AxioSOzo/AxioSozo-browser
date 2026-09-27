@@ -34,7 +34,8 @@ beside the Zen profile `<session>/gecko`. It holds Chromium's own cookies, cache
 storage and history; nothing is imported from or shared with Firefox. Chromium
 encrypts that data with its macOS Keychain item "Chromium Safe Storage", which the
 user approves once in the macOS dialog (again after each ad hoc host rebuild). The
-host never answers that dialog. Fixture hosts keep all page data in memory.
+host never answers that dialog. Fixture hosts keep all page data in memory, but
+still reach that Keychain item; see "Keychain gate" below.
 
 ## Input
 
@@ -161,3 +162,66 @@ shown. Background Chromium tabs are hidden natively and at most 24 are live per 
 Every ref-counted CEF struct passed into a C callback carries one reference the
 callback releases; every struct the host passes into CEF carries one reference CEF
 releases. The host follows both rules so `cef_shutdown` finds no live objects.
+
+## Engine-preference hook (F6)
+
+`installEngineProbeControls` returns `applyEnginePreference(tab, engine, { reason })`
+for `EnginePreference.sys.mjs` ([contexts-api-v1](contexts-api-v1.md) §5). It
+resolves to a frozen `{ applied, engine, error? }` and never rejects or throws.
+`engine` is `"firefox"` or `"chromium"`; `reason` is a diagnostic token
+(`/^[a-z][a-z0-9_]{0,31}$/`, otherwise recorded as `null`) and never reaches the UI.
+The whole object is `null` when the engine switch is not enabled for the window
+(`AXIOSOZO_ENGINE_SWITCHING` unset); callers treat that as `UNAVAILABLE`.
+
+Checks run in this order; the first refusal returns `applied:false` with:
+
+| `error` | When |
+| --- | --- |
+| `INVALID_ENGINE` | engine is not exactly `firefox`/`chromium` (`engine` is then `null`) |
+| `DISABLED` | pref `axiosozo.engine.preferences.enabled` is not `true` (default false; read errors count as false) |
+| `UNAVAILABLE` | disposed, fixture probe mode, no per-tab switch, or any unexpected exception |
+| `PRIVATE` | private window or private target |
+| `UNKNOWN_TAB` | the tab is not tracked by this window's Gecko adapter |
+| `PENDING` | an engine switch (manual, restore or preference) is in progress |
+| — | tab already uses the requested engine: `{ applied:false, engine }`, nothing happens |
+| `UNSUPPORTED_URL` | `chromium` only: the page is not a credential-free HTTP(S) URL whose session entry has no POST data (`about:`, `chrome:`, `file:`, extension and view-source pages always stay in Firefox) |
+| `CANCELLED` | the launch was cancelled (tab closed, deselected or switched back meanwhile) |
+| `SWITCH_FAILED` | the per-tab switch failed, or finished without the tab using the requested engine |
+
+A passing request calls the existing per-tab switch (`CEFPresenter.setTabEngine`),
+so every presenter and native check still applies and failure restores the Firefox
+tab without cookie transfer. A selected tab starts Chromium immediately; a
+background tab is only marked and starts when shown, like the tab menu. `firefox`
+on a Chromium tab returns it to Gecko with its current address. The native failure
+code is kept in `diagnostics().failure`; `diagnostics().enginePreferences` holds
+the gate state and the last request's result and reason. The hook adds nothing
+to installation (web mode already constructs the presenter, which starts no CEF
+process); a disabled gate and every refusal call no switch and start no CEF process.
+
+## Keychain gate
+
+Why live runs stop: the pinned CEF 154 runtime runs Chromium's OSCrypt, which on
+macOS keeps the at-rest encryption password as generic-password item service
+`Chromium Safe Storage`, account `Chromium` in the user's login keychain (both
+strings, the `saltysalt` KDF salt and the `use-mock-keychain`/`mock_password` test
+path are present in the pinned framework binary). The key is fetched process-wide
+on the first network/cookie use, independent of the request context's `cache_path`,
+so the in-memory fixture context and the persistent web context both reach it. The
+recorded stall (`docs/evidence/cef-owned-stall-sample.txt`) shows a worker blocked in
+`SecItemCopyMatching` → `SecKeychainItemCopyContent`: an item exists and reading its
+secret needs an ACL approval, i.e. the macOS dialog. The host is ad hoc signed, so
+its code identity is its cdhash and every rebuild is a new application to Keychain.
+The name is Chromium's default, so the item can be shared with other Chromium/CEF
+apps on the Mac. The host sets `command_line_args_disabled=1` and appends no
+switches; pinned `cef_settings_t` has no Keychain name fields (upstream per-app
+names, cef `fa874ac`, are `CEF_NEXT` only).
+
+| Option | Security effect | Status |
+| --- | --- | --- |
+| Wout approves "Allow" (not "Always Allow") during a synthetic-profile run, ideally in a dedicated synthetic macOS user | Encryption unchanged. Grants this ad hoc binary the default shared key; in Wout's own login keychain that may be another Chromium app's key. Repeat after each rebuild | Wout's decision; never answered by an agent |
+| Per-app Keychain service/account via a CEF release exposing fa874ac, plus stable Developer ID signing | Best: own item, ACL survives updates, no sharing | Blocked on upstream release and signing (open decision 3) |
+| Patched self-built CEF with an own service name | Same as above | Rejected: full Chromium build and maintenance |
+| `--use-mock-keychain` | Fixed, public key: at-rest data is only obfuscated | Never for the web profile. Acceptable only for strict fixture sessions (in-memory, synthetic, profile deleted on exit) behind an explicit flag the web host refuses; not implemented (native rebuild; unverifiable without risking the dialog) |
+| `--password-store=basic` | — | Linux-only switch; absent from the macOS framework, no effect |
+| Keep cookies in memory | — | Already true for fixtures and does not avoid the lookup |
+| Change default keychain / edit item ACLs | Mutates user Keychain | Rejected |

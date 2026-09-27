@@ -194,10 +194,53 @@ class BootstrapTests(unittest.TestCase):
                     self.assertEqual(zen.unexpected_source_changes(root), ['prefs/sample.yaml'])
 
     def test_retired_records_leave_no_active_overlay_behind(self):
-        active = {item['path'] for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text())}
+        active = json.loads((ROOT / 'patches/zen/overlay.json').read_text())
         for item in zen.retired_records():
-            self.assertNotIn(item['path'], active)
             self.assertNotIn(item['stock_sha256'], item['patched_sha256'])
+            # A superseded patch may only be replaced by a record that starts from
+            # the pinned stock file, which restore_retired recreates first.
+            chain = [record for record in active if record['path'] == item['path']]
+            if chain:
+                self.assertEqual(chain[0]['before_sha256'], item['stock_sha256'])
+                self.assertFalse({record['after_sha256'] for record in chain} & set(item['patched_sha256']))
+
+    def test_jar_overlay_only_includes_the_generated_manifest(self):
+        records = [item for item in zen.overlay_records() if item['path'] == 'src/zen/common/jar.inc.mn']
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['replacements'], [[
+            '        content/browser/ZenStartup.mjs',
+            '#include axiosozo/jar.inc.mn\n\n        content/browser/ZenStartup.mjs']])
+        stock = zen.capture(['git', '--no-optional-locks', '-c', 'core.hooksPath=/dev/null',
+                             'show', 'HEAD:src/zen/common/jar.inc.mn'], zen.UPSTREAM)
+        if stock is None:
+            self.skipTest('upstream/zen absent; stock jar.inc.mn hash not re-derived')
+        text = stock + '\n'
+        self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), records[0]['before_sha256'])
+        after = text.replace(*records[0]['replacements'][0], 1)
+        self.assertEqual(hashlib.sha256(after.encode()).hexdigest(), records[0]['after_sha256'])
+
+    def test_every_chrome_file_and_the_contexts_core_are_packaged(self):
+        names = {name for name, _ in zen.packaged_files()}
+        ignored = set(subprocess.run(['git', '--no-optional-locks', 'ls-files', '--others', '--ignored', '--exclude-standard', '-z',
+                                      '--', 'apps/browser/chrome', 'packages/contexts/src'],
+                                     cwd=ROOT, capture_output=True, check=True).stdout.decode().split('\0'))
+        for path in (ROOT / 'apps/browser/chrome').rglob('*'):
+            if path.relative_to(ROOT).as_posix() in ignored:
+                continue
+            self.assertFalse(path.is_symlink(), path)
+            if path.is_file() and path.suffix in zen.PACKAGED_SUFFIXES and not any(
+                    part.startswith('.') for part in path.relative_to(ROOT / 'apps/browser/chrome').parts):
+                self.assertIn(path.relative_to(ROOT / 'apps/browser/chrome').as_posix(), names)
+        for path in (ROOT / 'packages/contexts/src').glob('*.mjs'):
+            if not path.name.startswith('.'):
+                self.assertIn('contexts/' + path.name, names)
+        for required in ['AxioSozoStartup.mjs', 'ZenWorkspaceAdapter.sys.mjs', 'JsonStore.sys.mjs',
+                         'AxioSozoServices.sys.mjs', 'ContextMenuContexts.sys.mjs']:
+            self.assertIn(required, names)
+        manifest = zen.generated_jar_manifest().decode()
+        for name in names:
+            self.assertIn(f'        content/browser/axiosozo/{name} (../../zen/common/axiosozo/{name})\n', manifest)
+        self.assertNotIn('defaults.yaml', manifest)
 
     def test_source_guard_rejects_unexported_native_file(self):
         with tempfile.TemporaryDirectory(prefix='axiosozo-zen-source-') as directory:
@@ -259,6 +302,228 @@ class BootstrapTests(unittest.TestCase):
                     self.assertEqual(zen.describe()['reason'], 'NATIVE_REBUILD_REQUIRED')
         finally:
             zen.BUILD = original
+
+
+PACKAGING_TMP = ROOT / '.local/tmp/zen-packaging-tests'
+
+
+class PackagingTests(unittest.TestCase):
+    """Generated JAR packaging against a synthetic upstream tree under the
+    project's ignored .local/ directory; the real upstream is never touched."""
+
+    def setUp(self):
+        PACKAGING_TMP.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(prefix='overlay-', dir=PACKAGING_TMP)
+        root = Path(self.directory.name)
+        self.chrome = root / 'chrome'
+        self.contexts = root / 'contexts-src'
+        self.upstream = root / 'upstream'
+        (self.chrome / 'overview').mkdir(parents=True)
+        self.contexts.mkdir()
+        (self.chrome / 'defaults.yaml').write_text('- name: axiosozo.contexts.enabled\n  value: true\n')
+        (self.chrome / 'AxioSozoStartup.mjs').write_text('export {};\n')
+        (self.chrome / 'Feature.sys.mjs').write_text('export const a = 1;\n')
+        (self.chrome / 'notes.txt').write_text('not packaged\n')
+        (self.chrome / 'overview/about-axiosozo.html').write_text('<!doctype html>\n')
+        (self.chrome / 'overview/about-axiosozo-process.js').write_text('"use strict";\n')
+        (self.chrome / 'overview/._about-axiosozo.html').write_text('AppleDouble sidecar')
+        (self.contexts / 'index.mjs').write_text('export * from "./schema.mjs";\n')
+        (self.contexts / 'schema.mjs').write_text('export const v = 1;\n')
+        # Packaging lists sources through git (tracked + untracked-but-not-ignored),
+        # so the synthetic sources live in their own repository under .local/tmp.
+        subprocess.run(['git', 'init', '-q'], cwd=root, env=zen.zen_toolchain.environment(), check=True, capture_output=True)
+        jar = self.upstream / 'src/zen/common/jar.inc.mn'
+        jar.parent.mkdir(parents=True)
+        (self.upstream / 'prefs').mkdir()
+        (self.upstream / 'prefs/zen.yaml').write_text('- name: zen\n  value: true\n')
+        stock = '# header\n        content/browser/zen-sets.js (x)\n\n        content/browser/ZenStartup.mjs (y)\n'
+        jar.write_text(stock)
+        env = zen.zen_toolchain.environment()
+        for command in [['git', 'init', '-q'], ['git', 'add', '.'],
+                        ['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid',
+                         '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'stock']]:
+            subprocess.run(command, cwd=self.upstream, env=env, check=True, capture_output=True)
+        old = '        content/browser/ZenStartup.mjs'
+        new = '#include axiosozo/jar.inc.mn\n\n' + old
+        digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
+        self.record = {'path': 'src/zen/common/jar.inc.mn', 'before_sha256': digest(stock),
+                       'after_sha256': digest(stock.replace(old, new, 1)), 'replacements': [[old, new]]}
+        self.patches = [patch.object(zen, 'CHROME_SOURCE', self.chrome),
+                        patch.object(zen, 'CONTEXTS_SOURCE', self.contexts),
+                        patch.object(zen, 'overlay_records', return_value=[self.record]),
+                        patch.object(zen, 'retired_records', return_value=[])]
+        for item in self.patches:
+            item.start()
+
+    def tearDown(self):
+        for item in reversed(self.patches):
+            item.stop()
+        self.directory.cleanup()
+
+    def mirror(self, name):
+        return self.upstream / 'src/zen/common/axiosozo' / name
+
+    def test_overlay_packages_subdirectories_and_contexts_core(self):
+        zen.overlay(self.upstream)
+        names = [name for name, _ in zen.packaged_files()]
+        self.assertEqual(names, ['AxioSozoStartup.mjs', 'Feature.sys.mjs', 'contexts/index.mjs', 'contexts/schema.mjs',
+                                 'overview/about-axiosozo-process.js', 'overview/about-axiosozo.html'])
+        for name, source in zen.packaged_files():
+            self.assertEqual(self.mirror(name).read_bytes(), source.read_bytes())
+        self.assertFalse(self.mirror('notes.txt').exists())
+        # exFAT may create its own ._ xattr sidecars; they are never packaged.
+        self.assertNotIn('._', self.mirror('jar.inc.mn').read_text())
+        jar = (self.upstream / 'src/zen/common/jar.inc.mn').read_text()
+        self.assertEqual(jar.count('#include axiosozo/jar.inc.mn'), 1)
+        generated = self.mirror('jar.inc.mn').read_text()
+        self.assertIn('        content/browser/axiosozo/overview/about-axiosozo.html '
+                      '(../../zen/common/axiosozo/overview/about-axiosozo.html)\n', generated)
+        self.assertIn('        content/browser/axiosozo/contexts/schema.mjs (../../zen/common/axiosozo/contexts/schema.mjs)\n', generated)
+        self.assertEqual((self.upstream / 'prefs/axiosozo.yaml').read_bytes(), (self.chrome / 'defaults.yaml').read_bytes())
+        state = json.loads((self.upstream / '.axiosozo-overlay-state.json').read_text())['files']
+        self.assertIn('src/zen/common/axiosozo/overview/about-axiosozo.html', state)
+        self.assertIn('src/zen/common/axiosozo/jar.inc.mn', state)
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        zen.overlay(self.upstream)  # idempotent
+        self.assertEqual((self.upstream / 'src/zen/common/jar.inc.mn').read_text(), jar)
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+
+    def test_new_file_needs_no_overlay_edit_and_source_refresh_is_accepted(self):
+        zen.overlay(self.upstream)
+        (self.chrome / 'overview/overview.css').write_text(':root {}\n')
+        (self.chrome / 'Feature.sys.mjs').write_text('export const a = 2;\n')
+        # Until the next prepare the previous generation is still recognised.
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        zen.overlay(self.upstream)
+        self.assertIn('overview/overview.css', self.mirror('jar.inc.mn').read_text())
+        self.assertEqual(self.mirror('Feature.sys.mjs').read_text(), 'export const a = 2;\n')
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+
+    def test_user_edits_in_mirror_subdirectories_are_reported(self):
+        zen.overlay(self.upstream)
+        self.mirror('overview/about-axiosozo.html').write_text('local edit must survive')
+        (self.mirror('overview') / 'extra.html').write_text('unowned')
+        self.assertEqual(zen.unexpected_source_changes(self.upstream),
+                         ['src/zen/common/axiosozo/overview/about-axiosozo.html',
+                          'src/zen/common/axiosozo/overview/extra.html'])
+        self.mirror('jar.inc.mn').write_text('        content/browser/axiosozo/evil.mjs (/etc/passwd)\n')
+        self.assertIn('src/zen/common/axiosozo/jar.inc.mn', zen.unexpected_source_changes(self.upstream))
+
+    def test_removed_sources_leave_only_unmodified_mirrors_for_cleanup(self):
+        zen.overlay(self.upstream)
+        (self.chrome / 'overview/about-axiosozo-process.js').unlink()
+        (self.chrome / 'overview/about-axiosozo.html').unlink()
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        zen.overlay(self.upstream)
+        self.assertFalse(self.mirror('overview').exists())
+        self.assertNotIn('overview/', self.mirror('jar.inc.mn').read_text())
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        (self.contexts / 'schema.mjs').unlink()
+        self.mirror('contexts/schema.mjs').write_text('edited after generation')
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), ['src/zen/common/axiosozo/contexts/schema.mjs'])
+        zen.overlay(self.upstream)
+        self.assertEqual(self.mirror('contexts/schema.mjs').read_text(), 'edited after generation')
+
+    def test_invalid_state_and_unpackageable_names_fail_closed(self):
+        zen.overlay(self.upstream)
+        state_path = self.upstream / '.axiosozo-overlay-state.json'
+        state_path.write_text(json.dumps({'version': 1, 'files': {'src/widget/local.cpp': '0' * 64}}))
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), ['INVALID_OVERLAY_STATE'])
+        with self.assertRaisesRegex(RuntimeError, 'INVALID_OVERLAY_STATE'):
+            zen.overlay(self.upstream)
+        state_path.unlink()
+        (self.chrome / 'bad name.mjs').write_text('')
+        with self.assertRaisesRegex(RuntimeError, 'UNPACKAGEABLE_CHROME_FILE'):
+            zen.packaged_files()
+        self.assertEqual(zen.unexpected_source_changes(self.upstream)[0], 'UNPACKAGEABLE_CHROME_FILE: bad name.mjs')
+        (self.chrome / 'bad name.mjs').unlink()
+        (self.chrome / 'contexts').mkdir()
+        (self.chrome / 'contexts/index.mjs').write_text('')
+        with self.assertRaisesRegex(RuntimeError, 'RESERVED_CHROME_PATH'):
+            zen.packaged_files()
+
+    def test_ignored_files_are_never_packaged(self):
+        root = Path(self.directory.name)
+        (root / '.gitignore').write_text('chrome/Local.sys.mjs\nchrome/overview/build/\ncontexts-src/secret.mjs\n')
+        (self.chrome / 'Local.sys.mjs').write_text('export const local = "ignored build output";\n')
+        (self.chrome / 'overview/build').mkdir()
+        (self.chrome / 'overview/build/bundle.js').write_text('ignored\n')
+        (self.contexts / 'secret.mjs').write_text('export const s = "ignored";\n')
+        names = [name for name, _ in zen.packaged_files()]
+        self.assertEqual(names, ['AxioSozoStartup.mjs', 'Feature.sys.mjs', 'contexts/index.mjs', 'contexts/schema.mjs',
+                                 'overview/about-axiosozo-process.js', 'overview/about-axiosozo.html'])
+        zen.overlay(self.upstream)
+        self.assertFalse(self.mirror('Local.sys.mjs').exists())
+        self.assertFalse(self.mirror('contexts/secret.mjs').exists())
+        self.assertNotIn('Local.sys.mjs', self.mirror('jar.inc.mn').read_text())
+        # Tracked files are packaged too, and a tracked file deleted from the worktree is simply absent.
+        env = zen.zen_toolchain.environment()
+        subprocess.run(['git', 'add', 'chrome', 'contexts-src'], cwd=root, env=env, check=True, capture_output=True)
+        (self.chrome / 'Feature.sys.mjs').unlink()
+        self.assertNotIn('Feature.sys.mjs', [name for name, _ in zen.packaged_files()])
+
+    def test_symlinked_sources_fail_closed(self):
+        outside = Path(self.directory.name) / 'outside'
+        outside.mkdir()
+        (outside / 'secret.mjs').write_text('export const secret = 1;\n')
+        cases = [(self.chrome / 'Linked.sys.mjs', outside / 'secret.mjs'),
+                 (self.chrome / 'linked-dir', outside),
+                 (self.chrome / 'overview/about-axiosozo.css', outside / 'secret.mjs'),
+                 (self.contexts / 'rules.mjs', outside / 'secret.mjs')]
+        for link, target in cases:
+            link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, 'SYMLINKED_CHROME_FILE'):
+                zen.packaged_files()
+            self.assertEqual(zen.unexpected_source_changes(self.upstream)[0].split(':')[0], 'SYMLINKED_CHROME_FILE')
+            link.unlink()
+        # A tracked file whose directory was later replaced by a link is refused, not followed.
+        env = zen.zen_toolchain.environment()
+        subprocess.run(['git', 'add', 'chrome/overview'], cwd=Path(self.directory.name), env=env, check=True, capture_output=True)
+        overview = self.chrome / 'overview'
+        overview.rename(Path(self.directory.name) / 'moved-overview')
+        overview.symlink_to(Path(self.directory.name) / 'moved-overview')
+        with self.assertRaisesRegex(RuntimeError, 'SYMLINKED_CHROME_FILE'):
+            zen.packaged_files()
+        self.assertEqual((outside / 'secret.mjs').read_text(), 'export const secret = 1;\n')
+
+    def test_symlinked_mirror_entry_is_refused(self):
+        zen.overlay(self.upstream)
+        target = self.mirror('Feature.sys.mjs')
+        target.unlink()
+        outside = Path(self.directory.name) / 'outside.mjs'
+        outside.write_text('outside')
+        target.symlink_to(outside)
+        with self.assertRaisesRegex(RuntimeError, 'UNEXPECTED_MIRROR_ENTRY'):
+            zen.overlay(self.upstream)
+        self.assertEqual(outside.read_text(), 'outside')
+
+    def test_materialization_copies_every_packaged_file_into_the_bundle(self):
+        zen.overlay(self.upstream)
+        app = Path(self.directory.name) / 'AxioSozo Dev.app'
+        bundle = app / 'Contents/Resources/browser/chrome/browser/content/browser/axiosozo'
+        links = []
+        for name, _ in zen.packaged_files():
+            target = bundle / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(self.mirror(name))
+            links.append(target)
+        missing = links.pop()
+        missing.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'AXIOSOZO_RESOURCE_NOT_PACKAGED'):
+            zen.materialize_axiosozo_resources(self.upstream, app)
+        self.assertTrue(all(path.is_symlink() for path in links), 'preflight rewrites nothing')
+        missing.symlink_to(self.mirror(missing.relative_to(bundle).as_posix()))
+        links.append(missing)
+        self.assertEqual(zen.materialize_axiosozo_resources(self.upstream, app), len(links))
+        self.assertEqual(zen.materialize_axiosozo_resources(self.upstream, app), 0)
+        self.assertTrue(all(path.is_file() and not path.is_symlink() for path in links))
+        links[0].write_text('modified in bundle')
+        with self.assertRaisesRegex(RuntimeError, 'AXIOSOZO_RESOURCE_MODIFIED'):
+            zen.materialize_axiosozo_resources(self.upstream, app)
+        links[0].unlink()
+        links[0].symlink_to(Path(self.directory.name) / 'chrome/Feature.sys.mjs')
+        with self.assertRaisesRegex(RuntimeError, 'AXIOSOZO_UNEXPECTED_LINK'):
+            zen.materialize_axiosozo_resources(self.upstream, app)
 
 
 if __name__ == '__main__':

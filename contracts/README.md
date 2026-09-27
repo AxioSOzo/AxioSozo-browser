@@ -46,3 +46,18 @@ Cancellation never authorizes replay. Fixture tests are not live-provider eviden
 DecisionProvider receives explicit synthetic state, typed questions, schema/context
 version, deadline and AbortSignal. Unknown/no_op are valid outcomes; responses grant
 no authority. No key means zero Jev requests. See provider-host's runtime validators.
+
+## Handoff 3 contracts (contexts, projects, site rules)
+
+- `context-v1.schema.json`: context metadata keyed by Zen workspace UUID,
+  profile-local projects, the repository manifest `.axiosozo/project.json` and
+  the static detection draft.
+- `site-rule-v1.schema.json`: site rules, Jev consent/pacing, the usage ledger,
+  the M1 effect menu, evaluations and suppressions.
+- `decision-v1.md`: Jev choice sets `site_rule_v1` (M1) and `highlight_v1`
+  (M2), inputs, limits, disclosure and failure semantics.
+- `contexts-api-v1.md`: the module seams between contexts core, chrome
+  services, `about:axiosozo`, runtime modules, providers and CEF.
+
+Everything is local-first: no account, server or telemetry. A Jev answer is a
+suggestion only; the browser applies only effects the user's rule lists.

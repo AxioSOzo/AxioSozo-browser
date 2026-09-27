@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axiosozo.invalid/contracts/context-v1.schema.json",
+  "title": "AxioSozo context, project and manifest records, version 1",
+  "description": "Handoff 3 \u00a74.1/\u00a74.2. Profile-local metadata keyed by Zen workspace UUID. Never alters Zen's own workspace store. Manifests hold no secrets and no absolute local paths. Every object rejects unknown properties.",
+  "$defs": {
+    "workspaceUuid": {
+      "description": "Zen workspace UUID exactly as Zen stores it, including braces when Zen uses them.",
+      "type": "string",
+      "pattern": "^\\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\}?$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^p_[a-z0-9]{4,32}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "timestamp": {
+      "description": "Milliseconds since the Unix epoch.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "contextType": {
+      "enum": [
+        "personal",
+        "organization",
+        "project"
+      ]
+    },
+    "engine": {
+      "enum": [
+        "firefox",
+        "chromium"
+      ]
+    },
+    "webUrl": {
+      "description": "Absolute http(s) URL without userinfo or fragment. Implementations must also reject userinfo via URL parsing.",
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https?://[^/@\\s#]+(/[^\\s#]*)?$"
+    },
+    "baseUrl": {
+      "description": "http(s) origin plus optional path prefix; no userinfo, query or fragment. A trailing slash is normalized away except for the root path.",
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https?://[^/@\\s?#]+(/[^\\s?#]*)?$"
+    },
+    "environmentName": {
+      "description": "local, preview and production are the F4 switch order; other names are allowed and listed after them.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "base_url"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/environmentName"
+        },
+        "base_url": {
+          "$ref": "#/$defs/baseUrl"
+        }
+      }
+    },
+    "service": {
+      "description": "Declared or detected, never discovered by scanning the system. Status probing only touches this exact url/port.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "port"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "url": {
+          "$ref": "#/$defs/manifestUrl"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "surfaceKind": {
+      "enum": [
+        "repository",
+        "issues",
+        "ci",
+        "releases",
+        "hosting",
+        "analytics",
+        "payments",
+        "package",
+        "docs",
+        "dashboard",
+        "store",
+        "crash_reports",
+        "other"
+      ]
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "url": {
+          "$ref": "#/$defs/manifestUrl"
+        },
+        "kind": {
+          "$ref": "#/$defs/surfaceKind"
+        }
+      }
+    },
+    "projectKind": {
+      "enum": [
+        "web",
+        "desktop",
+        "library",
+        "cli",
+        "mobile"
+      ]
+    },
+    "contextMetadata": {
+      "description": "AxioSozo metadata for one Zen workspace. Absent record means type personal with no preferences.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "workspace_uuid",
+        "type",
+        "organization_uuid",
+        "project_id",
+        "engine_preference",
+        "updated_at"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "workspace_uuid": {
+          "$ref": "#/$defs/workspaceUuid"
+        },
+        "type": {
+          "$ref": "#/$defs/contextType"
+        },
+        "organization_uuid": {
+          "description": "Only for type project: the organization context it belongs to, or null.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/workspaceUuid"
+            }
+          ]
+        },
+        "project_id": {
+          "description": "Only for type project: the linked project, or null.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/projectId"
+            }
+          ]
+        },
+        "engine_preference": {
+          "description": "F6. Applied only while axiosozo.engine.preferences.enabled is true (experimental until E1/E2 pass).",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/engine"
+            }
+          ]
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "manifest": {
+      "description": "Repository file .axiosozo/project.json. Team-shareable. Never contains secrets, credentials, tokens, absolute local paths or commands in M1 (commands is reserved for M2 and must be absent in v1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "environments",
+        "services",
+        "surfaces"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "kind": {
+          "$ref": "#/$defs/projectKind"
+        },
+        "environments": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/environment"
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/service"
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/surface"
+          }
+        }
+      }
+    },
+    "project": {
+      "description": "Profile-local confirmed project. root is an absolute local path and never leaves the profile.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "root",
+        "manifest",
+        "manifest_state",
+        "context_uuid",
+        "trusted",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/projectId"
+        },
+        "root": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "manifest": {
+          "$ref": "#/$defs/manifest"
+        },
+        "manifest_state": {
+          "description": "none: never written; written: AxioSozo wrote it; external: read from the repo.",
+          "enum": [
+            "none",
+            "written",
+            "external"
+          ]
+        },
+        "context_uuid": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/workspaceUuid"
+            }
+          ]
+        },
+        "trusted": {
+          "description": "M2 service commands only. Always false in M1.",
+          "const": false
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "draftValue": {
+      "description": "A detected value with its provenance. guess=true for framework-default fallbacks.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "guess"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "guess": {
+          "type": "boolean"
+        }
+      }
+    },
+    "detectionDraft": {
+      "description": "Output of static detection (\u00a76.1). Everything here is a draft until the user confirms it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "kind_source",
+        "environments",
+        "services",
+        "surfaces",
+        "frameworks",
+        "files_read",
+        "refused",
+        "warnings"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "kind": {
+          "$ref": "#/$defs/projectKind"
+        },
+        "kind_source": {
+          "$ref": "#/$defs/draftValue"
+        },
+        "environments": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "base_url",
+              "source",
+              "guess"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/environmentName"
+              },
+              "base_url": {
+                "$ref": "#/$defs/baseUrl"
+              },
+              "source": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "guess": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "url",
+              "port",
+              "source",
+              "guess"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/name"
+              },
+              "url": {
+                "$ref": "#/$defs/manifestUrl"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "source": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "guess": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "url",
+              "kind",
+              "source",
+              "guess"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/name"
+              },
+              "url": {
+                "$ref": "#/$defs/manifestUrl"
+              },
+              "kind": {
+                "$ref": "#/$defs/surfaceKind"
+              },
+              "source": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "guess": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "files_read": {
+          "description": "Relative paths actually read, all from the allowlist.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "not_allowlisted",
+                  "too_large",
+                  "symlink_outside_root",
+                  "not_regular_file",
+                  "unreadable",
+                  "invalid_utf8"
+                ]
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "contextStore": {
+      "description": "Profile file axiosozo/contexts.json. Written atomically by one serialized writer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "contexts",
+        "projects"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "contexts": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/contextMetadata"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/project"
+          }
+        }
+      }
+    },
+    "manifestUrl": {
+      "description": "Service/surface URL in a committed manifest: absolute http(s), no userinfo, no query, no fragment (signed or token-bearing query strings must never be committed).",
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https?://[^/@\\s?#]+(/[^\\s?#]*)?$"
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/contextStore"
+    },
+    {
+      "$ref": "#/$defs/manifest"
+    },
+    {
+      "$ref": "#/$defs/detectionDraft"
+    }
+  ]
+}

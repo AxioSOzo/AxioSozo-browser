@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "name": "next-app",
+  "kind": "web",
+  "kind_source": {
+    "source": "package.json scripts.dev (next)",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:3001/",
+      "source": "package.json scripts.dev (next port 3001)",
+      "guess": false
+    }
+  ],
+  "services": [
+    {
+      "name": "Next.js dev server",
+      "url": "http://localhost:3001/",
+      "port": 3001,
+      "source": "package.json scripts.dev (next port 3001)",
+      "guess": false
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/next-app",
+      "kind": "repository",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/next-app/issues",
+      "kind": "issues",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/next-app/actions",
+      "kind": "ci",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/next-app/releases",
+      "kind": "releases",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Vercel (next-app)",
+      "url": "https://vercel.com/dashboard",
+      "kind": "hosting",
+      "source": ".vercel/project.json",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "next"
+  ],
+  "files_read": [
+    "package.json",
+    ".vercel/project.json",
+    "vercel.json",
+    ".git/config"
+  ],
+  "refused": [],
+  "warnings": []
+}

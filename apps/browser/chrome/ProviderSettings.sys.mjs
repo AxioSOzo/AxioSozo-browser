@@ -5,7 +5,11 @@ const PREF = "axiosozo.providers.instances.v1";
 const DRIVERS = Object.freeze(["codex", "claude-code", "antigravity"]);
 const LABELS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code", antigravity: "Antigravity" });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const KEYCHAIN_SETTINGS_ENABLED = false; // Requires a separately verified Keychain storage round-trip.
+// Open decision 4 (Wout): production Jev key entry stays off unless this pref is true.
+export const JEV_KEY_ENTRY_PREF = "axiosozo.jev.keyEntry.enabled";
+export function jevKeyEntryEnabled(prefs = globalThis.Services?.prefs) {
+  try { return prefs?.getBoolPref(JEV_KEY_ENTRY_PREF, false) === true; } catch { return false; }
+}
 const dialogs = new WeakMap();
 const authorizedWindows = new WeakSet();
 function requireValue(condition, code) { if (!condition) throw new Error(code); }
@@ -137,7 +141,7 @@ function nativeRuntime() {
   return { spawn: options => Subprocess.call(options), timers, env: name => Services.env.get(name) };
 }
 
-async function runOwned(runtime, command, args, { input = "", signal } = {}) {
+async function runOwned(runtime, command, args, { input = "", signal, keep = true } = {}) {
   requireValue(text(command) && command.startsWith("/"), "INVALID_HELPER_PATH");
   if (signal?.aborted) throw new Error("SETTINGS_CLOSED");
   const child = await runtime.spawn({ command, arguments: args, environmentAppend: false,
@@ -160,7 +164,7 @@ async function runOwned(runtime, command, args, { input = "", signal } = {}) {
   try {
     if (signal?.aborted) onAbort();
     const write = async () => { if (input) await child.stdin.write(input); await child.stdin.close(); };
-    const [stdout, , result] = await Promise.all([collect(child.stdout, true), collect(child.stderr, false), child.wait(), write()]);
+    const [stdout, , result] = await Promise.all([collect(child.stdout, keep), collect(child.stderr, false), child.wait(), write()]);
     requireValue(!cancelled, "SETTINGS_CLOSED"); requireValue(!timeout, "HELPER_TIMEOUT");
     requireValue(result.exitCode === 0, "HELPER_FAILED"); return stdout;
   } finally {
@@ -177,14 +181,19 @@ export async function discoverForSettings(runtime = nativeRuntime(), signal) {
   return validateDiscovery(JSON.parse(await runOwned(runtime, node, [host, "discover"], { signal })));
 }
 
-/** Deliberately gated: only explicit settings actions may ever reach Keychain. */
-export async function storeJevKey(secret, runtime, signal) {
-  requireValue(KEYCHAIN_SETTINGS_ENABLED, "KEYCHAIN_SETTINGS_NOT_VERIFIED");
-  requireValue(text(secret) && secret.length >= 8, "INVALID_KEY");
+/**
+ * Deliberately gated: only an explicit settings action with the review pref on may reach Keychain.
+ * The key goes only to the reviewed native helper's stdin: never argv, environment, disk, logs,
+ * prefs or a reply. Nothing is returned; the helper's stdout is not kept.
+ */
+export async function storeJevKey(secret, runtime, signal, prefs = globalThis.Services?.prefs) {
+  requireValue(jevKeyEntryEnabled(prefs), "KEYCHAIN_SETTINGS_NOT_VERIFIED");
+  const bytes = typeof secret === "string" ? new TextEncoder().encode(secret).length : 0;
+  requireValue(text(secret) && bytes >= 8 && bytes <= 4096, "INVALID_KEY");
   runtime ??= nativeRuntime();
   const root = runtime.env("AXIOSOZO_BUILD_ROOT");
-  requireValue(text(root) && root.startsWith("/Volumes/"), "KEYCHAIN_HELPER_UNAVAILABLE");
-  await runOwned(runtime, `${root}/providers/keychain`, ["store"], { input: secret, signal });
+  requireValue(text(root) && root.startsWith("/Volumes/") && !/(^|\/)\.\.(\/|$)/u.test(root), "KEYCHAIN_HELPER_UNAVAILABLE");
+  await runOwned(runtime, `${root}/providers/keychain`, ["store"], { input: secret, signal, keep: false });
 }
 
 function addText(document, parent, tag, value, className) {
@@ -317,10 +326,16 @@ export function initializeProviderSettings(win) {
     try { store.add(byId("driver").value, byId("instance-name").value); byId("instance-name").value = ""; renderInstances(); status("Local configuration saved. Authentication remains unknown."); }
     catch { status("Configuration was not saved. Use a name of 1–64 characters; at most 12 configurations are supported."); }
   });
+  if (jevKeyEntryEnabled()) {
+    // Markup ships disabled; only the review pref enables the form.
+    byId("jev-key").disabled = false; byId("jev-form").querySelector("button[type=submit]").disabled = false;
+    byId("jev-title").textContent = "Jev · key entry under review";
+    byId("jev-note").textContent = "Optional. The key is stored only in macOS Keychain and is never shown again. Jev is contacted only for site rules you allow.";
+  }
   byId("jev-form").addEventListener("submit", async event => {
     event.preventDefault(); const input = byId("jev-key"); let secret = input.value; input.value = "";
     try { await storeJevKey(secret, runtime, controller.signal); status("Jev key stored in macOS Keychain."); }
-    catch { status("Jev Keychain storage is not available in this development build."); }
+    catch (error) { status(error?.message === "INVALID_KEY" ? "Key not stored. Enter a key of 8–4096 characters on one line." : "Jev Keychain storage is not available in this development build."); }
     finally { secret = ""; }
   });
   byId("close").addEventListener("click", () => win.close());

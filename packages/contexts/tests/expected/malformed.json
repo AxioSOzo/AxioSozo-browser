@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "malformed",
+  "kind": "web",
+  "kind_source": {
+    "source": "netlify.toml",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "production",
+      "base_url": "https://shop.example.com/",
+      "source": "wrangler.toml routes",
+      "guess": false
+    },
+    {
+      "name": "staging",
+      "base_url": "https://staging.example.com/api",
+      "source": "wrangler.toml env.staging routes",
+      "guess": false
+    }
+  ],
+  "services": [],
+  "surfaces": [
+    {
+      "name": "Netlify",
+      "url": "https://app.netlify.com/",
+      "kind": "hosting",
+      "source": "netlify.toml",
+      "guess": false
+    },
+    {
+      "name": "Cloudflare (edge-fixture)",
+      "url": "https://dash.cloudflare.com/",
+      "kind": "hosting",
+      "source": "wrangler.toml",
+      "guess": false
+    }
+  ],
+  "frameworks": [],
+  "files_read": [
+    "package.json",
+    "netlify.toml",
+    "wrangler.toml",
+    "docker-compose.yml"
+  ],
+  "refused": [],
+  "warnings": [
+    "package.json: invalid JSON, ignored",
+    "netlify.toml: 3 unparsable statement(s) ignored (line 1: unterminated table header)",
+    "wrangler.toml: 1 unparsable statement(s) ignored (line 7: expected '=')",
+    "docker-compose.yml: 2 unparsable line(s) ignored (line 3: tab indentation)"
+  ]
+}

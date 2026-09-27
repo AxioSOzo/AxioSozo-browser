@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "name": "Tauri Fixture",
+  "kind": "desktop",
+  "kind_source": {
+    "source": "src-tauri/tauri.conf.json",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:1420/",
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    }
+  ],
+  "services": [
+    {
+      "name": "Tauri dev server",
+      "url": "http://localhost:1420/",
+      "port": 1420,
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://gitlab.com/acme/apps/tauri-app",
+      "kind": "repository",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://gitlab.com/acme/apps/tauri-app/-/issues",
+      "kind": "issues",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://gitlab.com/acme/apps/tauri-app/-/pipelines",
+      "kind": "ci",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://gitlab.com/acme/apps/tauri-app/-/releases",
+      "kind": "releases",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Update feed",
+      "url": "https://github.com/acme/tauri-app/releases/latest/download/latest.json",
+      "kind": "other",
+      "source": "src-tauri/tauri.conf.json updater.endpoints",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "vite",
+    "tauri"
+  ],
+  "files_read": [
+    "package.json",
+    "src-tauri/tauri.conf.json",
+    ".git/config"
+  ],
+  "refused": [],
+  "warnings": []
+}

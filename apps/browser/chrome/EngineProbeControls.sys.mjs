@@ -1,8 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { allowedFixtureURL, validFixtureOrigin } from "./CEFEngineAdapter.sys.mjs";
+import { transferableGeckoURL } from "./CEFPresenter.sys.mjs";
 
 const LIMITATIONS = "Local GET fixture only. Experimental: automatic Chromium control, IME, clipboard, native accessibility, downloads and permissions are unavailable.";
+// F6 gate (contexts-api-v1 §4). Default false; the lead owns the pref default.
+export const ENGINE_PREFERENCE_PREF = "axiosozo.engine.preferences.enabled";
+const PREFERENCE_REASON = /^[a-z][a-z0-9_]{0,31}$/u;
 const WEB_LIMITATIONS = "Chromium tabs use their own persistent Chromium profile, separate from Firefox. IME, native accessibility, downloads, extensions and site permissions are not integrated yet.";
 
 /**
@@ -96,6 +100,62 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
       pending = false; refreshOwners(); updateButton();
     }
   }
+  let lastPreference = null;
+  function preferenceEnabled() {
+    try { return win.Services.prefs?.getBoolPref?.(ENGINE_PREFERENCE_PREF, false) === true; }
+    catch { return false; }
+  }
+  /**
+   * F6 engine-preference hook (contexts-api-v1 §5). Resolves, never rejects. It
+   * reuses the explicit per-tab switch, so every native, private and URL check
+   * of that switch still applies; on any failure the Firefox tab is kept.
+   */
+  async function applyPreference(tab, engine, options) {
+    let reason = null;
+    try { reason = options?.reason; } catch {}
+    const requested = engine === "firefox" || engine === "chromium" ? engine : null;
+    const result = (applied, error) => {
+      const outcome = error ? { applied, engine: requested, error } : { applied, engine: requested };
+      lastPreference = { ...outcome, reason: typeof reason === "string" && PREFERENCE_REASON.test(reason) ? reason : null };
+      return Object.freeze(outcome);
+    };
+    try {
+      if (!requested) return result(false, "INVALID_ENGINE");
+      if (!preferenceEnabled()) return result(false, "DISABLED");
+      // Only the daily web switch applies preferences; the fixture probe stays manual.
+      if (disposed || fixtureMode || !presenter || typeof presenter.setTabEngine !== "function") return result(false, "UNAVAILABLE");
+      if (win.PrivateBrowsingUtils?.isWindowPrivate?.(win)) return result(false, "PRIVATE");
+      const browser = tab?.linkedBrowser;
+      const record = browser && gecko.find(browser);
+      const target = record && gecko.target(record);
+      if (!target || typeof target.tab_id !== "string") return result(false, "UNKNOWN_TAB");
+      if (target.private_mode) return result(false, "PRIVATE");
+      if (pending || presenter.pending) return result(false, "PENDING");
+      const current = presenter.engineOf(tab) === "chromium" ? "chromium" : "firefox";
+      if (current === engine) return result(false); // already in the preferred engine
+      if (engine === "chromium") {
+        // Only a credential-free HTTP(S) page without POST data moves across;
+        // about:, chrome:, file: and other privileged pages always stay in Firefox.
+        if (!transferableGeckoURL(browser)) return result(false, "UNSUPPORTED_URL");
+      }
+      pending = true; failure = null; updateButton();
+      if (engine === "chromium") cefOwners.add(target.tab_id); // before any async work
+      try {
+        await presenter.setTabEngine(tab, engine === "chromium" ? "chromium" : "gecko");
+      } catch (error) {
+        failed(error);
+        return result(false, error?.message === "ENGINE_SWITCH_CANCELLED" ? "CANCELLED" : "SWITCH_FAILED");
+      } finally {
+        pending = false; refreshOwners(); updateButton();
+      }
+      if (disposed) return result(false, "UNAVAILABLE");
+      // A switch counts only when the presenter now reports the requested engine.
+      if ((presenter.engineOf(tab) === "chromium" ? "chromium" : "firefox") !== engine) return result(false, "SWITCH_FAILED");
+      return result(true);
+    } catch {
+      return result(false, "UNAVAILABLE");
+    }
+  }
   const command = event => {
     if (!event.isTrusted) return;
     switchEngine(state.engine === "chromium" ? "gecko" : "chromium").catch(() => {});
@@ -109,6 +169,7 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     switchToChromium: () => switchEngine("chromium"),
     switchToGecko: () => switchEngine("gecko"),
     setTabEngine: (tab, engine) => getPresenter().setTabEngine(tab, engine),
+    applyEnginePreference: (tab, engine, options) => applyPreference(tab, engine, options),
     engineOf: tab => presenter?.engineOf(tab) ?? "gecko",
     isGeckoTargetActive: target => target?.engine === "gecko" && typeof target.tab_id === "string" && !cefOwners.has(target.tab_id),
     currentPage: (tab = win.gBrowser.selectedTab) => {
@@ -124,6 +185,7 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     diagnostics: () => ({ version: 1, enabled: true, pending, disposed, failure, targetEvents,
       activeEngine: state.engine, fixtureOrigin: fixtureMode ? origin : null, browsingMode, restrictions: limitations,
       automatedChromiumControl: "unsupported", cefOwnedTabIds: [...cefOwners],
+      enginePreferences: { enabled: preferenceEnabled(), last: lastPreference },
       native: presenter?.diagnostics() ?? { engine: "gecko" } }),
     async dispose() {
       if (disposed) return;

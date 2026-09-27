@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "name": "Electron Fixture",
+  "kind": "desktop",
+  "kind_source": {
+    "source": "package.json scripts.start (electron)",
+    "guess": false
+  },
+  "environments": [],
+  "services": [],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/electron-app",
+      "kind": "repository",
+      "source": ".git/config remote upstream",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/electron-app/issues",
+      "kind": "issues",
+      "source": ".git/config remote upstream",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/electron-app/actions",
+      "kind": "ci",
+      "source": ".git/config remote upstream",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/electron-app/releases",
+      "kind": "releases",
+      "source": "electron-builder.yml publish",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "electron"
+  ],
+  "files_read": [
+    "package.json",
+    "electron-builder.yml",
+    ".git/config"
+  ],
+  "refused": [],
+  "warnings": []
+}

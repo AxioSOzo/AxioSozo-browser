@@ -1,0 +1,34 @@
+# Synthetic compose file
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+  api:
+    build: ./api
+    ports:
+      - target: 3000
+        published: "3000"
+        protocol: tcp
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: example-not-a-secret
+    ports:
+      - "127.0.0.1:5432:5432"
+  cache:
+    image: redis:7
+    ports:
+      - 6379
+  metrics:
+    image: prom/prometheus
+    ports:
+      - "${METRICS_PORT:-9090}:9090"
+  dns:
+    image: coredns/coredns
+    ports:
+      - "5353:5353/udp"
+  lan:
+    image: busybox
+    ports:
+      - "192.168.1.20:7000:7000"

@@ -1,0 +1,21 @@
+[package]
+name = "tiny-lib"
+version = "0.1.0"
+edition = "2021"
+description = "A tiny synthetic library"   # trailing comment
+license = "MPL-2.0"
+repository = "https://codeberg.org/acme/tiny-lib"
+documentation = "https://docs.rs/tiny-lib"
+keywords = [
+  "synthetic",
+  "fixture", # comment inside array
+]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1.5"
+
+[profile.release]
+lto = true

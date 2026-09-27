@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MPL-2.0. AxioSozo Preview: main browser process (the .app root).
+
+  Mirrors the pinned Firefox 156.0 production entitlements
+  security/mac/hardenedruntime/production/firefox.browser.xml
+  (pristine Firefox commit in the build stage, before Zen's application-identifier edit),
+  applied to "/" by taskcluster/config.yml mac-signing > hardened-sign-config > production.
+
+  The two restricted entitlements in that file (com.apple.application-identifier and
+  com.apple.developer.web-browser.public-key-credential) are omitted, exactly as
+  Firefox's own `mach macos-sign -e production-without-restricted`
+  (tools/signing/macos/mach_commands.py, strip_restricted_entitlements) does, because
+  they require an Apple provisioning profile tied to an approved team. Consequence:
+  no platform passkey (webauthn) support in this Preview.
+
+  com.apple.security.cs.allow-unsigned-executable-memory is intentionally absent:
+  Firefox's production entitlements do not use it.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- Allow loading third party libraries to support pkcs11 modules -->
+    <key>com.apple.security.cs.disable-library-validation</key><true/>
+    <!-- Gecko needs to create executable pages with MAP_JIT on aarch64 -->
+    <key>com.apple.security.cs.allow-jit</key><true/>
+    <!-- Microphone on sites the user allows -->
+    <key>com.apple.security.device.audio-input</key><true/>
+    <!-- Camera on sites the user allows -->
+    <key>com.apple.security.device.camera</key><true/>
+    <!-- WebSerial devices over USB -->
+    <key>com.apple.security.device.usb</key><true/>
+    <!-- Location on sites the user allows -->
+    <key>com.apple.security.personal-information.location</key><true/>
+    <!-- SmartCardServices(7) -->
+    <key>com.apple.security.smartcard</key><true/>
+  </dict>
+</plist>

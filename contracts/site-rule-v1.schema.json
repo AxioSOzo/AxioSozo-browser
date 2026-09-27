@@ -1,0 +1,459 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axiosozo.invalid/contracts/site-rule-v1.schema.json",
+  "title": "AxioSozo site rules, usage ledger and effect menu, version 1",
+  "description": "Handoff 3 \u00a74.3, \u00a74.4, \u00a76.2, \u00a76.3. Rules and ledger are profile-local JSON written atomically by a serialized writer. Nothing here is uploaded. Every object rejects unknown properties.",
+  "$defs": {
+    "ruleId": {
+      "type": "string",
+      "pattern": "^r_[a-z0-9]{4,32}$"
+    },
+    "workspaceUuid": {
+      "$ref": "context-v1.schema.json#/$defs/workspaceUuid"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hostPattern": {
+      "description": "Lower-case ASCII (punycode) host, or '*.' plus a registrable suffix. '*.x.com' matches subdomains only, never x.com itself. No ports, paths, IP wildcards or bare '*'. Labels must not start or end with '-'; implementations enforce this and the 253-byte limit in code. Single-label hosts (localhost) are allowed without a wildcard.",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(\\*\\.[a-z0-9-]{1,63}(\\.[a-z0-9-]{1,63})+|[a-z0-9-]{1,63}(\\.[a-z0-9-]{1,63})*)$"
+    },
+    "effect": {
+      "description": "The M1 effect menu. nudge: small dismissible notice. suggest_leave: offers 'save and close'. pause_site: chrome-owned interstitial with the rule's override friction. None uses network blocking or rewrites page content.",
+      "enum": [
+        "nudge",
+        "suggest_leave",
+        "pause_site"
+      ]
+    },
+    "outcome": {
+      "description": "An effect or none. Any failure, timeout or malformed answer maps to none.",
+      "enum": [
+        "none",
+        "nudge",
+        "suggest_leave",
+        "pause_site"
+      ]
+    },
+    "observation": {
+      "description": "none: nothing leaves the machine. address: origin, path, page title. outline: address plus headings, link texts and form labels with opaque IDs. Default for new rules: none.",
+      "enum": [
+        "none",
+        "address",
+        "outline"
+      ]
+    },
+    "timeOfDay": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "allowedWindow": {
+      "description": "Local wall-clock window. end <= start wraps past midnight. days uses 0=Sunday..6=Saturday; omitted means every day.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/timeOfDay"
+        },
+        "end": {
+          "$ref": "#/$defs/timeOfDay"
+        },
+        "days": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          }
+        }
+      }
+    },
+    "reasonCode": {
+      "description": "Fixed reason codes. Deterministic: daily_limit_reached, outside_allowed_hours. Jev: drift, on_task, off_context, unclear. Messages are rendered from these codes or the rule's own text, never generated prose.",
+      "enum": [
+        "daily_limit_reached",
+        "outside_allowed_hours",
+        "drift",
+        "on_task",
+        "off_context",
+        "unclear"
+      ]
+    },
+    "siteRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "enabled",
+        "match",
+        "contexts",
+        "instruction",
+        "limits",
+        "observation",
+        "observation_raised_hosts",
+        "effects",
+        "override",
+        "agents",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/ruleId"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hosts"
+          ],
+          "properties": {
+            "hosts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/hostPattern"
+              }
+            }
+          }
+        },
+        "contexts": {
+          "description": "'all', or a selector by context type and/or explicit workspace UUIDs (union).",
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "types": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "context-v1.schema.json#/$defs/contextType"
+                  }
+                },
+                "workspaces": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/workspaceUuid"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "instruction": {
+          "description": "Plain-language instruction. Used only as data for Jev judgement and shown verbatim to the user. Never interpreted as code.",
+          "type": "string",
+          "maxLength": 2000
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "daily_minutes",
+            "allowed_hours"
+          ],
+          "properties": {
+            "daily_minutes": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1440
+                }
+              ]
+            },
+            "allowed_hours": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "$ref": "#/$defs/allowedWindow"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "observation": {
+          "$ref": "#/$defs/observation"
+        },
+        "observation_raised_hosts": {
+          "description": "Hosts in a sensitive category (banking, government, health, identity, password managers) for which the user explicitly raised the level above address. Every entry must also appear in match.hosts.",
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/hostPattern"
+          }
+        },
+        "effects": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/effect"
+          }
+        },
+        "override": {
+          "description": "Friction for continuing anyway. The user can always continue.",
+          "enum": [
+            "none",
+            "confirm",
+            "delay_10s"
+          ]
+        },
+        "agents": {
+          "description": "Part of v1 but ignored until M2. The human's limits never restrict agents; agents never see the ledger unless allowed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "access",
+            "instruction"
+          ],
+          "properties": {
+            "access": {
+              "enum": [
+                "none",
+                "read",
+                "act_with_confirmation"
+              ]
+            },
+            "instruction": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "ruleStore": {
+      "description": "Profile file axiosozo/site-rules.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "rules",
+        "jev"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/siteRule"
+          }
+        },
+        "jev": {
+          "description": "User consent and pacing for optional Jev judgement. consent=false means zero Jev calls regardless of key.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "consent",
+            "interval_minutes",
+            "hourly_budget"
+          ],
+          "properties": {
+            "consent": {
+              "type": "boolean"
+            },
+            "interval_minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "hourly_budget": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 30
+            }
+          }
+        }
+      }
+    },
+    "ledgerRecord": {
+      "description": "Local foreground time for one host in one context on one local calendar day. Private windows are never recorded. context_uuid null means the tab had no workspace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "day",
+        "host",
+        "context_uuid",
+        "foreground_ms"
+      ],
+      "properties": {
+        "day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "host": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^[a-z0-9.-]+$"
+        },
+        "context_uuid": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/workspaceUuid"
+            }
+          ]
+        },
+        "foreground_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000
+        }
+      }
+    },
+    "ledger": {
+      "description": "Profile file axiosozo/usage-ledger.json. At most one record per (day, host, context_uuid). Records older than retention_days are pruned on load and daily.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "retention_days",
+        "records"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 90
+        },
+        "records": {
+          "type": "array",
+          "maxItems": 200000,
+          "items": {
+            "$ref": "#/$defs/ledgerRecord"
+          }
+        }
+      }
+    },
+    "evaluation": {
+      "description": "Result of evaluating one rule for one foreground tab. effect none has reason_code null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "effect",
+        "source",
+        "reason_code"
+      ],
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/ruleId"
+        },
+        "effect": {
+          "$ref": "#/$defs/outcome"
+        },
+        "source": {
+          "enum": [
+            "deterministic",
+            "jev"
+          ]
+        },
+        "reason_code": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/reasonCode"
+            }
+          ]
+        }
+      }
+    },
+    "suppression": {
+      "description": "In-memory only. Created when the user dismisses a nudge (5 min) or continues past pause_site (15 min) for one rule in one context.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "context_uuid",
+        "effect",
+        "until"
+      ],
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/ruleId"
+        },
+        "context_uuid": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/workspaceUuid"
+            }
+          ]
+        },
+        "effect": {
+          "$ref": "#/$defs/effect"
+        },
+        "until": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ruleStore"
+    },
+    {
+      "$ref": "#/$defs/ledger"
+    }
+  ]
+}

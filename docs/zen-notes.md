@@ -198,3 +198,18 @@ decompressed SHA256, compressed SHA256, byte counts, session IDs, exact command
 exitcodes, and compiler-error/completion line excerpts. Raw files were removed
 only after decompression matched their original hash. This is real compile
 evidence, separate from the integration lead's subsequent GUI acceptance work.
+
+## Generated JAR manifest (Handoff 3, 27 September 2026)
+
+The three explicit `jar.inc.mn` overlay records were replaced by one
+hash-guarded record that inserts `#include axiosozo/jar.inc.mn`; the previous
+results moved to `retired.json`. `scripts/zen.py` generates
+`src/zen/common/axiosozo/jar.inc.mn` from the packaged file list: every
+`.mjs/.js/.xhtml/.html/.css` under `apps/browser/chrome/**` (including
+`overview/`) plus `packages/contexts/src/*.mjs` as `contexts/`, limited to files
+git lists as tracked or untracked-not-ignored, refusing symlinks. After
+`mach build`, `materialize_axiosozo_resources()` copies every packaged file into
+the dev bundle as a real file (the `privilegedabout` content process cannot
+follow the stage symlinks) and fails if one is missing. The first native build
+confirmed the nested `#include` resolves; 40 files were packaged. A chrome-only
+rebuild takes about 70 seconds.

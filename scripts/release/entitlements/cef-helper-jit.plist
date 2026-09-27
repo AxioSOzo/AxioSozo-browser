@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MPL-2.0. CEF "Helper (Renderer)" and "Helper (GPU)" apps.
+
+  UNVERIFIED ASSUMPTION. The pinned CEF 154.0.23 minimal archive contains no
+  entitlements file, so nothing here is mirrored from pinned source. V8 in the
+  renderer, like Gecko's plugin-container, needs MAP_JIT under the hardened runtime.
+  The CEF workstream must prove E0 with this exact hardened-runtime signature before
+  any release that embeds CEF. allow-unsigned-executable-memory is deliberately absent.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key><true/>
+  </dict>
+</plist>

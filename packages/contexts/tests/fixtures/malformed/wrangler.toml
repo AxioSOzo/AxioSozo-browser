@@ -1,0 +1,11 @@
+name = "edge-fixture"
+main = "src/index.ts"
+compatibility_date = 2026-01-01
+routes = [
+  { pattern = "shop.example.com/*", zone_name = "example.com" },
+]
+this line is not toml
+[env.staging]
+route = "staging.example.com/api/*"
+[env.staging.vars]
+MODE = "staging"

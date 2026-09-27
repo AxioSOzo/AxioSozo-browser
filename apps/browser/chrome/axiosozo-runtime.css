@@ -1,0 +1,218 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* F4/F5 runtime additions: environment pill, project block, rule indicator,
+ * outgoing-data indicator, rule panel, waiting overlay and pause interstitial.
+ * Zen/Firefox tokens with system-colour fallbacks; no custom fonts, no motion
+ * beyond what prefers-reduced-motion allows. */
+
+/* ---- Address bar ------------------------------------------------------------ */
+#axiosozo-env-pill,
+#axiosozo-rule-indicator {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: 2px;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: default;
+}
+#axiosozo-env-pill[hidden],
+#axiosozo-rule-indicator[hidden],
+#axiosozo-jev-outgoing[hidden] { display: none; }
+
+#axiosozo-env-pill {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+#axiosozo-env-pill:hover { background: color-mix(in srgb, currentColor 17%, transparent); }
+#axiosozo-env-pill[data-environment="production"] {
+  background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+}
+#axiosozo-env-pill .axiosozo-env-pill-alert { display: none; }
+#axiosozo-env-pill[data-services="down"] .axiosozo-env-pill-alert {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d93025;
+}
+
+#axiosozo-rule-indicator {
+  width: 22px;
+  height: 22px;
+  /* Zen's narrow sidebar URL bar otherwise squeezes the 22px hit target to ~8px. */
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--toolbarbutton-border-radius, 4px);
+  background: url("chrome://browser/skin/history.svg") center / 14px no-repeat;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.8;
+}
+#axiosozo-rule-indicator:hover { background-color: var(--urlbar-box-hover-bgcolor, color-mix(in srgb, currentColor 12%, transparent)); }
+
+#axiosozo-jev-outgoing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: 2px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 18%, transparent);
+}
+#axiosozo-jev-outgoing::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: url("chrome://global/skin/icons/arrow-up.svg") center / 10px no-repeat;
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
+:is(#axiosozo-env-pill, #axiosozo-rule-indicator):focus-visible,
+:is(.axiosozo-project-toggle, .axiosozo-waiting button, .axiosozo-pause button, .axiosozo-rule-edit):focus-visible {
+  outline: var(--focus-outline, 2px solid AccentColor);
+  outline-offset: var(--focus-outline-offset, 1px);
+}
+
+/* ---- Rule panel -------------------------------------------------------------- */
+#axiosozo-rule-panel .axiosozo-rule-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 320px;
+  padding: 12px 14px;
+  font-size: 12px;
+}
+#axiosozo-rule-panel h2 { margin: 0; font-size: 13px; font-weight: 600; }
+#axiosozo-rule-panel .axiosozo-rule-hosts { margin: 0; opacity: 0.75; }
+.axiosozo-rule-instruction {
+  margin: 0;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#axiosozo-rule-panel .axiosozo-rule-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+#axiosozo-rule-panel dt { opacity: 0.7; }
+#axiosozo-rule-panel dd { margin: 0; }
+.axiosozo-rule-edit,
+.axiosozo-waiting button,
+.axiosozo-pause button {
+  appearance: none;
+  padding: 4px 12px;
+  border: 1px solid var(--button-border-color, color-mix(in srgb, currentColor 22%, transparent));
+  border-radius: var(--button-border-radius, 6px);
+  background: var(--button-background-color, var(--button-bgcolor, ButtonFace));
+  color: var(--button-text-color, inherit);
+  font: inherit;
+}
+.axiosozo-rule-edit { align-self: flex-start; }
+:is(.axiosozo-waiting, .axiosozo-pause) button.primary {
+  border-color: transparent;
+  background: var(--button-background-color-primary, var(--button-primary-bgcolor, AccentColor));
+  color: var(--button-text-color-primary, var(--button-primary-color, AccentColorText));
+}
+:is(.axiosozo-waiting, .axiosozo-pause) button:disabled { opacity: 0.6; }
+
+/* ---- Project block (top of the active project workspace's tab list) -------------- */
+.axiosozo-project-block {
+  margin: 2px var(--zen-tab-margin, 6px) 6px;
+  padding: 2px 0;
+  border-radius: var(--border-radius-medium, 8px);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  font-size: 12px;
+}
+:root[zen-compact-mode="true"] .axiosozo-project-block { display: none; }
+.axiosozo-project-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+}
+.axiosozo-project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-project-summary { display: inline-flex; gap: 3px; }
+.axiosozo-project-toggle[aria-expanded="true"] .axiosozo-project-summary { display: none; }
+.axiosozo-project-services { margin: 0; padding: 0 8px 4px; list-style: none; }
+.axiosozo-project-services[hidden] { display: none; }
+.axiosozo-project-service { display: flex; align-items: center; gap: 6px; padding-block: 2px; }
+.axiosozo-service-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-service-status { opacity: 0.7; white-space: nowrap; }
+.axiosozo-status-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 35%, transparent);
+}
+.axiosozo-status-dot[data-status="up"] { background: #1e8e3e; }
+.axiosozo-status-dot[data-status="down"] { background: #d93025; }
+
+/* ---- Chrome-owned overlays in the tab's browser stack --------------------------------- */
+.axiosozo-waiting,
+.axiosozo-pause {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--zen-main-browser-background, Canvas);
+  color: var(--toolbar-color, CanvasText);
+  font: message-box;
+  font-size: 14px;
+}
+.axiosozo-waiting-card,
+.axiosozo-pause-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 34em;
+  text-align: center;
+}
+.axiosozo-waiting h1,
+.axiosozo-pause h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.axiosozo-waiting p,
+.axiosozo-pause p { margin: 0; }
+.axiosozo-waiting-status,
+.axiosozo-waiting-url { opacity: 0.75; }
+.axiosozo-waiting-url { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+.axiosozo-waiting-actions,
+.axiosozo-pause-actions,
+.axiosozo-pause-confirm { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.axiosozo-waiting [hidden],
+.axiosozo-pause [hidden] { display: none; }
+.axiosozo-waiting-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: axiosozo-spin 1s linear infinite;
+}
+.axiosozo-waiting:not([data-mode="polling"], [data-mode="reloading"]) .axiosozo-waiting-spinner { visibility: hidden; }
+@keyframes axiosozo-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .axiosozo-waiting-spinner { animation: none; }
+}

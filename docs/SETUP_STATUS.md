@@ -1,5 +1,7 @@
 # Setup status — 23 September 2026
 
+**27 September, Handoff 3 M1:** contexts, projects, dev loop, site rules and the `about:axiosozo` Overview are implemented on Gecko and exercised in the real app on a synthetic profile (27 PASS, 2 NOT_VERIFIED, 1 BLOCKED). E1/E2, live Jev and signed distribution remain blocked. See [Handoff 3 status](HANDOFF_3_STATUS.md). Not READY.
+
 The latest [26 September provider/engine continuation](PROVIDER_ENGINE_PROGRESS.md)
 adds the live-launch implementation and web-mode switching code. Its runtime
 validation remains incomplete; the results below are the prior native baseline.

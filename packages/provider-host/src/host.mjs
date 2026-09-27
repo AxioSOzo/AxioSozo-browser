@@ -4,16 +4,20 @@ import { StringDecoder } from 'node:string_decoder';
 import { exactKeys, id, object, prompt, ProviderError, requireValue } from './validation.mjs';
 import { DRIVERS } from './discovery.mjs';
 
-export const HOST_LIMITS = Object.freeze({ lineBytes: 65536, outputBytes: 4 * 1024 * 1024,
-  requests: 1024, concurrentRequests: 8, turnMs: 120000, idleMs: 120000 });
+// lineBytes fits a 64 KiB decision-v1 state plus its envelope.
+export const HOST_LIMITS = Object.freeze({ lineBytes: 73728, outputBytes: 4 * 1024 * 1024,
+  requests: 1024, concurrentRequests: 8, turnMs: 120000, idleMs: 120000, decisionsPerHour: 30 });
+const HOUR_MS = 3600000;
 
 // One process-owned channel, one immutable provider session. The caller is trusted
 // browser chrome; this is not an HTTP service or a web-content/native-messaging API.
 export class ProviderHost extends EventEmitter {
   #factory; #session = null; #opening = false; #closed = false; #seen = new Set();
   #pending = new Set(); #turnTimer; #idleTimer; #outputBytes = 0; #closePromise; #openingPromise; #closing;
-  constructor({ createAdapter, limits = HOST_LIMITS }) {
-    super(); this.#factory = createAdapter; this.limits = { ...HOST_LIMITS, ...limits };
+  #createDecider; #decider = null; #decisions = new Map(); #deciding = 0; #sent = []; #now;
+  constructor({ createAdapter, createDecisionProvider = null, limits = HOST_LIMITS, now = Date.now }) {
+    super(); this.#factory = createAdapter; this.#createDecider = createDecisionProvider; this.#now = now;
+    this.limits = { ...HOST_LIMITS, ...limits };
     this.#armIdle();
   }
   #send(value) {
@@ -23,6 +27,7 @@ export class ProviderHost extends EventEmitter {
     clearTimeout(this.#idleTimer);
     if (this.#closed) return;
     this.#idleTimer = setTimeout(() => {
+      if (this.#deciding) { this.#armIdle(); return; }
       this.#send({ event: { version: 1, type: 'host_idle', session_id: this.#session?.binding.session_id ?? null } });
       void this.close();
     }, this.limits.idleMs);
@@ -78,7 +83,33 @@ export class ProviderHost extends EventEmitter {
         message: error instanceof ProviderError ? error.message : 'Provider host failed; close and retry the session' } });
     } finally { this.#pending.delete(requestId); }
   }
+  // Defense in depth behind the browser's own budget: a rolling hour per host process.
+  #takeBudget() {
+    const now = this.#now(); this.#sent = this.#sent.filter(at => now - at < HOUR_MS);
+    if (this.#sent.length >= this.limits.decisionsPerHour) return false;
+    this.#sent.push(now); return true;
+  }
+  async #decide(params) {
+    requireValue(this.#createDecider, 'UNSUPPORTED', 'Decisions are unavailable in this host');
+    this.#decider ??= this.#createDecider();
+    const controller = new AbortController(); const requestId = typeof params.request_id === 'string' ? params.request_id : null;
+    const tracked = requestId !== null && !this.#decisions.has(requestId);
+    if (tracked) this.#decisions.set(requestId, controller);
+    this.#deciding++; clearTimeout(this.#idleTimer);
+    try { return await this.#decider.decideSiteRule(params, { signal: controller.signal, allowSend: () => !this.#closed && this.#takeBudget() }); }
+    finally {
+      if (tracked) this.#decisions.delete(requestId);
+      if (--this.#deciding === 0 && !this.#session?.active && !this.#opening) this.#armIdle();
+    }
+  }
   async #dispatch(method, params, requestId) {
+    // Decisions need no provider session and never start a provider client.
+    if (method === 'decision/site_rule') return this.#decide(params);
+    if (method === 'decision/cancel') {
+      exactKeys(params, ['request_id']); id(params.request_id, 'request_id');
+      const controller = this.#decisions.get(params.request_id); controller?.abort();
+      return { status: controller ? 'cancelling' : 'not_found', request_id: params.request_id };
+    }
     if (method === 'session/open') {
       exactKeys(params, ['driver', 'instance_id', 'session_id']);
       requireValue(DRIVERS.includes(params.driver), 'UNSUPPORTED', 'Unknown provider driver');
@@ -125,6 +156,7 @@ export class ProviderHost extends EventEmitter {
   async close() {
     if (this.#closePromise) return this.#closePromise;
     this.#closed = true; clearTimeout(this.#turnTimer); clearTimeout(this.#idleTimer);
+    for (const controller of this.#decisions.values()) controller.abort();
     this.#closePromise = (async () => {
       if (this.#openingPromise) {
         try { const adapter = await this.#openingPromise; await adapter.close(); } catch { /* Failed startup already reaps its child. */ }
@@ -136,8 +168,8 @@ export class ProviderHost extends EventEmitter {
   }
 }
 
-export async function serveStdio({ createAdapter, input = process.stdin, output = process.stdout, limits }) {
-  const host = new ProviderHost({ createAdapter, limits });
+export async function serveStdio({ createAdapter, createDecisionProvider, input = process.stdin, output = process.stdout, limits }) {
+  const host = new ProviderHost({ createAdapter, createDecisionProvider, limits });
   const decoder = new StringDecoder('utf8'); let buffer = '';
   let resolveDone;
   const done = new Promise(resolve => { resolveDone = resolve; });

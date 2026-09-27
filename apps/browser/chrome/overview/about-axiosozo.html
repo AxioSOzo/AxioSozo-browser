@@ -1,0 +1,107 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. https://mozilla.org/MPL/2.0/ -->
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src chrome:; style-src chrome:; img-src chrome: data:; object-src 'none'; frame-ancestors 'none'; form-action 'none'">
+    <meta name="color-scheme" content="light dark">
+    <meta name="referrer" content="no-referrer">
+    <title>AxioSozo overview</title>
+    <link rel="icon" href="chrome://branding/content/icon32.png">
+    <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
+    <link rel="stylesheet" href="chrome://browser/content/axiosozo/overview/about-axiosozo.css">
+    <script type="module" src="chrome://browser/content/axiosozo/overview/about-axiosozo.mjs"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="page-header">
+      <h1>Overview</h1>
+      <p class="deemphasized">Contexts, projects, site rules and screen time. Everything here stays on this machine.</p>
+      <nav aria-label="Overview sections">
+        <ul class="section-nav">
+          <li><a href="#attention">Needs attention</a></li>
+          <li><a href="#contexts">Contexts</a></li>
+          <li><a href="#projects">Projects</a></li>
+          <li><a href="#rules">Site rules</a></li>
+          <li><a href="#screen-time">Screen time</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <main id="main" tabindex="-1">
+      <section id="attention" aria-labelledby="attention-heading">
+        <h2 id="attention-heading">Needs attention</h2>
+        <ul id="attention-list" class="plain-list" aria-describedby="attention-heading"></ul>
+      </section>
+
+      <section id="contexts" aria-labelledby="contexts-heading">
+        <h2 id="contexts-heading">Contexts</h2>
+        <p id="contexts-help" class="deemphasized">A context is a Zen workspace with a type. Each workspace keeps its own container, so sign-ins stay separate.</p>
+        <div id="contexts-body"></div>
+      </section>
+
+      <section id="projects" aria-labelledby="projects-heading">
+        <h2 id="projects-heading">Projects</h2>
+        <p id="projects-help" class="deemphasized">A project is a local folder with confirmed names, addresses and services. Detection reads only a fixed list of configuration files and never runs anything.</p>
+        <div class="toolbar">
+          <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
+        </div>
+        <div id="project-review" hidden></div>
+        <ul id="project-list" class="plain-list"></ul>
+      </section>
+
+      <section id="rules" aria-labelledby="rules-heading">
+        <h2 id="rules-heading">Site rules</h2>
+        <p id="rules-help" class="deemphasized">A site rule is your own instruction for a set of sites, with limits the browser enforces locally. You can always continue past a rule.</p>
+        <div class="toolbar">
+          <button id="add-rule" type="button" class="primary" aria-describedby="rules-help">Add site rule…</button>
+        </div>
+        <div id="rule-editor" hidden></div>
+        <ul id="rule-list" class="plain-list"></ul>
+        <div id="jev-settings"></div>
+      </section>
+
+      <section id="screen-time" aria-labelledby="screen-time-heading">
+        <h2 id="screen-time-heading">Screen time</h2>
+        <p id="screen-time-help" class="deemphasized">Foreground time per site, per context, per day. Kept on this machine for 90 days and never uploaded. Private windows are not recorded.</p>
+        <div class="toolbar">
+          <label for="ledger-days">Period</label>
+          <select id="ledger-days" aria-describedby="screen-time-help">
+            <option value="1">Today</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+          <label for="ledger-group">Show</label>
+          <select id="ledger-group">
+            <option value="host" selected>By site and context</option>
+            <option value="day">By day</option>
+          </select>
+          <button id="ledger-export" type="button">Export as JSON…</button>
+          <button id="ledger-clear" type="button" class="destructive">Delete screen time…</button>
+        </div>
+        <div id="ledger-body"></div>
+      </section>
+
+      <section id="orphans" aria-labelledby="orphans-heading" hidden>
+        <h2 id="orphans-heading">Metadata for deleted workspaces</h2>
+        <p id="orphans-help" class="deemphasized">These workspaces no longer exist. Their AxioSozo settings are kept but never reused. Remove them if you do not need them.</p>
+        <div id="orphans-body"></div>
+      </section>
+    </main>
+
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+      <div class="dialog-body">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-message"></p>
+        <div class="button-row">
+          <button type="button" id="confirm-cancel">Cancel</button>
+          <button type="button" id="confirm-accept" class="primary"></button>
+        </div>
+      </div>
+    </dialog>
+  </body>
+</html>

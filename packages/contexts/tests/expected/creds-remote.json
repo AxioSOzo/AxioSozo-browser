@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "name": "@acme/widget-cli",
+  "kind": "cli",
+  "kind_source": {
+    "source": "package.json bin",
+    "guess": false
+  },
+  "environments": [],
+  "services": [],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/widget",
+      "kind": "repository",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/widget/issues",
+      "kind": "issues",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/widget/actions",
+      "kind": "ci",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/widget/releases",
+      "kind": "releases",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "npm",
+      "url": "https://www.npmjs.com/package/@acme/widget-cli",
+      "kind": "package",
+      "source": "package.json name",
+      "guess": true
+    }
+  ],
+  "frameworks": [],
+  "files_read": [
+    "package.json",
+    ".git/config"
+  ],
+  "refused": [],
+  "warnings": [
+    ".git/config: removed credentials from remote \"origin\""
+  ]
+}
