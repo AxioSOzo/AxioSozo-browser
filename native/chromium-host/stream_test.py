@@ -81,6 +81,7 @@ class Session:
         self.browsing_mode = browsing_mode
         self.timeout = timeout
         self.target = None
+        self.targets = {}
         self.events, self.frames = [], 0
         hello = dict(version=1, method='hello', token=self.token, engine_instance=self.instance,
                      fixture_origin=origin)
@@ -109,8 +110,12 @@ class Session:
             kind, item, pixels = read_packet(self.process.stdout, deadline)
             if kind == 1:
                 self.events.append(item)
-                if item.get('target'):
-                    self.target = item['target']
+                target = item.get('target')
+                if target:
+                    # One host can serve several tabs; `target` follows the first.
+                    self.targets[target['tab_id']] = target
+                    if self.target is None or target['tab_id'] == self.target['tab_id']:
+                        self.target = target
             else:
                 self.frames += 1
                 self.command('frame_ack', target=item['target'], frame_id=item['frame_id'])

@@ -1,20 +1,5 @@
 [
   {
-    "path": "src/zen/common/modules/ZenUpdates.mjs",
-    "before_sha256": "e27d5cfce760eeaa2ba52fbd2291b7a457ccf89caa9dfbf629811bab6b271346",
-    "after_sha256": "9408c74a6c548a3884bfe1b6552ac54cfeec94da79e06e00556da87bed0f53dc",
-    "replacements": [
-      [
-        "    version === lastVersion ||\n",
-        "    version === lastVersion ||\n    Services.prefs.getBoolPref(\"axiosozo.minimal-ui\", false) ||\n"
-      ],
-      [
-        "export async function playWindowSweepAnimation() {\n",
-        "export async function playWindowSweepAnimation() {\n  if (Services.prefs.getBoolPref(\"axiosozo.minimal-ui\", false)) return;\n"
-      ]
-    ]
-  },
-  {
     "path": "src/zen/common/ZenPreloadedScripts.js",
     "before_sha256": "be9a28b4b45e0dd508a7d611b21d1b0997ff7b6920f3a80284adc4eec6f8bfda",
     "after_sha256": "1cd314340005a1583b6eae5227d2ff4a2b8fbb633226bcd393dee2c64f0e3119",
@@ -44,28 +29,6 @@
       [
         "        content/browser/ZenStartup.mjs",
         "        content/browser/axiosozo/BrowserExperience.sys.mjs (../../zen/common/axiosozo/BrowserExperience.sys.mjs)\n        content/browser/axiosozo/SavedPages.sys.mjs (../../zen/common/axiosozo/SavedPages.sys.mjs)\n        content/browser/axiosozo/browser-experience.css (../../zen/common/axiosozo/browser-experience.css)\n        content/browser/ZenStartup.mjs"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/compact-mode.yaml",
-    "before_sha256": "b55721ee08c04cf2f532943fe72ef27643db419497aba136a2c4aa1ac5c177e7",
-    "after_sha256": "bfab8e8c13ce14289357c5a0f16be02dd9796c92e0088dcb11f5f453a20f0594",
-    "replacements": [
-      [
-        "- name: zen.view.compact.enable-at-startup\n  hidden: true\n  value: false\n",
-        "- name: zen.view.compact.enable-at-startup\n  hidden: true\n  value: true\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/welcome.yaml",
-    "before_sha256": "74a1a4925deb04e6fc3b9ebc57c7db479d85881aa07b90361fa5dfc6b5cf90e9",
-    "after_sha256": "74a1a4925deb04e6fc3b9ebc57c7db479d85881aa07b90361fa5dfc6b5cf90e9",
-    "replacements": [
-      [
-        "- name: zen.welcome-screen.seen\n  value: \"@cond\"\n  sticky: true\n  condition: \"!defined(MOZILLA_OFFICIAL)\"\n",
-        "- name: zen.welcome-screen.seen\n  value: \"@cond\"\n  sticky: true\n  condition: \"!defined(MOZILLA_OFFICIAL)\"\n"
       ]
     ]
   },
@@ -140,95 +103,6 @@
       [
         "        content/browser/ZenStartup.mjs",
         "        content/browser/axiosozo/ProviderConversation.sys.mjs (../../zen/common/axiosozo/ProviderConversation.sys.mjs)\n        content/browser/axiosozo/ProviderPanel.sys.mjs (../../zen/common/axiosozo/ProviderPanel.sys.mjs)\n        content/browser/ZenStartup.mjs"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/compact-mode.yaml",
-    "before_sha256": "bfab8e8c13ce14289357c5a0f16be02dd9796c92e0088dcb11f5f453a20f0594",
-    "after_sha256": "af1222e5685ea0a7fbc5862c641048c531984c5bc0a44058dd1b27bf53e526fc",
-    "replacements": [
-      [
-        "- name: zen.view.compact.animate-sidebar\n  value: true\n",
-        "- name: zen.view.compact.animate-sidebar\n  value: false\n"
-      ],
-      [
-        "- name: zen.view.compact.show-background-tab-toast\n  value: true\n",
-        "- name: zen.view.compact.show-background-tab-toast\n  value: false\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/boosts.yaml",
-    "before_sha256": "540289351dafccc0e155bf271580f129999a3c640d8599ca47d1d047c2202ba2",
-    "after_sha256": "c7349bcd61398f829f256f09ef2b5984fba70fed1e3f6d4503507acc5783e355",
-    "replacements": [
-      [
-        "- name: zen.boosts.enabled\n  value: true\n",
-        "- name: zen.boosts.enabled\n  value: false\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/glance.yaml",
-    "before_sha256": "b9d4107513f82f4bb74f30a5e4c3b5a594f18c56e5dd9f8b8e9fff1975f81f07",
-    "after_sha256": "73895216ce0f5d8f98c7b0237d8cfe92931cfcaedbb70ac398673f187ca6eb49",
-    "replacements": [
-      [
-        "- name: zen.glance.enabled\n  value: true\n",
-        "- name: zen.glance.enabled\n  value: false\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/downloads.yaml",
-    "before_sha256": "6addca8d37ba88ed7abf0040fd249bbc51d4ad67461c597b5d1f072fe3512f08",
-    "after_sha256": "9751de731d73a0b41e37c1f3a866bd9295b0ddc7496b4b40cdbbb4d878e3c754",
-    "replacements": [
-      [
-        "- name: zen.downloads.download-animation\n  value: true\n",
-        "- name: zen.downloads.download-animation\n  value: false\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/workspaces.yaml",
-    "before_sha256": "a3c9dff66a7de397e8939bd852fed531cdd87fd4cfe0e1fa02510c2c2e03c036",
-    "after_sha256": "b3bf5e6d8e6491237974333ea83abacd24637513e749db1f819929bece28fc2c",
-    "replacements": [
-      [
-        "- name: zen.workspaces.swipe-actions\n  value: true\n",
-        "- name: zen.workspaces.swipe-actions\n  value: false\n"
-      ],
-      [
-        "- name: zen.workspaces.switch-animation-duration\n  value: 250\n",
-        "- name: zen.workspaces.switch-animation-duration\n  value: 0\n"
-      ]
-    ]
-  },
-  {
-    "path": "prefs/zen/theme.yaml",
-    "before_sha256": "fee904173d940a92c25961a90fc87002fd15e36870773bc567cb4bb52fd84dec",
-    "after_sha256": "6a739283a8f4827b27542b8ff37147c7bdc988c3566fb343a1fc1782ca89962c",
-    "replacements": [
-      [
-        "- name: zen.theme.use-system-colors\n  value: false\n",
-        "- name: zen.theme.use-system-colors\n  value: true\n"
-      ],
-      [
-        "- name: zen.theme.hide-unified-extensions-button\n  value: true\n",
-        "- name: zen.theme.hide-unified-extensions-button\n  value: false\n"
-      ]
-    ]
-  },
-  {
-    "path": "src/browser/themes/shared/preferences/zen-preferences.css",
-    "before_sha256": "d775c7dd21c872833646a1ca20987b265212e274ef9a11f67b51c2da5f531651",
-    "after_sha256": "1aed4a1274e96658369dc55ca0a3eea90cb0dea1be891624727a6b034a596628",
-    "replacements": [
-      [
-        "@media -moz-pref(\"zen.urlbar.replace-newtab\") {\n  #category-home {\n    display: none !important;\n  }\n}\n",
-        "@media -moz-pref(\"zen.urlbar.replace-newtab\") {\n  #category-home {\n    display: none !important;\n  }\n}\n\n/* AxioSozo exposes browser essentials; optional Zen customization stays out of the main settings navigation. */\n@media -moz-pref(\"axiosozo.minimal-ui\") {\n  #category-zen-looks,\n  #category-zen-marketplace {\n    display: none !important;\n  }\n}\n"
       ]
     ]
   }

@@ -243,6 +243,7 @@ export async function attachCoordinator(win, adapter, { isTargetActive = () => t
       update.catch(onFailure);
     };
     for (const record of adapter.tabs.values()) {
+      if (!adapter.loaded(record)) continue;
       const target = adapter.target(record);
       if (!target.private_mode) await bridge.synchronize(target);
     }

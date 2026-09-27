@@ -1,18 +1,28 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
-import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROMIUM_VERSION } from "./CEFEngineAdapter.sys.mjs";
+import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROMIUM_VERSION, BLANK_IDENTITY } from "./CEFEngineAdapter.sys.mjs";
 
-const MAX_CEF_TABS = 4;
-const BLANK_IDENTITY = "https://axiosozo.invalid";
-/** A switch is not authority to replay POST results or URL-carried secrets. */
+const MAX_CEF_TABS = 24;
+const XHTML = "http://www.w3.org/1999/xhtml";
+// Persisted with Zen's own session so a Chromium tab restores as a Chromium tab.
+const ENGINE_ATTRIBUTE = "axiosozo-engine";
+const ENGINE_VALUE = "axiosozo-engine";
+const URL_VALUE = "axiosozo-chromium-url";
+
+/** A page address that one engine may hand to the other on an explicit switch. */
+export function transferableURL(value) {
+  return allowedWebURL(value) && value !== "about:blank" ? value : null;
+}
+
+/**
+ * The switch carries the visible address, as if the user retyped it. It never
+ * replays POST results: the pinned parent-process nsISHEntry must match and
+ * carry no POST data. Page content, cookies and history stay in their engine.
+ */
 export function transferableGeckoURL(browser) {
-  const value = browser.currentURI?.spec;
-  if (!allowedWebURL(value) || value === "about:blank") return null;
-  const url = new URL(value);
-  if (url.search || url.hash) return null;
+  const value = transferableURL(browser.currentURI?.spec);
+  if (!value) return null;
   try {
-    // This is the pinned parent-process nsISHEntry, never serialized session
-    // history or page content. Only inspect the presence of POST data.
     const entry = browser.browsingContext?.activeSessionHistoryEntry;
     if (!entry || entry.URI?.spec !== value || entry.postData !== null) return null;
     return value;
@@ -37,6 +47,8 @@ const MAC_KEYS = {
   Home:0x73, PageUp:0x74, Delete:0x75, End:0x77, PageDown:0x79,
   ArrowLeft:0x7b, ArrowRight:0x7c, ArrowDown:0x7d, ArrowUp:0x7e,
 };
+// Command chords that edit or move within page text stay with the page.
+const PAGE_CHORDS = new Set(["arrowleft", "arrowright", "arrowup", "arrowdown", "backspace", "delete", "home", "end"]);
 export function cefModifiers(event) {
   return (event.getModifierState?.("CapsLock") ? 1 : 0) | (event.shiftKey ? 2 : 0)
     | (event.ctrlKey ? 4 : 0) | (event.altKey ? 8 : 0) | (event.metaKey ? 128 : 0)
@@ -46,8 +58,10 @@ export function keyboardRoute(event, { editing = false } = {}) {
   if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
   const key = event.key.toLowerCase();
   if (event.metaKey && ["c", "v", "x", "a", "z"].includes(key)) return editing ? "edit" : "unsupported";
-  if ((event.metaKey && ["l", "r", "t", "w", "n", "q", ",", "[", "]", "arrowleft", "arrowright"].includes(key))
-      || (event.ctrlKey && key === "tab") || /^F\d{1,2}$/u.test(event.key)) return "chrome";
+  // Every other ⌘ shortcut (new tab, close, find, tab numbers, zoom, Zen's own
+  // commands) belongs to the browser, exactly as over a Firefox page.
+  if ((event.metaKey && !PAGE_CHORDS.has(key)) || (event.ctrlKey && ["tab", "pageup", "pagedown"].includes(key))
+      || /^F\d{1,2}$/u.test(event.key)) return "chrome";
   return Object.hasOwn(MAC_KEYS, event.code) ? "cef" : "unsupported";
 }
 export function cefKey(event, type) {
@@ -70,32 +84,60 @@ export function bgraToRGBA(buffer) {
   return rgba;
 }
 
-/** Experimental privileged presenter; a CEF frame is never injected into website DOM. */
+const PAGE_ERRORS = {
+  certificate_error: ["Your connection isn't private",
+    "Chromium could not verify this site's certificate and did not load it. Firefox can show you the details."],
+  load_failed: ["This page couldn't be loaded", "Check the address and your connection, then try again."],
+  render_process_terminated: ["This page stopped working", "Reload to try again. Anything you entered may be lost."],
+  engine_failed: ["Chromium stopped", "The Chromium engine for this tab stopped. Reload to start it again."],
+};
+const NOTICES = {
+  permission_denied: "Chromium tabs can't grant site permissions yet.",
+  download_denied: "Downloads aren't supported in Chromium tabs yet. Open this tab in Firefox to download.",
+  popup_denied: "A pop-up was blocked.",
+  file_dialog_unavailable: "File uploads aren't supported in Chromium tabs yet.",
+  javascript_dialog_unavailable: "This page tried to show a dialog, which Chromium tabs don't support yet.",
+  client_certificate_unavailable: "Client certificates aren't supported in Chromium tabs.",
+  navigation_denied: "Chromium tabs only open web addresses.",
+};
+
+/**
+ * Presents Chromium inside a Zen tab and routes Zen's own tab, address bar and
+ * navigation controls to the tab's engine. Privileged chrome only; a CEF frame
+ * is never injected into website DOM.
+ */
 export class CEFPresenter {
   constructor(win, geckoAdapter, { launch = launchCEF, onEngineChange = () => {},
-    onTargetEvent = () => {}, onFailure = () => {}, browsingMode = "fixture" } = {}) {
+    onTargetEvent = () => {}, onFailure = () => {}, onSwitchStart = () => {}, browsingMode = "fixture" } = {}) {
     this.window = win; this.gecko = geckoAdapter; this.launch = launch;
     this.onEngineChange = onEngineChange; this.onTargetEvent = onTargetEvent; this.onFailure = onFailure;
+    this.onSwitchStart = onSwitchStart;
     this.browsingMode = browsingMode;
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = [];
+    this.restoreURLs = new WeakMap();
     this.onTabClose = event => {
       const record = this.records.get(event.target) || (event.target === this.pending?.tab ? this.pending : null);
-      if (record) this.#remove(record).then(() => this.#indicator(this.active)).catch(onFailure);
+      if (record) this.#remove(record, { keepEngine: true }).then(() => this.#indicator(this.active)).catch(onFailure);
     };
     this.onTabAttrModified = event => {
       const record = this.records.get(event.target);
       if (!record) return;
       try { this.#assertNoActiveMedia(record.tab); }
-      catch (error) { this.#failed(record, error); }
+      catch (error) { this.#revert(record, error); }
     };
     this.onTabSelect = () => {
       for (const record of this.records.values()) this.#visibility(record);
       this.#indicator(this.active);
-      if (this.active) { this.#syncChrome(this.active); this.#resize(this.active); }
+      if (this.active) {
+        this.#syncChrome(this.active); this.#resize(this.active);
+        if (!this.window.gURLBar.focused) this.active.canvas.focus();
+      } else this.#activateIfMarked(this.window.gBrowser.selectedTab);
     };
+    this.onTabRestored = event => this.#adoptRestoredTab(event.target);
     win.gBrowser.tabContainer.addEventListener("TabClose", this.onTabClose);
     win.gBrowser.tabContainer.addEventListener("TabSelect", this.onTabSelect);
     win.gBrowser.tabContainer.addEventListener("TabAttrModified", this.onTabAttrModified);
+    win.gBrowser.tabContainer.addEventListener("SSTabRestored", this.onTabRestored);
     this.onVisibilityChange = () => {
       // Gecko's own handler runs first, then reapply ownership after it may
       // reactivate the retained document when the window becomes visible.
@@ -104,17 +146,29 @@ export class CEFPresenter {
       });
     };
     win.document.addEventListener?.("visibilitychange", this.onVisibilityChange);
-    try { this.#installCommands(); this.#installIdentityMask(); }
-    catch (error) {
+    try {
+      this.#installCommands(); this.#installStyle();
+      if (this.browsingMode === "web") { this.#installTabMenu(); this.#installBadge(); }
+    } catch (error) {
       for (const restore of this.restoreHooks.reverse()) restore();
-      win.gBrowser.tabContainer.removeEventListener("TabClose", this.onTabClose);
-      win.gBrowser.tabContainer.removeEventListener("TabSelect", this.onTabSelect);
-      win.gBrowser.tabContainer.removeEventListener("TabAttrModified", this.onTabAttrModified);
-      win.document.removeEventListener?.("visibilitychange", this.onVisibilityChange);
+      this.#removeListeners();
       throw error;
+    }
+    if (this.browsingMode === "web") {
+      for (const tab of win.gBrowser.tabs ?? []) this.#adoptRestoredTab(tab);
+      this.window.queueMicrotask(() => this.#activateIfMarked(this.window.gBrowser.selectedTab));
     }
   }
   get active() { return this.records.get(this.window.gBrowser.selectedTab) ?? null; }
+  get record() { return this.active; }
+  #removeListeners() {
+    const container = this.window.gBrowser.tabContainer;
+    container.removeEventListener("TabClose", this.onTabClose);
+    container.removeEventListener("TabSelect", this.onTabSelect);
+    container.removeEventListener("TabAttrModified", this.onTabAttrModified);
+    container.removeEventListener("SSTabRestored", this.onTabRestored);
+    this.window.document.removeEventListener?.("visibilitychange", this.onVisibilityChange);
+  }
   #assertNoActiveMedia(tab) {
     const sharing = this.window.gBrowser.getTabSharingState?.(tab);
     if (sharing?.camera || sharing?.microphone || sharing?.screen) throw new Error("CEF_ACTIVE_CAPTURE_MUST_STOP");
@@ -122,8 +176,14 @@ export class CEFPresenter {
       throw new Error("CEF_ACTIVE_MEDIA_MUST_PAUSE");
     }
   }
-  get record() { return this.active; }
-  owners() { return [...this.records.values()].map(record => record.originalTarget.tab_id); }
+  owners() {
+    const owners = [...this.records.values()].map(record => record.originalTarget.tab_id);
+    if (this.pending?.originalTarget && !owners.includes(this.pending.originalTarget.tab_id)) owners.push(this.pending.originalTarget.tab_id);
+    return owners;
+  }
+  engineOf(tab) {
+    return this.records.has(tab) || this.pending?.tab === tab || tab?.getAttribute?.(ENGINE_ATTRIBUTE) === "chromium" ? "chromium" : "gecko";
+  }
   currentPage(tab = this.window.gBrowser.selectedTab) {
     const record = this.records.get(tab);
     return record ? { url:record.latestURL, title:record.title || "", engine:"chromium", tabId:record.originalTarget.tab_id } : null;
@@ -134,7 +194,7 @@ export class CEFPresenter {
     if (postData) throw new Error("CEF_POST_REPLAY_BLOCKED");
     if (!record.adapter.allowedURL(url)) throw new Error("CEF_UNSUPPORTED_URL");
     const result = await record.adapter.navigate(record.adapter.target, url);
-    if (result.status !== "success") throw new Error("CEF_NAVIGATION_FAILED");
+    if (!["success", "unsupported"].includes(result.status) && result.reason !== "NAVIGATION_SUPERSEDED") throw new Error("CEF_NAVIGATION_FAILED");
     if (this.active === record) record.canvas.focus();
     return true;
   }
@@ -142,27 +202,166 @@ export class CEFPresenter {
     if (!this.active) return false;
     this.active.canvas.focus(); return true;
   }
-  #installIdentityMask() {
-    // Gecko's identity and permission controls describe the preserved document,
-    // never the CEF page. Do not show its lock/permission status over Chromium.
+
+  // ---- Engine choice, persisted per tab -------------------------------------
+  #session() { return this.window.SessionStore; }
+  #markEngine(tab, engine, url = null) {
+    const store = this.#session();
+    if (engine === "chromium") {
+      tab.setAttribute?.(ENGINE_ATTRIBUTE, "chromium");
+      try { store?.setCustomTabValue(tab, ENGINE_VALUE, "chromium"); } catch {}
+      this.#rememberURL(tab, url);
+    } else {
+      tab.removeAttribute?.(ENGINE_ATTRIBUTE);
+      this.restoreURLs.delete(tab);
+      try { store?.deleteCustomTabValue(tab, ENGINE_VALUE); store?.deleteCustomTabValue(tab, URL_VALUE); } catch {}
+    }
+  }
+  #rememberURL(tab, url) {
+    const value = transferableURL(url);
+    if (!value) return;
+    this.restoreURLs.set(tab, value);
+    try { this.#session()?.setCustomTabValue(tab, URL_VALUE, value); } catch {}
+  }
+  #adoptRestoredTab(tab) {
+    if (this.browsingMode !== "web" || !tab || this.records.has(tab)) return;
+    let engine = null, url = null;
+    try { engine = this.#session()?.getCustomTabValue(tab, ENGINE_VALUE); url = this.#session()?.getCustomTabValue(tab, URL_VALUE); } catch {}
+    if (engine !== "chromium") return;
+    tab.setAttribute?.(ENGINE_ATTRIBUTE, "chromium");
+    if (transferableURL(url)) this.restoreURLs.set(tab, url);
+    if (tab === this.window.gBrowser.selectedTab) this.#activateIfMarked(tab);
+  }
+  /** Chromium starts lazily, when its tab is first shown. */
+  #activateIfMarked(tab) {
+    if (this.disposed || this.browsingMode !== "web" || !tab || this.records.has(tab) || this.pending?.tab === tab
+        || tab.getAttribute?.(ENGINE_ATTRIBUTE) !== "chromium") return;
+    const previous = this.pending?.settled ?? Promise.resolve();
+    previous.catch(() => {}).then(() => {
+      if (this.disposed || this.window.gBrowser.selectedTab !== tab || this.records.has(tab) || this.pending) return;
+      return this.switchToChromium(tab, { url: this.restoreURLs.get(tab) ?? null });
+    }).catch(() => {});
+  }
+  /** The explicit per-tab switch behind the tab menu and the address-bar badge. */
+  async setTabEngine(tab, engine) {
+    if (engine === "chromium") {
+      if (this.records.has(tab) || this.pending?.tab === tab) return;
+      if (tab !== this.window.gBrowser.selectedTab) {
+        // A background tab switches when it is next shown.
+        this.#markEngine(tab, "chromium", transferableGeckoURL(tab.linkedBrowser));
+        return;
+      }
+      await this.switchToChromium(tab);
+      return;
+    }
+    const record = this.records.get(tab) || (this.pending?.tab === tab ? this.pending : null);
+    if (record) await this.#toGecko(record);
+    else this.#markEngine(tab, "gecko");
+  }
+
+  // ---- Browser chrome: style, tab menu and badge -------------------------------
+  #installStyle() {
+    // Gecko's identity and permission controls describe the blank Firefox
+    // document, never the CEF page. The badge states Chromium's own state.
     const root = this.window.document.documentElement;
     if (!root) return;
-    const style = this.window.document.createElementNS("http://www.w3.org/1999/xhtml", "style");
-    style.textContent = `[axiosozo-cef-active] :is(#identity-box, #tracking-protection-icon-container,
-      #notification-popup-box, #reader-mode-button, #translations-button, #pageActionButton, #star-button-box) { display:none !important; }`;
+    const style = this.window.document.createElementNS(XHTML, "style");
+    style.textContent = `
+      [axiosozo-cef-active] :is(#identity-box, #tracking-protection-icon-container,
+        #notification-popup-box, #reader-mode-button, #translations-button, #pageActionButton, #star-button-box) { display:none !important; }
+      #axiosozo-engine-badge { display:none; align-items:center; gap:5px; margin-inline:4px 2px; padding:1px 8px;
+        border:0; border-radius:999px; background:color-mix(in srgb, #1a73e8 16%, transparent); color:inherit;
+        font:inherit; font-size:11px; font-weight:600; white-space:nowrap; cursor:default; }
+      [axiosozo-cef-active] #axiosozo-engine-badge { display:inline-flex; }
+      #axiosozo-engine-badge:hover { background:color-mix(in srgb, #1a73e8 26%, transparent); }
+      #axiosozo-engine-badge:focus-visible { outline:2px solid var(--focus-outline-color, AccentColor); outline-offset:1px; }
+      #axiosozo-engine-badge[insecure] { background:color-mix(in srgb, #d93025 16%, transparent); }
+      .tabbrowser-tab[axiosozo-engine="chromium"] .tab-icon-stack { position:relative; }
+      .tabbrowser-tab[axiosozo-engine="chromium"] .tab-icon-stack::after { content:"C"; position:absolute;
+        inset-inline-end:-4px; inset-block-end:-4px; width:10px; height:10px; border-radius:50%;
+        background:#1a73e8; color:#fff; font:700 7px/10px system-ui; text-align:center; pointer-events:none; }
+      [data-axiosozo-cef] .axiosozo-cef-panel { position:absolute; inset:0; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; gap:10px; padding:32px; text-align:center;
+        background:Canvas; color:CanvasText; font:14px/1.5 system-ui; }
+      [data-axiosozo-cef] .axiosozo-cef-panel[hidden], [data-axiosozo-cef] .axiosozo-cef-notice[hidden] { display:none; }
+      [data-axiosozo-cef] .axiosozo-cef-panel h1 { margin:0; font-size:20px; font-weight:600; }
+      [data-axiosozo-cef] .axiosozo-cef-panel p { margin:0; max-width:34em; opacity:.8; }
+      [data-axiosozo-cef] .axiosozo-cef-panel div { display:flex; gap:8px; margin-top:6px; }
+      [data-axiosozo-cef] .axiosozo-cef-panel button { font:inherit; padding:5px 14px; border-radius:6px;
+        border:1px solid color-mix(in srgb, CanvasText 25%, Canvas); background:Canvas; color:inherit; }
+      [data-axiosozo-cef] .axiosozo-cef-panel button.primary { background:AccentColor; color:AccentColorText; border-color:transparent; }
+      [data-axiosozo-cef] .axiosozo-cef-notice { position:absolute; inset-inline:0; inset-block-end:16px; margin:auto;
+        width:max-content; max-width:80%; padding:6px 12px; border-radius:8px; background:color-mix(in srgb, CanvasText 85%, Canvas);
+        color:Canvas; font:12px/1.4 system-ui; pointer-events:none; }`;
     root.appendChild(style);
     this.restoreHooks.push(() => { root.removeAttribute("axiosozo-cef-active"); style.remove(); });
   }
+  #installTabMenu() {
+    const menu = this.window.document.getElementById?.("tabContextMenu");
+    if (!menu) return;
+    const item = this.window.document.createXULElement("menuitem");
+    item.id = "axiosozo-context-engine";
+    const contextTab = () => this.window.TabContextMenu?.contextTab;
+    // Firefox's MenuSectionLayout rearranges this menu on popupshowing and
+    // rejects unknown items anywhere but the trailing (extensions) run. Keep
+    // the item trailing while closed; place it by Reload Tab once arranged.
+    const showing = event => {
+      if (event.target !== menu) return;
+      const tab = contextTab();
+      const available = tab && !this.window.PrivateBrowsingUtils?.isWindowPrivate?.(this.window);
+      item.hidden = !available;
+      if (available) item.setAttribute("label", this.engineOf(tab) === "chromium" ? "Open in Firefox" : "Open in Chromium");
+      const anchor = this.window.document.getElementById("context_reloadSelectedTabs")
+        ?? this.window.document.getElementById("context_reloadTab");
+      if (anchor?.parentNode === menu) anchor.after(item);
+    };
+    const hidden = event => { if (event.target === menu) menu.appendChild(item); };
+    const command = () => {
+      const tab = contextTab();
+      if (tab) this.setTabEngine(tab, this.engineOf(tab) === "chromium" ? "gecko" : "chromium").catch(error => this.onFailure(error));
+    };
+    item.addEventListener("command", command);
+    menu.addEventListener("popupshowing", showing);
+    menu.addEventListener("popuphidden", hidden);
+    menu.appendChild(item);
+    this.restoreHooks.push(() => {
+      menu.removeEventListener("popupshowing", showing); menu.removeEventListener("popuphidden", hidden); item.remove();
+    });
+  }
+  #installBadge() {
+    const identity = this.window.document.getElementById?.("identity-box");
+    if (!identity) return;
+    const badge = this.window.document.createElementNS(XHTML, "button");
+    badge.id = "axiosozo-engine-badge";
+    badge.textContent = "Chromium";
+    badge.setAttribute("tooltiptext", "This tab uses Chromium. Click to open it in Firefox.");
+    badge.setAttribute("aria-label", "Chromium tab. Open in Firefox");
+    const command = event => {
+      event.stopPropagation();
+      if (this.active) this.#toGecko(this.active).catch(error => this.onFailure(error));
+    };
+    badge.addEventListener("click", command);
+    identity.before(badge);
+    this.badge = badge;
+    this.restoreHooks.push(() => { badge.removeEventListener("click", command); badge.remove(); this.badge = null; });
+  }
+  #updateBadge(record) {
+    if (!this.badge || this.active !== record) return;
+    const insecure = record.latestURL?.startsWith("http:");
+    this.badge.toggleAttribute("insecure", !!insecure);
+    this.badge.textContent = insecure ? "Chromium · Not secure" : "Chromium";
+  }
+
   #visibility(record) {
     const visible = this.active === record && !this.window.document.hidden;
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
     if (record.visible === visible) return;
     record.visible = visible;
-    if (this.browsingMode === "web") this.#action(record, target => record.adapter.visibility(target, visible));
+    if (this.browsingMode === "web" && record.adapter?.target) this.#action(record, target => record.adapter.visibility(target, visible));
   }
   #surface(record) {
     const rect = record.browser.getBoundingClientRect();
-    const surface = fitCEFRenderSurface({ width: Math.floor(rect.width), height: Math.floor(rect.height),
+    const surface = fitCEFRenderSurface({ width: Math.max(1, Math.floor(rect.width)), height: Math.max(1, Math.floor(rect.height)),
       device_scale: this.window.devicePixelRatio });
     record.renderScaleLimited = surface.device_scale < this.window.devicePixelRatio;
     return surface;
@@ -172,10 +371,20 @@ export class CEFPresenter {
     const scaleNotice = active && record.renderScaleLimited
       ? `CEF render scale capped at ${record.adapter.surface.device_scale}× for this window size` : undefined;
     this.window.document.documentElement?.toggleAttribute("axiosozo-cef-active", !!active);
+    if (active) this.#updateBadge(record);
     this.onEngineChange({ engine: active ? "chromium" : "gecko", experimental: !!active,
       version: active ? CHROMIUM_VERSION : null, fixtureOnly: !!active && this.browsingMode === "fixture", reason: reason ?? scaleNotice });
   }
-  async switchToChromium(tab = this.window.gBrowser.selectedTab) {
+  #element(parent, tag, className, text) {
+    const node = this.window.document.createElementNS(XHTML, tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    parent?.appendChild(node);
+    return node;
+  }
+
+  // ---- Switching -----------------------------------------------------------------
+  async switchToChromium(tab = this.window.gBrowser.selectedTab, { url: requestedURL = null } = {}) {
     if (this.disposed || this.pending) throw new Error("ENGINE_SWITCH_IN_PROGRESS");
     if (this.records.has(tab)) return this.records.get(tab).adapter.target;
     if (this.records.size >= MAX_CEF_TABS) throw new Error("CEF_TAB_LIMIT");
@@ -186,25 +395,31 @@ export class CEFPresenter {
     let url = browser.currentURI.spec;
     if (!originalTarget || originalTarget.private_mode) throw new Error("CEF_PRIVATE_OR_UNKNOWN_TAB");
     if (this.browsingMode === "web") {
-      url = transferableGeckoURL(browser) || "about:blank";
-      origin = url === "about:blank" ? BLANK_IDENTITY : new URL(url).origin;
+      // Every web target starts inert, then navigates like a typed address, so
+      // a slow site cannot time out creation and no document is replayed.
+      url = transferableURL(requestedURL) || transferableGeckoURL(browser);
+      origin = BLANK_IDENTITY;
     } else if (!allowedFixtureURL(url, origin)) throw new Error("CEF_LOCAL_FIXTURE_ONLY");
     // Tabbrowser.sys.mjs at the pinned revision owns browser -> browserStack -> browserContainer.
     const stack = browser.parentNode;
     if (!stack.classList.contains("browserStack")) throw new Error("UNSUPPORTED_ZEN_CONTENT_CONTAINER");
-    const overlay = this.window.document.createElementNS("http://www.w3.org/1999/xhtml", "div");
-    overlay.setAttribute("data-axiosozo-cef", this.browsingMode === "web" ? "experimental-web" : "experimental-fixture-only");
+    const overlay = this.window.document.createElementNS(XHTML, "div");
+    overlay.setAttribute("data-axiosozo-cef", this.browsingMode === "web" ? "web" : "experimental-fixture-only");
     overlay.style.cssText = "position:absolute;inset:0;display:none;z-index:1;background:#fff;overflow:hidden";
-    const canvas = this.window.document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+    const canvas = this.window.document.createElementNS(XHTML, "canvas");
     canvas.tabIndex = 0; canvas.setAttribute("role", "application");
-    canvas.setAttribute("aria-label", "Chromium page. Native accessibility and IME unavailable. Use the engine switch to return to Firefox.");
+    canvas.setAttribute("aria-label", "Chromium page. Native accessibility and IME are not available yet.");
     canvas.style.cssText = "display:block;width:100%;height:100%;outline:none";
     overlay.appendChild(canvas);
     const record = { tab, browser, stack, overlay, canvas, originalTarget, committed:false, adapter:null,
       priorVisibility:browser.style.visibility, priorPosition:stack.style.position, originalLabel:tab.label,
-      priorDocShellIsActive:browser.docShellIsActive,
-      latestURL:url, listeners:[], displayedFrames:0, drawMilliseconds:0, firstFrameAt:null, startedAt:this.window.performance.now() };
+      priorDocShellIsActive:browser.docShellIsActive, pendingURL:this.browsingMode === "web" ? url : null,
+      latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
+      firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 } };
+    let settle;
+    record.settled = new Promise(resolve => { settle = resolve; });
     this.pending = record;
+    this.onSwitchStart(originalTarget.tab_id);
     if (this.window.getComputedStyle(stack).position === "static") stack.style.position = "relative";
     stack.appendChild(overlay);
     try {
@@ -213,7 +428,7 @@ export class CEFPresenter {
         onEvent:event => this.#event(record, event),
         onFailure:error => this.#failed(record, error) });
       if (this.disposed || this.pending !== record) throw new Error("ENGINE_SWITCH_CANCELLED");
-      const target = await record.adapter.create(url, this.#surface(record));
+      const target = await record.adapter.create(this.browsingMode === "web" ? "about:blank" : url, this.#surface(record));
       this.gecko.resolve(originalTarget); // no navigation/identity change during asynchronous preparation
       this.#assertNoActiveMedia(tab);
       if (this.disposed || this.pending !== record || this.window.gBrowser.selectedTab !== tab) throw new Error("ENGINE_SWITCH_CANCELLED");
@@ -223,13 +438,35 @@ export class CEFPresenter {
       record.observer = new this.window.ResizeObserver(() => this.#resize(record));
       record.observer.observe(stack);
       this.#visibility(record);
+      if (this.browsingMode === "web") {
+        this.#markEngine(tab, "chromium", url);
+        // The Firefox document is released; the tab now lives in Chromium.
+        this.#loadInGecko(record, "about:blank");
+        if (url) this.#action(record, current => record.adapter.navigate(current, url));
+      }
       canvas.focus(); this.#indicator(record); this.#syncChrome(record);
       return target;
     } catch (error) {
-      await this.#remove(record);
+      await this.#remove(record, { keepEngine: this.browsingMode === "web" && error.message === "ENGINE_SWITCH_CANCELLED" });
+      // A tab closed or switched back while its engine was still launching: that
+      // adapter arrived after removal and must still release its native target.
+      if (!record.adapterReleased) await record.adapter?.close().catch(() => {});
+      if (error.message !== "ENGINE_SWITCH_CANCELLED") {
+        this.#markEngine(tab, "gecko");
+        // A restored Chromium tab that cannot start opens its address in Firefox.
+        if (this.browsingMode === "web" && url && browser.currentURI?.spec === "about:blank") this.#loadInGecko(record, url);
+      }
       this.onFailure(error);
       throw error;
-    }
+    } finally { settle(); }
+  }
+  #loadInGecko(record, url) {
+    const browser = record.browser;
+    if (typeof browser.loadURI !== "function") return;
+    try {
+      browser.loadURI(this.window.Services.io.newURI(url),
+        { triggeringPrincipal: this.window.Services.scriptSecurityManager.getSystemPrincipal() });
+    } catch (error) { this.onFailure(error); }
   }
   #draw(record, metadata, pixels) {
     if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
@@ -245,13 +482,28 @@ export class CEFPresenter {
     record.lastFrameId = metadata.frame_id;
   }
   #event(record, event) {
-    if (event.event === "url") record.latestURL = event.url;
+    if (event.event === "url") {
+      record.latestURL = event.url;
+      if (record.committed && this.browsingMode === "web") this.#rememberURL(record.tab, event.url);
+    }
     if (event.event === "title") record.title = event.title;
-    if (event.event === "loading") record.loading = event;
+    if (event.event === "loading") {
+      record.loading = event;
+      record.tab.toggleAttribute?.("busy", !!event.loading);
+    }
+    if (event.event === "cursor") record.canvas.style.cursor = event.cursor;
+    // The page closed itself (window.close()); the tab explains and can reload.
+    if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
+    if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
+    if (event.event === "load") {
+      const failed = this.browsingMode === "web" ? event.http_status < 0 : false;
+      if (!failed) this.#panel(record, null);
+    }
     if (event.event === "error" && !event.request_id) {
-      if (["render_process_terminated", "load_failed"].includes(event.code)) {
-        this.#failed(record, new Error("CEF_PAGE_LOAD_FAILED")); return;
-      }
+      if (["render_process_terminated", "load_failed", "certificate_error"].includes(event.code)) {
+        if (this.browsingMode !== "web") { this.#revert(record, new Error("CEF_PAGE_LOAD_FAILED")); return; }
+        this.#panel(record, event.code);
+      } else if (NOTICES[event.code]) this.#notice(record, NOTICES[event.code]);
       if (["permission_denied", "download_denied", "popup_denied", "navigation_denied", "certificate_error"].includes(event.code)) {
         this.#indicator(this.active, "Unsupported Chromium operation blocked");
       }
@@ -260,22 +512,87 @@ export class CEFPresenter {
     if (record.committed && event.event === "navigation") { record.visible = undefined; this.#visibility(record); }
     if (record.committed) this.#syncChrome(record);
   }
+  #openInNewTab(record, url, background) {
+    const gBrowser = this.window.gBrowser;
+    if (typeof gBrowser.addTrustedTab !== "function" || !transferableURL(url)) return;
+    const tab = gBrowser.addTrustedTab("about:blank", { inBackground: background, relatedToCurrent: true,
+      ownerTab: background ? null : record.tab, userContextId: record.tab.userContextId ?? 0 });
+    this.#markEngine(tab, "chromium", url);
+    if (gBrowser.selectedTab === tab) this.#activateIfMarked(tab);
+  }
+  /** Page-level failures stay inside the Chromium tab, like any browser's error page. */
+  #panel(record, code) {
+    // Chromium reports a refused certificate, then the cancelled load; keep the specific reason.
+    if (code === "load_failed" && record.panelCode === "certificate_error") return;
+    if (!record.panel) {
+      if (!code) return;
+      const panel = this.#element(record.overlay, "div", "axiosozo-cef-panel");
+      panel.setAttribute("role", "alert");
+      const title = this.#element(panel, "h1"), text = this.#element(panel, "p"), actions = this.#element(panel, "div");
+      const retry = this.#element(actions, "button", "primary", "Try again");
+      const firefox = this.#element(actions, "button", "", "Open in Firefox");
+      retry.addEventListener("click", () => this.#retry(record));
+      firefox.addEventListener("click", () => this.#toGecko(record).catch(error => this.onFailure(error)));
+      record.panel = { panel, title, text, retry };
+    }
+    record.panel.panel.hidden = !code;
+    record.canvas.style.visibility = code ? "hidden" : "";
+    if (!code) { record.panelCode = null; return; }
+    const [title, text] = PAGE_ERRORS[code] ?? PAGE_ERRORS.load_failed;
+    record.panel.title.textContent = title; record.panel.text.textContent = text;
+    record.panel.retry.textContent = code === "certificate_error" ? "Go back" : (code === "engine_failed" ? "Reload" : "Try again");
+    record.panelCode = code;
+  }
+  #notice(record, message) {
+    record.notice ??= this.#element(record.overlay, "div", "axiosozo-cef-notice");
+    record.notice.setAttribute?.("role", "status");
+    record.notice.textContent = message; record.notice.hidden = false;
+    this.window.clearTimeout?.(record.noticeTimer);
+    record.noticeTimer = this.window.setTimeout?.(() => { if (record.notice) record.notice.hidden = true; }, 4000);
+  }
+  #retry(record) {
+    if (record.panelCode === "engine_failed") { this.#restart(record).catch(error => this.onFailure(error)); return; }
+    const adapter = record.adapter;
+    if (record.panelCode === "certificate_error" && record.loading?.can_go_back) this.#action(record, target => adapter.back(target));
+    else if (record.panelCode === "render_process_terminated" || !transferableURL(record.latestURL)) this.#action(record, target => adapter.reload(target));
+    else this.#action(record, target => adapter.navigate(target, record.latestURL));
+  }
+  async #restart(record) {
+    const { tab, latestURL } = record;
+    await this.#remove(record, { keepEngine: true });
+    if (this.window.gBrowser.selectedTab === tab) await this.switchToChromium(tab, { url: latestURL });
+  }
   #syncChrome(record) {
     if (this.active !== record) return;
-    if (record.title) record.tab.label = record.title;
+    if (record.title) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
     // The explicit nsIURI updates address text; Gecko security UI is masked.
-    if (!this.window.gURLBar.focused) this.window.gURLBar.setURI({ uri:this.window.Services.io.newURI(record.latestURL) });
+    const shown = record.latestURL === "about:blank" ? null : record.latestURL;
+    if (!this.window.gURLBar.focused) {
+      try { this.window.gURLBar.setURI(shown ? { uri:this.window.Services.io.newURI(shown) } : {}); } catch {}
+    }
+    this.#updateBadge(record);
+  }
+  #setLabel(record) {
+    const gBrowser = this.window.gBrowser;
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(record.tab, record.title);
+    else record.tab.label = record.title;
   }
   #action(record, operation) {
     const target = record.adapter.target;
     Promise.resolve().then(() => operation(target)).then(result => {
-      if (result?.status === "unsupported") this.#indicator(record, result.reason || "Operation unsupported in fixture engine");
-      else if (result && result.status !== "success") throw new Error("CEF_ACTION_FAILED");
+      if (result?.status === "unsupported") {
+        if (!["NAVIGATION_SUPERSEDED", "NAVIGATION_CANCELLED", "history_boundary"].includes(result.reason)) {
+          this.#indicator(record, result.reason || "Operation unsupported in fixture engine");
+        }
+      } else if (result && result.status === "failed" && this.browsingMode === "web") {
+        // A failed navigation already reported its own page error.
+      } else if (result && result.status !== "success") throw new Error("CEF_ACTION_FAILED");
     }).catch(error => {
       if (!record.committed) return;
       if (error.message === "STALE_CEF_TARGET") this.#indicator(record, "Input discarded after navigation");
+      else if (error.message === "CEF_UNAVAILABLE") return;
       else this.#failed(record, error);
     });
   }
@@ -315,6 +632,14 @@ export class CEFPresenter {
     record.canvas.addEventListener(type, handler, options);
     record.listeners.push(() => record.canvas.removeEventListener(type, handler, options));
   }
+  #clickCount(record, event, position) {
+    // Pointer events carry no reliable click count; derive it like the OS does.
+    const clicks = record.clicks, now = event.timeStamp ?? this.window.performance.now();
+    const near = Math.abs(position.x - clicks.x) <= 4 && Math.abs(position.y - clicks.y) <= 4;
+    clicks.count = near && now - clicks.time <= 500 ? Math.min(3, clicks.count + 1) : 1;
+    Object.assign(clicks, { time:now, x:position.x, y:position.y });
+    return clicks.count;
+  }
   #input(record) {
     const send = (method, fields) => this.#action(record, target => record.adapter.input(target, method, fields));
     const point = event => {
@@ -327,8 +652,10 @@ export class CEFPresenter {
       if (type === "pointerdown" && !record.resizePending) { record.canvas.focus(); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
       event.preventDefault();
-      const fields = { ...point(event), type:type === "pointermove" ? "move" : (type === "pointerdown" ? "down" : "up"),
-        button:["left", "middle", "right"][Math.max(0, event.button)] || "left", click_count:Math.max(1, Math.min(3, event.detail || 1)), mouse_leave:false };
+      const position = point(event);
+      const count = type === "pointerdown" ? this.#clickCount(record, event, position) : record.clicks.count;
+      const fields = { ...position, type:type === "pointermove" ? "move" : (type === "pointerdown" ? "down" : "up"),
+        button:["left", "middle", "right"][Math.max(0, event.button)] || "left", click_count:count, mouse_leave:false };
       if (record.resizePending) {
         if (type === "pointerup") record.deferredPointerUp = fields;
         return;
@@ -350,6 +677,11 @@ export class CEFPresenter {
         send("mouse", fields);
       }
     });
+    this.#listen(record, "pointerleave", event => {
+      if (!event.isTrusted || !record.committed || record.resizePending) return;
+      record.nextPointer = null;
+      send("mouse", { ...point(event), type:"move", button:"left", click_count:1, mouse_leave:true });
+    });
     this.#listen(record, "wheel", event => {
       if (!event.isTrusted) return;
       event.preventDefault();
@@ -361,7 +693,7 @@ export class CEFPresenter {
     for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, eventName, event => {
       if (!event.isTrusted) return;
       const route = keyboardRoute(event, { editing:this.browsingMode === "web" });
-      if (route === "chrome") return; // URL bar/new tab/close/reload retain normal browser shortcuts
+      if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
         if (type === "down") {
@@ -372,17 +704,27 @@ export class CEFPresenter {
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
       const fields = cefKey(event, type); send("key", fields);
-      if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length <= 2) send("key", { ...fields, type:"char" });
+      if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.key.length <= 2) send("key", { ...fields, type:"char" });
+        else if (event.key === "Enter") send("key", { ...fields, type:"char", text:"\r" }); // newline in text areas
+      }
     });
     this.#listen(record, "focus", () => this.#action(record, target => record.adapter.focus(target, true)));
     this.#listen(record, "blur", () => this.#action(record, target => record.adapter.focus(target, false)));
     this.#listen(record, "contextmenu", event => { event.preventDefault(); this.#indicator(record, "Chromium context menu is not integrated"); });
     this.#listen(record, "compositionstart", event => { event.preventDefault(); this.#indicator(record, "IME is unsupported in the experimental Chromium surface"); });
   }
+  #recordForBrowser(browser) {
+    for (const record of this.records.values()) if (record.browser === browser) return record;
+    return null;
+  }
   #installCommands() {
-    const wrap = (owner, method, replacement) => {
+    const wrap = (owner, method, replacement, { optional = false } = {}) => {
       const original = owner?.[method];
-      if (typeof original !== "function") throw new Error(`UNSUPPORTED_BROWSER_API_${method}`);
+      if (typeof original !== "function") {
+        if (optional) return;
+        throw new Error(`UNSUPPORTED_BROWSER_API_${method}`);
+      }
       const presenter = this;
       const wrapped = function(...args) { return replacement.call(this, presenter, original, args); };
       owner[method] = wrapped;
@@ -399,10 +741,16 @@ export class CEFPresenter {
       if (!record) return original.apply(this, args);
       const event = args[0];
       if (event && presenter.window.BrowserUtils.whereToOpenLink(event, false, true) !== "current") {
-        presenter.#indicator(record, "Modified history navigation is unsupported in this fixture engine"); return;
+        presenter.#indicator(record, "Opening history in a new tab is not supported for Chromium tabs yet"); return;
       }
+      if (method === "reload" && record.panelCode) { presenter.#retry(record); return; }
       presenter.#action(record, target => record.adapter[method](target));
     });
+    wrap(this.window.BrowserCommands, "stop", function(presenter, original, args) {
+      const record = presenter.active;
+      if (!record) return original.apply(this, args);
+      presenter.#action(record, target => record.adapter.stop(target));
+    }, { optional: true });
     wrap(this.window, "UpdateBackForwardCommands", function(presenter, original, args) {
       const record = presenter.active;
       if (!record) return original.apply(this, args);
@@ -410,40 +758,70 @@ export class CEFPresenter {
         canGoForward:!!record.loading?.can_go_forward });
     });
     wrap(this.window.BrowserCommands, "reloadSkipCache", function(presenter, original, args) {
-      if (!presenter.active) return original.apply(this, args);
-      presenter.#indicator(presenter.active, "Cache-bypass reload is unsupported in this fixture engine");
-    });
-    wrap(this.window.gURLBar, "handleNavigation", function(presenter, original, args) {
       const record = presenter.active;
       if (!record) return original.apply(this, args);
-      const value = this.value;
-      if (presenter.browsingMode === "web" ? allowedWebURL(value) : allowedFixtureURL(value, record.originalTarget.identity)) {
-        this.view.close({ elementPicked:true }); record.canvas.focus();
-        presenter.#action(record, target => record.adapter.navigate(target, value));
-        return;
-      }
-      // An explicit normal URL/search returns to the preserved Gecko tab, then
-      // invokes the original audited URL-bar behavior. No URL/model text is code.
-      return presenter.switchToGecko().then(() => { this.value = value; return original.apply(this, args); });
+      presenter.#action(record, target => record.adapter.reload(target));
     });
+    // The back-button history menu lists Firefox history; Chromium keeps its own.
+    wrap(this.window, "FillHistoryMenu", function(presenter, original, args) {
+      return presenter.active ? false : original.apply(this, args);
+    }, { optional: true });
+    wrap(this.window.BrowserCommands, "gotoHistoryIndex", function(presenter, original, args) {
+      return presenter.active ? false : original.apply(this, args);
+    }, { optional: true });
+    wrap(this.window.gBrowser, "setTabTitle", function(presenter, original, args) {
+      const record = presenter.records.get(args[0]);
+      if (!record?.title) return original.apply(this, args);
+      presenter.#setLabel(record);
+      return true;
+    }, { optional: true });
+    // Typed addresses, searches, address-bar results, bookmarks and history all
+    // reach openTrustedLinkIn. "current" in a Chromium tab loads in Chromium.
+    wrap(this.window, "openTrustedLinkIn", function(presenter, original, args) {
+      const [url, where, params = {}] = args;
+      const record = where === "current"
+        && presenter.#recordForBrowser(params?.targetBrowser ?? presenter.window.gBrowser.selectedBrowser);
+      if (!record) return original.apply(this, args);
+      if (!params?.postData && transferableURL(url) && record.adapter.allowedURL(url)) {
+        presenter.window.gURLBar.view?.close?.({ elementPicked:true });
+        record.latestURL = url; presenter.#panel(record, null);
+        presenter.#action(record, target => record.adapter.navigate(target, url));
+        record.canvas.focus();
+        return undefined;
+      }
+      // Firefox-only destinations (about:, file:, POST searches) open in Firefox.
+      return presenter.#toGecko(record, { load: false }).then(() => original.apply(this, args));
+    }, { optional: this.browsingMode !== "web" });
   }
   async #failed(record, error) {
+    if (this.browsingMode === "web" && record.committed) {
+      // The tab stays a Chromium tab and explains itself; Reload starts a new target.
+      record.adapterFailed = true;
+      this.#panel(record, "engine_failed");
+      this.onFailure(error);
+      return;
+    }
+    await this.#revert(record, error);
+  }
+  async #revert(record, error) {
     await this.#remove(record);
+    if (this.browsingMode === "web") this.#loadInGecko(record, transferableURL(record.latestURL) ?? "about:blank");
     this.#indicator(this.active, "Chromium stopped; Firefox tab preserved");
     this.onFailure(error);
   }
-  async #remove(record) {
+  async #remove(record, { keepEngine = false } = {}) {
     if (record.removing) return record.removing;
-    record.removing = this.#removeOnce(record);
+    record.removing = this.#removeOnce(record, keepEngine);
     return record.removing;
   }
-  async #removeOnce(record) {
+  async #removeOnce(record, keepEngine) {
     if (this.pending === record) this.pending = null;
     if (this.records.get(record.tab) === record) this.records.delete(record.tab);
     record.committed = false;
     record.observer?.disconnect();
     for (const remove of record.listeners) remove();
     record.listeners = [];
+    this.window.clearTimeout?.(record.noticeTimer);
     record.browser.style.visibility = record.priorVisibility;
     if (typeof record.priorDocShellIsActive === "boolean") {
       record.browser.docShellIsActive = this.window.gBrowser.shouldActivateDocShell?.(record.browser)
@@ -452,20 +830,32 @@ export class CEFPresenter {
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
     record.canvas.width = 1; record.canvas.height = 1;
+    record.tab.toggleAttribute?.("busy", false);
+    if (!keepEngine) this.#markEngine(record.tab, "gecko");
     if (record.tab.isConnected) this.window.gBrowser.setTabTitle(record.tab);
     if (this.window.gBrowser.selectedTab === record.tab) {
       this.window.gURLBar.setURI(); this.window.gBrowser.updateTitlebar();
       this.window.UpdateBackForwardCommands(record.browser);
     }
+    record.adapterReleased = !!record.adapter;
     await record.adapter?.close().catch(() => {});
+  }
+  /** Return a tab to Firefox, carrying Chromium's current address across. */
+  async #toGecko(record, { load = true } = {}) {
+    const url = transferableURL(record.latestURL);
+    await this.#remove(record);
+    if (load && this.browsingMode === "web" && url) this.#loadInGecko(record, url);
+    if (this.window.gBrowser.selectedTab === record.tab) {
+      this.window.gURLBar.setURI(); this.window.gBrowser.updateTitlebar();
+      this.window.UpdateBackForwardCommands(this.window.gBrowser.selectedBrowser);
+      record.browser.focus?.();
+    }
+    this.#indicator(this.active);
   }
   async switchToGecko() {
     const record = this.active || (this.pending?.tab === this.window.gBrowser.selectedTab ? this.pending : null);
     if (!record) return;
-    await this.#remove(record);
-    this.window.gURLBar.setURI(); this.window.gBrowser.updateTitlebar();
-    this.window.UpdateBackForwardCommands(this.window.gBrowser.selectedBrowser);
-    this.#indicator(this.active);
+    await this.#toGecko(record);
   }
   diagnostics() {
     const record = this.active;
@@ -486,11 +876,10 @@ export class CEFPresenter {
   }
   async dispose() {
     this.disposed = true;
-    this.window.gBrowser.tabContainer.removeEventListener("TabClose", this.onTabClose);
-    this.window.gBrowser.tabContainer.removeEventListener("TabSelect", this.onTabSelect);
-    this.window.gBrowser.tabContainer.removeEventListener("TabAttrModified", this.onTabAttrModified);
-    this.window.document.removeEventListener?.("visibilitychange", this.onVisibilityChange);
+    this.#removeListeners();
     for (const restore of this.restoreHooks.reverse()) restore();
-    await Promise.all([...this.records.values(), ...(this.pending ? [this.pending] : [])].map(record => this.#remove(record)));
+    // Window close keeps each tab's engine for session restore.
+    await Promise.all([...this.records.values(), ...(this.pending ? [this.pending] : [])]
+      .map(record => this.#remove(record, { keepEngine: true })));
   }
 }

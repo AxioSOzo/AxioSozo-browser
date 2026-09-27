@@ -7,12 +7,14 @@ runtime evidence; dated E0 and manual local-fixture E1/E2 results are recorded u
 
 ## Process and authentication
 
-The browser launches one native host per Chromium target using inherited stdin/stdout.
+In web mode the browser runs one native host per Firefox process and Zen profile,
+shared by every browser window; each Chromium tab is one target of that host. The
+strict fixture probe keeps one host per target. Both use inherited stdin/stdout.
 The first stdin message has keys `version:1`, `method:hello`, a browser-generated
 256-bit hex `token`, an `engine_instance` and `fixture_origin`. An explicit
 `browsing_mode:"web"` adds normal HTTP(S) browsing; omission retains the strict
-fixture policy. In web mode `fixture_origin` is a stable process/session identity,
-not the current website origin. Current page identity shown to the user comes
+fixture policy. In web mode `fixture_origin` is a stable process/session identity
+(`https://axiosozo.invalid`), not the current website origin. Current page identity shown to the user comes
 from the native navigation URL. No provider browser grants use this session label.
 The secret is
 delivered only through the private pipe, never argv, environment, files or logs.
@@ -23,8 +25,16 @@ descriptors and redirects inherited helper standard streams before CEF starts,
 so sandboxed renderers cannot inherit the authenticated parent channel.
 Unknown versions/keys, malformed input, missing hello, wrong tokens and overlong
 lines close the channel. No TCP, WebSocket, debugging port or automatic reconnect.
-The parent owns the child, drains stderr with a limit, and shuts it down on browser
-window/target close. The native host exits on stdin EOF and closes its helpers.
+The parent owns the child and drains its stderr. The native host exits on stdin EOF
+or `shutdown`, closing every target and its helpers. Closing one web target never
+ends the host; a fixture host ends with its only target.
+
+A web host keeps one persistent Chromium profile (`<session>/chromium`, mode 0700)
+beside the Zen profile `<session>/gecko`. It holds Chromium's own cookies, cache,
+storage and history; nothing is imported from or shared with Firefox. Chromium
+encrypts that data with its macOS Keychain item "Chromium Safe Storage", which the
+user approves once in the macOS dialog (again after each ad hoc host rebuild). The
+host never answers that dialog. Fixture hosts keep all page data in memory.
 
 ## Input
 
@@ -37,12 +47,18 @@ memory without expiring animated pages after an hour of frame acknowledgements.
 
 `create` receives a pending browser-owned target: logical `tab_id`, `engine_instance`,
 `identity`, `document_generation`, `navigation_generation` and `private_mode:false`.
-CEF emits its actual `native_target_id` when the browser is created. Subsequent
+A web target's `identity` is the origin it was created with (Zen creates every web
+target at `about:blank` with the inert session identity, then navigates). A host
+serves at most 32 targets, creates one at a time, and rejects a `tab_id` that is
+already live. CEF emits its actual `native_target_id` when the browser is created. Subsequent
 commands bind the complete BrowserTarget from `ipc-v1.schema.json`, including
 `engine:chromium`, and reject any stale field before native dispatch.
 
-Commands: `create`, `navigate`, `back`, `forward`, `reload`, `resize`, `focus`, `key`,
-`mouse`, `wheel`, `frame_ack`, `visibility`, `edit`, `close`, `shutdown`. The adapter declares capabilities
+Commands: `create`, `navigate`, `back`, `forward`, `reload`, `stop`, `resize`, `focus`, `key`,
+`mouse`, `wheel`, `frame_ack`, `visibility`, `edit`, `close`, `shutdown`. `close`
+ends only its target. A new navigation supersedes one still loading: the earlier
+request completes `unsupported` with reason `NAVIGATION_SUPERSEDED`. Navigation
+requests have no parent-side deadline; they complete on load, error or replacement. The adapter declares capabilities
 and returns `unsupported` for unavailable operations; `devtools` must not silently
 succeed. Input coordinates use logical content points plus an explicit device scale.
 Keyboard fields are `type:down|up|char`, `native_key_code`, `windows_key_code`,
@@ -62,12 +78,16 @@ Private Chromium mode is unavailable until isolation is proven. These restrictio
 must be visible in the development UI, not mistaken for general browsing support.
 
 Web mode permits normal HTTP(S) URLs and subresources, plus an empty `about:blank`
-start. Forms submitted inside Chromium remain Chromium operations. Switching
-from Gecko never transfers cookies or silently resubmits a form: unsafe or
-unverifiable navigation state starts Chromium blank and preserves the Gecko tab.
+start. Forms submitted inside Chromium remain Chromium operations. An explicit
+switch carries only the visible address, as if the user retyped it: an HTTP(S)
+URL without credentials whose Gecko history entry has no POST data. It never
+transfers cookies, storage, history or page state, and never resubmits a form;
+anything else starts Chromium blank.
 Certificate validation remains native and has no bypass command. Unsupported
-permissions, downloads, new-window popups, file selectors and JavaScript dialogs
-fail closed with explicit native diagnostics. OSR select/autocomplete popup pixels
+permissions, downloads, file selectors and JavaScript dialogs fail closed with
+explicit native diagnostics. A user-gesture link that targets a new tab or window
+never creates a native window: the host emits `open_url` (`url`, `background`) and
+Zen opens a new Chromium tab; other pop-ups are denied. OSR select/autocomplete popup pixels
 are composited into the same frame stream; they are not external browser windows.
 Web mode remains experimental while IME, accessibility and developer tools are
 unavailable; adding HTTP(S) navigation is not full E1/E2 certification.
@@ -95,7 +115,11 @@ fits. The UI exposes a scale cap; it is never mistaken for native Retina fidelit
 All generations are safe JSON integers (0..9007199254740991).
 
 Events include `ready` with actual CEF/Chromium/platform/capabilities, `created`,
-`accepted`, `completed`, `navigation`, `loading`, `title`, `url`, `closed`, `error`.
+`accepted`, `completed`, `navigation`, `loading`, `title`, `url`, `closed`, `error`,
+`cursor` (a CSS cursor keyword) and `open_url`. A shared host must report
+`multi_target`, `stop`, `cursor`, `persistent_profile` and `open_in_tab`. A malformed
+event about one target's document ends that target; framing, authentication,
+identity and response errors end the host and every target.
 Generation changes precede observable navigation events. Frames/events for a stale
 generation are discarded by the presenter and never applied to another target.
 CEF engine identity comes from the pinned native runtime, not a spoofed user agent.
@@ -114,8 +138,9 @@ network URL never counts as a successful load.
 
 ## Backpressure and lifecycle
 
-At most one frame is outstanding. The parent sends `frame_ack` only after consuming
-or deliberately discarding that exact frame. An ACK matches the exact outstanding
+At most one frame is outstanding across the host. Each target keeps only its newest
+undelivered frame, and delivery alternates between targets. The parent sends
+`frame_ack` only after consuming or deliberately discarding that exact frame. An ACK matches the exact outstanding
 `{frame_id,target}`, even when its generations have since become stale. This releases
 transport credit only; it grants no native action. Unknown or duplicate ACKs fail.
 The native UI thread never blocks on
@@ -125,9 +150,14 @@ No frame is a screenshot of another application: payloads come directly from CEF
 native `OnPaint` callback and input returns to the same live CEF browser.
 
 Resize invalidates stale-size frames. Close rejects further input, closes the CEF
-browser, waits for the native closed callback, then ends the child. Engine switching
-keeps the original Gecko tab until the Chromium candidate emits an admitted load
-and actual frame; failure restores its original presentation with no cookie transfer.
-Retained Gecko content is suspended while Chromium owns the visible tab, and its
-state is restored on return. Background Chromium tabs are hidden natively; a
-bounded number of Chromium hosts prevents unbounded per-tab process growth.
+browser and waits for the native closed callback. Engine switching keeps the Gecko
+tab until the Chromium candidate emits an admitted load and actual frame; failure
+restores it with no cookie transfer. After the switch commits, the Gecko browser
+loads `about:blank`, so no Firefox document keeps running hidden behind Chromium.
+Switching back loads Chromium's current address in Gecko. Each tab's engine and
+Chromium address are saved as Zen session values and restore lazily when the tab is
+shown. Background Chromium tabs are hidden natively and at most 24 are live per window.
+
+Every ref-counted CEF struct passed into a C callback carries one reference the
+callback releases; every struct the host passes into CEF carries one reference CEF
+releases. The host follows both rules so `cef_shutdown` finds no live objects.

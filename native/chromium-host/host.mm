@@ -61,9 +61,6 @@ static NSString* streamInstance;
 static NSString* fixtureOrigin;
 static bool webBrowsing=false;
 static NSMutableSet* requestIds;
-static NSString* navigationRequest;
-static NSString* createRequest;
-static NSString* closeRequest;
 static NSString* shutdownRequest;
 static uint64_t frameId=0;
 static NSString* captureName=@"cef-e0-initial.png";
@@ -134,23 +131,27 @@ static void configure() {
   client.api.get_request_handler=[](cef_client_t*){return request.retain();};
   client.api.get_permission_handler=[](cef_client_t*){return permissions.retain();};
   processHandler.api.on_context_initialized=[](cef_browser_process_handler_t*){
-    // Never use or share a persistent Chromium profile. An explicit non-global
-    // context keeps all page cookies/cache in memory for this one owned target.
+    // Fixture probes keep cookies/cache in memory. A web host owns exactly one
+    // persistent Chromium profile beside its Zen profile, never Firefox data.
+    static std::u16string persistentPath;
     cef_request_context_settings_t contextSettings{};contextSettings.size=sizeof(contextSettings);
+    if(streaming&&webBrowsing){persistentPath=utf16(profilePath);contextSettings.cache_path=view(persistentPath);}
     isolatedContext=p_cef_request_context_create_context(&contextSettings,nullptr);
     if(!isolatedContext){event(@"error",@{@"code":@"isolated_context_failed"});streamClosing=true;return;}
     if(streaming){streamReady=true;streamReadyEvent();return;}
     cef_window_info_t wi{};wi.size=sizeof(wi);wi.windowless_rendering_enabled=1;wi.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
     cef_browser_settings_t settings{};settings.size=sizeof(settings);settings.windowless_frame_rate=20;
     auto url=view(initialURL);
-    int accepted=p_cef_browser_host_create_browser(&wi,&client.api,&url,&settings,nullptr,isolatedContext);
+    // CEF takes one reference to each ref-counted argument.
+    isolatedContext->base.base.add_ref(&isolatedContext->base.base);
+    int accepted=p_cef_browser_host_create_browser(&wi,client.retain(),&url,&settings,nullptr,isolatedContext);
     event(@"create_accepted",@{@"accepted":@(accepted)});
   };
   lifespan.api.on_after_created=[](cef_life_span_handler_t*,cef_browser_t*b){browser=b;b->base.add_ref(&b->base);event(@"created",@{@"nativeTargetId":@(b->get_identifier(b))});};
   lifespan.api.on_before_close=[](cef_life_span_handler_t*,cef_browser_t*){event(@"closed",@{});closed=true;browser->base.release(&browser->base);browser=nullptr;};
   render.api.get_view_rect=[](cef_render_handler_t*,cef_browser_t*,cef_rect_t*r){*r={0,0,width,height};};
   render.api.get_screen_info=[](cef_render_handler_t*,cef_browser_t*,cef_screen_info_t*i){i->device_scale_factor=deviceScale;i->depth=32;i->depth_per_component=8;i->rect={0,0,width,height};i->available_rect=i->rect;return 1;};
-  render.api.on_paint=[](cef_render_handler_t*,cef_browser_t*,cef_paint_element_type_t type,size_t,const cef_rect_t*,const void*buf,int w,int h){if(type==PET_VIEW){frames++;if(streaming)streamFrame(buf,w,h);else saveFrame(buf,w,h);}};
+  render.api.on_paint=[](cef_render_handler_t*,cef_browser_t*,cef_paint_element_type_t type,size_t,const cef_rect_t*,const void*buf,int w,int h){if(type==PET_VIEW){frames++;saveFrame(buf,w,h);}}; // stream mode replaces this handler
   display.api.on_title_change=[](cef_display_handler_t*,cef_browser_t*,const cef_string_t*t){NSString*title=ns(t);event(@"title",@{@"title":title});if([title containsString:@"input=CEF"]){inputObserved=true;captureName=@"cef-e0-input.png";}if([title containsString:@"page=2"])navigated=true;};
   display.api.on_address_change=[](cef_display_handler_t*,cef_browser_t*,cef_frame_t*f,const cef_string_t*u){if(f->is_main(f))event(@"url",@{@"url":ns(u)});};
   loading.api.on_load_start=[](cef_load_handler_t*,cef_browser_t*,cef_frame_t*f,cef_transition_type_t){if(f->is_main(f))event(@"load_start",@{@"url":requestString(f->get_url(f))});};
@@ -173,6 +174,7 @@ int main(int argc,char**argv){@autoreleasepool{
   NSURL*u=streaming?nil:[NSURL URLWithString:[NSString stringWithUTF8String:argv[1]]];
   if(!streaming&&(![u.scheme isEqual:@"http"]||![u.host isEqual:@"127.0.0.1"]||![u.path isEqual:@"/engine.html"]||u.user||u.password)){fprintf(stderr,"only the synthetic local fixture is allowed\n");return 64;}
   evidence=[NSString stringWithUTF8String:argv[3]];if(!streaming)initialURL=utf16(u.absoluteString);
+  profilePath=[NSString stringWithUTF8String:argv[2]];
   signal(SIGPIPE,SIG_IGN);
   if(streaming&&!streamHandshake())return 64;
   loadFramework([folder stringByAppendingPathComponent:@"../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework"]);
@@ -200,7 +202,8 @@ int main(int argc,char**argv){@autoreleasepool{
       if(streaming){
         for(int count=0;count<32&&!streamClosing;++count){auto line=transport.pop();if(!line)break;streamCommand(*line);}
         if(interrupted||transport.failed()||transport.eof())streamClosing=true;
-        if(streamClosing&&!closing){closing=true;closeStarted=std::chrono::steady_clock::now();closeBrowser();if(!browser&&!createRequest)closed=true;}
+        if(streamClosing&&!closing){closing=true;closeStarted=std::chrono::steady_clock::now();}
+        if(closing){streamCloseAll();if(streamIdle())closed=true;}
         if(closing&&std::chrono::duration<double>(std::chrono::steady_clock::now()-closeStarted).count()>10){exitStatus=75;p_cef_quit_message_loop();return;}
       }
       if(!streaming&&browser&&!closing){

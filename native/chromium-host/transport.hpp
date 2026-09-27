@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <fcntl.h>
 #include <mutex>
 #include <optional>
@@ -33,7 +34,9 @@ class Transport {
   std::condition_variable changed_;
   std::deque<std::string> inputQueue_;
   std::deque<Packet> events_;
-  std::optional<Packet> pending_;
+  // Latest undelivered frame per target; one frame is in flight at a time.
+  std::map<std::string, Packet> pending_;
+  std::string lastKey_;
   uint64_t outstanding_ = 0;
   std::string outstandingTarget_;
   bool writing_ = false;
@@ -68,7 +71,7 @@ class Transport {
         line.push_back(bytes[i]);
         if (bytes[i] == '\n') {
           std::lock_guard lock(mutex_);
-          if (inputQueue_.size() >= 64) { fail(); break; }
+          if (inputQueue_.size() >= 256) { fail(); break; }
           inputQueue_.push_back(std::move(line)); line.clear();
         }
       }
@@ -80,12 +83,15 @@ class Transport {
       {
         std::unique_lock lock(mutex_);
         changed_.wait_for(lock, std::chrono::milliseconds(100), [&] {
-          return stop_ || failed_ || !events_.empty() || (pending_ && !outstanding_);
+          return stop_ || failed_ || !events_.empty() || (!pending_.empty() && !outstanding_);
         });
         if (stop_ || failed_) break;
         if (!events_.empty()) { packet = std::move(events_.front()); events_.pop_front(); }
-        else if (pending_ && !outstanding_) {
-          packet = std::move(*pending_); pending_.reset();
+        else if (!pending_.empty() && !outstanding_) {
+          // Round-robin across targets so one busy page cannot starve another.
+          auto next = pending_.upper_bound(lastKey_);
+          if (next == pending_.end()) next = pending_.begin();
+          lastKey_ = next->first; packet = std::move(next->second); pending_.erase(next);
           // Record credit before emitting any bytes: an immediate ack is valid.
           outstanding_ = packet.frame; outstandingTarget_ = packet.target;
         } else continue;
@@ -133,17 +139,17 @@ public:
   }
   bool event(std::string metadata) {
     std::lock_guard lock(mutex_);
-    if (metadata.empty() || metadata.size() > MaxMeta || events_.size() >= 64) { fail(); return false; }
+    if (metadata.empty() || metadata.size() > MaxMeta || events_.size() >= 512) { fail(); return false; }
     events_.push_back(Packet{1, std::move(metadata), {}, {}, 0}); changed_.notify_all(); return true;
   }
-  bool frame(std::string metadata, std::string target, uint64_t id, const void* pixels, size_t bytes) {
+  bool frame(const std::string& key, std::string metadata, std::string target, uint64_t id, const void* pixels, size_t bytes) {
     if (metadata.empty() || metadata.size() > MaxMeta || !pixels || !bytes || bytes > MaxFrame || !id) { fail(); return false; }
     Packet packet{2, std::move(metadata), std::move(target), {}, id};
     packet.pixels.assign(static_cast<const uint8_t*>(pixels), static_cast<const uint8_t*>(pixels) + bytes);
     std::lock_guard lock(mutex_);
-    pending_ = std::move(packet); changed_.notify_all(); return true;
+    pending_[key] = std::move(packet); changed_.notify_all(); return true;
   }
-  void invalidatePendingFrame() { std::lock_guard lock(mutex_); pending_.reset(); }
+  void invalidatePendingFrame(const std::string& key) { std::lock_guard lock(mutex_); pending_.erase(key); }
   bool acknowledge(uint64_t frame, const std::string& exactTarget) {
     std::lock_guard lock(mutex_);
     // The outstanding target may predate current navigation/resize. This exact
@@ -152,7 +158,7 @@ public:
     outstanding_ = 0; outstandingTarget_.clear(); changed_.notify_all(); return true;
   }
   void finishEvents(std::chrono::milliseconds timeout) {
-    std::unique_lock lock(mutex_); pending_.reset();
+    std::unique_lock lock(mutex_); pending_.clear();
     changed_.wait_for(lock, timeout, [&] { return failed_ || (events_.empty() && !writing_); });
   }
   void stop() {

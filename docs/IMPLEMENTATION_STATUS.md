@@ -1,5 +1,18 @@
 # Browser experience implementation status — 23 September 2026
 
+**26 September, Zen reset and per-tab engines (branch `zen-reset`):** the frontend is
+stock Zen again. Every Zen look-and-feel overlay patch was retired
+(`patches/zen/retired.json`), and the command palette, toolbar chips and shortcut
+interception no longer load. Each tab can instead be switched between Firefox
+and Chromium from Zen's tab context menu; Chromium tabs show a "Chromium" badge in
+the address bar and drive Zen's own address bar, back/forward/reload/stop, title and
+loading state. One shared Chromium host serves all Chromium tabs with a persistent
+Chromium profile beside the Zen profile. Offline JS/protocol tests and the native
+transport test pass, and both builds succeed. **Live Chromium runs are blocked on a
+one-time macOS Keychain approval** ("Chromium Safe Storage"), which Chromium needs
+even at shutdown; no GUI, E1 or E2 result exists for this code yet. The provider UI
+is not loaded; `packages/provider-host` is unchanged.
+
 **26 September continuation:** the provider host/panel, lazy startup, per-tab
 Chromium web-mode code and quieter Zen defaults have now been implemented.
 See [provider/engine progress](PROVIDER_ENGINE_PROGRESS.md) for current changes,

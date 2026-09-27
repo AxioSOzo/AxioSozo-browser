@@ -252,8 +252,8 @@ def daily(profile):
             # CEF's fixture profile is a child of this locked, app-owned session.
             # The native adapter validates this path against Gecko's actual ProfD.
             env["AXIOSOZO_SESSION_RUNTIME"] = str(session.path)
-            # Native Chromium is started only by an explicit browser-chrome
-            # switch. Fixture probes retain their separate strict origin mode.
+            # Each tab chooses its engine from Zen's tab menu. Chromium starts only
+            # when a tab is switched and uses its own profile beside this one.
             env["AXIOSOZO_ENGINE_SWITCHING"] = "1"
             env["AXIOSOZO_ENGINE_PROBE"] = "0"
             env.pop("AXIOSOZO_ENGINE_FIXTURE_ORIGIN", None)

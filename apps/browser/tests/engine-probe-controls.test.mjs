@@ -34,6 +34,7 @@ function fixture({ flag = "1", origin = "http://127.0.0.1:8910", privateMode = f
     }
     async switchToGecko() { calls.push("restore"); this.engine = "gecko"; this.callbacks.onEngineChange({ engine: "gecko" }); }
     diagnostics() { return { engine: this.engine, fixture: true, target: this.engine === "chromium" ? { ...target, engine: "chromium" } : null }; }
+    currentPage() { return null; }
     async dispose() { calls.push("disposed"); }
   }
   const controls = installEngineProbeControls(win, gecko, { Presenter: TestPresenter });
@@ -127,16 +128,17 @@ test("a pending native switch cannot create duplicate engine owners", async () =
   f.release(); await first; await f.controls.dispose();
 });
 
-test("daily mode is enabled independently of local fixture and remains lazy until a user switch",async()=>{
+test("web mode uses Zen's own tab controls and starts Chromium only on a user switch",async()=>{
   const f=fixture({flag:"",daily:"1",origin:"",url:"about:newtab"});
-  assert.deepEqual(f.calls,[]);assert.equal(f.controls.diagnostics().browsingMode,"web");
+  // The presenter exists to restore tabs and install the tab menu; no engine runs yet.
+  assert.deepEqual(f.calls,["constructed"]);assert.equal(f.controls.diagnostics().browsingMode,"web");
   assert.equal(f.controls.diagnostics().fixtureOrigin,null);
-  assert.match(f.button.attributes.label,/Firefox.*Chromium/u);
+  assert.equal(f.children.length,0,"web mode adds no toolbar button");
   assert.equal(f.controls.currentPage().url,"about:newtab");
   await f.controls.switchToChromium();assert.deepEqual(f.calls,["constructed","switch"]);
-  assert.match(f.button.attributes.label,/Chromium.*Firefox/u);await f.controls.dispose();
+  assert.equal(f.controls.diagnostics().activeEngine,"chromium");await f.controls.dispose();
   const privateTab=fixture({flag:"",daily:"1",privateMode:true});
   assert.equal(privateTab.controls.currentPage(),null);
   await assert.rejects(privateTab.controls.switchToChromium(),/CEF_PRIVATE_OR_UNKNOWN_TAB/u);
-  assert.deepEqual(privateTab.calls,[]);await privateTab.controls.dispose();
+  assert.deepEqual(privateTab.calls,["constructed"]);await privateTab.controls.dispose();
 });

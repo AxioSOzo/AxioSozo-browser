@@ -166,6 +166,39 @@ class BootstrapTests(unittest.TestCase):
                 zen.apply_records(root, [record])
             self.assertEqual(path.read_text(), 'existing work must survive')
 
+    def test_retired_patch_restores_only_its_exact_result(self):
+        with tempfile.TemporaryDirectory(prefix='axiosozo-zen-retired-') as directory:
+            root = Path(directory)
+            env = zen.zen_toolchain.environment()
+            path = root / 'prefs/sample.yaml'
+            path.parent.mkdir()
+            path.write_text('value: true\n')
+            subprocess.run(['git', 'init', '-q'], cwd=root, env=env, check=True)
+            subprocess.run(['git', 'add', '.'], cwd=root, env=env, check=True)
+            subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid',
+                            '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false',
+                            'commit', '-qm', 'synthetic upstream'], cwd=root, env=env, check=True)
+            digest = lambda: hashlib.sha256(path.read_bytes()).hexdigest()
+            stock = digest()
+            path.write_text('value: false\n')
+            record = {'path': 'prefs/sample.yaml', 'stock_sha256': stock, 'patched_sha256': [digest()]}
+            with patch.object(zen, 'retired_records', return_value=[record]):
+                with patch.object(zen, 'capture', side_effect=['prefs/sample.yaml\0', '']):
+                    self.assertEqual(zen.unexpected_source_changes(root), [])
+                zen.restore_retired(root)
+                self.assertEqual(digest(), stock)
+                path.write_text('local work must survive\n')
+                zen.restore_retired(root)
+                self.assertEqual(path.read_text(), 'local work must survive\n')
+                with patch.object(zen, 'capture', side_effect=['prefs/sample.yaml\0', '']):
+                    self.assertEqual(zen.unexpected_source_changes(root), ['prefs/sample.yaml'])
+
+    def test_retired_records_leave_no_active_overlay_behind(self):
+        active = {item['path'] for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text())}
+        for item in zen.retired_records():
+            self.assertNotIn(item['path'], active)
+            self.assertNotIn(item['stock_sha256'], item['patched_sha256'])
+
     def test_source_guard_rejects_unexported_native_file(self):
         with tempfile.TemporaryDirectory(prefix='axiosozo-zen-source-') as directory:
             with patch.object(zen, 'capture', side_effect=['src/widget/local.cpp\0', '._sidecar\0']):

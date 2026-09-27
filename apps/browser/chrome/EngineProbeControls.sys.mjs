@@ -3,9 +3,13 @@
 import { allowedFixtureURL, validFixtureOrigin } from "./CEFEngineAdapter.sys.mjs";
 
 const LIMITATIONS = "Local GET fixture only. Experimental: automatic Chromium control, IME, clipboard, native accessibility, downloads and permissions are unavailable.";
-const WEB_LIMITATIONS = "Experimental Chromium uses a separate temporary profile. Firefox retains the original page. IME, native accessibility, downloads, popups, extensions and permissions are not integrated.";
+const WEB_LIMITATIONS = "Chromium tabs use their own persistent Chromium profile, separate from Firefox. IME, native accessibility, downloads, extensions and site permissions are not integrated yet.";
 
-/** Explicit development action in browser chrome; no website event listener. */
+/**
+ * Engine switching in browser chrome; no website event listener. Web mode puts
+ * the switch in Zen's own tab menu and address bar. The fixture probe keeps an
+ * explicit toolbar action for its owned test page.
+ */
 export function installEngineProbeControls(win, gecko, { Presenter, onEngineChange = () => {},
   onTargetEvent = () => {}, onFailure = () => {} } = {}) {
   const origin = win.Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN");
@@ -14,9 +18,9 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
   const browsingMode = fixtureMode ? "fixture" : "web";
   const limitations = fixtureMode ? LIMITATIONS : WEB_LIMITATIONS;
   const toolbar = win.document.getElementById("nav-bar-customization-target");
-  if (!toolbar || typeof Presenter !== "function") return null;
-  const button = win.document.createXULElement("toolbarbutton");
-  button.id = "axiosozo-engine-probe";
+  if ((fixtureMode && !toolbar) || typeof Presenter !== "function") return null;
+  const button = fixtureMode ? win.document.createXULElement("toolbarbutton") : null;
+  if (button) button.id = "axiosozo-engine-probe";
   let presenter = null;
   let pending = false;
   let disposed = false;
@@ -34,6 +38,7 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
   }
 
   function updateButton() {
+    if (!button) return;
     const label = pending ? "Switching engine…" : state.engine === "chromium"
       ? (fixtureMode ? "Return to Gecko" : "Experimental Chromium · switch to Firefox")
       : (fixtureMode ? "Test Chromium · fixture only" : "Firefox · try experimental Chromium");
@@ -58,6 +63,8 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     if (!presenter) presenter = new Presenter(win, gecko, {
       browsingMode,
       onEngineChange(next) { if (!disposed) { state = { ...next }; refreshOwners(); updateButton(); onEngineChange(next); } },
+      // Retained Gecko action authority ends before any asynchronous switch work.
+      onSwitchStart(tabId) { if (typeof tabId === "string") cefOwners.add(tabId); },
       onTargetEvent(event) { if (!disposed) { targetEvents++; onTargetEvent(event); } },
       onFailure: failed,
     });
@@ -93,12 +100,16 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     if (!event.isTrusted) return;
     switchEngine(state.engine === "chromium" ? "gecko" : "chromium").catch(() => {});
   };
-  button.addEventListener("command", command);
-  toolbar.appendChild(button);
-  updateButton();
+  if (button) {
+    button.addEventListener("command", command);
+    toolbar.appendChild(button);
+    updateButton();
+  } else getPresenter(); // restores Chromium tabs and installs the tab menu and badge
   return Object.freeze({
     switchToChromium: () => switchEngine("chromium"),
     switchToGecko: () => switchEngine("gecko"),
+    setTabEngine: (tab, engine) => getPresenter().setTabEngine(tab, engine),
+    engineOf: tab => presenter?.engineOf(tab) ?? "gecko",
     isGeckoTargetActive: target => target?.engine === "gecko" && typeof target.tab_id === "string" && !cefOwners.has(target.tab_id),
     currentPage: (tab = win.gBrowser.selectedTab) => {
       const native = presenter?.currentPage(tab);
@@ -117,7 +128,7 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     async dispose() {
       if (disposed) return;
       disposed = true;
-      button.removeEventListener("command", command); button.remove();
+      button?.removeEventListener("command", command); button?.remove();
       await presenter?.dispose();
       cefOwners.clear();
     },

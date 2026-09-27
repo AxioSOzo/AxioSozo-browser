@@ -88,3 +88,17 @@ test('unsupported operations are honest; failed engine switching keeps the origi
   assert.equal(f.listeners.size, 0);
   assert.equal(f.adapter.tabs.size, 0);
 });
+
+test('lazy restored tabs are tracked without a principal and get a target once loaded', () => {
+  const f = fixture();
+  const lazy = { linkedBrowser: { browsingContext: null, contentPrincipal: undefined, currentURI: { spec: 'about:blank' } }, label: 'Restored', private: false };
+  const record = f.adapter.track(lazy);
+  assert.equal(f.adapter.loaded(record), false);
+  assert.throws(() => f.adapter.target(record), /TARGET_NOT_LOADED/);
+  f.listeners.get('TabAttrModified')({ type: 'TabAttrModified', target: lazy });
+  assert.equal(f.events.length, 0);
+  Object.assign(lazy.linkedBrowser, { browsingContext: { id: 7 }, contentPrincipal: { origin: 'https://example.invalid' } });
+  const target = f.adapter.target(record);
+  assert.equal(target.identity, 'https://example.invalid');
+  assert.equal(target.native_target_id, '7');
+});

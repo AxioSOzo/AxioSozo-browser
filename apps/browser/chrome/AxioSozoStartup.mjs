@@ -2,37 +2,26 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { GeckoEngineAdapter } from "chrome://browser/content/axiosozo/GeckoEngineAdapter.sys.mjs";
 import { attachCoordinator } from "chrome://browser/content/axiosozo/BrowserCoordinator.sys.mjs";
-import { openProviderSettings } from "chrome://browser/content/axiosozo/ProviderSettings.sys.mjs";
 import { CEFPresenter } from "chrome://browser/content/axiosozo/CEFPresenter.sys.mjs";
 import { installEngineProbeControls } from "chrome://browser/content/axiosozo/EngineProbeControls.sys.mjs";
-import { installBrowserExperience } from "chrome://browser/content/axiosozo/BrowserExperience.sys.mjs";
 
 // Loaded only by ZenPreloadedScripts in the trusted browser window.
+// Zen owns the visible frontend. The only additions are a tab-menu engine
+// switch and an address-bar badge on Chromium tabs; no shortcut is taken over.
 async function initialize() {
   await window.gZenStartup.promiseInitialized;
   if (!Services.prefs.getBoolPref("axiosozo.foundation.enabled", true)) return;
-  document.documentElement.toggleAttribute("axiosozo-minimal-ui", Services.prefs.getBoolPref("axiosozo.minimal-ui", true));
   const adapter = new GeckoEngineAdapter(window);
-  const badge = document.createXULElement("toolbarbutton");
-  badge.id = "axiosozo-engine-indicator";
-  badge.setAttribute("label", "Firefox");
-  badge.setAttribute("tooltiptext", "Firefox engine · Open browser settings");
-  badge.setAttribute("aria-label", "Active engine Firefox; open browser settings");
-  badge.setAttribute("engine", "gecko");
-  badge.addEventListener("command", () => openProviderSettings(window));
-  document.getElementById("nav-bar-customization-target").appendChild(badge);
+  // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
+  // (`./dev engine-probe`) adds its own explicit toolbar action.
   const engineProbe = installEngineProbeControls(window, adapter, {
     Presenter: CEFPresenter,
-    onEngineChange(state) {
-      const label = state.engine === "chromium" ? `Experimental Chromium ${state.version}` : "Firefox";
-      badge.setAttribute("label", label);
-      badge.setAttribute("aria-label", label + "; open browser settings");
-      badge.setAttribute("tooltiptext", label + " · Open browser settings");
-      badge.setAttribute("engine", state.engine === "chromium" ? "chromium" : "gecko");
-    },
     onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
-  const experience = installBrowserExperience(window, { engineProbe });
+  const fixtureProbe = engineProbe?.diagnostics().browsingMode === "fixture";
+  const probeSheet = fixtureProbe ? document.createProcessingInstruction("xml-stylesheet",
+    'href="chrome://browser/content/axiosozo/browser-experience.css" type="text/css"') : null;
+  if (probeSheet) document.insertBefore(probeSheet, document.documentElement);
   // Browser startup performs no provider discovery and starts no model client.
   // The optional privileged-action coordinator is also created only on demand.
   let coordinator = null; let coordinatorStarting = null; let disposed = false;
@@ -45,13 +34,12 @@ async function initialize() {
       .finally(() => { coordinatorStarting = null; });
     return coordinatorStarting;
   };
-  window.AxioSozo = Object.freeze({ version: 3, engine: adapter, engineProbe, experience, ensureCoordinator,
+  window.AxioSozo = Object.freeze({ version: 4, engine: adapter, engineProbe, ensureCoordinator,
     get coordinator() { return coordinator; } });
   window.addEventListener("unload", () => {
-    disposed = true; experience.dispose();
+    disposed = true; probeSheet?.remove();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });
-
 }
 window.addEventListener("MozBeforeInitialXULLayout", () => { initialize().catch(console.error); }, { once: true });

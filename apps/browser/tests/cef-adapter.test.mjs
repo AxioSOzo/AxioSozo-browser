@@ -276,10 +276,14 @@ test('web same-document loads revoke old targets and accept only a committed sam
   }
 });
 
-test('engine switch only transfers a matching GET history entry with no URL query or fragment',()=>{
+test('engine switch carries the visible web address of a GET page, never POST results or non-web pages',()=>{
   const browser={currentURI:{spec:'https://example.com/page'},browsingContext:{activeSessionHistoryEntry:{URI:{spec:'https://example.com/page'},postData:null}}};
   assert.equal(transferableGeckoURL(browser),'https://example.com/page');
-  for(const url of ['https://example.com/page?token=secret','https://example.com/page#secret','about:blank','file:///secret']) {
+  for(const url of ['https://example.com/search?q=zen','https://example.com/page#section']) {
+    browser.currentURI.spec=url;browser.browsingContext.activeSessionHistoryEntry.URI.spec=url;
+    assert.equal(transferableGeckoURL(browser),url);
+  }
+  for(const url of ['https://user:pw@example.com/','about:blank','about:preferences','file:///secret']) {
     browser.currentURI.spec=url;browser.browsingContext.activeSessionHistoryEntry.URI.spec=url;
     assert.equal(transferableGeckoURL(browser),null);
   }
@@ -392,7 +396,7 @@ test('native BGRA conversion handles premultiplied alpha; browser shortcuts stay
 });
 
 function presenterFixture() {
-  const listeners=new Map(), nodes=[], observers=[];
+  const listeners=new Map(), nodes=[], observers=[], opened=[], navigations=[];
   let geometry={width:2,height:2};
   const element=()=>({style:{},children:[],handlers:new Map(),setAttribute(){},appendChild(child){this.children.push(child);child.parentNode=this;},
     remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(child=>child!==this);},
@@ -417,6 +421,7 @@ function presenterFixture() {
     BrowserCommands:{back:original,forward:original,reload:original,reloadSkipCache:original},
     UpdateBackForwardCommands:original,
     gURLBar:{focused:false,setURI(){},handleNavigation:original,view:{close(){}}},
+    openTrustedLinkIn(url,where,params){opened.push({url,where,params});},
   };
   const gecko={find:()=>({}),target:()=>geckoTarget,resolve:value=>{assert.deepEqual(value,geckoTarget);}};
   let settle, hooks, closeCount=0;
@@ -429,9 +434,11 @@ function presenterFixture() {
       edit:async(_target,action)=>{editCalls.push(action);return {status:'success'};},
       resize(_target,surface){resizeCalls.push(surface);this.surface=surface;return Promise.resolve({status:'success'});},
       input(_target,method,fields){inputCalls.push({method,fields});return Promise.resolve({status:'success'});},
+      navigate:async(_target,url)=>{navigations.push({tabId:callbacks.tabId,url});return {status:'success'};},
+      back:async()=>({status:'success'}),reload:async()=>({status:'success'}),stop:async()=>({status:'success'}),
       close:async()=>{closeCount++;}};
   };
-  return {win,gecko,launch,stack,browser,tab,listeners,original,nodes,settle,resizeCalls,inputCalls,visibilityCalls,editCalls,launchCalls,
+  return {win,gecko,launch,stack,browser,tab,listeners,original,nodes,settle,resizeCalls,inputCalls,visibilityCalls,editCalls,launchCalls,opened,navigations,
     addTab:()=>{const nextStack={...element(),classList:{contains:value=>value==='browserStack'}};
       const nextBrowser={...browser,style:{visibility:''},parentNode:nextStack};
       return {linkedBrowser:nextBrowser,label:'SECOND FIXTURE',isConnected:true};},

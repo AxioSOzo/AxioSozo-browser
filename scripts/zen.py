@@ -63,6 +63,9 @@ def unexpected_source_changes(destination=UPSTREAM):
     records = {}
     for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text()):
         records.setdefault(item['path'], set()).update((item['before_sha256'], item['after_sha256']))
+    # Exact results of withdrawn patches are known; the next overlay restores them.
+    for item in retired_records():
+        records.setdefault(item['path'], set()).update(item['patched_sha256'])
     generated = {'prefs/axiosozo.yaml': ROOT / 'apps/browser/chrome/defaults.yaml'}
     for source in chrome_sources():
         generated['src/zen/common/axiosozo/' + source.name] = source
@@ -149,6 +152,7 @@ def doctor():
 def overlay(destination):
     """Strict idempotent patch application; unknown source changes are rejected."""
     manifest = json.loads((ROOT / 'patches/zen/overlay.json').read_text())
+    restore_retired(destination)
     apply_records(destination, manifest)
     target_dir = destination / 'src/zen/common/axiosozo'
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +161,24 @@ def overlay(destination):
     shutil.copyfile(ROOT / 'apps/browser/chrome/defaults.yaml', destination / 'prefs/axiosozo.yaml')
     copied = [destination / 'prefs/axiosozo.yaml', *[target_dir / source.name for source in chrome_sources()]]
     (destination / '.axiosozo-overlay-state.json').write_text(json.dumps({'version': 1, 'files': {str(path.relative_to(destination)): file_hash(path, 'sha256') for path in copied}}, indent=2) + '\n')
+
+
+def retired_records():
+    return json.loads((ROOT / 'patches/zen/retired.json').read_text())
+
+
+def restore_retired(destination):
+    """Return withdrawn overlay results to pinned upstream; any other content is left alone."""
+    for item in retired_records():
+        target = destination / item['path']
+        if file_hash(target, 'sha256') not in item['patched_sha256']:
+            continue
+        stock = subprocess.run(['git', '--no-optional-locks', '-c', 'core.hooksPath=/dev/null',
+                                'show', 'HEAD:' + item['path']], cwd=destination,
+                               capture_output=True, timeout=30, check=True).stdout
+        if hashlib.sha256(stock).hexdigest() != item['stock_sha256']:
+            raise RuntimeError(f'RETIRED_PATCH_BASE_MISMATCH: {item["path"]}')
+        target.write_bytes(stock)
 
 
 def apply_records(destination, manifest):

@@ -165,9 +165,26 @@ def run(interaction_timeout=15):
             completed('visibility', visible=True)
             session.until(lambda kind, _: kind == 2)
             result['tests'].append('hidden_OSR_suspended_and_visible_resumed')
+            # A second Zen tab is a second target of the same host and profile.
+            first_before = dict(session.target)
+            second = dict(pending, tab_id='web-test-2')
+            session.command('create', target=second, url='about:blank', width=600, height=400, device_scale=1)
+            session.until(lambda kind, item: kind == 2 and item['target']['tab_id'] == 'web-test-2')
+            assert completed('navigate', target=session.targets['web-test-2'], url=origin + '/page')['status'] == 'success'
+            session.until(lambda kind, item: kind == 2 and item['target']['tab_id'] == 'web-test-2',
+                          capture=directory / 'second-tab.png')
+            assert session.target == first_before, 'the other tab keeps its document and generation'
+            assert completed('close', target=session.targets['web-test-2'])['status'] == 'success'
+            assert session.process.poll() is None, 'closing one tab keeps the host running'
+            assert completed('focus', focused=True)['status'] == 'success'
+            result['tests'].append('second_target_isolated_navigation_and_close')
             assert completed('close')['status'] == 'success'
+            assert session.process.poll() is None, 'a web host outlives its last tab until shutdown'
+            shutdown = session.command('shutdown')
+            session.until(lambda _, item: item.get('event') == 'completed' and item.get('request_id') == shutdown)
             session.process.wait(timeout=10)
             assert session.process.returncode == 0
+            result['tests'].append('explicit_shutdown_after_last_target')
             result.update(status='PASS', native_exit_code=0, frames=session.frames,
                           cef=ready['cef'], chromium=ready['chromium'], requests=main.requests,
                           peer_requests=peer.requests, rejected_tls_requests=secure.requests)

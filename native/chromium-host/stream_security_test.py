@@ -30,7 +30,7 @@ def run():
     session = None
     previous_term = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
-        for kind in ['wrong_token', 'duplicate_frame_ack', 'clean_pipe_eof']:
+        for kind in ['wrong_token', 'duplicate_frame_ack', 'duplicate_target_id', 'clean_pipe_eof']:
             case = directory / kind
             case.mkdir()
             session = stream.Session(origin, case)
@@ -52,6 +52,21 @@ def run():
                 session.command('frame_ack', target=first['target'], frame_id=first['frame_id'])
                 session.process.wait(timeout=15)
                 assert session.process.returncode == 64
+            elif kind == 'duplicate_target_id':
+                pending = dict(tab_id='fixture-tab', engine_instance=session.instance, identity=origin,
+                               document_generation=1, navigation_generation=1, private_mode=False)
+                session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=2)
+                session.until(lambda kind, _: kind == 2)
+                live = dict(session.target)
+                # A second target may never claim a live tab's identity.
+                again = session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=2)
+                session.until(lambda _, item: item.get('request_id') == again and item.get('code') == 'invalid_lifecycle')
+                focus = session.command('focus', focused=True)
+                session.until(lambda _, item: item.get('event') == 'completed' and item.get('request_id') == focus)
+                assert session.target == live
+                session.process.stdin.close()
+                session.process.wait(timeout=15)
+                assert session.process.returncode == 0
             else:
                 session.process.stdin.close()
                 session.process.wait(timeout=15)
@@ -59,8 +74,8 @@ def run():
             result['tests'].append(dict(name=kind, status='PASS', native_exit_code=session.process.returncode))
             session.close()
             session = None
-        assert len(set(result['profiles'])) == 3
-        result.update(status='PASS', profile_isolation='three distinct fresh native profile directories')
+        assert len(set(result['profiles'])) == 4
+        result.update(status='PASS', profile_isolation='four distinct fresh native profile directories')
     except (Exception, KeyboardInterrupt) as error:
         result['error'] = type(error).__name__ + ': ' + str(error)
     finally:

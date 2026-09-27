@@ -52,13 +52,13 @@ archive hashes; network-enabled setup fetches only verified upstream URLs.
 | --- | --- |
 | `./dev doctor` | Read-only platform, storage, toolchain, build and provider metadata |
 | `./dev setup` | Controlled pinned source/bootstrap/native builds; first build can take substantial time |
-| `./dev` | Start verified custom Zen and owned services with its development profile |
+| `./dev` | Start verified custom Zen with its development profile; any tab can switch to Chromium from the tab menu |
 | `./dev --profile second` | Use an explicitly separate development profile |
 | `./dev check` | Rust formatting/clippy, JS/provider, Zen source and native CEF checks |
 | `./dev test` | Deterministic Rust, IPC/lifecycle, provider/Jev, fixture and real CEF stream tests |
 | `./dev smoke` | Owned Zen fixture/TLS inspection session; GUI assertions require observing that run |
 | `./dev engine-probe` | Fresh E0, then owned Zen fixture session with explicit experimental switch |
-| `./dev web-probe` | Fresh E0, then owned HTTP/TLS fixture session using experimental Chromium web mode |
+| `./dev web-probe` | Fresh E0, then an owned HTTP/TLS fixture session with per-tab Chromium switching |
 | `./dev provider-test codex --authorized` | Approved fixed diagnostic only; its dedicated profile currently requires login |
 | `./dev provider-test claude-code --authorized` | Approved fixed diagnostic only; authentication is unavailable under confinement |
 | `./dev provider-test antigravity --authorized` | Reports unsupported startup isolation; no live request |

@@ -46,7 +46,8 @@ export class GeckoEngineAdapter {
     let record = this.find(tab.linkedBrowser);
     if (!record) {
       record = { id: this.uuid(), tab, document: 1, navigation: 1,
-        principalIdentity: tab.linkedBrowser.contentPrincipal.origin };
+        // A lazy (not yet inserted) tab has no principal until it first loads.
+        principalIdentity: tab.linkedBrowser.contentPrincipal?.origin ?? null };
       this.tabs.set(record.id, record);
     }
     return record;
@@ -54,7 +55,14 @@ export class GeckoEngineAdapter {
 
   find(browser) { return [...this.tabs.values()].find(item => item.tab.linkedBrowser === browser); }
 
+  /** Restored tabs stay lazy, with no document or principal, until first shown. */
+  loaded(record) {
+    const browser = record.tab.linkedBrowser;
+    return !!(browser.contentPrincipal && browser.browsingContext);
+  }
+
   target(record) {
+    if (!this.loaded(record)) throw new Error("TARGET_NOT_LOADED");
     const browser = record.tab.linkedBrowser;
     const identity = browser.contentPrincipal.origin;
     if (identity !== record.principalIdentity) {
@@ -83,6 +91,7 @@ export class GeckoEngineAdapter {
   }
 
   send(record, type) {
+    if (!this.loaded(record)) return; // Its first load reports it.
     const browser = record.tab.linkedBrowser;
     const target = this.target(record);
     // Never collect private URLs or titles for the coordinator.
