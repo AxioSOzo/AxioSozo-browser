@@ -30,7 +30,8 @@ const ENGINES = ["firefox", "chromium"];
 const LOOPBACK_ADDRESSES = Object.freeze({ "localhost": ["127.0.0.1", "::1"], "127.0.0.1": ["127.0.0.1"], "[::1]": ["::1"] });
 const LEDGER_HOST = /^[a-z0-9.-]{1,253}$/u;
 const WORKSPACE_UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/u;
-const EMPTY_CONTEXT_STORE = Object.freeze({ version: 1, contexts: [], projects: [] });
+// Directory entries looked at per listed parent in the workspace phase (§2.2).
+export const MAX_LISTING_ENTRIES = 512;
 
 export class ServicesError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "ServicesError"; this.code = code; }
@@ -60,7 +61,7 @@ function metadataRecord(uuid, now) {
 export class AxioSozoServices {
   #deps; #stores; #listeners = new Map(); #windows = new Map();
   #serviceStatus = new Map(); #lastProbe = new Map(); #probing = new Map(); #pendingLedger = new Map(); #effectiveLedger = null;
-  #flushTimer = null; #prunedDay = null; #detectCache = new Map();
+  #flushTimer = null; #prunedDay = null; #detectCache = new Map(); #contextsFileIsV1 = false;
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -81,8 +82,13 @@ export class AxioSozoServices {
       timers: globalThis, ...deps };
     const storageFor = this.#deps.storageFor ?? (name => profileStorage(name));
     this.#stores = {
+      // contexts.json v1 (contexts[].project_id) is read through the pure
+      // migration; the first load writes the v2 document back atomically.
       contexts: new JsonStore({ storage: storageFor(STORE_FILES.contexts),
-        validate: core.validateContextStore, empty: EMPTY_CONTEXT_STORE }),
+        validate: value => {
+          if (value?.version === 1) this.#contextsFileIsV1 = true;
+          return core.migrateContextStore(value);
+        }, empty: core.DEFAULT_CONTEXT_STORE }),
       rules: new JsonStore({ storage: storageFor(STORE_FILES.rules),
         validate: core.validateRuleStore, empty: core.DEFAULT_RULE_STORE }),
       ledger: new JsonStore({ storage: storageFor(STORE_FILES.ledger),
@@ -157,13 +163,31 @@ export class AxioSozoServices {
   }
 
   // ── contexts ──────────────────────────────────────────────────────────
-  #contextView(space, meta) {
+  /** The validated v2 contexts document. A v1 file is migrated on read and
+   * written back as v2 once (atomic JsonStore write); a failed write is retried
+   * on the next load and never loses the v1 file. */
+  async #loadContexts() {
+    const doc = await this.#stores.contexts.load();
+    if (this.#contextsFileIsV1) {
+      this.#contextsFileIsV1 = false;
+      try { return await this.#stores.contexts.update(current => ({ ...current })); }
+      catch (error) { this.#contextsFileIsV1 = true; console.error("AxioSozo: contexts.json v2 write failed", error); }
+    }
+    return doc;
+  }
+
+  #contextView(space, meta, projects = []) {
     const adapter = space.adapter;
+    // Projects live in a space through projects[].context_uuid (store v2); any
+    // space type may hold several. project_id is the first, kept for callers
+    // that predate v2.
+    const projectIds = projects.filter(project => project.context_uuid === space.uuid).map(project => project.id);
     return {
       uuid: space.uuid, name: space.name, icon: space.icon,
       type: meta?.type ?? "personal",
       organization_uuid: meta?.organization_uuid ?? null,
-      project_id: meta?.project_id ?? null,
+      project_id: projectIds[0] ?? null,
+      project_ids: projectIds,
       engine_preference: meta?.engine_preference ?? null,
       // Identity: the Zen workspace's default container (userContextId, 0 = none).
       container: space.containerTabId,
@@ -172,16 +196,24 @@ export class AxioSozoServices {
   }
 
   async listContexts() {
-    const doc = await this.#stores.contexts.load();
+    const doc = await this.#loadContexts();
     const byUuid = new Map(doc.contexts.map(meta => [meta.workspace_uuid, meta]));
-    return [...this.#liveWorkspaces().values()].map(space => this.#contextView(space, byUuid.get(space.uuid)));
+    return [...this.#liveWorkspaces().values()].map(space => this.#contextView(space, byUuid.get(space.uuid), doc.projects));
   }
 
   async getContext(uuid) {
     const space = this.#liveWorkspaces().get(uuid);
     if (!space) return null;
-    const doc = await this.#stores.contexts.load();
-    return this.#contextView(space, doc.contexts.find(meta => meta.workspace_uuid === uuid));
+    const doc = await this.#loadContexts();
+    return this.#contextView(space, doc.contexts.find(meta => meta.workspace_uuid === uuid), doc.projects);
+  }
+
+  /** The space shown in the requesting (or most recent) window, or null. */
+  async activeContext({ window } = {}) {
+    const adapter = this.#adapterFor(window);
+    let uuid = null;
+    try { uuid = adapter && !adapter.isPrivateWindow() ? adapter.activeWorkspaceUuid() : null; } catch { uuid = null; }
+    return { uuid: uuid && this.#liveWorkspaces().has(uuid) ? uuid : null };
   }
 
   #upsertMeta(doc, uuid, patch) {
@@ -195,6 +227,7 @@ export class AxioSozoServices {
   }
 
   async #updateContexts(mutator, events = ["contexts"]) {
+    await this.#loadContexts();
     const result = await this.#stores.contexts.update(mutator);
     this.#emit(...events);
     return result;
@@ -208,12 +241,9 @@ export class AxioSozoServices {
       if ((current?.type ?? "personal") === type) return doc;
       const patch = { type };
       let next = doc;
-      if (type !== "project") {
-        // Links exist only on project contexts; release this context's project.
-        patch.organization_uuid = null; patch.project_id = null;
-        next = { ...next, projects: next.projects.map(project => (project.context_uuid === uuid
-          ? { ...project, context_uuid: null, updated_at: this.#deps.clock() } : project)) };
-      }
+      // The type is a label: projects stay in this space whatever its type. Only
+      // project spaces belong to an organization (context-v1).
+      if (type !== "project") patch.organization_uuid = null;
       if (current?.type === "organization") {
         next = { ...next, contexts: next.contexts.map(meta => (meta.organization_uuid === uuid
           ? { ...meta, organization_uuid: null, updated_at: this.#deps.clock() } : meta)) };
@@ -239,31 +269,31 @@ export class AxioSozoServices {
     return this.getContext(uuid);
   }
 
-  #linkProjectDoc(doc, uuid, projectId) {
+  /** Store v2: a project lives in the space named by its context_uuid (or none).
+   * Other projects of that space stay; the deprecated contexts[].project_id
+   * mirror is always cleared. */
+  #placeProject(doc, projectId, uuid) {
     const now = this.#deps.clock();
-    const projects = doc.projects.map(project => {
-      if (project.id === projectId) return { ...project, context_uuid: uuid, updated_at: now };
-      if (project.context_uuid === uuid && uuid !== null) return { ...project, context_uuid: null, updated_at: now };
-      return project;
-    });
-    const contexts = doc.contexts.map(meta => (meta.project_id === projectId && meta.workspace_uuid !== uuid
-      ? { ...meta, project_id: null, updated_at: now } : meta));
-    return { ...doc, projects, contexts };
+    return {
+      ...doc,
+      projects: doc.projects.map(project => (project.id === projectId && project.context_uuid !== uuid
+        ? { ...project, context_uuid: uuid, updated_at: now } : project)),
+      contexts: doc.contexts.map(meta => (meta.project_id !== null ? { ...meta, project_id: null, updated_at: now } : meta)),
+    };
   }
 
+  /** Puts a project in any space (personal, organization or project); several
+   * projects may share a space. projectId null takes every project out of it. */
   async linkProject(uuid, projectId) {
     this.#requireLive(uuid);
     await this.#updateContexts(doc => {
-      const meta = doc.contexts.find(item => item.workspace_uuid === uuid);
-      if (meta?.type !== "project") fail("CONTEXT_NOT_PROJECT");
       if (projectId === null) {
-        const now = this.#deps.clock();
-        const unlinked = { ...doc, projects: doc.projects.map(project => (project.context_uuid === uuid
-          ? { ...project, context_uuid: null, updated_at: now } : project)) };
-        return this.#upsertMeta(unlinked, uuid, { project_id: null });
+        let next = doc;
+        for (const project of doc.projects) if (project.context_uuid === uuid) next = this.#placeProject(next, project.id, null);
+        return next;
       }
       if (!doc.projects.some(project => project.id === projectId)) fail("UNKNOWN_PROJECT");
-      return this.#upsertMeta(this.#linkProjectDoc(doc, uuid, projectId), uuid, { project_id: projectId });
+      return this.#placeProject(doc, projectId, uuid);
     }, ["contexts", "projects"]);
     return this.getContext(uuid);
   }
@@ -280,7 +310,7 @@ export class AxioSozoServices {
   async listOrphans() {
     if (!this.#authoritativeAdapters().length) return [];
     const live = this.#liveWorkspaces();
-    const doc = await this.#stores.contexts.load();
+    const doc = await this.#loadContexts();
     return clone(doc.contexts.filter(meta => !live.has(meta.workspace_uuid)));
   }
 
@@ -307,11 +337,11 @@ export class AxioSozoServices {
 
   // ── projects ──────────────────────────────────────────────────────────
   async listProjects() {
-    return clone((await this.#stores.contexts.load()).projects);
+    return clone((await this.#loadContexts()).projects);
   }
 
   async getProject(id) {
-    const project = (await this.#stores.contexts.load()).projects.find(item => item.id === id);
+    const project = (await this.#loadContexts()).projects.find(item => item.id === id);
     return project ? clone(project) : null;
   }
 
@@ -326,9 +356,13 @@ export class AxioSozoServices {
     return this.#deps.fs ?? fail("UNAVAILABLE");
   }
 
-  /** Static, read-only detection (§6.1): reads only DETECTION_FILES under root,
-   * each a regular file ≤ MAX_FILE_BYTES, refusing symlinks that leave the root.
-   * Never lists directories, never follows anything else, never executes. */
+  /** Static, read-only detection (§6.1, contexts-api-v1 §2.1–§2.2), two phases:
+   * 1. only DETECTION_FILES under root, each a regular file ≤ MAX_FILE_BYTES,
+   *    refusing symlinks that leave the root;
+   * 2. for workspaces: the names of the immediate child directories of the
+   *    parents the core plans (nothing below them is opened), then only
+   *    PACKAGE_DETECTION_FILES in the package directories the core expands.
+   * Same lstat/realpath/size refusal policy in both phases; never executes. */
   async detect(root) {
     const fs = this.#fs();
     if (typeof root !== "string" || !root.startsWith("/") || root.includes("\0")) fail("INVALID_ROOT");
@@ -340,16 +374,67 @@ export class AxioSozoServices {
     const files = {}; const refused = [];
     for (const relative of core.DETECTION_FILES) {
       if (!core.isAllowedPath(relative)) { refused.push({ path: relative, reason: "not_allowlisted" }); continue; }
-      const result = await this.#readAllowlisted(fs, rootReal, relative);
+      const result = await this.#readAllowlisted(fs, rootReal, relative,
+        (resolvedPath, target) => core.detectionRefusal({ path: relative, resolvedPath, isFile: target.type === "regular", size: target.size }));
       if (result.text !== undefined) files[relative] = result.text;
       else if (result.reason) refused.push({ path: relative, reason: result.reason });
     }
-    const draft = core.detectProject({ rootName: fs.basename(root), files, refused });
+    const packages = await this.#readWorkspace(fs, rootReal, files);
+    const draft = core.detectProject({ rootName: fs.basename(root), files, refused, packages });
     this.#detectCache.set(root, files[core.MANIFEST_PATH] ?? null);
     return clone(draft);
   }
 
-  async #readAllowlisted(fs, rootReal, relative) {
+  /** Phase 2 (§2.2). Returns { [dir]: { files, refused } } for packages with
+   * anything readable or refused. */
+  async #readWorkspace(fs, rootReal, rootFiles) {
+    if (typeof fs.listDirectory !== "function") return {};
+    const plan = core.workspaceCandidates(rootFiles);
+    const prefix = rootReal.endsWith("/") ? rootReal : rootReal + "/";
+    const listing = {};
+    for (const parent of plan.list.slice(0, 16)) {
+      const names = await this.#listChildDirectories(fs, rootReal, prefix, parent);
+      if (names) listing[parent] = names;
+    }
+    const packages = {};
+    for (const dir of core.expandWorkspaceGlobs(plan.patterns, listing).slice(0, core.MAX_WORKSPACE_PACKAGES)) {
+      if (!core.isPackageDir(dir)) continue;
+      const files = {}; const refused = [];
+      for (const rel of core.PACKAGE_DETECTION_FILES) {
+        if (!core.isAllowedPackagePath(dir, rel)) continue;
+        const result = await this.#readAllowlisted(fs, rootReal, `${dir}/${rel}`,
+          (resolvedPath, target) => core.packageDetectionRefusal({ dir, path: rel, resolvedPath,
+            isFile: target.type === "regular", size: target.size }));
+        if (result.text !== undefined) files[rel] = result.text;
+        else if (result.reason) refused.push({ path: rel, reason: result.reason });
+      }
+      if (Object.keys(files).length || refused.length) packages[dir] = { files, refused };
+    }
+    return packages;
+  }
+
+  /** Names of the immediate child directories (and symlinks, which phase 2
+   * re-checks) of one planned parent inside the root; null when the parent is
+   * absent, not a directory or resolves outside the root. Nothing below the
+   * children is opened or stat'ed. */
+  async #listChildDirectories(fs, rootReal, prefix, parent) {
+    if (typeof parent !== "string" || (parent && !core.isPackageDir(parent))) return null;
+    const full = parent ? fs.join(rootReal, parent) : rootReal;
+    try {
+      if (parent) {
+        if (!await fs.lstat(full)) return null;
+        const real = await fs.realpath(full);
+        if (!real.startsWith(prefix)) return null;
+        if ((await fs.stat(real))?.type !== "directory") return null;
+      }
+      const entries = await fs.listDirectory(full, MAX_LISTING_ENTRIES);
+      return entries.slice(0, MAX_LISTING_ENTRIES)
+        .filter(entry => entry && (entry.type === "directory" || entry.type === "symlink") && typeof entry.name === "string")
+        .map(entry => entry.name);
+    } catch { return null; }
+  }
+
+  async #readAllowlisted(fs, rootReal, relative, refusalFor) {
     const full = fs.join(rootReal, relative);
     let info;
     try { info = await fs.lstat(full); } catch { return { reason: "unreadable" }; }
@@ -363,8 +448,7 @@ export class AxioSozoServices {
     if (!target) return { reason: "unreadable" };
     // An in-root symlink may only resolve to another allowlisted file, so
     // `package.json -> .env` is refused before anything is opened.
-    const refusal = core.detectionRefusal({ path: relative, resolvedPath: real.slice(prefix.length),
-      isFile: target.type === "regular", size: target.size });
+    const refusal = refusalFor(real.slice(prefix.length), target);
     if (refusal) return { reason: refusal };
     let bytes;
     try { bytes = await fs.read(real, core.MAX_FILE_BYTES + 1); } catch { return { reason: "unreadable" }; }
@@ -403,12 +487,9 @@ export class AxioSozoServices {
     await this.#updateContexts(doc => {
       if (doc.projects.some(item => item.root === root)) fail("PROJECT_EXISTS");
       if (doc.projects.some(item => item.id === id)) fail("DUPLICATE_PROJECT_ID");
-      let next = { ...doc, projects: [...doc.projects, project] };
-      if (contextUuid !== null) {
-        next = this.#linkProjectDoc(next, contextUuid, id);
-        next = this.#upsertMeta(next, contextUuid, { type: "project", project_id: id });
-      }
-      return next;
+      // Any space may hold the project; its type (a label) is left as it is.
+      const next = { ...doc, projects: [...doc.projects, project] };
+      return contextUuid !== null ? this.#placeProject(next, id, contextUuid) : next;
     }, ["projects", "contexts"]);
     return this.getProject(id);
   }
@@ -444,16 +525,7 @@ export class AxioSozoServices {
           ? { ...item, manifest: clone(manifest), updated_at: this.#deps.clock() } : item)) };
       }
       if ("context_uuid" in patch && patch.context_uuid !== existing.context_uuid) {
-        const now = this.#deps.clock();
-        next = { ...next, contexts: next.contexts.map(meta => (meta.project_id === id
-          ? { ...meta, project_id: null, updated_at: now } : meta)) };
-        if (patch.context_uuid === null) {
-          next = { ...next, projects: next.projects.map(item => (item.id === id
-            ? { ...item, context_uuid: null, updated_at: now } : item)) };
-        } else {
-          next = this.#linkProjectDoc(next, patch.context_uuid, id);
-          next = this.#upsertMeta(next, patch.context_uuid, { type: "project", project_id: id });
-        }
+        next = this.#placeProject(next, id, patch.context_uuid);
       }
       return next;
     }, ["projects", "contexts"]);
@@ -472,20 +544,16 @@ export class AxioSozoServices {
     return { removed: true };
   }
 
-  /** The project and environment whose declared base URL contains url. A
-   * project linked to contextUuid wins over other matches. */
+  /** Tab ↔ project linking (§2.5): the project and environment whose declared
+   * base URL contains url (loopback aliases count as one host). A project in
+   * contextUuid wins, then an exact host, then the longest path prefix. */
   async projectForUrl(url, contextUuid) {
     if (typeof url !== "string") return null;
-    const { projects } = await this.#stores.contexts.load();
-    let best = null;
-    for (const project of projects) {
-      const match = core.matchEnvironment(project.manifest.environments, url);
-      if (!match) continue;
-      const candidate = { project: clone(project), environment: clone(match.environment) };
-      if (contextUuid && project.context_uuid === contextUuid) return candidate;
-      best ??= candidate;
-    }
-    return best;
+    const { projects } = await this.#loadContexts();
+    const match = core.matchProjectForUrl(projects, url, { contextUuid: contextUuid ?? undefined });
+    const project = match && projects.find(item => item.id === match.project_id);
+    if (!project) return null;
+    return { project: clone(project), environment: clone(match.environment), app: match.app, ambiguous: match.ambiguous };
   }
 
   // ── service status (declared loopback ports only, on request) ─────────
@@ -688,7 +756,7 @@ export class AxioSozoServices {
    * and rules whose daily limit is reached today. Never probes by itself. */
   async needsAttention() {
     const items = [];
-    const { projects } = await this.#stores.contexts.load();
+    const { projects } = await this.#loadContexts();
     for (const project of projects) {
       for (const entry of this.#serviceStatus.get(project.id)?.values() ?? []) {
         if (entry.status !== "down") continue;
@@ -885,6 +953,24 @@ export function chromeFileSystem() {
     },
     async read(path, maxBytes) {
       return IOUtils.read(path, { maxBytes });
+    },
+    /** Names and no-follow types of a directory's entries (workspace phase):
+     * IOUtils.getChildren lists names only; each entry is lstat'ed through
+     * nsIFile.isSymlink() before isDirectory(), so a link is reported as a link
+     * and nothing below an entry is touched. At most `limit` entries. */
+    async listDirectory(path, limit = MAX_LISTING_ENTRIES) {
+      const children = await IOUtils.getChildren(path, { ignoreAbsent: true });
+      const entries = [];
+      for (const child of children.slice(0, limit)) {
+        const file = localFile(child);
+        let type = "other";
+        try {
+          if (file.isSymlink()) type = "symlink";
+          else if (file.isDirectory()) type = "directory";
+        } catch { continue; }
+        entries.push({ name: PathUtils.filename(child), type });
+      }
+      return entries;
     },
     /** One directory level; rejects when anything (a link included) already exists. */
     async makeDirectory(path) {

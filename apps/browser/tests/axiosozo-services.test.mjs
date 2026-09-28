@@ -57,6 +57,21 @@ function fakeFs(tree, hooks = {}) {
     async lstat(path) { return info(nodes.get(resolve(path, false))); },
     async stat(path) { return info(nodes.get(resolve(path, true))); },
     async realpath(path) { const real = resolve(path, true); if (!nodes.has(real)) throw new Error("ENOENT"); return real; },
+    listed: [],
+    /** Immediate entries of a directory with no-follow types (IOUtils.getChildren + lstat). */
+    async listDirectory(path, limit = Infinity) {
+      const real = resolve(path, true);
+      if (!nodes.get(real)?.dir) throw new Error("ENOTDIR");
+      this.listed.push(real);
+      const out = [];
+      for (const [key, node] of nodes) {
+        if (key === real || !key.startsWith(real === "/" ? "/" : real + "/")) continue;
+        const name = key.slice(real.length + 1);
+        if (name.includes("/")) continue;
+        out.push({ name, type: info(node).type });
+      }
+      return out.slice(0, limit);
+    },
     async read(path, maxBytes) {
       hooks.beforeRead?.(path, nodes);
       const real = resolve(path, true);
@@ -205,8 +220,9 @@ test("contexts: leaving type project or organization clears dependent links", { 
   assert.equal((await h.services.getContext(APP)).organization_uuid, null);
   await h.services.setContextType(APP, "personal");
   const app = await h.services.getContext(APP);
-  assert.deepEqual([app.type, app.project_id], ["personal", null]);
-  assert.equal((await h.services.getProject(project.id)).context_uuid, null);
+  // Store v2: the type is a label; the project stays in its space.
+  assert.deepEqual([app.type, app.project_id, app.project_ids], ["personal", project.id, [project.id]]);
+  assert.equal((await h.services.getProject(project.id)).context_uuid, APP);
 });
 
 test("orphans: a deleted workspace's metadata is never applied and is removed only on request", { skip }, async () => {
@@ -280,7 +296,7 @@ test("projects: confirm, link to a context, map URLs, write the manifest only on
   assert.equal(project.trusted, false);
   assert.equal(h.fs.writes.length, 0, "confirming never writes to the repository");
   const app = await h.services.getContext(APP);
-  assert.deepEqual([app.type, app.project_id], ["project", project.id]);
+  assert.deepEqual([app.type, app.project_id], ["personal", project.id], "adding a project never changes the space type");
   await assert.rejects(h.services.confirmProject({ root: "/work/shop", manifest: MANIFEST }), error => error.code === "PROJECT_EXISTS");
   await assert.rejects(h.services.confirmProject({ root: "/work", manifest: { ...MANIFEST, name: "" } }));
   await assert.rejects(h.services.confirmProject({ root: "/work", manifest: { ...MANIFEST,
@@ -651,4 +667,76 @@ test("Overview rule editor contract: a new rule is saved without the model's pla
   assert.equal((await h.services.saveRule(edited)).limits.daily_minutes, 1);
   const page = (await import("node:fs")).readFileSync(new URL("../chrome/overview/about-axiosozo.mjs", import.meta.url), "utf8");
   assert.match(page, /if \(!rule\) delete payload\.id;/u, "the page drops the placeholder id for new rules");
+});
+
+test("store v2: a v1 contexts.json is migrated on load and written back as v2 once", { skip }, async () => {
+  const h = harness();
+  const project = { version: 1, id: "p_legacy1", root: "/work/shop", manifest: MANIFEST, manifest_state: "none",
+    context_uuid: null, trusted: false, created_at: 5, updated_at: 5 };
+  const v1 = { version: 1, projects: [project], contexts: [
+    { version: 1, workspace_uuid: APP, type: "project", organization_uuid: null, project_id: "p_legacy1", engine_preference: null, updated_at: 5 }] };
+  h.storage.files.set("contexts.json", JSON.stringify(v1));
+  const services = h.make();
+  services.registerWindow(h.zen.window, h.adapter);
+  const [listed] = await services.listProjects();
+  assert.equal(listed.context_uuid, APP, "the v1 link becomes projects[].context_uuid");
+  const written = JSON.parse(h.storage.files.get("contexts.json"));
+  assert.equal(written.version, 2);
+  assert.equal(written.contexts[0].project_id, null, "the deprecated mirror is cleared");
+  assert.equal(written.projects[0].updated_at, 5, "migration changes nothing else");
+  const before = h.storage.files.get("contexts.json");
+  await services.listContexts();
+  assert.equal(h.storage.files.get("contexts.json"), before, "written once");
+  // An invalid file is still never overwritten.
+  h.storage.files.set("contexts.json", "{\"version\":1,\"contexts\":\"x\"}");
+  const broken = h.make();
+  await assert.rejects(broken.listProjects(), error => error.code === "INVALID_STORE");
+  assert.equal(h.storage.files.get("contexts.json"), "{\"version\":1,\"contexts\":\"x\"}");
+});
+
+test("projects live in any space: several per space, personal spaces included, moved with linkProject", { skip }, async () => {
+  const h = harness({ tree: { ...VITE_TREE, "/work/docs": { dir: true } } });
+  const shop = await h.services.confirmProject({ root: "/work/shop", manifest: MANIFEST, contextUuid: HOME });
+  const docs = await h.services.confirmProject({ root: "/work/docs", manifest: { ...MANIFEST, name: "Docs",
+    environments: [{ name: "local", base_url: "http://localhost:4321" }], services: [] }, contextUuid: HOME });
+  const home = await h.services.getContext(HOME);
+  assert.deepEqual([home.type, home.project_ids], ["personal", [shop.id, docs.id]]);
+  await h.services.linkProject(BV, docs.id);
+  assert.deepEqual((await h.services.getContext(HOME)).project_ids, [shop.id]);
+  assert.deepEqual((await h.services.getContext(BV)).project_ids, [docs.id]);
+  assert.equal((await h.services.getContext(BV)).type, "personal", "never forced to type project");
+  await h.services.linkProject(HOME, null);
+  assert.equal((await h.services.getProject(shop.id)).context_uuid, null);
+  assert.equal((await h.services.getProject(docs.id)).context_uuid, BV, "only that space's projects are released");
+  const stored = JSON.parse(h.storage.files.get("contexts.json"));
+  assert.equal(stored.version, 2);
+  assert.ok(stored.contexts.every(meta => meta.project_id === null));
+});
+
+test("projectForUrl links tabs by URL: loopback aliases, the active space first, app of the environment", { skip }, async () => {
+  const h = harness({ tree: { ...VITE_TREE, "/work/domo": { dir: true } } });
+  const domo = await h.services.confirmProject({ root: "/work/domo", contextUuid: APP, manifest: { version: 2, name: "Domo", kind: "desktop",
+    environments: [{ name: "local", app: "desktop", base_url: "http://localhost:1420" }, { name: "local", app: "web", base_url: "http://localhost:5173" }],
+    services: [], surfaces: [] } });
+  const other = await h.services.confirmProject({ root: "/work/shop", contextUuid: HOME, manifest: { ...MANIFEST,
+    environments: [{ name: "local", base_url: "http://localhost:5173" }] } });
+  const inApp = await h.services.projectForUrl("http://127.0.0.1:5173/board?x=1", APP);
+  assert.deepEqual([inApp.project.id, inApp.environment.name, inApp.app, inApp.ambiguous], [domo.id, "local", "web", false]);
+  const inHome = await h.services.projectForUrl("http://localhost:5173/", HOME);
+  assert.equal(inHome.project.id, other.id);
+  assert.equal((await h.services.projectForUrl("http://localhost:1420/", HOME)).app, "desktop");
+  assert.equal(await h.services.projectForUrl("http://0.0.0.0:5173/"), null, "0.0.0.0 is not a loopback alias");
+  // Editing environments re-links at once: the next lookup sees the new URL.
+  await h.services.updateProject(domo.id, { manifest: { version: 1, name: "Domo", kind: "web",
+    environments: [{ name: "local", base_url: "http://localhost:5180" }], services: [], surfaces: [] } });
+  assert.equal((await h.services.projectForUrl("http://localhost:5180/x", APP)).project.id, domo.id);
+});
+
+test("activeContext reports the requesting window's space and nothing for private windows", { skip }, async () => {
+  const h = harness();
+  await h.zen.zen.changeWorkspaceWithID(BV);
+  assert.deepEqual(await h.services.activeContext({ window: h.zen.window }), { uuid: BV });
+  const privateZen = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }], isPrivate: true });
+  h.services.registerWindow(privateZen.window, new ZenWorkspaceAdapter(privateZen.window));
+  assert.deepEqual(await h.services.activeContext({ window: privateZen.window }), { uuid: null });
 });

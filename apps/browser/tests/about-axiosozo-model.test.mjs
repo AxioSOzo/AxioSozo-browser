@@ -191,19 +191,6 @@ test("editing a confirmed project round-trips its manifest", () => {
   assert.deepEqual(M.reviewToManifest(review).manifest, manifest);
 });
 
-test("context rows expose organization and project links only for project contexts", () => {
-  const contexts = [
-    { uuid: "{aaaaaaaa-0000-0000-0000-000000000001}", name: "BV", type: "organization" },
-    { uuid: "{aaaaaaaa-0000-0000-0000-000000000002}", name: "App", type: "project" },
-    { uuid: "{aaaaaaaa-0000-0000-0000-000000000003}", name: "Me", type: "personal" },
-  ];
-  const rows = M.contextRows(contexts, [{ id: "p_abcd", manifest: { name: "App repo" } }]);
-  assert.deepEqual(rows.map(row => row.showLinks), [false, true, false]);
-  assert.deepEqual(rows[1].organizationOptions, [{ uuid: contexts[0].uuid, name: "BV" }]);
-  assert.deepEqual(rows[1].projectOptions, [{ id: "p_abcd", name: "App repo" }]);
-  assert.deepEqual(rows[0].organizationOptions, []);
-});
-
 test("ledger views group per host/context and per day with readable durations", () => {
   assert.equal(M.formatDuration(0), "under 1 min");
   assert.equal(M.formatDuration(59_999), "under 1 min");
@@ -247,4 +234,152 @@ test("the page model shares enum values with the contexts core", async () => {
     assert.deepEqual([...M[name]], [...core[name]], name);
   }
   assert.deepEqual(Object.keys(M.REFUSAL_TEXT), [...core.REFUSAL_REASONS]);
+});
+
+const expectedDraft = async name => JSON.parse(await (await import("node:fs/promises")).readFile(
+  new URL(`../../../packages/contexts/tests/expected/${name}.json`, import.meta.url), "utf8"));
+
+test("add-project review, Domo-like: environments grouped per app, production URL on the web app, v2 manifest", async () => {
+  const core = await import("../../../packages/contexts/src/index.mjs");
+  const draft = await expectedDraft("tauri-plus-web");
+  const review = M.draftToReview(draft, { contextUuid: UUID });
+  assert.equal(review.contextUuid, UUID);
+  assert.deepEqual(review.environments.map(row => [row.app, row.name, row.base_url, row.guess, row.enabled]),
+    [["desktop", "local", "http://localhost:1420", false, true], ["web", "local", "http://localhost:5173", true, true]]);
+  assert.deepEqual(M.environmentGroups(review).map(group => [group.app, group.label, group.rows.map(item => item.index)]),
+    [["desktop", "Desktop app (desktop)", [0]], ["web", "App web", [1]]]);
+  assert.deepEqual(review.surfaces.map(row => [row.name, row.prominence]),
+    draft.surfaces.map(surface => [surface.name, surface.prominence]), "Shown/More follows the draft's prominence");
+  // Untouched, the review gives the same manifest as the core (apart from base URL trailing slashes).
+  const untouched = M.reviewToManifest(review).manifest;
+  const reference = core.draftToManifest(draft);
+  assert.equal(untouched.version, 2);
+  assert.deepEqual(core.validateManifest(untouched).environments.map(env => [env.app, env.name, env.base_url.replace(/\/$/u, "")]),
+    reference.environments.map(env => [env.app, env.name, env.base_url.replace(/\/$/u, "")]));
+  assert.deepEqual(untouched.services.map(s => [s.app, s.name, s.port]), reference.services.map(s => [s.app, s.name, s.port]));
+  assert.deepEqual(untouched.surfaces.map(s => [s.name, M.surfaceProminence(s)]),
+    reference.surfaces.map(s => [s.name, core.surfaceProminence(s)]));
+  // The optional Production URL lands on the web app, like core.draftToManifest(…, { production_url }).
+  review.productionUrl = "https://domo.example/";
+  const withProd = M.reviewToManifest(review).manifest;
+  assert.deepEqual(withProd.environments.at(-1), { name: "production", base_url: "https://domo.example", app: "web" });
+  assert.deepEqual(core.draftToManifest(draft, { production_url: "https://domo.example" }).environments.at(-1).app, "web");
+  // Unticking the web app's local environment drops its service; editing the Tauri port moves its service.
+  review.environments[1].enabled = false;
+  review.environments[0].base_url = "http://localhost:1421";
+  const edited = M.reviewToManifest(review).manifest;
+  assert.deepEqual(edited.environments.map(env => [env.app, env.name]), [["desktop", "local"], ["web", "production"]]);
+  assert.deepEqual(edited.services.map(s => [s.app, s.name, s.port, s.url]), [["desktop", "Tauri dev server", 1421, "http://localhost:1421/"]]);
+  core.validateManifest(edited);
+});
+
+test("add-project review, RemoteRAL-like: + Add environment gets a dev server; guesses stay marked; bad production URL refused", async () => {
+  const core = await import("../../../packages/contexts/src/index.mjs");
+  const draft = await expectedDraft("npm-workspaces");
+  const review = M.draftToReview(draft);
+  assert.deepEqual(review.environments.map(row => [row.app, row.name, row.guess]), [[null, "local", true]]);
+  assert.deepEqual(M.environmentGroups(review).map(group => group.label), [null], "one app: no group headings");
+  review.environments.push({ app: null, name: "api", base_url: "http://localhost:8787", source: "", guess: false, enabled: true, servicePort: null });
+  review.productionUrl = "https://remoteral.example";
+  const { manifest, errors } = M.reviewToManifest(review);
+  assert.deepEqual(errors, []);
+  assert.equal(manifest.version, 1, "single-app manifests stay version 1");
+  assert.deepEqual(manifest.environments.map(env => [env.name, env.base_url]),
+    [["local", "http://localhost:5173"], ["api", "http://localhost:8787"], ["production", "https://remoteral.example"]]);
+  assert.deepEqual(manifest.services.map(s => [s.name, s.port]), [["Vite dev server", 5173], ["Dev server", 8787]]);
+  core.validateManifest(manifest);
+  for (const bad of ["ftp://x.example", "https://x.example/?a=1", "https://u:p@x.example"]) {
+    review.productionUrl = bad;
+    const refused = M.reviewToManifest(review);
+    assert.equal(refused.manifest, null, bad);
+    assert.equal(refused.errors[0].field, "production_url");
+  }
+});
+
+test("surfaces: Shown/More is written only where it differs from the kind's default; unticked ones are dropped", () => {
+  const review = M.draftToReview({ ...DRAFT, surfaces: [
+    { name: "Repository", url: "https://git.example.test/team/app", kind: "repository", prominence: "primary", source: "", guess: false },
+    { name: "CI", url: "https://ci.example.test/app", kind: "ci", prominence: "secondary", source: "", guess: false },
+    { name: "Issues", url: "https://git.example.test/team/app/issues", kind: "issues", prominence: "secondary", source: "", guess: false }] });
+  review.surfaces[1].prominence = "primary";
+  review.surfaces[2].enabled = false;
+  const { manifest } = M.reviewToManifest(review);
+  assert.equal(manifest.version, 2);
+  assert.deepEqual(manifest.surfaces, [
+    { name: "Repository", url: "https://git.example.test/team/app", kind: "repository" },
+    { name: "CI", url: "https://ci.example.test/app", kind: "ci", prominence: "primary" }]);
+  validateManifest(manifest);
+});
+
+test("projects are grouped by space (any type) and the page says where a new project lives", () => {
+  const contexts = [
+    { uuid: "{aaaaaaaa-0000-4000-8000-000000000001}", name: "Me", type: "personal" },
+    { uuid: "{aaaaaaaa-0000-4000-8000-000000000002}", name: "BV", type: "organization" }];
+  const projects = [
+    { id: "p_aaaa", context_uuid: contexts[0].uuid, manifest: { name: "Domo" } },
+    { id: "p_bbbb", context_uuid: contexts[0].uuid, manifest: { name: "Blog" } },
+    { id: "p_cccc", context_uuid: null, manifest: { name: "Loose" } },
+    { id: "p_dddd", context_uuid: "{deadbeef-0000-4000-8000-000000000000}", manifest: { name: "Orphaned" } }];
+  const groups = M.projectGroups(contexts, projects);
+  assert.deepEqual(groups.map(group => [group.context?.name ?? null, group.projects.map(p => p.id)]),
+    [["Me", ["p_aaaa", "p_bbbb"]], ["BV", []], [null, ["p_cccc", "p_dddd"]]]);
+  assert.match(M.placementMessage(projects[0], contexts), /^Domo was added to the space Me\. It is in that space's sidebar/u);
+  assert.match(M.placementMessage(projects[2], contexts), /not to a space yet/u);
+  assert.deepEqual(M.TYPE_LABELS, { personal: "Personal", organization: "Organization", project: "Project" });
+});
+
+test("deep links: three views, old hashes redirect, item links validated", () => {
+  assert.deepEqual(M.VIEWS, ["projects", "rules", "ai"]);
+  assert.deepEqual(M.routeFromHash("#ai"), { view: "ai" });
+  assert.deepEqual(M.routeFromHash("#home"), { view: "projects", legacy: true });
+  assert.deepEqual(M.routeFromHash("#time"), { view: "rules", legacy: true });
+  assert.deepEqual(M.routeFromHash("#settings"), { view: "ai", legacy: true });
+  assert.deepEqual(M.routeFromHash("#project=p_abcd"), { view: "projects", project: "p_abcd" });
+  assert.deepEqual(M.routeFromHash("#edit-project=p_abcd"), { view: "projects", project: "p_abcd", edit: true });
+  assert.deepEqual(M.routeFromHash(`#add-project=${UUID}`), { view: "projects", addTo: UUID });
+  assert.deepEqual(M.routeFromHash(`#add-project=${encodeURIComponent(UUID)}`), { view: "projects", addTo: UUID }, "an encoded fragment works too");
+  assert.deepEqual(M.routeFromHash("#rule=r_7f3a"), { view: "rules", rule: "r_7f3a" });
+  for (const bad of ["", "#", "#project=../x", "#add-project=nope", "#rule=p_abcd", "#constructor", "#%E0%A4%A"]) {
+    assert.equal(M.routeFromHash(bad).view, "projects", bad);
+    assert.equal(Object.keys(M.routeFromHash(bad)).length, 1, bad);
+  }
+});
+
+test("AI & keys: provider cards keep the honest labels; Jev key form rules; Keychain texts match ProviderStatus", async () => {
+  const { buildProviderStatus, keychainErrorText } = await import("../chrome/ProviderStatus.sys.mjs");
+  const status = buildProviderStatus({
+    discovery: [{ driver: "codex", installed: true, client_version: "0.157.1" }, { driver: "claude-code", installed: false }],
+    jev: { keyEntryEnabled: true, key: "missing" } });
+  const cards = M.providerCards(status);
+  assert.deepEqual(cards.map(card => [card.id, card.stateLabel, card.tone]), [
+    ["codex", "Installed · not yet verified", "info"], ["claude-code", "Not installed", "off"],
+    ["antigravity", "Status unknown", "unknown"], ["jev", "No key stored", "off"]]);
+  assert.ok(cards.every(card => card.detail.length > 0));
+  assert.ok(!cards.some(card => card.state === "ready"), "nothing is claimed ready");
+  assert.match(M.providerSummary(status), /no assistant was started/u);
+  const jev = cards.find(card => card.isJev);
+  assert.deepEqual(M.jevKeyForm(jev), { enabled: true, reason: null, canRemove: false });
+  assert.equal(M.jevKeyForm(jev, { isPrivate: true }).enabled, false);
+  assert.equal(M.jevKeyForm({ ...jev, keyEntryEnabled: false }).enabled, false);
+  assert.equal(M.jevKeyForm({ ...jev, key: "unavailable" }).enabled, false);
+  assert.equal(M.jevKeyForm({ ...jev, key: "stored" }).canRemove, true);
+  for (const code of ["INVALID_KEY", "JEV_KEY_ENTRY_DISABLED", "KEYCHAIN_HELPER_UNAVAILABLE", "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "PRIVATE_WINDOW", "OTHER"]) {
+    assert.equal(M.keychainErrorText(code), keychainErrorText(code), code);
+  }
+  assert.deepEqual(M.checkJevKey("short"), { ok: false, code: "INVALID_KEY" });
+  assert.deepEqual(M.checkJevKey("line\nbreak-key"), { ok: false, code: "INVALID_KEY" });
+  assert.deepEqual(M.checkJevKey("synthetic-not-a-real-key"), { ok: true });
+});
+
+test("site rules show their own screen time; top sites are marked when a rule covers them", () => {
+  const rule = { id: "r_7f3a", match: { hosts: ["x.com", "*.x.com"] }, limits: { daily_minutes: 15 } };
+  const today = [{ host: "x.com", context_uuid: UUID, total_ms: 10 * 60_000 }, { host: "m.x.com", context_uuid: null, total_ms: 6 * 60_000 },
+    { host: "notx.com", context_uuid: null, total_ms: 60 * 60_000 }];
+  const week = [...today, { host: "x.com", context_uuid: null, total_ms: 51 * 60_000 }];
+  const usage = M.ruleUsage(rule, { today, week });
+  assert.equal(usage.text, "Today 16 min of 15 min · 7 days 1 h 07 min");
+  assert.equal(usage.overLimit, true);
+  assert.equal(M.hostMatches("*.x.com", "x.com"), false, "wildcards match subdomains only, like the core");
+  assert.deepEqual(M.siteUsageRows(week, [rule], 2).map(row => [row.host, row.text, row.rule]),
+    [["x.com", "1 h 01 min", "r_7f3a"], ["notx.com", "1 h", null]]);
 });

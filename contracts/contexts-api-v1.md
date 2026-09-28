@@ -296,7 +296,7 @@ never rejects (failures resolve to outcome `none`).
 | `axiosozo.foundation.enabled` | true | existing kill switch |
 | `axiosozo.contexts.enabled` | true | F1–F5 |
 | `axiosozo.engine.preferences.enabled` | false | F6, experimental until E1/E2 pass |
-| `axiosozo.jev.keyEntry.enabled` | false | production key entry (open decision 4) |
+| `axiosozo.jev.keyEntry.enabled` | true | production key entry; decided 28 September 2026 (open decision 4): it ships, and the pref stays as a kill switch that fails closed |
 
 ## 5. Engine preference hook (CEF workstream)
 

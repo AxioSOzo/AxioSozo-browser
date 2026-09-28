@@ -167,6 +167,9 @@ function requirePickedRoot(ctx, name, root) {
 export const METHODS = Object.freeze({
   // contexts
   listContexts: { params: {}, run: ({ services }) => services.listContexts() },
+  // The space of the window this page is in (default space for "Add project").
+  activeContext: { params: {}, run: ctx => (typeof ctx.services.activeContext === "function"
+    ? ctx.services.activeContext({ window: ctx.window() }) : { uuid: null }) },
   setContextType: { params: { uuid: T.uuid, type: T.contextType },
     run: ({ services }, p) => services.setContextType(p.uuid, p.type) },
   linkOrganization: { params: { uuid: T.uuid, organizationUuid: T.uuidOrNull },

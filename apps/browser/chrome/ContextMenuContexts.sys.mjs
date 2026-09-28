@@ -1,10 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
-// F1: one native "Context" submenu in Zen's existing workspace context menu.
-// Sets the context type (personal/organization/project) and, for projects, the
-// organization and project links. Stored by AxioSozoServices in contexts.json;
-// Zen's workspace store is never written. Zen element ids come from the adapter.
+// F1: native entries in Zen's existing workspace context menu: a "Space type"
+// submenu (personal/organization/project, and the organization of a project
+// space), "Projects in this space" (any space type may hold several projects,
+// store v2) and "Add project to this space…", which opens the add-project review
+// in about:axiosozo with this space preselected. Stored by AxioSozoServices in
+// contexts.json; Zen's workspace store is never written. Zen element ids come
+// from the adapter.
 
 export const CONTEXT_TYPE_LABELS = Object.freeze({
   personal: "Personal", organization: "Organization", project: "Project",
@@ -29,20 +32,25 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
   const linkSeparator = create("menuseparator");
   const orgMenu = create("menu", { label: "Organization" });
   const orgPopup = create("menupopup");
-  const projectMenu = create("menu", { label: "Linked project" });
-  const projectPopup = create("menupopup");
-  orgMenu.appendChild(orgPopup); projectMenu.appendChild(projectPopup);
+  orgMenu.appendChild(orgPopup);
   for (const item of typeItems) menuPopup.appendChild(item);
-  menuPopup.appendChild(linkSeparator); menuPopup.appendChild(orgMenu); menuPopup.appendChild(projectMenu);
-  let overviewItem = null;
+  menuPopup.appendChild(linkSeparator); menuPopup.appendChild(orgMenu);
   if (typeof openOverview === "function") {
     menuPopup.appendChild(create("menuseparator"));
-    overviewItem = create("menuitem", { label: "Spaces in AxioSozo…", "data-axiosozo-action": "overview" });
-    menuPopup.appendChild(overviewItem);
+    menuPopup.appendChild(create("menuitem", { label: "Spaces in AxioSozo…", "data-axiosozo-action": "overview" }));
   }
   menu.appendChild(menuPopup);
+  // Projects are not tied to the type: every space lists and takes projects.
+  const projectMenu = create("menu", { id: `${ID}-projects`, label: "Projects in this space" });
+  const projectPopup = create("menupopup", { id: `${ID}-projects-popup` });
+  projectMenu.appendChild(projectPopup);
+  const addItem = typeof openOverview === "function"
+    ? create("menuitem", { id: `${ID}-add-project`, label: "Add project to this space…", "data-axiosozo-action": "add-project" }) : null;
   const anchor = adapter.workspaceMenuAnchor();
   if (anchor?.parentNode === popup) anchor.after(menu); else popup.appendChild(menu);
+  menu.after(projectMenu);
+  if (addItem) projectMenu.after(addItem);
+  const additions = [menu, projectMenu, addItem].filter(Boolean);
 
   let target = null; let state = null; let generation = 0;
 
@@ -55,20 +63,27 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
 
   const render = () => {
     const context = state?.contexts.find(item => item.uuid === target) ?? null;
-    setHidden(menu, !target || !context);
+    for (const element of additions) setHidden(element, !target || !context);
     if (!context) return;
+    // Checked = the project lives in this space; choosing moves it here or out.
+    setHidden(projectMenu, !state.projects.length);
+    projectPopup.replaceChildren(...state.projects.map(project => {
+      const item = create("menuitem", { type: "checkbox", label: project.manifest?.name ?? project.id,
+        "data-axiosozo-action": "project", "data-axiosozo-value": project.id });
+      if (project.context_uuid === target) item.setAttribute("checked", "true");
+      return item;
+    }));
     for (const item of typeItems) {
       if (item.getAttribute("data-axiosozo-value") === context.type) item.setAttribute("checked", "true");
       else item.removeAttribute("checked");
     }
+    // Only project spaces belong to an organization (context-v1).
     const isProject = context.type === "project";
-    for (const element of [linkSeparator, orgMenu, projectMenu]) setHidden(element, !isProject);
+    for (const element of [linkSeparator, orgMenu]) setHidden(element, !isProject);
     if (!isProject) return;
     const organizations = state.contexts.filter(item => item.type === "organization" && item.uuid !== target);
     orgPopup.replaceChildren(radio("None", "organization", "", !context.organization_uuid),
       ...organizations.map(org => radio(org.name, "organization", org.uuid, org.uuid === context.organization_uuid)));
-    projectPopup.replaceChildren(radio("None", "project", "", !context.project_id),
-      ...state.projects.map(project => radio(project.manifest.name, "project", project.id, project.id === context.project_id)));
   };
 
   const refresh = async () => {
@@ -88,7 +103,7 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
   const onShowing = event => {
     if (event.target !== popup) return;
     target = adapter.isPrivateWindow() || adapter.isAuthoritative?.() === false ? null : adapter.workspaceForMenuEvent(event);
-    setHidden(menu, true);
+    for (const element of additions) setHidden(element, true);
     if (target) return refresh();
     return undefined;
   };
@@ -102,22 +117,31 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
     let operation;
     if (action === "type") operation = services.setContextType(target, value);
     else if (action === "organization") operation = services.linkOrganization(target, value);
-    else if (action === "project") operation = services.linkProject(target, value);
-    else if (action === "overview") operation = Promise.resolve(openOverview?.());
+    else if (action === "project") {
+      const project = state?.projects.find(item => item.id === value);
+      if (!project) return;
+      operation = project.context_uuid === target
+        ? services.updateProject(value, { context_uuid: null })
+        : services.linkProject(target, value);
+    } else if (action === "overview") operation = Promise.resolve(openOverview?.("#projects"));
+    else if (action === "add-project") operation = Promise.resolve(openOverview?.(`#add-project=${target}`));
     else return;
     Promise.resolve(operation).catch(error => console.error("AxioSozo context change refused", error));
   };
 
+  const commandTargets = [menuPopup, projectPopup, addItem].filter(Boolean);
   popup.addEventListener("popupshowing", onShowing);
-  menuPopup.addEventListener("command", onCommand);
-  setHidden(menu, true);
+  for (const element of commandTargets) element.addEventListener("command", onCommand);
+  for (const element of additions) setHidden(element, true);
   return {
     element: menu,
+    projectsElement: projectMenu,
+    addProjectElement: addItem,
     dispose() {
       generation++;
       popup.removeEventListener("popupshowing", onShowing);
-      menuPopup.removeEventListener("command", onCommand);
-      menu.remove();
+      for (const element of commandTargets) element.removeEventListener("command", onCommand);
+      for (const element of additions) element.remove();
     },
   };
 }

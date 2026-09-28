@@ -37,6 +37,8 @@ export class FakeNode {
   removeAttribute(k) { this.attrs.delete(k); }
   toggleAttribute(k, force) { const on = force ?? !this.attrs.has(k); if (on) { if (!this.attrs.has(k)) this.attrs.set(k, ""); } else this.attrs.delete(k); return on; }
   get firstChild() { return this.children[0] ?? null; }
+  get previousElementSibling() { const p = this.parentNode; return p ? p.children[p.children.indexOf(this) - 1] ?? null : null; }
+  contains(node) { for (let n = node; n; n = n.parentNode) if (n === this) return true; return false; }
   get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return n === this.ownerDocument.documentElement; }
   #detach(node) { node.parentNode?.children.splice(node.parentNode.children.indexOf(node), 1); node.parentNode = null; }
   appendChild(node) { this.#detach(node); this.children.push(node); node.parentNode = this; return node; }
@@ -292,14 +294,17 @@ export function createFakeAdapter({ privateWindow = false, active = WORKSPACE_A,
     emit(change) { for (const l of [...listeners]) l(change); },
     listenerCount: () => listeners.size,
   };
-  if (elements) adapter.workspaceElement = uuid => elements(uuid);
+  if (elements) {
+    adapter.workspaceElement = uuid => elements(uuid);
+    adapter.workspaceHeader = uuid => elements(uuid)?.querySelector(".zen-current-workspace-indicator") ?? null;
+  }
   return adapter;
 }
 
 // ---- Fake services ------------------------------------------------------------------------
 export function createFakeServices(core, { projects = [], contexts = [], rules = [], jev = null, statuses = {} } = {}) {
   const listeners = new Map();
-  const calls = { projectForUrl: 0, serviceStatus: 0, recordForeground: [], usageSummary: 0, listRules: 0 };
+  const calls = { projectForUrl: 0, listProjects: 0, serviceStatus: 0, updateProject: [], recordForeground: [], usageSummary: 0, listRules: 0 };
   let ledger = core.DEFAULT_LEDGER;
   const services = {
     projects, contexts, rules, statuses, calls,
@@ -313,6 +318,13 @@ export function createFakeServices(core, { projects = [], contexts = [], rules =
       return null;
     },
     async listContexts() { return services.contexts; },
+    async listProjects() { calls.listProjects++; return services.projects; },
+    async updateProject(id, patch) {
+      calls.updateProject.push([id, patch]);
+      services.projects = services.projects.map(p => (p.id === id ? { ...p, ...patch } : p));
+      services.emit("projects");
+      return services.projects.find(p => p.id === id) ?? null;
+    },
     async getProject(id) { return services.projects.find(p => p.id === id) ?? null; },
     async serviceStatus(projectId) {
       calls.serviceStatus++;
@@ -342,11 +354,11 @@ export function createFakeServices(core, { projects = [], contexts = [], rules =
   return services;
 }
 
-export function project({ id = "p_webapp", name = "Webapp", environments, services = [] } = {}) {
+export function project({ id = "p_webapp", name = "Webapp", environments, services = [], surfaces = [], space = WORKSPACE_A } = {}) {
   return {
-    version: 1, id, root: "/synthetic/webapp", manifest_state: "none", context_uuid: WORKSPACE_A, trusted: false,
+    version: 1, id, root: `/synthetic/${id}`, manifest_state: "none", context_uuid: space, trusted: false,
     created_at: 1, updated_at: 1,
-    manifest: { version: 1, name, kind: "web", surfaces: [], services,
+    manifest: { version: environments?.some(e => e.app) ? 2 : 1, name, kind: "web", surfaces, services,
       environments: environments ?? [
         { name: "production", base_url: "https://webapp.example" },
         { name: "local", base_url: "http://localhost:5173" },

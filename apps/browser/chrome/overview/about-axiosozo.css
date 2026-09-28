@@ -574,6 +574,75 @@ dialog[open] { animation: sheet-in 200ms var(--ease); }
 .setting { display: flex; align-items: center; gap: 12px; }
 .setting .row-main { gap: 2px; }
 
+/* ---- Projects grouped by space ------------------------------------------------------- */
+
+.space-group { display: flex; flex-direction: column; gap: 8px; }
+.space-group-head { display: flex; align-items: center; gap: 10px; padding-inline: 2px; }
+.space-group-head .row-main { gap: 0; }
+.space-group-head .space-name { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.space-group[data-empty] .space-group-head { opacity: 0.8; }
+.space-group .cards { padding-inline-start: 36px; }
+.card-title .tag { font-weight: 500; }
+h4.card-title { font-size: 14px; color: var(--ink); font-weight: 600; }
+select.compact { min-height: 26px; font-size: 12px; }
+.notice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline), inset 3px 0 0 var(--good);
+}
+.notice-row[hidden] { display: none; }
+.notice-row p { flex: 1; }
+.block-head-row { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.block-head-row > div { display: flex; flex-direction: column; gap: 2px; }
+
+/* ---- Add-project review ------------------------------------------------------------------ */
+
+.env-group { display: flex; flex-direction: column; gap: 6px; }
+.env-group + .env-group { margin-top: 6px; }
+.review-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-row:not([data-enabled]) :is(.surface-name, .surface-host) { opacity: 0.5; text-decoration: line-through; }
+.review-row .env-name { width: 8rem; }
+.review-row .env-url { flex: 1 1 14rem; min-width: 10rem; }
+.review-row .provenance { flex-basis: 100%; padding-inline-start: 24px; }
+.surface-name { font-weight: 500; }
+.surface-host { flex: 1; min-width: 0; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.small { min-height: 24px; padding-inline: 8px; font-size: 12px; }
+
+/* ---- Site rules: screen time -------------------------------------------------------------- */
+
+.usage-line { font-variant-numeric: tabular-nums; }
+.usage-line[data-over] { color: var(--warn); }
+.usage-row { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(4rem, 10rem) 5rem auto; }
+.usage-row .bar-value { white-space: nowrap; }
+
+/* ---- AI & keys ------------------------------------------------------------------------------- */
+
+.provider-cards .card { gap: 6px; }
+.provider-detail { font-size: 12px; }
+.tag.state[data-tone="ok"] { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.tag.state[data-tone="warn"] { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.tag.state[data-tone="info"] { background: var(--accent-soft); color: var(--accent); }
+.jev-state { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.key-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-row input[type="password"] {
+  flex: 1 1 16rem;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  font: inherit;
+}
+.key-row input[type="password"]:focus-visible { box-shadow: inset 0 0 0 1px var(--accent), var(--focus); }
+.key-row input:disabled { opacity: 0.5; }
+p.errors:empty { display: none; }
+
 /* ---- Toast ------------------------------------------------------------------------------ */
 
 .toast {
@@ -598,6 +667,9 @@ dialog[open] { animation: sheet-in 200ms var(--ease); }
 .toast[data-kind="error"] { background: var(--bad); color: white; }
 
 @media (max-width: 640px) {
+  .space-group .cards { padding-inline-start: 0; }
+  .usage-row { grid-template-columns: 1fr 4rem auto; }
+  .usage-row .bar { display: none; }
   .steps { grid-template-columns: 1fr; }
   .facts { grid-template-columns: 1fr; gap: 4px; }
   .facts dd { margin-bottom: 8px; }

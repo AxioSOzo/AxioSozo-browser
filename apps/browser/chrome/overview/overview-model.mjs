@@ -293,6 +293,28 @@ export function formToJevPatch(form) {
 
 // ---------------------------------------------------------------- projects
 
+export const PRIMARY_SURFACE_KINDS = Object.freeze(["repository", "package", "store"]);
+const APP_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** "primary" (shown in the sidebar) or "secondary" (behind "…"), as the core decides. */
+export function surfaceProminence(surface) {
+  if (surface?.prominence === "primary" || surface?.prominence === "secondary") return surface.prominence;
+  return PRIMARY_SURFACE_KINDS.includes(surface?.kind) ? "primary" : "secondary";
+}
+
+function portOf(text) {
+  try {
+    const url = new URL(text);
+    return Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+  } catch { return null; }
+}
+function isLoopback(text) {
+  try { return LOOPBACK_HOSTS.has(new URL(text).hostname); } catch { return false; }
+}
+const appOrNull = value => (typeof value === "string" && value ? value : null);
+const trimSlash = text => String(text ?? "").replace(/\/+$/, "");
+
 function reviewRow(item, keys) {
   const row = {};
   for (const key of keys) row[key] = item[key] == null ? "" : String(item[key]);
@@ -301,14 +323,29 @@ function reviewRow(item, keys) {
   return row;
 }
 
-export function draftToReview(draft) {
+function environmentRow(item) {
+  const row = reviewRow(item, ["name"]);
+  row.app = appOrNull(item.app);
+  row.base_url = trimSlash(item.base_url);
+  row.enabled = item.enabled !== false;
+  // The port a declared local service followed at detection time: editing the
+  // address moves that service along; unticking the environment drops it.
+  row.servicePort = isLoopback(item.base_url) ? portOf(item.base_url) : null;
+  return row;
+}
+
+/** Review state for the add-project sheet. contextUuid: the space it will live in. */
+export function draftToReview(draft, { contextUuid = null } = {}) {
   return {
     name: draft.name ?? "",
     kind: draft.kind ?? "web",
     kindSource: { source: draft.kind_source?.source ?? "", guess: draft.kind_source?.guess === true },
-    environments: (draft.environments ?? []).map(item => reviewRow(item, ["name", "base_url"])),
-    services: (draft.services ?? []).map(item => reviewRow(item, ["name", "url", "port"])),
-    surfaces: (draft.surfaces ?? []).map(item => reviewRow(item, ["name", "url", "kind"])),
+    contextUuid,
+    productionUrl: "",
+    environments: (draft.environments ?? []).map(environmentRow),
+    services: (draft.services ?? []).map(item => ({ ...reviewRow(item, ["name", "url", "port"]), app: appOrNull(item.app) })),
+    surfaces: (draft.surfaces ?? []).map(item => ({ ...reviewRow(item, ["name", "url", "kind"]),
+      prominence: surfaceProminence(item), enabled: true })),
     frameworks: [...(draft.frameworks ?? [])],
     filesRead: [...(draft.files_read ?? [])],
     refused: (draft.refused ?? []).map(item => ({ path: item.path, reason: item.reason })),
@@ -319,15 +356,35 @@ export function draftToReview(draft) {
 export function projectToReview(project) {
   const manifest = project.manifest;
   const confirmed = item => ({ ...item, source: "confirmed", guess: false });
-  return {
-    ...draftToReview({
-      name: manifest.name, kind: manifest.kind, kind_source: { source: "confirmed", guess: false },
-      environments: manifest.environments.map(confirmed),
-      services: manifest.services.map(confirmed),
-      surfaces: manifest.surfaces.map(confirmed),
-    }),
-    contextUuid: project.context_uuid ?? null,
-  };
+  return draftToReview({
+    name: manifest.name, kind: manifest.kind, kind_source: { source: "confirmed", guess: false },
+    environments: manifest.environments.map(confirmed),
+    services: manifest.services.map(confirmed),
+    surfaces: manifest.surfaces.map(confirmed),
+  }, { contextUuid: project.context_uuid ?? null });
+}
+
+/** Apps of a review in first-seen order (null = project-wide). */
+export function reviewApps(review) {
+  return [...new Set((review.environments ?? []).map(row => appOrNull(row.app)))];
+}
+
+/** Environment rows grouped per app for the sheet; `index` points into review.environments. */
+export function environmentGroups(review) {
+  const apps = reviewApps(review);
+  const multi = apps.filter(Boolean).length > 1;
+  return apps.map(app => ({
+    app,
+    label: !multi ? null : app === null ? "Whole project" : app === "desktop" ? "Desktop app (desktop)" : `App ${app}`,
+    rows: (review.environments ?? []).map((row, index) => ({ row, index })).filter(({ row }) => appOrNull(row.app) === app),
+  }));
+}
+
+/** The app a single "Production URL" belongs to (same rule as the core's mainWebApp). */
+export function productionApp(environments) {
+  if (!environments.some(env => env.app)) return null;
+  const local = environments.filter(env => env.name === "local" && env.app);
+  return (local.find(env => env.app !== "desktop") ?? local[0])?.app ?? null;
 }
 
 function normalizeBaseUrl(text) {
@@ -344,8 +401,11 @@ function normalizeWebUrl(text) {
 }
 
 const isBlank = (row, keys) => keys.every(key => String(row[key] ?? "").trim() === "");
+const withApp = (record, app) => (app ? { ...record, app } : record);
 
-// → { manifest, errors }. Empty rows are dropped; everything else must be valid.
+// → { manifest, errors }. Unticked and empty rows are dropped; everything else
+// must be valid. Local services follow their environments (see environmentRow);
+// every local environment gets a service so the sidebar can show its dot.
 export function reviewToManifest(review) {
   const errors = [];
   const add = (field, message) => errors.push({ field, message });
@@ -354,45 +414,96 @@ export function reviewToManifest(review) {
   if (!PROJECT_KINDS.includes(review.kind)) add("kind", "Choose a project kind.");
 
   const environments = [];
+  const moved = []; // { app, from, to: { port, origin } | null }
+  const key = (app, envName) => `${app ?? ""}\u0000${envName}`;
   (review.environments ?? []).forEach((row, index) => {
+    const app = appOrNull(row.app);
+    if (row.enabled === false) {
+      if (row.servicePort) moved.push({ app, from: row.servicePort, to: null });
+      return;
+    }
     if (isBlank(row, ["name", "base_url"])) return;
     const envName = String(row.name ?? "").trim();
     const baseUrl = normalizeBaseUrl(String(row.base_url ?? "").trim());
+    if (app !== null && !APP_NAME.test(app)) add("environments", `Environment ${index + 1}: the app name is not valid.`);
     if (!ENV_NAME.test(envName)) add("environments", `Environment ${index + 1}: use a lower-case name such as local, preview or production.`);
-    else if (environments.some(env => env.name === envName)) add("environments", `Environment ${index + 1}: "${envName}" is listed twice.`);
+    else if (environments.some(env => key(env.app, env.name) === key(app, envName))) {
+      add("environments", `Environment ${index + 1}: "${app ? `${app} · ` : ""}${envName}" is listed twice.`);
+    }
     if (!baseUrl) add("environments", `Environment ${index + 1}: enter an http or https address without query or fragment.`);
-    if (ENV_NAME.test(envName) && baseUrl) environments.push({ name: envName, base_url: baseUrl });
+    if (ENV_NAME.test(envName) && baseUrl) {
+      environments.push(withApp({ name: envName, base_url: baseUrl }, app));
+      if (row.servicePort && isLoopback(baseUrl)) moved.push({ app, from: row.servicePort, to: { port: portOf(baseUrl), origin: new URL(baseUrl).origin } });
+      else if (row.servicePort) moved.push({ app, from: row.servicePort, to: null });
+    }
   });
+
+  const production = String(review.productionUrl ?? "").trim();
+  if (production) {
+    const baseUrl = normalizeBaseUrl(production);
+    if (!baseUrl) add("production_url", "Production URL: enter an http or https address without query or fragment, or leave it empty.");
+    else {
+      // The app is chosen from every detected environment, ticked or not, so
+      // unticking the web app's local server keeps production on the web app.
+      const app = productionApp((review.environments ?? []).map(row => ({ name: String(row.name ?? "").trim(), app: appOrNull(row.app) })));
+      const record = withApp({ name: "production", base_url: baseUrl }, app);
+      const at = environments.findIndex(env => key(env.app, env.name) === key(app, "production"));
+      if (at >= 0) environments[at] = record; else environments.push(record);
+    }
+  }
   if (environments.length > 16) add("environments", "Use at most 16 environments.");
 
   const services = [];
   (review.services ?? []).forEach((row, index) => {
     if (isBlank(row, ["name", "url", "port"])) return;
+    const app = appOrNull(row.app);
     const serviceName = String(row.name ?? "").trim();
     const url = normalizeWebUrl(String(row.url ?? "").trim());
     const port = parseInteger(row.port, 1, 65535);
     if (!validName(serviceName)) add("services", `Service ${index + 1}: enter a name.`);
     if (!url) add("services", `Service ${index + 1}: enter an http or https address without query or fragment.`);
     if (port === null) add("services", `Service ${index + 1}: port must be 1 to 65535.`);
-    if (validName(serviceName) && url && port !== null) services.push({ name: serviceName, url, port });
+    if (!validName(serviceName) || !url || port === null) return;
+    const move = moved.find(item => item.app === app && item.from === port)
+      ?? (app === null ? null : moved.find(item => item.app === null && item.from === port));
+    if (move && !move.to) return; // its environment was unticked
+    if (move && move.to.port !== port) {
+      services.push(withApp({ name: serviceName, url: `${move.to.origin}/`, port: move.to.port }, app));
+      return;
+    }
+    services.push(withApp({ name: serviceName, url, port }, app));
   });
+  for (const env of environments) {
+    if (!isLoopback(env.base_url)) continue;
+    const port = portOf(env.base_url);
+    if (services.some(service => service.port === port && (service.app ?? null) === (env.app ?? null))) continue;
+    if (services.some(service => service.port === port)) continue;
+    services.push(withApp({ name: env.app ? `${env.app} dev server` : "Dev server", url: `${new URL(env.base_url).origin}/`, port }, env.app));
+  }
   if (services.length > 32) add("services", "Use at most 32 services.");
 
   const surfaces = [];
   (review.surfaces ?? []).forEach((row, index) => {
-    if (isBlank(row, ["name", "url"])) return;
+    if (row.enabled === false || isBlank(row, ["name", "url"])) return;
     const surfaceName = String(row.name ?? "").trim();
     const url = normalizeWebUrl(String(row.url ?? "").trim());
     const kind = SURFACE_KINDS.includes(row.kind) ? row.kind : null;
     if (!validName(surfaceName)) add("surfaces", `Surface ${index + 1}: enter a name.`);
     if (!url) add("surfaces", `Surface ${index + 1}: enter an http or https address without query or fragment.`);
     if (!kind) add("surfaces", `Surface ${index + 1}: choose a kind.`);
-    if (validName(surfaceName) && url && kind) surfaces.push({ name: surfaceName, url, kind });
+    if (validName(surfaceName) && url && kind) {
+      const surface = { name: surfaceName, url, kind };
+      // Written only where it differs from the default for the kind.
+      const prominence = row.prominence === "primary" || row.prominence === "secondary" ? row.prominence : null;
+      if (prominence && prominence !== surfaceProminence({ kind })) surface.prominence = prominence;
+      surfaces.push(surface);
+    }
   });
   if (surfaces.length > 64) add("surfaces", "Use at most 64 surfaces.");
 
   if (errors.length) return { manifest: null, errors };
-  return { errors, manifest: { version: 1, name, kind: review.kind, environments, services, surfaces } };
+  const v2 = [...environments, ...services].some(item => item.app) || surfaces.some(item => item.prominence);
+  return { errors, manifest: { version: v2 ? 2 : 1, name, kind: review.kind, environments, services, surfaces } };
 }
 
 export const REFUSAL_TEXT = Object.freeze({
@@ -404,18 +515,111 @@ export const REFUSAL_TEXT = Object.freeze({
   invalid_utf8: "not valid text",
 });
 
-// ---------------------------------------------------------------- contexts
+// ---------------------------------------------------------------- spaces
 
-export function contextRows(contexts, projects) {
-  const organizations = contexts.filter(context => context.type === "organization")
-    .map(context => ({ uuid: context.uuid, name: context.name }));
-  const projectOptions = projects.map(project => ({ id: project.id, name: project.manifest?.name ?? project.id }));
-  return contexts.map(context => ({
-    ...context,
-    showLinks: context.type === "project",
-    organizationOptions: organizations.filter(org => org.uuid !== context.uuid),
-    projectOptions,
+export const TYPE_LABELS = Object.freeze({ personal: "Personal", organization: "Organization", project: "Project" });
+
+/** Projects grouped by the space they live in, in Zen's space order, then the
+ * projects that are in no (live) space. Every space is listed, with or without
+ * projects, so any space can take one. */
+export function projectGroups(contexts, projects) {
+  const live = new Set((contexts ?? []).map(context => context.uuid));
+  const groups = (contexts ?? []).map(context => ({
+    context,
+    projects: (projects ?? []).filter(project => project.context_uuid === context.uuid),
   }));
+  const loose = (projects ?? []).filter(project => !project.context_uuid || !live.has(project.context_uuid));
+  if (loose.length) groups.push({ context: null, projects: loose });
+  return groups;
+}
+
+/** Where a project now lives, in one sentence for the page after saving. */
+export function placementMessage(project, contexts) {
+  const name = project?.manifest?.name ?? "The project";
+  const space = (contexts ?? []).find(context => context.uuid === project?.context_uuid);
+  if (space) return `${name} was added to the space ${space.name}. It is in that space's sidebar, under the space name.`;
+  return `${name} was added, but not to a space yet. Choose a space below to show it in the sidebar.`;
+}
+
+// ---------------------------------------------------------------- deep links
+
+export const VIEWS = Object.freeze(["projects", "rules", "ai"]);
+const LEGACY_VIEWS = Object.freeze({ home: "projects", time: "rules", settings: "ai" });
+const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
+const RULE_ID = /^r_[a-z0-9]{4,32}$/;
+
+/** "#projects", "#rules", "#ai"; old "#home", "#time", "#settings" redirect;
+ * "#project=<id>", "#edit-project=<id>", "#add-project=<space uuid>", "#rule=<id>". */
+export function routeFromHash(hash) {
+  let text = String(hash ?? "").replace(/^#/, "");
+  try { text = decodeURIComponent(text); } catch { return { view: "projects" }; }
+  const [name, value] = text.split("=", 2);
+  if (VIEWS.includes(text)) return { view: text };
+  if (Object.hasOwn(LEGACY_VIEWS, text)) return { view: LEGACY_VIEWS[text], legacy: true };
+  if (name === "project" && PROJECT_ID.test(value ?? "")) return { view: "projects", project: value };
+  if (name === "edit-project" && PROJECT_ID.test(value ?? "")) return { view: "projects", project: value, edit: true };
+  if (name === "add-project" && isWorkspaceUuid(value ?? "")) return { view: "projects", addTo: value };
+  if (name === "rule" && RULE_ID.test(value ?? "")) return { view: "rules", rule: value };
+  return { view: "projects" };
+}
+
+// ---------------------------------------------------------------- AI & keys
+
+const PROVIDER_TONES = Object.freeze({ ready: "ok", "key-stored": "ok", unverified: "info", "not-installed": "off",
+  unavailable: "warn", "needs-key": "off", disabled: "off", unknown: "unknown" });
+
+/** Cards for the AI & keys view from getProviderStatus(); texts are shown as the
+ * providers workstream wrote them (honest state_label and detail). */
+export function providerCards(status) {
+  const providers = Array.isArray(status?.providers) ? status.providers : [];
+  return providers.map(provider => ({
+    id: String(provider.id ?? ""),
+    label: String(provider.label ?? provider.id ?? "Provider"),
+    state: String(provider.state ?? "unknown"),
+    stateLabel: String(provider.state_label ?? "Status unknown"),
+    detail: String(provider.detail ?? ""),
+    version: provider.version ? String(provider.version) : null,
+    expectedVersion: provider.expected_version ? String(provider.expected_version) : null,
+    tone: PROVIDER_TONES[provider.state] ?? "unknown",
+    isJev: provider.id === "jev",
+    keyEntryEnabled: provider.key_entry_enabled === true,
+    key: provider.key ?? null,
+  }));
+}
+
+export function providerSummary(status) {
+  if (!status) return "Checking which assistants are installed…";
+  if (status.discovery !== "ok") return "Could not read which assistants are installed. No client was started.";
+  return "Read from installation metadata only: no assistant was started and nothing was sent. Answers through this browser have not been verified yet.";
+}
+
+/** Can the Jev key form be used, and why not. */
+export function jevKeyForm(jev, { isPrivate = false } = {}) {
+  if (isPrivate) return { enabled: false, reason: "Keys cannot be changed from a private window." };
+  if (!jev) return { enabled: false, reason: "Checking the macOS Keychain…" };
+  if (!jev.keyEntryEnabled) return { enabled: false, reason: "Jev key entry is turned off in this build (axiosozo.jev.keyEntry.enabled)." };
+  if (jev.key === "unavailable") return { enabled: false, reason: "The Keychain helper is not available in this build." };
+  return { enabled: true, reason: null, canRemove: jev.key === "stored" || jev.key === "unknown" };
+}
+
+/** Same sentences as ProviderStatus.keychainErrorText (the page cannot load chrome modules). */
+export function keychainErrorText(code) {
+  switch (code) {
+    case "INVALID_KEY": return "Key not stored. Enter a key of 8–4096 characters on one line.";
+    case "JEV_KEY_ENTRY_DISABLED": return "Jev key entry is turned off in this build.";
+    case "KEYCHAIN_HELPER_UNAVAILABLE": return "Keychain helper not available in this build. Nothing was stored.";
+    case "KEYCHAIN_REFUSED": return "The macOS Keychain refused the change. Unlock the Keychain and try again.";
+    case "HELPER_TIMEOUT": return "The macOS Keychain did not respond in time. Nothing was confirmed.";
+    case "PRIVATE_WINDOW": return "Keys cannot be changed from a private window.";
+    default: return "The Keychain change did not complete.";
+  }
+}
+
+/** A key typed by the user, checked like the actor does before anything is sent. */
+export function checkJevKey(text) {
+  const key = String(text ?? "");
+  if (key.length < 8 || key.length > 4096 || /[\u0000-\u001f\u007f]/u.test(key)) return { ok: false, code: "INVALID_KEY" };
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------- ledger
@@ -477,6 +681,36 @@ export function ledgerDays(summary) {
 export function exportFileName({ year, month, day }) {
   const pad = value => String(value).padStart(2, "0");
   return `axiosozo-usage-${year}-${pad(month)}-${pad(day)}.json`;
+}
+
+/** Same matching as the core's hostMatches: "*.x.com" matches subdomains only. */
+export function hostMatches(pattern, host) {
+  const p = String(pattern ?? "").toLowerCase().replace(/\.$/, "");
+  const h = String(host ?? "").toLowerCase().replace(/\.$/, "");
+  if (!p || !h) return false;
+  return p.startsWith("*.") ? h.endsWith(p.slice(1)) && h.length > p.length - 1 : p === h;
+}
+
+/** Time on a rule's sites from usageSummary() results (all spaces). */
+export function ruleUsage(rule, { today = [], week = [] } = {}) {
+  const hosts = rule?.match?.hosts ?? [];
+  const sum = summary => (summary ?? []).filter(entry => hosts.some(pattern => hostMatches(pattern, entry.host)))
+    .reduce((total, entry) => total + (Number(entry.total_ms) || 0), 0);
+  const todayMs = sum(today); const weekMs = sum(week);
+  const limit = rule?.limits?.daily_minutes ?? null;
+  const parts = [`Today ${formatDuration(todayMs)}${limit ? ` of ${limit} min` : ""}`, `7 days ${formatDuration(weekMs)}`];
+  return { todayMs, weekMs, text: parts.join(" · "), overLimit: !!limit && todayMs >= limit * 60000 };
+}
+
+/** Top sites over a period, summed over spaces, marked when a rule covers them. */
+export function siteUsageRows(summary, rules = [], limit = 8) {
+  const byHost = new Map();
+  for (const entry of summary ?? []) byHost.set(entry.host, (byHost.get(entry.host) ?? 0) + (Number(entry.total_ms) || 0));
+  return [...byHost].map(([host, ms]) => ({ host, ms, text: formatDuration(ms),
+    rule: rules.find(rule => rule.match?.hosts?.some(pattern => hostMatches(pattern, host)))?.id ?? null }))
+    .filter(row => row.ms > 0)
+    .sort((a, b) => b.ms - a.ms || a.host.localeCompare(b.host))
+    .slice(0, limit);
 }
 
 // ---------------------------------------------------------------- attention

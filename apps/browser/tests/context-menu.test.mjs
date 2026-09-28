@@ -51,23 +51,28 @@ function fixture({ isPrivate = false, contexts, failing = false } = {}) {
     { uuid: APP, name: "Shop app", type: "project", organization_uuid: BV, project_id: "p_shop1" }];
   const services = {
     listContexts: async () => { calls.push(["listContexts"]); if (failing) throw new Error("INVALID_STORE"); return state; },
-    listProjects: async () => [{ id: "p_shop1", manifest: { name: "Shop" } }, { id: "p_docs1", manifest: { name: "Docs" } }],
+    listProjects: async () => [{ id: "p_shop1", context_uuid: APP, manifest: { name: "Shop" } },
+      { id: "p_docs1", context_uuid: HOME, manifest: { name: "Docs" } }],
     setContextType: async (...args) => { calls.push(["setContextType", ...args]); },
     linkOrganization: async (...args) => { calls.push(["linkOrganization", ...args]); },
     linkProject: async (...args) => { calls.push(["linkProject", ...args]); },
+    updateProject: async (...args) => { calls.push(["updateProject", ...args]); },
   };
   const adapter = new ZenWorkspaceAdapter(zen.window);
   const overview = [];
-  const menu = installContextTypeMenu(zen.window, { services, adapter, openOverview: () => overview.push("open") });
+  const menu = installContextTypeMenu(zen.window, { services, adapter, openOverview: fragment => overview.push(fragment) });
   const icon = uuid => { const button = new Element("toolbarbutton"); button.setAttribute("zen-workspace-id", uuid); return button; };
   const show = uuid => popup.dispatch("popupshowing", { explicitOriginalTarget: uuid ? icon(uuid) : null });
   return { zen, popup, anchor, menu, calls, show, overview, setState: next => { state = next; } };
 }
 
-test("one native Context submenu sits after Zen's container menu and starts hidden", () => {
+test("native space entries sit after Zen's container menu and start hidden", () => {
   const f = fixture();
   const index = f.popup.children.indexOf(f.anchor);
-  assert.equal(f.popup.children[index + 1], f.menu.element);
+  assert.deepEqual(f.popup.children.slice(index + 1, index + 4), [f.menu.element, f.menu.projectsElement, f.menu.addProjectElement]);
+  assert.equal(f.menu.projectsElement.getAttribute("label"), "Projects in this space");
+  assert.equal(f.menu.addProjectElement.getAttribute("label"), "Add project to this space…");
+  assert.ok([f.menu.projectsElement, f.menu.addProjectElement].every(element => element.hidden));
   assert.equal(f.menu.element.getAttribute("label"), "Space type");
   assert.equal(f.menu.element.hidden, true);
   assert.deepEqual(f.menu.element.children[0].children.slice(0, 3).map(item => item.getAttribute("label")),
@@ -81,7 +86,9 @@ test("shows the clicked workspace's type and sets a new type on a trusted comman
   assert.equal(menu.hidden, false);
   assert.equal(menu.byLabel("Organization").getAttribute("checked"), "true");
   assert.equal(menu.byLabel("Personal").getAttribute("checked"), null);
-  assert.equal(menu.find(child => child.tagName === "menu" && child.getAttribute("label") === "Linked project").hidden, true, "links only for project contexts");
+  assert.equal(menu.find(child => child.tagName === "menu" && child.getAttribute("label") === "Organization").hidden, true,
+    "the organization link only for project spaces");
+  assert.equal(f.menu.projectsElement.hidden, false, "projects can live in an organization space too");
   await menu.byLabel("Project").dispatch("command", { isTrusted: false });
   assert.ok(!f.calls.some(call => call[0] === "setContextType"), "untrusted commands are ignored");
   await menu.byLabel("Project").dispatch("command");
@@ -89,7 +96,7 @@ test("shows the clicked workspace's type and sets a new type on a trusted comman
   assert.deepEqual(f.calls.filter(call => call[0] === "setContextType"), [["setContextType", BV, "project"]]);
 });
 
-test("project contexts link an organization and a project, or none", async () => {
+test("project spaces link an organization; any space takes projects in or out", async () => {
   const f = fixture();
   await f.show(APP);
   const menu = f.menu.element;
@@ -98,14 +105,27 @@ test("project contexts link an organization and a project, or none", async () =>
   const orgItems = orgMenu.children[0].children;
   assert.deepEqual(orgItems.map(item => [item.getAttribute("label"), item.getAttribute("checked")]),
     [["None", null], ["AxioSozo BV", "true"]]);
-  const projectItems = menu.find(child => child.tagName === "menu" && child.getAttribute("label") === "Linked project").children[0].children;
-  assert.deepEqual(projectItems.map(item => [item.getAttribute("label"), item.getAttribute("checked")]),
-    [["None", null], ["Shop", "true"], ["Docs", null]]);
+  const projectItems = f.menu.projectsElement.children[0].children;
+  assert.deepEqual(projectItems.map(item => [item.getAttribute("label"), item.getAttribute("type"), item.getAttribute("checked")]),
+    [["Shop", "checkbox", "true"], ["Docs", "checkbox", null]]);
   await orgItems[0].dispatch("command");
-  await projectItems[2].dispatch("command");
+  await projectItems[1].dispatch("command");
   await projectItems[0].dispatch("command");
   assert.deepEqual(f.calls.filter(call => call[0] !== "listContexts"),
-    [["linkOrganization", APP, null], ["linkProject", APP, "p_docs1"], ["linkProject", APP, null]]);
+    [["linkOrganization", APP, null], ["linkProject", APP, "p_docs1"], ["updateProject", "p_shop1", { context_uuid: null }]]);
+  // A personal space lists the same projects; Docs lives there.
+  await f.show(HOME);
+  assert.deepEqual(f.menu.projectsElement.children[0].children.map(item => item.getAttribute("checked")), [null, "true"]);
+});
+
+test("Add project to this space opens the add-project review with that space", async () => {
+  const f = fixture();
+  await f.show(BV);
+  assert.equal(f.menu.addProjectElement.hidden, false);
+  await f.menu.addProjectElement.dispatch("command", { isTrusted: false });
+  assert.deepEqual(f.overview, []);
+  await f.menu.addProjectElement.dispatch("command");
+  assert.deepEqual(f.overview, [`#add-project=${BV}`]);
 });
 
 test("falls back to the active workspace; submenu events are not mistaken for Zen's popup", async () => {
@@ -116,7 +136,7 @@ test("falls back to the active workspace; submenu events are not mistaken for Ze
   await f.menu.element.children[0].dispatch("popupshowing");
   assert.equal(f.calls.length, before);
   await f.menu.element.byLabel("Spaces in AxioSozo…").dispatch("command");
-  assert.deepEqual(f.overview, ["open"]);
+  assert.deepEqual(f.overview, ["#projects"]);
 });
 
 test("private windows and unreadable stores keep the menu hidden", async () => {
@@ -134,6 +154,8 @@ test("dispose removes the menu and its listeners", async () => {
   const f = fixture();
   f.menu.dispose();
   assert.equal(f.popup.children.includes(f.menu.element), false);
+  assert.equal(f.popup.children.includes(f.menu.projectsElement), false);
+  assert.equal(f.popup.children.includes(f.menu.addProjectElement), false);
   await f.show(BV);
   assert.deepEqual(f.calls, []);
 });

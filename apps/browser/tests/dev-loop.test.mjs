@@ -26,9 +26,8 @@ function setup({ privateWindow = false, statuses = null, contexts = null, probe 
     ...(probe ? { probe } : {}) });
   const pill = () => h.document.getElementById("axiosozo-env-pill");
   const menu = () => h.document.getElementById("axiosozo-env-menu");
-  const block = () => h.document.getElementById("axiosozo-project-block");
   const overlay = tab => h.stackOf(tab).querySelector(".axiosozo-waiting");
-  return { h, adapter, services, clock, loop, pill, menu, block, overlay, project: p };
+  return { h, adapter, services, clock, loop, pill, menu, overlay, project: p };
 }
 
 test("environment pill appears only on URLs of a declared project environment", async () => {
@@ -97,66 +96,210 @@ test("switching environment keeps path, query and fragment in the same tab", asy
   t.loop.dispose();
 });
 
-test("project block sits at the top of the active project workspace and follows workspace switches", async () => {
-  const t = setup({ statuses: [{ ...WEB, status: "up", checked_at: 1 }, { name: "api", url: "http://localhost:8787/", port: 8787, status: "down", checked_at: 1 }] });
+const folders = h => h.document.getElementById("axiosozo-project-folders");
+const blocks = h => folders(h)?.querySelectorAll(".axiosozo-project-block") ?? [];
+const blockFor = (h, id) => blocks(h).find(b => b.getAttribute("data-project-id") === id) ?? null;
+const rowsOf = block => block.querySelectorAll(".axiosozo-project-link").map(li => li.children[0]);
+
+test("project folder sits right under the space header of the active space and follows switches", async () => {
+  const t = setup({ statuses: [{ ...WEB, status: "up", checked_at: 1 }] });
   await flushMicrotasks();
-  const block = t.block();
-  assert.ok(block, "block rendered for the project context");
   const workspace = t.h.document.getElementById(WORKSPACE_A);
-  assert.equal(block.parentNode, workspace);
-  assert.equal(workspace.children.indexOf(block), 1, "right after Zen's workspace indicator, above the tab list");
-  assert.equal(block.querySelector(".axiosozo-project-name").textContent, "Webapp");
+  const header = workspace.querySelector(".zen-current-workspace-indicator");
+  assert.equal(folders(t.h).parentNode, workspace);
+  assert.equal(folders(t.h).previousElementSibling, header, "anchored after Zen's (possibly hidden) space header");
+  assert.equal(folders(t.h).getAttribute("role"), "group");
+  const block = blockFor(t.h, t.project.id);
   const toggle = block.querySelector(".axiosozo-project-toggle");
   assert.equal(toggle.localName, "button");
-  assert.equal(toggle.getAttribute("aria-expanded"), "false", "collapsed by default: one quiet row");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false", "no open tab: collapsed, one quiet row");
   assert.equal(block.querySelector(".axiosozo-project-body").hidden, true);
-  assert.match(toggle.getAttribute("aria-label"), /Webapp, 1 of 2 services running/u);
+  assert.equal(block.querySelector(".axiosozo-project-name").textContent, "Webapp");
+  // One dot per local environment plus production; dots are decorative, the label carries the status.
+  assert.deepEqual(block.querySelector(".axiosozo-project-summary").querySelectorAll(".axiosozo-status-dot").map(d => d.getAttribute("data-status")),
+    ["up", "remote"]);
+  assert.match(toggle.getAttribute("aria-label"), /^Webapp, 1 of 1 local server running, production not checked\. Expand project$/u);
   toggle.click();
   await flushMicrotasks();
-  assert.equal(toggle.getAttribute("aria-expanded"), "true");
-  assert.equal(block.querySelector(".axiosozo-project-services").hidden, false);
-  const rows = block.querySelectorAll(".axiosozo-project-service").map(li => li.textContent);
-  assert.deepEqual(rows, ["webrunning · port 5173", "apinot running · port 8787"]);
-  for (const dot of block.querySelectorAll(".axiosozo-status-dot")) assert.equal(dot.getAttribute("aria-hidden"), "true", "dots are decorative; text carries the status");
-  const links = block.querySelectorAll(".axiosozo-project-link").map(li => li.querySelector("button").getAttribute("data-kind"));
-  assert.ok(links.includes("environment"), "environments are one click away");
-  toggle.click();
-  assert.equal(toggle.getAttribute("aria-expanded"), "false");
-  assert.equal(block.querySelector(".axiosozo-project-services").hidden, true);
+  const opened = blockFor(t.h, t.project.id);
+  assert.equal(opened.querySelector(".axiosozo-project-toggle").getAttribute("aria-expanded"), "true");
+  assert.deepEqual(rowsOf(opened).map(b => [b.getAttribute("data-kind"), b.querySelector(".axiosozo-project-link-label").textContent]),
+    [["environment", "local"], ["environment", "preview"], ["environment", "production"], ["more", "More"]]);
+  assert.match(rowsOf(opened)[0].getAttribute("aria-label"), /^local, localhost:5173, running$/u);
   t.adapter.active = WORKSPACE_B;
   t.adapter.emit({ kind: "switched", uuid: WORKSPACE_B });
   await flushMicrotasks();
-  assert.equal(t.block(), null, "personal context shows no block");
+  assert.equal(folders(t.h), null, "a space without projects shows nothing");
   t.adapter.active = WORKSPACE_A;
   t.adapter.emit({ kind: "switched", uuid: WORKSPACE_A });
   await flushMicrotasks();
-  assert.equal(t.block()?.parentNode, workspace);
-  // Compact mode hides the block; the pill carries project name and service status.
+  assert.equal(folders(t.h)?.parentNode, workspace);
   const css = readFileSync(new URL("../chrome/axiosozo-runtime.css", import.meta.url), "utf8");
-  assert.match(css, /:root\[zen-compact-mode="true"\] \.axiosozo-project-block \{ display: none; \}/u);
+  assert.match(css, /:root\[zen-compact-mode="true"\] \.axiosozo-project-folders \{ display: none; \}/u);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{[^}]*axiosozo-project/u);
   t.loop.dispose();
-  assert.equal(t.block(), null);
+  assert.equal(folders(t.h), null);
 });
 
-test("project block rows select an open tab of that site in this space before opening a new one", async () => {
+test("without a space header the folder falls back to the top of the workspace element", async () => {
+  const h = createFakeWindow();
+  const adapter = createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) });
+  delete adapter.workspaceHeader;
+  const p = project();
+  const services = createFakeServices(core, { projects: [p] });
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
+  await flushMicrotasks();
+  assert.equal(h.document.getElementById(WORKSPACE_A).children[0], folders(h));
+  loop.dispose();
+});
+
+test("a manually opened localhost tab links to its project: pill, active folder, aria-current", async () => {
   const t = setup();
   await flushMicrotasks();
-  const toggle = t.block().querySelector(".axiosozo-project-toggle");
-  toggle.click();
+  // 127.0.0.1 is the same host as the declared localhost (loopback alias).
+  const tab = t.h.addTab({ url: "http://127.0.0.1:5173/board" });
   await flushMicrotasks();
-  const row = name => t.block().querySelectorAll(".axiosozo-project-link").map(li => li.querySelector("button"))
-    .find(button => button.getAttribute("aria-label").startsWith(`${name},`));
+  assert.equal(t.pill().hidden, false);
+  assert.equal(t.pill().getAttribute("data-environment"), "local");
+  const block = blockFor(t.h, t.project.id);
+  assert.ok(block.hasAttribute("data-active"));
+  assert.equal(block.querySelector(".axiosozo-project-toggle").getAttribute("aria-expanded"), "true", "the active project starts expanded");
+  assert.equal(rowsOf(block)[0].getAttribute("aria-current"), "true");
+  t.h.commit(tab, "https://unrelated.example/");
+  await flushMicrotasks();
+  assert.equal(blockFor(t.h, t.project.id).querySelector(".axiosozo-project-toggle").getAttribute("aria-expanded"), "false");
+  t.loop.dispose();
+});
+
+test("folder rows select an open tab of that environment in this space before opening a new one", async () => {
+  const t = setup();
+  await flushMicrotasks();
+  blockFor(t.h, t.project.id).querySelector(".axiosozo-project-toggle").click();
+  await flushMicrotasks();
+  const row = label => rowsOf(blockFor(t.h, t.project.id)).find(b => b.getAttribute("aria-label").startsWith(`${label},`));
   const other = t.h.addTab({ url: "http://localhost:5173/app/settings", workspace: WORKSPACE_B, select: false });
-  const local = t.h.addTab({ url: "http://localhost:5173/app/settings", select: false });
+  const local = t.h.addTab({ url: "http://127.0.0.1:5173/app/settings", select: false });
   t.h.addTab({ url: "https://docs.example/" });
+  await flushMicrotasks();
   row("local").click();
-  assert.equal(t.h.gBrowser.selectedTab, local, "the local tab in this space, not the one in another space");
+  assert.equal(t.h.gBrowser.selectedTab, local, "the local tab in this space (via its loopback alias), not the one in another space");
   assert.notEqual(t.h.gBrowser.selectedTab, other);
   assert.equal(t.h.opened.length, 0);
   row("preview").click();
-  assert.equal(t.h.opened.length, 1, "no open preview tab: a new one");
-  assert.equal(t.h.opened[0].url, "https://preview.webapp.example/");
-  assert.equal(t.h.opened[0].where, "tab");
+  assert.deepEqual(t.h.opened.map(o => [o.url, o.where]), [["https://preview.webapp.example/", "tab"]], "no open preview tab: a new one");
+  t.loop.dispose();
+});
+
+test("projects live in any space; more than three fold into an overflow row, active ones first", async () => {
+  const h = createFakeWindow();
+  const adapter = createFakeAdapter({ active: WORKSPACE_B, elements: uuid => h.document.getElementById(uuid) });
+  const list = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"].map((name, i) => project({ id: `p_${name.toLowerCase()}`, name, space: WORKSPACE_B,
+    environments: [{ name: "local", base_url: `http://localhost:${4000 + i}` }] }));
+  const services = createFakeServices(core, { projects: list, contexts: [context(WORKSPACE_A, "project"), context(WORKSPACE_B, "personal")] });
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
+  h.addTab({ url: "http://localhost:4004/", workspace: WORKSPACE_B });
+  await flushMicrotasks();
+  assert.deepEqual(blocks(h).map(b => b.querySelector(".axiosozo-project-name").textContent), ["Epsilon", "Alpha", "Beta"],
+    "a personal space holds projects; the one with an open tab comes first");
+  const overflow = folders(h).querySelector(".axiosozo-project-overflow");
+  assert.equal(overflow.textContent, "2 more projects");
+  assert.equal(overflow.getAttribute("aria-expanded"), "false");
+  overflow.click();
+  await flushMicrotasks();
+  assert.equal(blocks(h).length, 5);
+  assert.equal(folders(h).querySelector(".axiosozo-project-overflow").textContent, "Show fewer projects");
+  assert.ok(blocks(h).slice(1).every(b => b.querySelector(".axiosozo-project-toggle").getAttribute("aria-expanded") === "false"),
+    "inactive projects stay collapsed");
+  loop.dispose();
+});
+
+test("multi-app projects: rows grouped per app, pill names the app, switching stays in the app", async () => {
+  const h = createFakeWindow();
+  const adapter = createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) });
+  const domo = project({ id: "p_domo", name: "Domo Cortex",
+    environments: [{ name: "local", app: "desktop", base_url: "http://localhost:1420" },
+      { name: "local", app: "web", base_url: "http://localhost:5173" },
+      { name: "production", app: "web", base_url: "https://domo.example" }],
+    services: [{ name: "Tauri dev server", app: "desktop", url: "http://localhost:1420/", port: 1420 },
+      { name: "Vite dev server", app: "web", url: "http://localhost:5173/", port: 5173 }] });
+  const services = createFakeServices(core, { projects: [domo], statuses: { p_domo: [
+    { name: "Tauri dev server", url: "http://localhost:1420/", port: 1420, status: "down", checked_at: 1 },
+    { name: "Vite dev server", url: "http://localhost:5173/", port: 5173, status: "up", checked_at: 1 }] } });
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
+  const tab = h.addTab({ url: "http://localhost:5173/boards/7?q=1" });
+  await flushMicrotasks();
+  const pill = h.document.getElementById("axiosozo-env-pill");
+  assert.equal(pill.querySelector(".axiosozo-env-pill-label").textContent, "web · local");
+  const block = blockFor(h, "p_domo");
+  assert.deepEqual(block.querySelector(".axiosozo-project-summary").querySelectorAll(".axiosozo-status-dot").map(d => d.getAttribute("data-status")),
+    ["down", "up", "remote"], "desktop down (grey), web up (green), production never contacted");
+  assert.deepEqual(block.querySelectorAll(".axiosozo-project-app").map(li => li.textContent), ["desktop", "web"]);
+  pill.click();
+  const menu = h.document.getElementById("axiosozo-env-menu");
+  const items = menu.querySelectorAll("menuitem");
+  assert.deepEqual(items.filter(i => i.hasAttribute("data-environment")).map(i => i.getAttribute("label")),
+    ["web · local · localhost:5173", "web · production · domo.example"]);
+  assert.deepEqual(items.filter(i => i.hasAttribute("data-open-url")).map(i => i.getAttribute("data-open-url")), ["http://localhost:1420"]);
+  menu.dispatch("command", { target: items.find(i => i.getAttribute("data-environment") === "production") });
+  assert.equal(h.opened.at(-1).url, "https://domo.example/boards/7?q=1");
+  assert.equal(h.opened.at(-1).where, "current");
+  menu.dispatch("command", { target: items.find(i => i.getAttribute("data-open-url")) });
+  assert.deepEqual([h.opened.at(-1).url, h.opened.at(-1).where], ["http://localhost:1420/", "tab"]);
+  assert.equal(loop.switchEnvironment("production"), "https://domo.example/boards/7?q=1", "implicit: the current app");
+  assert.equal(tab.linkedBrowser.currentURI.spec, "http://localhost:5173/boards/7?q=1");
+  loop.dispose();
+});
+
+test("the … row: secondary surfaces, Edit project… and Remove from space", async () => {
+  const h = createFakeWindow();
+  const adapter = createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) });
+  const p = project({ surfaces: [
+    { name: "Repository", url: "https://github.com/acme/webapp", kind: "repository" },
+    { name: "CI", url: "https://github.com/acme/webapp/actions", kind: "ci" },
+    { name: "Vercel", url: "https://vercel.com/dashboard", kind: "hosting" }] });
+  const services = createFakeServices(core, { projects: [p] });
+  const settings = [];
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0,
+    openSettings: (id, options) => settings.push([id, options]) });
+  await flushMicrotasks();
+  blockFor(h, p.id).querySelector(".axiosozo-project-toggle").click();
+  await flushMicrotasks();
+  const rows = rowsOf(blockFor(h, p.id));
+  assert.deepEqual(rows.filter(b => b.getAttribute("data-kind") === "surface").map(b => b.querySelector(".axiosozo-project-link-label").textContent),
+    ["Repository"], "only primary surfaces are rows");
+  const more = rows.find(b => b.getAttribute("data-kind") === "more");
+  assert.equal(more.getAttribute("aria-haspopup"), "menu");
+  more.click();
+  const menu = h.document.getElementById("axiosozo-project-more-menu");
+  assert.equal(menu.openedWith, more);
+  assert.equal(more.getAttribute("aria-expanded"), "true");
+  const items = menu.querySelectorAll("menuitem");
+  assert.deepEqual(items.map(i => i.getAttribute("label")),
+    ["CI · github.com", "Vercel · vercel.com", "Edit project…", "Remove from space"]);
+  menu.dispatch("command", { target: items[0] });
+  assert.equal(h.opened.at(-1).url, "https://github.com/acme/webapp/actions");
+  menu.dispatch("command", { target: items[2] });
+  assert.deepEqual(settings, [[p.id, { edit: true }]]);
+  menu.dispatch("command", { target: items[3] });
+  await flushMicrotasks();
+  assert.deepEqual(services.calls.updateProject, [[p.id, { context_uuid: null }]]);
+  assert.equal(folders(h), null, "the project left this space");
+  loop.dispose();
+});
+
+test("editing a project's environments re-links open tabs at once", async () => {
+  const t = setup();
+  const tab = t.h.addTab({ url: "http://localhost:5180/editor" });
+  await flushMicrotasks();
+  assert.equal(t.pill().hidden, true);
+  t.services.projects = [{ ...t.project, manifest: { ...t.project.manifest,
+    environments: [...t.project.manifest.environments, { name: "staging", base_url: "http://localhost:5180" }] } }];
+  t.services.emit("projects");
+  await flushMicrotasks();
+  assert.equal(t.pill().hidden, false);
+  assert.equal(t.pill().getAttribute("data-environment"), "staging");
+  assert.ok(blockFor(t.h, t.project.id).hasAttribute("data-active"));
+  assert.equal(tab.linkedBrowser.currentURI.spec, "http://localhost:5180/editor");
   t.loop.dispose();
 });
 
@@ -176,11 +319,11 @@ test("service status refreshes only declared services on a bounded interval", as
   t.loop.dispose();
 });
 
-test("private windows get no project block and never probe (M1)", async () => {
+test("private windows get no project folders and never probe (M1)", async () => {
   const probes = [];
   const t = setup({ privateWindow: true });
   await flushMicrotasks();
-  assert.equal(t.block(), null);
+  assert.equal(folders(t.h), null);
   const tab = t.h.addTab({ url: "http://localhost:5173/app" });
   await flushMicrotasks();
   assert.equal(t.pill().hidden, false, "the pill is local data only");
@@ -371,7 +514,7 @@ test("dispose removes every addition and listener", async () => {
   t.loop.dispose();
   assert.equal(t.pill(), null);
   assert.equal(t.menu(), null);
-  assert.equal(t.block(), null);
+  assert.equal(folders(t.h), null);
   assert.equal(t.h.progressListeners.size, 0);
   assert.equal(t.h.gBrowser.tabContainer.listenerCount(), 0);
   assert.equal(t.services.listenerCount(), 0);

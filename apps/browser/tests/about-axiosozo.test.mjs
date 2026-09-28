@@ -123,7 +123,7 @@ test("wrong principal is rejected before any service call", async () => {
 
 test("the method list is closed and matches contexts-api-v1 §3.3 plus openContext, openUrl and flags", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
-    "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
+    "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
     "getOverviewFlags", "getProject", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
     "listOrphans", "listProjects", "listRules", "needsAttention", "openContext", "openUrl", "pickFolder",
     "projectForUrl", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus", "setContextType",
@@ -187,6 +187,18 @@ test("valid requests map named params onto the services API", async () => {
     ]);
     const exported = await request(actor, "exportLedger");
     assert.equal(exported.value, "{\"version\":1}\n");
+  } finally { restore(); }
+});
+
+test("activeContext asks services for the requesting tab's window only", async () => {
+  const { services, calls } = fakeServices();
+  const restore = withProviders(services);
+  try {
+    const window = { name: "requesting-window" };
+    const actor = fakeActor({ window });
+    await request(actor, "activeContext");
+    assert.deepEqual(calls, [["activeContext", { window }]]);
+    assert.equal((await request(actor, "activeContext", { window: "other" })).error.code, "INVALID_PARAMS");
   } finally { restore(); }
 });
 

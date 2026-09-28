@@ -68,7 +68,7 @@ const INTRODUCED_PREF = "axiosozo.home.introduced";
 function introduceOnce(openOverview, zen) {
   if (Services.prefs.getBoolPref(INTRODUCED_PREF, false) || !zen.isAuthoritative()) return;
   Services.prefs.setBoolPref(INTRODUCED_PREF, true);
-  openOverview("#home");
+  openOverview("#projects");
 }
 
 // F1–F6, gated by axiosozo.contexts.enabled. Returns disposers in install order.
@@ -90,7 +90,9 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   // Reuses an open AxioSozo tab; a #fragment selects a view or item inside it.
   const openOverview = aboutRegistered ? (fragment = "") => window.switchToTabHavingURI(`about:axiosozo${fragment}`, true,
     { ignoreFragment: "whenComparingAndReplace" }) : null;
-  const openProjectSettings = openOverview ? id => openOverview(`#project=${id}`) : null;
+  // "Edit project…" in the sidebar opens the project's edit sheet; otherwise its card.
+  const openProjectSettings = openOverview
+    ? (id, { edit = false } = {}) => openOverview(edit ? `#edit-project=${id}` : `#project=${id}`) : null;
   if (aboutRegistered) guarded("overview tab recovery", () => reloadFailedOverviewTabs());
   if (openOverview) {
     const entry = guarded("tools menu entry", () => installToolsEntry(openOverview));

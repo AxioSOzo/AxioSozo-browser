@@ -20,49 +20,44 @@
         <img class="brand-mark" src="chrome://branding/content/about-logo.svg" alt="">
         <div>
           <h1>AxioSozo</h1>
-          <p class="brand-line">Your spaces, projects and site rules. Stored on this Mac only.</p>
+          <p class="brand-line">Projects, site rules and assistants. Stored on this Mac only.</p>
         </div>
       </div>
       <nav class="views" aria-label="AxioSozo">
-        <a href="#home" data-view="home">Home</a>
         <a href="#projects" data-view="projects">Projects</a>
         <a href="#rules" data-view="rules">Site rules</a>
-        <a href="#time" data-view="time">Screen time</a>
-        <a href="#settings" data-view="settings">Settings</a>
+        <a href="#ai" data-view="ai">AI &amp; keys</a>
       </nav>
     </header>
 
     <div id="status" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <main id="main" tabindex="-1">
-      <!-- Home: what needs you, then your spaces. A first-run guide stays until its steps are done or dismissed. -->
-      <section id="view-home" class="view" data-view="home" aria-labelledby="home-heading">
-        <h2 id="home-heading" class="visually-hidden">Home</h2>
-        <div id="guide"></div>
-        <div id="attention" class="block" aria-labelledby="attention-heading">
-          <div class="block-head"><h3 id="attention-heading">Needs attention</h3></div>
-          <ul id="attention-list" class="rows"></ul>
-        </div>
-        <div class="block" aria-labelledby="spaces-heading">
-          <div class="block-head">
-            <h3 id="spaces-heading">Spaces</h3>
-            <p id="spaces-help" class="block-help">Each Zen space keeps its own sign-ins. Give it a type so AxioSozo knows what it is for.</p>
-          </div>
-          <div id="spaces-body"></div>
-        </div>
-      </section>
-
-      <section id="view-projects" class="view" data-view="projects" aria-labelledby="projects-heading" hidden>
+      <!-- Projects: every space (any type) with the projects that live in it. First-run guidance is the empty state. -->
+      <section id="view-projects" class="view" data-view="projects" aria-labelledby="projects-heading">
         <div class="view-head">
           <div>
             <h2 id="projects-heading">Projects</h2>
-            <p id="projects-help" class="block-help">A local folder with its addresses, services and web surfaces. Link it to a space and it appears at the top of that space in the sidebar.</p>
+            <p id="projects-help" class="block-help">A project is a folder on this Mac with its local servers and web links. It lives in a space and shows in that space's sidebar, under the space name.</p>
           </div>
           <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
         </div>
-        <ul id="project-list" class="cards"></ul>
+        <div id="placement" class="notice-row" role="status" hidden></div>
+        <div id="attention" class="block" aria-labelledby="attention-heading" hidden>
+          <div class="block-head"><h3 id="attention-heading">Needs attention</h3></div>
+          <ul id="attention-list" class="rows"></ul>
+        </div>
+        <div id="projects-body" class="block"></div>
+        <div id="orphans" class="block" aria-labelledby="orphans-heading" hidden>
+          <div class="block-head">
+            <h3 id="orphans-heading">Settings of deleted spaces</h3>
+            <p id="orphans-help" class="block-help">These spaces no longer exist in Zen. Their AxioSozo settings are kept but never reused.</p>
+          </div>
+          <div id="orphans-body"></div>
+        </div>
       </section>
 
+      <!-- Site rules, each with its own screen time; the most-used sites below. -->
       <section id="view-rules" class="view" data-view="rules" aria-labelledby="rules-heading" hidden>
         <div class="view-head">
           <div>
@@ -72,15 +67,12 @@
           <button id="add-rule" type="button" class="primary" aria-describedby="rules-help">Add site rule…</button>
         </div>
         <ul id="rule-list" class="cards"></ul>
-      </section>
-
-      <section id="view-time" class="view" data-view="time" aria-labelledby="time-heading" hidden>
-        <div class="view-head">
-          <div>
-            <h2 id="time-heading">Screen time</h2>
-            <p id="screen-time-help" class="block-help">Time a site was in front, per space and day. Kept here for 90 days and never uploaded. Private windows are not recorded.</p>
-          </div>
-          <div class="view-tools">
+        <div id="usage" class="block" aria-labelledby="usage-heading">
+          <div class="block-head block-head-row">
+            <div>
+              <h3 id="usage-heading">Screen time</h3>
+              <p id="screen-time-help" class="block-help">Time a site was in front. Kept on this Mac for 90 days and never uploaded. Private windows are not recorded.</p>
+            </div>
             <label class="visually-hidden" for="ledger-days">Period</label>
             <select id="ledger-days" aria-describedby="screen-time-help">
               <option value="1">Today</option>
@@ -88,31 +80,28 @@
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
             </select>
-            <label class="visually-hidden" for="ledger-group">Show</label>
-            <select id="ledger-group">
-              <option value="host" selected>By site</option>
-              <option value="day">By day</option>
-            </select>
           </div>
-        </div>
-        <div id="ledger-body" class="block"></div>
-        <div class="quiet-actions">
-          <button id="ledger-export" type="button" class="ghost">Export as JSON…</button>
-          <button id="ledger-clear" type="button" class="ghost destructive">Delete screen time…</button>
+          <ul id="usage-list" class="rows"></ul>
+          <div class="quiet-actions">
+            <button id="ledger-export" type="button" class="ghost">Export as JSON…</button>
+            <button id="ledger-clear" type="button" class="ghost destructive">Delete screen time…</button>
+          </div>
         </div>
       </section>
 
-      <section id="view-settings" class="view" data-view="settings" aria-labelledby="settings-heading" hidden>
-        <div class="view-head"><div><h2 id="settings-heading">Settings</h2></div></div>
-        <div id="engine-settings" class="block"></div>
-        <div id="jev-settings" class="block"></div>
-        <div id="orphans" class="block" aria-labelledby="orphans-heading" hidden>
-          <div class="block-head">
-            <h3 id="orphans-heading">Settings of deleted spaces</h3>
-            <p id="orphans-help" class="block-help">These spaces no longer exist in Zen. Their AxioSozo settings are kept but never reused.</p>
+      <!-- AI & keys: which assistants are installed, the Jev key and Jev settings, other settings. -->
+      <section id="view-ai" class="view" data-view="ai" aria-labelledby="ai-heading" hidden>
+        <div class="view-head">
+          <div>
+            <h2 id="ai-heading">AI &amp; keys</h2>
+            <p id="ai-help" class="block-help">Browsing and site rules work without any of these. Nothing here starts an assistant or sends anything.</p>
           </div>
-          <div id="orphans-body"></div>
+          <button id="providers-refresh" type="button" class="ghost" aria-describedby="ai-help">Check again</button>
         </div>
+        <p id="providers-summary" class="block-help"></p>
+        <ul id="provider-list" class="cards provider-cards" aria-label="Assistants"></ul>
+        <div id="jev-card" class="block" aria-labelledby="jev-heading"></div>
+        <div id="engine-settings" class="block"></div>
       </section>
     </main>
 
