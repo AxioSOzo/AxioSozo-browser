@@ -727,7 +727,11 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     const match = matchUrl(url.href, spaceOfTab(tab));
     if (disposed || !match?.project || !tab.linkedBrowser || tab.closing) return;
     const environments = environmentsOf(match.project);
-    if (!core.isDeclaredLocalOrigin(environments, url.href)) return; // neterror stays unchanged
+    // A loopback alias (127.0.0.1 for a declared localhost, same scheme and port)
+    // is linked to the environment by matchProjectForUrl, so it waits too.
+    const declaredLocal = core.isDeclaredLocalOrigin(environments, url.href)
+      || (isLoopbackUrl(url.href) && isLoopbackUrl(match.environment?.base_url));
+    if (!declaredLocal) return; // neterror stays unchanged
     if (refused.get(tab) !== url.href) return; // another load started or committed meanwhile
     const stack = browserStackOf(window, tab);
     if (!stack) return;

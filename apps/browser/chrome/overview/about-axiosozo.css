@@ -95,7 +95,9 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
   flex-direction: column;
   gap: 18px;
   padding: 40px 0 14px;
-  background: linear-gradient(var(--page) 82%, transparent);
+  /* Opaque down to the view switcher; only the bottom padding fades, so
+   * scrolled content never shows through the switcher. */
+  background: linear-gradient(var(--page) calc(100% - 14px), transparent);
 }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 36px; height: 36px; border-radius: 9px; box-shadow: var(--shadow); }
@@ -350,6 +352,7 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
   font-weight: 500;
   white-space: nowrap;
 }
+.tag .dot { margin-inline-end: 5px; } /* status dot before the service text */
 .tag.accent { background: var(--accent-soft); color: var(--accent); }
 .tag.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .tag.guess { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }

@@ -361,7 +361,8 @@ test("waiting overlay appears only for a refused declared local origin", async (
   t.h.fail(tab, "http://localhost:3000/");
   t.h.fail(tab, "https://webapp.example/");
   t.h.fail(tab, "http://localhost:5173/", NS_ERROR_UNKNOWN_HOST);
-  t.h.fail(tab, "http://127.0.0.1:5173/"); // same port, but a different origin than the declared one
+  t.h.fail(tab, "http://0.0.0.0:5173/"); // not a loopback alias of the declared origin
+  t.h.fail(tab, "http://127.0.0.1:3000/"); // loopback alias, but an undeclared port
   await flushMicrotasks();
   assert.equal(t.overlay(tab), null);
   t.h.fail(tab, "http://localhost:5173/app?x=1");
@@ -377,6 +378,19 @@ test("waiting overlay appears only for a refused declared local origin", async (
   assert.equal(t.overlay(other), null, "other tabs untouched");
   t.loop.dispose();
   assert.equal(t.overlay(tab), null);
+});
+
+test("a typed loopback alias of the declared local origin waits too (it is linked to the project)", async () => {
+  const t = setup();
+  const tab = t.h.addTab({ url: "about:blank" });
+  await flushMicrotasks();
+  t.h.fail(tab, "http://127.0.0.1:5173/x");
+  await flushMicrotasks();
+  const overlay = t.overlay(tab);
+  assert.ok(overlay, "127.0.0.1 is the same host as the declared localhost for linking and waiting");
+  assert.equal(overlay.querySelector(".axiosozo-waiting-url").textContent, "127.0.0.1:5173/x");
+  assert.equal(overlay.getAttribute("data-mode"), "polling");
+  t.loop.dispose();
 });
 
 test("waiting polls the one declared port with backoff, then reloads once it answers", async () => {
