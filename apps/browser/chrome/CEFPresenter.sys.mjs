@@ -276,10 +276,7 @@ export class CEFPresenter {
       #axiosozo-engine-badge:hover { background:color-mix(in srgb, #1a73e8 26%, transparent); }
       #axiosozo-engine-badge:focus-visible { outline:2px solid var(--focus-outline-color, AccentColor); outline-offset:1px; }
       #axiosozo-engine-badge[insecure] { background:color-mix(in srgb, #d93025 16%, transparent); }
-      .tabbrowser-tab[axiosozo-engine="chromium"] .tab-icon-stack { position:relative; }
-      .tabbrowser-tab[axiosozo-engine="chromium"] .tab-icon-stack::after { content:"C"; position:absolute;
-        inset-inline-end:-4px; inset-block-end:-4px; width:10px; height:10px; border-radius:50%;
-        background:#1a73e8; color:#fff; font:700 7px/10px system-ui; text-align:center; pointer-events:none; }
+      /* The Chromium tab marker is drawn by EngineTabs in axiosozo-runtime.css. */
       [data-axiosozo-cef] .axiosozo-cef-panel { position:absolute; inset:0; display:flex; flex-direction:column;
         align-items:center; justify-content:center; gap:10px; padding:32px; text-align:center;
         background:Canvas; color:CanvasText; font:14px/1.5 system-ui; }

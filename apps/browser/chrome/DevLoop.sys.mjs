@@ -100,10 +100,10 @@ function hostLabel(baseUrl) {
  * serviceStatus, on). `adapter`: ZenWorkspaceAdapter (activeWorkspaceUuid,
  * workspaceForTab, isPrivateWindow, onChange, optional workspaceElement).
  * Optional: `core` (contexts core), `timers`, `clock`, `probe({ url, port }) → boolean`,
- * `openUrl(url, where, tab)`.
+ * `openUrl(url, where, tab)`, `openSettings(projectId)` (the project in about:axiosozo).
  */
 export function installDevLoop(window, { services, adapter, core = defaultCore, timers = defaultTimers(window),
-  clock = () => Date.now(), probe = null, openUrl = null } = {}) {
+  clock = () => Date.now(), probe = null, openUrl = null, openSettings = null } = {}) {
   if (!services || !adapter || !window?.gBrowser || !prefEnabled(window, "axiosozo.contexts.enabled", true)) return INERT;
   const document = window.document;
   const gBrowser = window.gBrowser;
@@ -165,6 +165,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   function hidePill() {
     pillState = null; pill.hidden = true; diagnostics.pillShown = false;
     pill.removeAttribute("data-environment"); pill.removeAttribute("data-services");
+    if (blockState) renderBlock(); // the block marks the current environment
   }
 
   function renderPill() {
@@ -179,6 +180,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     pill.setAttribute("aria-label", `${name}: ${current} environment${serviceText}. Switch environment`);
     pill.setAttribute("title", `${name} · ${current}${serviceText}`); // HTML elements in chrome use title for tooltips
     pill.hidden = false; diagnostics.pillShown = true;
+    if (blockState) renderBlock();
   }
 
   async function refreshPill() {
@@ -265,15 +267,24 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   });
 
   // ---- Project block -------------------------------------------------------------
+  // One quiet row under the space name: project name and service dots. Expanded,
+  // it lists the project's environments, services and web surfaces as tab-like
+  // rows; a row selects an open tab of that site in this space before it opens
+  // a new one. Collapsed by default, remembered per project for this window.
   const block = element(document, "div", { className: "axiosozo-project-block", attrs: { id: "axiosozo-project-block", role: "group" } });
   const blockToggle = element(document, "button", { className: "axiosozo-project-toggle",
-    attrs: { "aria-expanded": "true", "aria-controls": "axiosozo-project-services" } }, block);
+    attrs: { "aria-expanded": "false", "aria-controls": "axiosozo-project-body" } }, block);
+  element(document, "span", { className: "axiosozo-project-glyph", attrs: { "aria-hidden": "true" } }, blockToggle);
   const blockName = element(document, "span", { className: "axiosozo-project-name" }, blockToggle);
   const blockSummary = element(document, "span", { className: "axiosozo-project-summary", attrs: { "aria-hidden": "true" } }, blockToggle);
-  const blockList = element(document, "ul", { className: "axiosozo-project-services", attrs: { id: "axiosozo-project-services" } }, block);
+  element(document, "span", { className: "axiosozo-project-chevron", attrs: { "aria-hidden": "true" } }, blockToggle);
+  const blockBody = element(document, "div", { className: "axiosozo-project-body", attrs: { id: "axiosozo-project-body" } }, block);
+  const blockLinks = element(document, "ul", { className: "axiosozo-project-links", attrs: { "aria-label": "Project links" } }, blockBody);
+  const blockList = element(document, "ul", { className: "axiosozo-project-services", attrs: { id: "axiosozo-project-services", "aria-label": "Services" } }, blockBody);
+  const blockSettings = element(document, "button", { className: "axiosozo-project-settings", text: "Project settings" }, blockBody);
   let blockState = null; // { uuid, project, statuses }
   let blockToken = 0;
-  let expanded = true;
+  const expandedProjects = new Set();
 
   function removeBlock() { blockState = null; block.remove(); diagnostics.blockShown = false; }
 
@@ -285,13 +296,48 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return workspace;
   }
 
+  /** An open tab of this space whose page is under `base` (same origin, path prefix). */
+  function openTabUnder(base, uuid) {
+    const target = webURL(base);
+    if (!target) return null;
+    for (const tab of gBrowser.tabs ?? []) {
+      if (tab.closing || adapter.workspaceForTab(tab) !== uuid) continue;
+      const url = webURL(tab.linkedBrowser?.currentURI?.spec);
+      if (url && url.origin === target.origin && url.pathname.startsWith(target.pathname)) return tab;
+    }
+    return null;
+  }
+
+  function goTo(url, uuid) {
+    const target = webURL(url);
+    if (!target) return null;
+    const existing = openTabUnder(target.href, uuid);
+    if (existing) { gBrowser.selectedTab = existing; return "selected"; }
+    open(target.href, "tab", gBrowser.selectedTab);
+    return "opened";
+  }
+
+  function linkRow(kind, label, detail, url, uuid) {
+    const item = element(document, "li", { className: "axiosozo-project-link" }, blockLinks);
+    const button = element(document, "button", { attrs: { "data-kind": kind, "aria-label": `${label}, ${detail}` } }, item);
+    const icon = element(document, "img", { className: "axiosozo-project-link-icon", attrs: { alt: "", role: "presentation" } }, button);
+    // Surfaces show the site's own favicon when Places has one; environments use a fixed glyph.
+    if (kind === "surface") icon.setAttribute("src", `page-icon:${url}`);
+    element(document, "span", { className: "axiosozo-project-link-label", text: label }, button);
+    element(document, "span", { className: "axiosozo-project-link-detail", text: detail }, button);
+    button.addEventListener("click", event => { event.stopPropagation?.(); goTo(url, uuid); });
+    return button;
+  }
+
   function renderBlock() {
     if (!blockState) return removeBlock();
     const { uuid, project, statuses } = blockState;
     const workspace = blockAnchor(uuid);
     if (!workspace) return removeBlock();
+    const expanded = expandedProjects.has(project.id);
     const name = project.manifest?.name ?? "Project";
     const up = statuses.filter(s => s.status === "up").length;
+    const down = statuses.filter(s => s.status === "down").length;
     blockName.textContent = name;
     while (blockSummary.firstChild) blockSummary.firstChild.remove();
     for (const service of statuses) {
@@ -300,8 +346,19 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     }
     const serviceText = statuses.length ? `, ${up} of ${statuses.length} services running` : "";
     block.setAttribute("aria-label", `Project ${name}`);
-    blockToggle.setAttribute("aria-label", `${name}${serviceText}. ${expanded ? "Collapse" : "Expand"} project details`);
+    block.toggleAttribute?.("data-expanded", expanded);
+    if (down) block.setAttribute("data-services", "down"); else block.removeAttribute("data-services");
+    blockToggle.setAttribute("aria-label", `${name}${serviceText}. ${expanded ? "Collapse" : "Expand"} project`);
     blockToggle.setAttribute("aria-expanded", String(expanded));
+    while (blockLinks.firstChild) blockLinks.firstChild.remove();
+    const current = pillState?.project.id === project.id ? pillState.current : null;
+    for (const environment of environmentsOf(project)) {
+      const button = linkRow("environment", environment.name, hostLabel(environment.base_url), environment.base_url, uuid);
+      if (environment.name === current) button.setAttribute("aria-current", "true");
+    }
+    for (const surface of project.manifest?.surfaces ?? []) {
+      linkRow("surface", surface.name, hostLabel(surface.url), surface.url, uuid);
+    }
     while (blockList.firstChild) blockList.firstChild.remove();
     for (const service of statuses) {
       const status = STATUS_TEXT[service.status] ? service.status : "unknown";
@@ -310,7 +367,10 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
       element(document, "span", { className: "axiosozo-service-name", text: service.name }, item);
       element(document, "span", { className: "axiosozo-service-status", text: `${STATUS_TEXT[status]} · port ${service.port}` }, item);
     }
+    blockBody.hidden = !expanded;
+    blockLinks.hidden = !blockLinks.children.length;
     blockList.hidden = !expanded || statuses.length === 0;
+    blockSettings.hidden = typeof openSettings !== "function";
     if (block.parentNode !== workspace) {
       const indicator = workspace.querySelector?.(".zen-current-workspace-indicator");
       if (indicator) indicator.after(block); else workspace.prepend(block);
@@ -339,11 +399,27 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
 
   const onToggle = event => {
     event.stopPropagation?.();
-    expanded = !expanded;
+    if (!blockState) return;
+    const id = blockState.project.id;
+    if (expandedProjects.has(id)) expandedProjects.delete(id);
+    else {
+      expandedProjects.add(id);
+      // Opening the block is the moment to look: refresh service dots now.
+      refreshStatuses().catch(() => {});
+    }
     renderBlock();
   };
+  const onSettings = event => {
+    event.stopPropagation?.();
+    if (blockState) openSettings?.(blockState.project.id);
+  };
   blockToggle.addEventListener("click", onToggle);
-  cleanups.push(() => { blockToggle.removeEventListener("click", onToggle); block.remove(); });
+  blockSettings.addEventListener("click", onSettings);
+  cleanups.push(() => {
+    blockToggle.removeEventListener("click", onToggle);
+    blockSettings.removeEventListener("click", onSettings);
+    block.remove();
+  });
 
   async function refreshStatuses() {
     if (privateWindow) return;

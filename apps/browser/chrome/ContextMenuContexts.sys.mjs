@@ -22,14 +22,14 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
   };
   const setHidden = (element, hidden) => (hidden ? element.setAttribute("hidden", "true") : element.removeAttribute("hidden"));
 
-  const menu = create("menu", { id: ID, label: "Context" });
+  const menu = create("menu", { id: ID, label: "Space type" });
   const menuPopup = create("menupopup", { id: `${ID}-popup` });
   const typeItems = Object.entries(CONTEXT_TYPE_LABELS).map(([type, label]) =>
     create("menuitem", { type: "radio", name: `${ID}-type`, label, "data-axiosozo-action": "type", "data-axiosozo-value": type }));
   const linkSeparator = create("menuseparator");
   const orgMenu = create("menu", { label: "Organization" });
   const orgPopup = create("menupopup");
-  const projectMenu = create("menu", { label: "Project folder" });
+  const projectMenu = create("menu", { label: "Linked project" });
   const projectPopup = create("menupopup");
   orgMenu.appendChild(orgPopup); projectMenu.appendChild(projectPopup);
   for (const item of typeItems) menuPopup.appendChild(item);
@@ -37,7 +37,7 @@ export function installContextTypeMenu(window, { services, adapter, openOverview
   let overviewItem = null;
   if (typeof openOverview === "function") {
     menuPopup.appendChild(create("menuseparator"));
-    overviewItem = create("menuitem", { label: "Manage contexts…", "data-axiosozo-action": "overview" });
+    overviewItem = create("menuitem", { label: "Spaces in AxioSozo…", "data-axiosozo-action": "overview" });
     menuPopup.appendChild(overviewItem);
   }
   menu.appendChild(menuPopup);

@@ -2,6 +2,12 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 /** Privileged browser-chrome only. No actor, DOM event, or website IPC listener. */
+// A restored, not yet remote <browser> has no document: its contentPrincipal
+// getter then throws (contentDocument is null) instead of returning null.
+function principalOrigin(browser) {
+  try { return browser?.contentPrincipal?.origin ?? null; } catch { return null; }
+}
+
 export class GeckoEngineAdapter {
   constructor(win, { emit = () => {}, uuid = () => win.Services.uuid.generateUUID().toString().replace(/[{}]/g, "") } = {}) {
     this.window = win;
@@ -47,7 +53,7 @@ export class GeckoEngineAdapter {
     if (!record) {
       record = { id: this.uuid(), tab, document: 1, navigation: 1,
         // A lazy (not yet inserted) tab has no principal until it first loads.
-        principalIdentity: tab.linkedBrowser.contentPrincipal?.origin ?? null };
+        principalIdentity: principalOrigin(tab.linkedBrowser) };
       this.tabs.set(record.id, record);
     }
     return record;
@@ -58,7 +64,7 @@ export class GeckoEngineAdapter {
   /** Restored tabs stay lazy, with no document or principal, until first shown. */
   loaded(record) {
     const browser = record.tab.linkedBrowser;
-    return !!(browser.contentPrincipal && browser.browsingContext);
+    return !!(principalOrigin(browser) !== null && browser.browsingContext);
   }
 
   target(record) {

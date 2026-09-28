@@ -102,3 +102,15 @@ test('lazy restored tabs are tracked without a principal and get a target once l
   assert.equal(target.identity, 'https://example.invalid');
   assert.equal(target.native_target_id, '7');
 });
+
+test('a restored tab whose browser has no document yet does not stop startup', () => {
+  const f = fixture();
+  // Gecko's <browser>.contentPrincipal throws for a non-remote browser without a
+  // document (seen in the real app after a session restore); it must read as unloaded.
+  const pending = { browsingContext: null, currentURI: { spec: 'about:blank' },
+    get contentPrincipal() { throw new TypeError("can't access property \"nodePrincipal\", this.contentDocument is null"); } };
+  const restored = { linkedBrowser: pending, label: 'Restored', private: false };
+  const record = f.adapter.track(restored);
+  assert.equal(record.principalIdentity, null);
+  assert.throws(() => f.adapter.target(record), /TARGET_NOT_LOADED/);
+});

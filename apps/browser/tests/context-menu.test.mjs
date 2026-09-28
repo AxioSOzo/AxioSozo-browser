@@ -68,7 +68,7 @@ test("one native Context submenu sits after Zen's container menu and starts hidd
   const f = fixture();
   const index = f.popup.children.indexOf(f.anchor);
   assert.equal(f.popup.children[index + 1], f.menu.element);
-  assert.equal(f.menu.element.getAttribute("label"), "Context");
+  assert.equal(f.menu.element.getAttribute("label"), "Space type");
   assert.equal(f.menu.element.hidden, true);
   assert.deepEqual(f.menu.element.children[0].children.slice(0, 3).map(item => item.getAttribute("label")),
     ["Personal", "Organization", "Project"]);
@@ -81,7 +81,7 @@ test("shows the clicked workspace's type and sets a new type on a trusted comman
   assert.equal(menu.hidden, false);
   assert.equal(menu.byLabel("Organization").getAttribute("checked"), "true");
   assert.equal(menu.byLabel("Personal").getAttribute("checked"), null);
-  assert.equal(menu.byLabel("Project folder").hidden, true, "links only for project contexts");
+  assert.equal(menu.find(child => child.tagName === "menu" && child.getAttribute("label") === "Linked project").hidden, true, "links only for project contexts");
   await menu.byLabel("Project").dispatch("command", { isTrusted: false });
   assert.ok(!f.calls.some(call => call[0] === "setContextType"), "untrusted commands are ignored");
   await menu.byLabel("Project").dispatch("command");
@@ -98,7 +98,7 @@ test("project contexts link an organization and a project, or none", async () =>
   const orgItems = orgMenu.children[0].children;
   assert.deepEqual(orgItems.map(item => [item.getAttribute("label"), item.getAttribute("checked")]),
     [["None", null], ["AxioSozo BV", "true"]]);
-  const projectItems = menu.byLabel("Project folder").children[0].children;
+  const projectItems = menu.find(child => child.tagName === "menu" && child.getAttribute("label") === "Linked project").children[0].children;
   assert.deepEqual(projectItems.map(item => [item.getAttribute("label"), item.getAttribute("checked")]),
     [["None", null], ["Shop", "true"], ["Docs", null]]);
   await orgItems[0].dispatch("command");
@@ -115,7 +115,7 @@ test("falls back to the active workspace; submenu events are not mistaken for Ze
   const before = f.calls.length;
   await f.menu.element.children[0].dispatch("popupshowing");
   assert.equal(f.calls.length, before);
-  await f.menu.element.byLabel("Manage contexts…").dispatch("command");
+  await f.menu.element.byLabel("Spaces in AxioSozo…").dispatch("command");
   assert.deepEqual(f.overview, ["open"]);
 });
 

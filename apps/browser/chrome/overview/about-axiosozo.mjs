@@ -3,7 +3,11 @@
 
 // about:axiosozo page script. Runs with the about:axiosozo content
 // principal; its only channel is window.AxioSozoOverview (the actor child).
-// All text is inserted with textContent; nothing is parsed as markup.
+// All text is inserted with textContent; nothing is parsed as markup. Icons
+// are SVG elements built here (the page CSS may not load url() resources).
+//
+// Words: a "space" in this page is a Zen space (workspace) with an AxioSozo
+// type; the contracts call the same thing a context.
 
 import * as M from "./overview-model.mjs";
 
@@ -12,8 +16,13 @@ const $ = id => document.getElementById(id);
 let idCounter = 0;
 const newId = prefix => `${prefix}-${++idCounter}`;
 
+const VIEWS = ["home", "projects", "rules", "time", "settings"];
+const TYPE_LABELS = { personal: "Personal", organization: "Organization", project: "Project" };
+const GUIDE_DISMISSED = "axiosozo.guide.dismissed";
+
 const state = {
   connected: !!api,
+  view: "home",
   flags: { contexts: true, enginePreferences: false, jevKeyEntry: false },
   contexts: [], projects: [], rules: [], orphans: [], attention: [], jev: null,
   serviceStatus: new Map(), ledgerSummary: [],
@@ -28,7 +37,7 @@ function h(tag, props = {}, ...children) {
     if (key === "class") element.className = value;
     else if (key === "text") element.textContent = value;
     else if (key.startsWith("on")) element.addEventListener(key.slice(2), value);
-    else if (["checked", "disabled", "hidden", "value", "selected", "required", "readOnly"].includes(key)) element[key] = value;
+    else if (["checked", "disabled", "hidden", "value", "selected", "required", "readOnly", "open"].includes(key)) element[key] = value;
     else element.setAttribute(key, value === true ? "" : String(value));
   }
   for (const child of children.flat(Infinity)) {
@@ -36,6 +45,47 @@ function h(tag, props = {}, ...children) {
     element.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   return element;
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+// 16px line icons, drawn with currentColor.
+const ICONS = {
+  open: ["M6 3.5h6.5V10", "M12.5 3.5 4 12"],
+  more: [],
+  close: ["M4 4l8 8", "M12 4l-8 8"],
+  check: ["M3.5 8.5 6.5 11.5 12.5 4.5"],
+  refresh: ["M13 8a5 5 0 1 1-1.46-3.54", "M13 3v2.5h-2.5"],
+  space: ["M3 3.5h10v9H3z", "M6 3.5v9"],
+  globe: ["M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11", "M2.5 8h11", "M8 2.5c1.6 1.6 2.3 3.5 2.3 5.5S9.6 11.9 8 13.5C6.4 11.9 5.7 10 5.7 8S6.4 4.1 8 2.5"],
+  laptop: ["M3.5 4h9v6h-9z", "M2 12.5h12"],
+  plus: ["M8 3v10", "M3 8h10"],
+};
+function icon(name, size = 16) {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.5");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  if (name === "more") {
+    for (const x of [4, 8, 12]) {
+      const dot = document.createElementNS(SVG, "circle");
+      dot.setAttribute("cx", String(x)); dot.setAttribute("cy", "8"); dot.setAttribute("r", "1.1");
+      dot.setAttribute("fill", "currentColor"); dot.setAttribute("stroke", "none");
+      svg.append(dot);
+    }
+    return svg;
+  }
+  for (const d of ICONS[name] ?? []) {
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
 }
 
 function option(value, label, selected) {
@@ -59,10 +109,35 @@ function choice({ type, name, value, checked, label, help, onchange, disabled })
     h("div", {}, h("label", { for: input.id }, label), help ? h("span", { class: "help", id: helpId }, help) : null));
 }
 
+function iconButton(name, label, onclick, extra = {}) {
+  return h("button", { type: "button", class: "icon", "aria-label": label, title: label, onclick, ...extra }, icon(name));
+}
+
+/** A small overflow menu: <details> with a list of buttons. Closes on choice, Escape or outside click. */
+function overflowMenu(label, items) {
+  const menu = h("details", { class: "menu" });
+  const close = () => { menu.open = false; };
+  menu.append(
+    h("summary", { class: "icon-summary", "aria-label": label, title: label },
+      h("span", { class: "button-like icon" }, icon("more"))),
+    h("div", { class: "menu-items", role: "menu" }, items.filter(Boolean).map(item =>
+      h("button", { type: "button", role: "menuitem", class: item.destructive ? "destructive" : null,
+        "data-focus-key": item.focusKey, onclick: () => { close(); item.run(); } }, item.label))));
+  menu.addEventListener("keydown", event => { if (event.key === "Escape" && menu.open) { close(); menu.querySelector("summary").focus(); } });
+  return menu;
+}
+document.addEventListener("click", event => {
+  for (const menu of document.querySelectorAll("details.menu[open]")) if (!menu.contains(event.target)) menu.open = false;
+});
+
+let toastTimer = null;
 function setStatus(message, kind = "info") {
   const node = $("status");
   node.dataset.kind = kind;
   node.textContent = message;
+  node.toggleAttribute("data-visible", !!message);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.removeAttribute("data-visible"), kind === "error" ? 6000 : 3200);
 }
 
 function errorText(error) {
@@ -123,8 +198,93 @@ function setupDialog() {
   dialog.addEventListener("cancel", event => { event.preventDefault(); dialogResolve?.(false); });
 }
 
+// One modal sheet for the project review and the rule editor.
+let sheetClose = null;
+function openSheet({ title, body, footer }) {
+  const dialog = $("sheet");
+  const returnFocus = document.activeElement;
+  const close = () => {
+    sheetClose = null;
+    if (dialog.open) dialog.close();
+    $("sheet-body").replaceChildren();
+    returnFocus?.focus?.();
+  };
+  sheetClose = close;
+  $("sheet-body").replaceChildren(h("div", { class: "sheet" },
+    h("div", { class: "sheet-head" }, h("h2", { id: "sheet-title", tabindex: "-1" }, title),
+      iconButton("close", "Close", close)),
+    h("div", { class: "sheet-body" }, body),
+    h("div", { class: "sheet-foot" }, footer)));
+  if (!dialog.open) dialog.showModal();
+  $("sheet-title").focus();
+  return close;
+}
+function setupSheet() {
+  $("sheet").addEventListener("cancel", event => { event.preventDefault(); sheetClose?.(); });
+}
+
 const contextName = uuid => state.contexts.find(context => context.uuid === uuid)?.name ?? null;
 const projectName = project => project.manifest?.name ?? project.id;
+const hostOf = url => { try { return new URL(url).host; } catch { return url; } };
+
+// ---------------------------------------------------------------- views
+
+function viewFromHash() {
+  const hash = location.hash.slice(1);
+  if (/^project=/.test(hash)) return "projects";
+  if (/^rule=/.test(hash)) return "rules";
+  return VIEWS.includes(hash) ? hash : "home";
+}
+
+function showView(view) {
+  state.view = view;
+  for (const section of document.querySelectorAll("section.view")) section.hidden = section.dataset.view !== view;
+  for (const link of document.querySelectorAll(".views a")) {
+    if (link.dataset.view === view) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+function renderViewCounts() {
+  const link = document.querySelector('.views a[data-view="home"]');
+  link.querySelector(".count")?.remove();
+  if (state.attention.length) link.append(h("span", { class: "count", "aria-label": `${state.attention.length} need attention` }, String(state.attention.length)));
+}
+
+// ---------------------------------------------------------------- guide
+
+function guideDismissed() {
+  try { return localStorage.getItem(GUIDE_DISMISSED) === "1"; } catch { return false; }
+}
+
+function renderGuide() {
+  const box = $("guide");
+  const steps = [
+    { title: "Type your spaces", text: "Mark a Zen space as personal, organization or project. Sign-ins already stay separate per space.",
+      done: state.contexts.some(context => context.type !== "personal"),
+      action: h("button", { type: "button", onclick: () => document.querySelector(".space input:checked")?.focus() }, "Show spaces") },
+    { title: "Add a project", text: "Pick a folder. AxioSozo reads a few config files, never runs anything, and puts the project at the top of its space.",
+      done: state.projects.some(project => project.context_uuid),
+      action: h("button", { type: "button", onclick: () => { location.hash = "projects"; addProjectFlow(); } }, "Add project…") },
+    { title: "Set a site rule", text: "Write what a site is for, in your words, with an optional daily limit. You can always continue.",
+      done: state.rules.length > 0,
+      action: h("button", { type: "button", onclick: () => { location.hash = "rules"; openRuleEditor(null); } }, "Add rule…") },
+  ];
+  if (!state.connected || guideDismissed() || steps.every(step => step.done)) { box.replaceChildren(); return; }
+  box.replaceChildren(h("section", { class: "guide", "aria-labelledby": "guide-heading" },
+    h("div", { class: "guide-head" },
+      h("h3", { id: "guide-heading" }, "Make AxioSozo yours"),
+      h("p", {}, "Three steps, each optional. Everything stays on this Mac.")),
+    iconButton("close", "Hide these steps", () => {
+      try { localStorage.setItem(GUIDE_DISMISSED, "1"); } catch {}
+      renderGuide();
+    }, { class: "icon guide-close" }),
+    h("ol", { class: "steps" }, steps.map((step, index) => h("li", { class: "step", "data-done": step.done },
+      h("span", { class: "step-mark", "aria-hidden": "true" }, step.done ? icon("check", 12) : String(index + 1)),
+      h("span", { class: "step-title" }, step.title, step.done ? h("span", { class: "visually-hidden" }, " (done)") : null),
+      h("p", {}, step.text),
+      step.done ? null : step.action)))));
+}
 
 // ---------------------------------------------------------------- attention
 
@@ -142,88 +302,98 @@ function renderAttention() {
   const list = $("attention-list");
   const items = [];
   if (!state.connected) {
-    items.push(h("li", {}, h("p", { class: "item-title" }, "AxioSozo services are not available"),
-      h("p", { class: "deemphasized" }, "Open about:axiosozo from the address bar of a normal browser window. Nothing on this page works until it is connected.")));
+    items.push(h("li", { class: "row" }, h("span", { class: "dot", "data-status": "warn", "aria-hidden": "true" }),
+      h("div", { class: "row-main" }, h("span", { class: "row-title" }, "AxioSozo is not connected"),
+        h("span", { class: "row-detail" }, "Open about:axiosozo from the address bar of a normal browser window."))));
   }
   for (const item of state.attention) {
     const action = M.attentionAction(item);
     let button = null;
-    if (action?.kind === "rule") button = h("button", { type: "button", onclick: () => openRuleEditorById(action.id) }, "Edit rule…");
-    else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => focusProject(action.id) }, "Show project");
+    if (action?.kind === "rule") button = h("button", { type: "button", onclick: () => { location.hash = `rule=${action.id}`; } }, "Edit rule");
+    else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => { location.hash = `project=${action.id}`; } }, "Show project");
     else if (action?.kind === "url") button = h("button", { type: "button", onclick: () => act("openUrl", { url: action.url }) }, "Open");
-    const kind = item.kind === "service_down" ? "Service down" : item.kind === "rule_limit_reached" ? "Limit reached" : "Attention";
-    items.push(h("li", {},
-      h("div", { class: "item-head" },
-        h("p", { class: "item-title" }, item.title ?? kind),
-        h("span", { class: "tag" }, kind),
-        button ? h("div", { class: "item-actions" }, button) : null),
-      item.detail ? h("p", { class: "deemphasized" }, item.detail) : null));
+    const status = item.kind === "service_down" ? "down" : "warn";
+    items.push(h("li", { class: "row" },
+      h("span", { class: "dot", "data-status": status, "aria-hidden": "true" }),
+      h("div", { class: "row-main" },
+        h("span", { class: "row-title" }, item.title ?? "Needs attention"),
+        item.detail ? h("span", { class: "row-detail" }, item.detail) : null),
+      button));
   }
-  if (!items.length) items.push(h("li", { class: "empty" }, "Nothing needs attention."));
   list.replaceChildren(...items);
+  $("attention").hidden = !items.length;
+  renderViewCounts();
 }
 
-// ---------------------------------------------------------------- contexts
+// ---------------------------------------------------------------- spaces
 
 async function loadContexts() {
   try {
     state.contexts = await call("listContexts");
     await keepFocus(renderContexts);
   } catch (error) {
-    $("contexts-body").replaceChildren(h("p", { class: "deemphasized" }, "Could not load contexts. " + errorText(error)));
+    $("spaces-body").replaceChildren(h("p", { class: "empty" }, "Could not load spaces. " + errorText(error)));
   }
 }
 
+function spaceIcon(space) {
+  const box = h("span", { class: "space-icon", "aria-hidden": "true" });
+  const glyph = typeof space.icon === "string" ? space.icon.trim() : "";
+  if (glyph.startsWith("chrome://")) box.append(h("img", { src: glyph, alt: "" }));
+  else if (glyph && [...glyph].length <= 2) box.textContent = glyph;
+  else box.append(icon("space"));
+  return box;
+}
+
+function typePicker(row) {
+  const name = newId("type");
+  return h("fieldset", { class: "segmented", "aria-label": `Type of ${row.name}` },
+    M.CONTEXT_TYPES.map(type => {
+      const input = h("input", { type: "radio", name, value: type, checked: row.type === type, id: newId("type"),
+        "data-focus-key": `space:${row.uuid}:type:${type}`,
+        onchange: () => act("setContextType", { uuid: row.uuid, type },
+          `${row.name} is now a ${TYPE_LABELS[type].toLowerCase()} space.`).then(loadContexts) });
+      return [input, h("label", { for: input.id }, TYPE_LABELS[type])];
+    }));
+}
+
 function renderContexts() {
-  const body = $("contexts-body");
+  const body = $("spaces-body");
   if (!state.contexts.length) {
-    body.replaceChildren(h("p", { class: "deemphasized" }, "No Zen workspaces found."));
+    body.replaceChildren(h("p", { class: "empty" }, state.connected
+      ? "Waiting for Zen's spaces… If this stays empty, open a normal browser window."
+      : "Spaces appear here once AxioSozo is connected."));
+    renderGuide();
     return;
   }
-  const engineHelpId = newId("help");
-  const rows = M.contextRows(state.contexts, state.projects).map(row => {
-    const key = suffix => `context:${row.uuid}:${suffix}`;
-    const typeSelect = h("select", {
-      "aria-label": `Type of ${row.name}`, "data-focus-key": key("type"),
-      onchange: event => act("setContextType", { uuid: row.uuid, type: event.target.value },
-        `${row.name} is now a ${event.target.value} context.`).then(loadContexts),
-    }, M.CONTEXT_TYPES.map(type => option(type, type[0].toUpperCase() + type.slice(1), row.type)));
-    const orgSelect = row.showLinks ? h("select", {
-      "aria-label": `Organization of ${row.name}`, "data-focus-key": key("org"),
-      onchange: event => act("linkOrganization", { uuid: row.uuid, organizationUuid: event.target.value || null },
-        "Organization link saved."),
-    }, option("", "None", row.organization_uuid ?? ""),
-    row.organizationOptions.map(org => option(org.uuid, org.name, row.organization_uuid))) : h("span", { class: "deemphasized" }, "—");
-    const projectSelect = row.showLinks ? h("select", {
-      "aria-label": `Project of ${row.name}`, "data-focus-key": key("project"),
-      onchange: event => act("linkProject", { uuid: row.uuid, projectId: event.target.value || null },
-        "Project link saved."),
-    }, option("", "None", row.project_id ?? ""),
-    row.projectOptions.map(project => option(project.id, project.name, row.project_id))) : h("span", { class: "deemphasized" }, "—");
-    const engineSelect = h("select", {
-      "aria-label": `Engine preference of ${row.name}`, "aria-describedby": engineHelpId,
-      "data-focus-key": key("engine"), disabled: !state.flags.enginePreferences,
-      onchange: event => act("setEnginePreference", { uuid: row.uuid, engine: event.target.value || null },
-        "Engine preference saved."),
-    }, option("", "Default", row.engine_preference ?? ""),
-    option("firefox", "Firefox", row.engine_preference),
-    option("chromium", "Chromium (experimental)", row.engine_preference));
-    const open = h("button", { type: "button", "aria-label": `Open ${row.name}`, "data-focus-key": key("open"),
-      onclick: () => act("openContext", { uuid: row.uuid }) }, "Open");
-    return h("tr", {},
-      h("th", { scope: "row" }, row.name),
-      h("td", {}, typeSelect), h("td", {}, orgSelect), h("td", {}, projectSelect),
-      h("td", {}, engineSelect), h("td", {}, open));
+  const cards = M.contextRows(state.contexts, state.projects).map(row => {
+    const key = suffix => `space:${row.uuid}:${suffix}`;
+    let meta = row.container_label ? `Sign-ins: ${row.container_label}` : "Shared sign-ins";
+    const links = [];
+    if (row.showLinks) {
+      const linked = state.projects.find(project => project.id === row.project_id);
+      meta = linked ? `Project: ${projectName(linked)}` : "No project linked yet";
+      links.push(h("select", { "aria-label": `Project of ${row.name}`, "data-focus-key": key("project"),
+        onchange: event => act("linkProject", { uuid: row.uuid, projectId: event.target.value || null }, "Project link saved.") },
+      option("", row.projectOptions.length ? "Link a project…" : "No projects yet", row.project_id ?? ""),
+      row.projectOptions.map(project => option(project.id, project.name, row.project_id))));
+      if (row.organizationOptions.length) {
+        links.push(h("select", { "aria-label": `Organization of ${row.name}`, "data-focus-key": key("org"),
+          onchange: event => act("linkOrganization", { uuid: row.uuid, organizationUuid: event.target.value || null }, "Organization link saved.") },
+        option("", "No organization", row.organization_uuid ?? ""),
+        row.organizationOptions.map(org => option(org.uuid, org.name, row.organization_uuid))));
+      }
+    }
+    return h("li", { class: "space" },
+      h("div", { class: "space-head" }, spaceIcon(row),
+        h("div", { class: "row-main" }, h("span", { class: "space-name" }, row.name), h("span", { class: "space-meta" }, meta)),
+        iconButton("open", `Switch to ${row.name}`, () => act("openContext", { uuid: row.uuid }), { class: "icon open", "data-focus-key": key("open") })),
+      typePicker(row),
+      links.length ? h("div", { class: "form-row" }, links) : null);
   });
-  body.replaceChildren(
-    h("table", { "aria-describedby": "contexts-help" },
-      h("caption", {}, "Zen workspaces and their AxioSozo context settings"),
-      h("thead", {}, h("tr", {},
-        ["Context", "Type", "Organization", "Project", "Engine", "Actions"].map(label => h("th", { scope: "col" }, label)))),
-      h("tbody", {}, rows)),
-    h("p", { class: "help", id: engineHelpId }, state.flags.enginePreferences
-      ? "Engine preference is experimental. If Chromium is unavailable the Firefox tab stays."
-      : "Engine preference is experimental and turned off until the Chromium checks pass."));
+  body.replaceChildren(h("ul", { class: "spaces", "aria-describedby": "spaces-help" }, cards));
+  renderGuide();
+  renderEngineSettings();
 }
 
 async function loadOrphans() {
@@ -241,19 +411,19 @@ function renderOrphans() {
   if (!state.orphans.length) { $("orphans-body").replaceChildren(); return; }
   const boxes = state.orphans.map(orphan => choice({
     type: "checkbox", name: "orphan", value: orphan.workspace_uuid, checked: true,
-    label: `${orphan.type} context ${orphan.workspace_uuid}`,
+    label: `${TYPE_LABELS[orphan.type] ?? orphan.type} space ${orphan.workspace_uuid}`,
     help: orphan.project_id ? `Linked to project ${orphan.project_id}` : null,
   }));
   const remove = h("button", { type: "button", class: "destructive", "aria-describedby": "orphans-help", onclick: async () => {
     const uuids = [...section.querySelectorAll('input[name="orphan"]:checked')].map(input => input.value);
     if (!uuids.length) { setStatus("Select at least one entry to remove."); return; }
-    const ok = await confirmDialog({ title: "Remove old context settings?",
-      message: `This removes AxioSozo settings for ${uuids.length} deleted workspace${uuids.length === 1 ? "" : "s"}. Zen is not changed.`,
+    const ok = await confirmDialog({ title: "Remove old space settings?",
+      message: `This removes AxioSozo settings for ${uuids.length} deleted space${uuids.length === 1 ? "" : "s"}. Zen is not changed.`,
       accept: "Remove", destructive: true });
-    if (ok) await act("removeOrphans", { uuids }, "Old context settings removed.").then(loadOrphans);
+    if (ok) await act("removeOrphans", { uuids }, "Old space settings removed.").then(loadOrphans);
   } }, "Remove selected…");
-  $("orphans-body").replaceChildren(h("fieldset", {}, h("legend", {}, "Deleted workspaces"), boxes),
-    h("div", { class: "toolbar" }, remove));
+  $("orphans-body").replaceChildren(h("div", { class: "panel sheet-body" },
+    h("fieldset", {}, h("legend", {}, "Deleted spaces"), boxes), h("div", { class: "button-row" }, remove)));
 }
 
 // ---------------------------------------------------------------- projects
@@ -267,26 +437,30 @@ async function loadProjects() {
   }
 }
 
-async function refreshServiceStatus(project) {
+async function refreshServiceStatus(project, { quiet = false } = {}) {
   try {
     state.serviceStatus.set(project.id, await call("serviceStatus", { projectId: project.id }));
   } catch (error) {
-    setStatus(errorText(error), "error");
+    if (!quiet) setStatus(errorText(error), "error");
   }
   await keepFocus(renderProjects);
+  if (quiet) return;
   const down = (state.serviceStatus.get(project.id) ?? []).filter(service => service.status === "down").length;
-  setStatus(down ? `${down} service${down === 1 ? " is" : "s are"} down in ${projectName(project)}.` : `Service status updated for ${projectName(project)}.`);
+  setStatus(down ? `${down} service${down === 1 ? " is" : "s are"} not running in ${projectName(project)}.` : `Services checked for ${projectName(project)}.`);
 }
 
-function urlButton(label, url, contextUuid, description) {
-  return h("button", { type: "button", class: "link-button", "aria-label": description ?? `Open ${label}`,
-    onclick: () => act("openUrl", { url, contextUuid: contextUuid ?? null }) }, label);
+function urlChip(label, url, contextUuid, description, glyph = "globe") {
+  return h("button", { type: "button", class: "chip", "aria-label": description ?? `Open ${label}`, title: url,
+    onclick: () => act("openUrl", { url, contextUuid: contextUuid ?? null }) },
+  icon(glyph, 14), h("span", {}, label), h("span", { class: "chip-detail" }, hostOf(url)));
 }
 
 function renderProjects() {
   const list = $("project-list");
   if (!state.projects.length) {
-    list.replaceChildren(h("li", { class: "empty" }, "No projects yet. Add a project folder to see its environments, services and web surfaces here."));
+    list.replaceChildren(h("li", { class: "empty" },
+      h("p", {}, "No projects yet."),
+      h("p", { class: "help" }, "Add a project folder to see its environments, services and web surfaces here and at the top of its space.")));
     return;
   }
   list.replaceChildren(...state.projects.map(project => {
@@ -294,52 +468,68 @@ function renderProjects() {
     const key = suffix => `project:${project.id}:${suffix}`;
     const headingId = newId("project");
     const statuses = new Map((state.serviceStatus.get(project.id) ?? []).map(service => [service.name, service]));
-    const manifestState = { none: "Not in repository", written: "Project file written", external: "From repository file" }[project.manifest_state] ?? project.manifest_state;
-    return h("li", { id: `project-${project.id}`, "aria-labelledby": headingId, tabindex: "-1" },
-      h("div", { class: "item-head" },
-        h("h3", { id: headingId, class: "item-title" }, projectName(project)),
-        h("span", { class: "tag" }, manifest.kind),
-        h("span", { class: "tag" }, manifestState),
-        h("div", { class: "item-actions" },
-          h("button", { type: "button", "data-focus-key": key("edit"), "aria-label": `Edit ${projectName(project)}`,
-            onclick: () => openProjectReview({ mode: "edit", project }) }, "Edit…"),
-          h("button", { type: "button", "data-focus-key": key("write"), "aria-label": `Write project file for ${projectName(project)}`,
-            onclick: () => writeManifestFlow(project) }, "Write .axiosozo/project.json…"),
-          h("button", { type: "button", class: "destructive", "data-focus-key": key("remove"), "aria-label": `Remove ${projectName(project)}`,
-            onclick: () => removeProjectFlow(project) }, "Remove…"))),
-      h("p", { class: "path" }, project.root),
-      h("p", { class: "item-meta" }, project.context_uuid
-        ? `Context: ${contextName(project.context_uuid) ?? "deleted workspace"}` : "Not linked to a context"),
-      manifest.environments.length ? [h("h4", {}, "Environments"), h("ul", { class: "file-list" },
-        manifest.environments.map(env => h("li", {}, `${env.name}: `,
-          urlButton(env.base_url, env.base_url, project.context_uuid, `Open ${env.name} environment ${env.base_url}`))))] : null,
-      manifest.services.length ? [h("h4", {}, "Services"), h("ul", { class: "file-list" },
-        manifest.services.map(service => {
+    const down = [...statuses.values()].filter(service => service.status === "down").length;
+    const inRepo = project.manifest_state === "written" || project.manifest_state === "external";
+    const spaceSelect = h("select", { "aria-label": `Space of ${projectName(project)}`, "data-focus-key": key("space"),
+      onchange: event => act("updateProject", { id: project.id, patch: { context_uuid: event.target.value || null } },
+        event.target.value ? `${projectName(project)} now lives in ${contextName(event.target.value)}.` : `${projectName(project)} is no longer linked to a space.`)
+        .then(() => Promise.all([loadProjects(), loadContexts()])) },
+    option("", "Not linked", project.context_uuid ?? ""),
+    state.contexts.map(context => option(context.uuid, context.name, project.context_uuid)));
+    const facts = [
+      ["Space", [spaceSelect, project.context_uuid && contextName(project.context_uuid)
+        ? iconButton("open", `Switch to ${contextName(project.context_uuid)}`, () => act("openContext", { uuid: project.context_uuid }), { "data-focus-key": key("open-space") })
+        : h("span", { class: "help" }, project.context_uuid ? "That space was deleted." : "Link it to show the project in that space's sidebar.")]],
+      manifest.environments.length ? ["Environments", manifest.environments.map(env =>
+        urlChip(env.name, env.base_url, project.context_uuid, `Open ${env.name} environment ${env.base_url}`, env.name === "local" ? "laptop" : "globe"))] : null,
+      manifest.services.length ? ["Services", [
+        ...manifest.services.map(service => {
           const status = statuses.get(service.name)?.status ?? "unknown";
-          return h("li", {}, h("span", { class: "service-status", "data-status": status },
-            `${service.name} (port ${service.port}): ${M.serviceStatusText(service, status)}`));
-        })),
-      h("p", { class: "help" }, M.SERVICES_HELP),
-      h("button", { type: "button", "data-focus-key": key("status"), onclick: () => refreshServiceStatus(project) }, "Check services")] : null,
-      manifest.surfaces.length ? [h("h4", {}, "Surfaces"), h("ul", { class: "file-list" },
-        manifest.surfaces.map(surface => h("li", {},
-          urlButton(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind})`),
-          h("span", { class: "item-meta" }, ` ${surface.kind.replaceAll("_", " ")}`))))] : null);
+          return h("span", { class: "tag", title: M.SERVICES_HELP },
+            h("span", { class: "dot", "data-status": status, "aria-hidden": "true" }), " ",
+            `${service.name} :${service.port} · ${M.serviceStatusText(service, status)}`);
+        }),
+        iconButton("refresh", `Check services of ${projectName(project)}`, () => refreshServiceStatus(project), { "data-focus-key": key("status") })]] : null,
+      manifest.surfaces.length ? ["Links", manifest.surfaces.map(surface =>
+        urlChip(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
+    ].filter(Boolean);
+    return h("li", { class: "card", id: `project-${project.id}`, "aria-labelledby": headingId, tabindex: "-1" },
+      h("div", { class: "card-head" },
+        h("div", { class: "card-titles" },
+          h("h3", { id: headingId, class: "card-title" }, projectName(project),
+            h("span", { class: "tag" }, manifest.kind),
+            inRepo ? h("span", { class: "tag accent", title: "Stored in .axiosozo/project.json" }, "In repository") : null,
+            down ? h("span", { class: "tag bad" }, `${down} down`) : null),
+          h("span", { class: "card-sub path", title: project.root }, project.root)),
+        h("div", { class: "card-actions" },
+          overflowMenu(`More for ${projectName(project)}`, [
+            { label: "Edit project…", focusKey: key("edit"), run: () => openProjectReview({ mode: "edit", project }) },
+            { label: inRepo ? "Update .axiosozo/project.json…" : "Save as .axiosozo/project.json…", focusKey: key("write"), run: () => writeManifestFlow(project) },
+            { label: "Remove project…", destructive: true, focusKey: key("remove"), run: () => removeProjectFlow(project) },
+          ]))),
+      h("dl", { class: "facts" }, facts.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)])));
   }));
+  focusFromHash();
 }
 
 function focusProject(id) {
   const node = document.getElementById(`project-${id}`);
-  if (node) { node.scrollIntoView({ block: "start" }); node.focus(); }
+  if (!node) return false;
+  node.scrollIntoView({ block: "start", behavior: "smooth" });
+  node.focus({ preventScroll: true });
+  node.removeAttribute("data-highlight");
+  void node.offsetWidth;
+  node.setAttribute("data-highlight", "");
+  return true;
 }
 
 async function writeManifestFlow(project) {
   const ok = await confirmDialog({
-    title: "Write the project file?",
-    message: `This writes .axiosozo/project.json in ${project.root}, replacing any existing file there. It holds names, addresses, ports and surfaces only, never secrets. You can commit it so your team gets the same setup.`,
-    accept: "Write file",
+    title: "Save the project file?",
+    message: `This writes .axiosozo/project.json in ${project.root}, replacing any existing file there. It holds names, addresses, ports and links only, never secrets. Commit it and your team gets the same setup.`,
+    accept: "Save file",
   });
-  if (ok) await act("writeManifest", { projectId: project.id }, result => `Wrote ${result?.path ?? ".axiosozo/project.json"}.`);
+  if (ok) await act("writeManifest", { projectId: project.id }, result => `Saved ${result?.path ?? ".axiosozo/project.json"}.`).then(loadProjects);
 }
 
 async function removeProjectFlow(project) {
@@ -354,32 +544,26 @@ async function removeProjectFlow(project) {
 async function addProjectFlow() {
   const picked = await act("pickFolder");
   if (!picked.ok) return;
-  if (!picked.result) { setStatus("No folder chosen."); return; }
+  if (!picked.result) return;
   const root = picked.result;
-  setStatus(`Reading project files in ${root}…`);
   const detected = await act("detect", { root });
   if (!detected.ok) return;
   openProjectReview({ mode: "new", root, draft: detected.result });
-  setStatus("Detection finished. Review the draft before confirming.");
 }
 
-// Draft review / project edit form.
+// Draft review / project edit form, in the sheet.
 function openProjectReview({ mode, root, draft, project }) {
-  const container = $("project-review");
   const review = mode === "new" ? { ...M.draftToReview(draft), contextUuid: null } : M.projectToReview(project);
-  const returnFocus = document.activeElement;
-  const headingId = newId("review");
   const errorsList = h("ul", { class: "errors", role: "alert" });
   let writeManifest = false;
-
-  const close = () => { container.hidden = true; container.replaceChildren(); returnFocus?.focus?.(); };
+  let close = () => {};
 
   const provenance = row => row.source
     ? h("span", { class: "provenance" }, row.guess ? h("span", { class: "tag guess" }, "guess") : null,
-      ` from ${row.source}`) : null;
+      `from ${row.source}`) : null;
 
   const rowEditor = ({ title, rows, fields, empty, addLabel }) => {
-    const box = h("div", { class: "rows" });
+    const box = h("div", { class: "form-rows" });
     const render = focusIndex => {
       box.replaceChildren(...rows.map((row, index) => {
         const controls = fields.map(spec => {
@@ -390,20 +574,20 @@ function openProjectReview({ mode, root, draft, project }) {
               oninput: event => { row[spec.key] = event.target.value; } });
           return field({ label: `${spec.label} ${index + 1}`, control });
         });
-        const remove = h("button", { type: "button", "aria-label": `Remove ${title.toLowerCase()} ${index + 1}`,
-          onclick: () => { rows.splice(index, 1); render(Math.min(index, rows.length - 1)); } }, "Remove");
-        return h("div", { class: "row", role: "group", "aria-label": `${title} ${index + 1}` }, controls, remove, provenance(row));
+        const remove = iconButton("close", `Remove ${title.toLowerCase()} ${index + 1}`,
+          () => { rows.splice(index, 1); render(Math.min(index, rows.length - 1)); });
+        return h("div", { class: "form-row", role: "group", "aria-label": `${title} ${index + 1}` }, controls, remove, provenance(row));
       }));
-      if (!rows.length) box.append(h("p", { class: "deemphasized" }, empty));
+      if (!rows.length) box.append(h("p", { class: "help" }, empty));
       if (focusIndex !== undefined && focusIndex >= 0) box.children[focusIndex]?.querySelector("input, select, button")?.focus();
       else if (focusIndex !== undefined) addButton.focus();
     };
-    const addButton = h("button", { type: "button", onclick: () => {
+    const addButton = h("button", { type: "button", class: "ghost", onclick: () => {
       rows.push(Object.fromEntries([...fields.map(spec => [spec.key, spec.kind ? spec.kind[0] : ""]), ["source", ""], ["guess", false]]));
       render(rows.length - 1);
-    } }, addLabel);
+    } }, icon("plus", 14), addLabel);
     render();
-    return h("fieldset", {}, h("legend", {}, title), box, h("div", { class: "toolbar" }, addButton));
+    return h("fieldset", {}, h("legend", {}, title), box, h("div", {}, addButton));
   };
 
   const nameInput = h("input", { type: "text", value: review.name, maxlength: "80", required: true,
@@ -411,24 +595,24 @@ function openProjectReview({ mode, root, draft, project }) {
   const kindSelect = h("select", { onchange: event => { review.kind = event.target.value; } },
     M.PROJECT_KINDS.map(kind => option(kind, kind, review.kind)));
   const contextSelect = h("select", { onchange: event => { review.contextUuid = event.target.value || null; } },
-    option("", "No context", review.contextUuid ?? ""),
-    state.contexts.map(context => option(context.uuid, `${context.name} (${context.type})`, review.contextUuid)));
+    option("", "Not linked", review.contextUuid ?? ""),
+    state.contexts.map(context => option(context.uuid, context.name, review.contextUuid)));
 
   const detectionDetails = mode === "new" ? h("details", {},
     h("summary", {}, `What was read: ${review.filesRead.length} file${review.filesRead.length === 1 ? "" : "s"}, ${review.refused.length} refused`),
     review.frameworks.length ? h("p", {}, "Frameworks: " + review.frameworks.join(", ")) : null,
     h("h4", {}, "Files read"),
     review.filesRead.length ? h("ul", { class: "file-list" }, review.filesRead.map(path => h("li", { class: "path" }, path)))
-      : h("p", { class: "deemphasized" }, "None."),
+      : h("p", { class: "help" }, "None."),
     h("h4", {}, "Files refused"),
     review.refused.length ? h("ul", { class: "file-list" }, review.refused.map(item =>
       h("li", {}, h("span", { class: "path" }, item.path), ` — ${M.REFUSAL_TEXT[item.reason] ?? item.reason}`)))
-      : h("p", { class: "deemphasized" }, "None."),
+      : h("p", { class: "help" }, "None."),
     review.warnings.length ? [h("h4", {}, "Warnings"), h("ul", { class: "file-list" }, review.warnings.map(text => h("li", {}, text)))] : null,
     h("p", { class: "help" }, ".env files, key files and anything outside the folder are never read. Nothing is executed.")) : null;
 
-  const writeChoice = mode === "new" ? choice({ type: "checkbox", name: "write-manifest", label: "Also write .axiosozo/project.json into the folder",
-    help: "Asks for confirmation first. The file holds names, addresses, ports and surfaces only, never secrets.",
+  const writeChoice = mode === "new" ? choice({ type: "checkbox", name: "write-manifest", label: "Also save .axiosozo/project.json in the folder",
+    help: "Asks first. The file holds names, addresses, ports and links only, never secrets.",
     onchange: event => { writeManifest = event.target.checked; } }) : null;
 
   const submit = async () => {
@@ -438,39 +622,39 @@ function openProjectReview({ mode, root, draft, project }) {
     if (mode === "edit") {
       const saved = await act("updateProject", { id: project.id, patch: { manifest, context_uuid: review.contextUuid } },
         `${manifest.name} saved.`);
-      if (saved.ok) { close(); await loadProjects(); }
+      if (saved.ok) { close(); await Promise.all([loadProjects(), loadContexts()]); }
       return;
     }
     const confirmed = await act("confirmProject", { root, manifest, contextUuid: review.contextUuid }, `${manifest.name} added.`);
     if (!confirmed.ok) return;
     close();
-    await loadProjects();
+    await Promise.all([loadProjects(), loadContexts()]);
+    if (confirmed.result?.id) { location.hash = `project=${confirmed.result.id}`; focusFromHash(); }
     if (writeManifest && confirmed.result?.id) await writeManifestFlow(confirmed.result);
   };
 
-  container.replaceChildren(h("div", { class: "editor", role: "region", "aria-labelledby": headingId },
-    h("h3", { id: headingId, tabindex: "-1" }, mode === "new" ? "Review detected project" : `Edit ${projectName(project)}`),
-    mode === "new" ? [h("p", { class: "path" }, root),
-      h("p", { class: "notice" }, "Everything below is a draft from static detection. Values marked guess are framework defaults. Nothing is saved until you confirm.")] : null,
-    field({ label: "Name", control: nameInput }),
-    field({ label: "Kind", control: kindSelect, help: review.kindSource.source
-      ? `${review.kindSource.guess ? "Guessed" : "Detected"} from ${review.kindSource.source}` : null }),
-    rowEditor({ title: "Environment", rows: review.environments, empty: "No environments.", addLabel: "Add environment",
-      fields: [{ key: "name", label: "Name of environment", placeholder: "local" },
-        { key: "base_url", label: "Address of environment", type: "url" }] }),
-    rowEditor({ title: "Service", rows: review.services, empty: "No services.", addLabel: "Add service",
-      fields: [{ key: "name", label: "Name of service" }, { key: "url", label: "Address of service", type: "url" },
-        { key: "port", label: "Port of service", type: "number" }] }),
-    rowEditor({ title: "Surface", rows: review.surfaces, empty: "No web surfaces.", addLabel: "Add surface",
-      fields: [{ key: "name", label: "Name of surface" }, { key: "url", label: "Address of surface", type: "url" },
-        { key: "kind", label: "Kind of surface", kind: M.SURFACE_KINDS }] }),
-    field({ label: "Context", control: contextSelect, help: "The Zen workspace this project belongs to." }),
-    detectionDetails, writeChoice, errorsList,
-    h("div", { class: "button-row" },
-      h("button", { type: "button", onclick: close }, "Cancel"),
-      h("button", { type: "button", class: "primary", onclick: submit }, mode === "new" ? "Confirm project" : "Save changes"))));
-  container.hidden = false;
-  container.querySelector(`#${headingId}`).focus();
+  close = openSheet({
+    title: mode === "new" ? "Review project" : `Edit ${projectName(project)}`,
+    body: [
+      mode === "new" ? [h("p", { class: "path" }, root),
+        h("p", { class: "notice" }, "A draft from static detection. Values marked guess are framework defaults. Nothing is saved until you confirm.")] : null,
+      h("div", { class: "form-row" }, field({ label: "Name", control: nameInput }),
+        field({ label: "Kind", control: kindSelect, help: review.kindSource.source
+          ? `${review.kindSource.guess ? "Guessed" : "Detected"} from ${review.kindSource.source}` : null }),
+        field({ label: "Space", control: contextSelect })),
+      rowEditor({ title: "Environments", rows: review.environments, empty: "No environments.", addLabel: "Add environment",
+        fields: [{ key: "name", label: "Name of environment", placeholder: "local" },
+          { key: "base_url", label: "Address of environment", type: "url" }] }),
+      rowEditor({ title: "Services", rows: review.services, empty: "No services.", addLabel: "Add service",
+        fields: [{ key: "name", label: "Name of service" }, { key: "url", label: "Address of service", type: "url" },
+          { key: "port", label: "Port of service", type: "number" }] }),
+      rowEditor({ title: "Links", rows: review.surfaces, empty: "No web links.", addLabel: "Add link",
+        fields: [{ key: "name", label: "Name of link" }, { key: "url", label: "Address of link", type: "url" },
+          { key: "kind", label: "Kind of link", kind: M.SURFACE_KINDS }] }),
+      detectionDetails, writeChoice, errorsList],
+    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: submit }, mode === "new" ? "Add project" : "Save")],
+  });
 }
 
 // ---------------------------------------------------------------- site rules
@@ -486,30 +670,32 @@ async function loadRules() {
 
 function renderRules() {
   const list = $("rule-list");
+  renderGuide();
   if (!state.rules.length) {
-    list.replaceChildren(h("li", { class: "empty" }, "No site rules yet."));
+    list.replaceChildren(h("li", { class: "empty" },
+      h("p", {}, "No site rules yet."),
+      h("p", { class: "help" }, "For example: “x.com — I come here to post and answer mentions. Nudge me if I drift into the feed.”")));
     return;
   }
   list.replaceChildren(...state.rules.map(rule => {
     const key = suffix => `rule:${rule.id}:${suffix}`;
     const hosts = rule.match.hosts.join(", ");
     const headingId = newId("rule");
-    const enabled = h("input", { type: "checkbox", checked: rule.enabled, id: newId("enabled"), "data-focus-key": key("enabled"),
-      "aria-label": `Rule for ${hosts} enabled`,
+    const enabled = h("input", { type: "checkbox", class: "switch", checked: rule.enabled, "data-focus-key": key("enabled"),
+      "aria-label": `Rule for ${hosts} ${rule.enabled ? "on" : "off"}`, title: rule.enabled ? "On" : "Off",
       onchange: event => act("saveRule", { rule: { ...rule, enabled: event.target.checked, updated_at: Date.now() } },
-        `Rule for ${hosts} ${event.target.checked ? "enabled" : "disabled"}.`).then(loadRules) });
-    return h("li", { "aria-labelledby": headingId },
-      h("div", { class: "item-head" },
-        h("h3", { id: headingId, class: "item-title" }, hosts),
-        rule.enabled ? null : h("span", { class: "tag" }, "Off"),
-        h("div", { class: "item-actions" },
-          h("div", { class: "choice" }, enabled, h("label", { for: enabled.id }, "Enabled")),
-          h("button", { type: "button", "data-focus-key": key("edit"), "aria-label": `Edit rule for ${hosts}`,
-            onclick: () => openRuleEditor(rule) }, "Edit…"),
-          h("button", { type: "button", class: "destructive", "data-focus-key": key("delete"), "aria-label": `Delete rule for ${hosts}`,
-            onclick: () => deleteRuleFlow(rule) }, "Delete…"))),
-      h("p", { class: "item-meta" }, M.describeRule(rule)),
-      rule.instruction ? h("p", {}, h("q", {}, rule.instruction)) : null);
+        `Rule for ${hosts} ${event.target.checked ? "on" : "off"}.`).then(loadRules) });
+    return h("li", { class: "card", id: `rule-${rule.id}`, "aria-labelledby": headingId, tabindex: "-1" },
+      h("div", { class: "card-head" },
+        h("div", { class: "card-titles" },
+          h("h3", { id: headingId, class: "card-title" }, hosts),
+          h("span", { class: "card-sub" }, M.describeRule(rule))),
+        h("div", { class: "card-actions" }, enabled,
+          h("button", { type: "button", class: "ghost", "data-focus-key": key("edit"), "aria-label": `Edit rule for ${hosts}`,
+            onclick: () => openRuleEditor(rule) }, "Edit"),
+          overflowMenu(`More for rule ${hosts}`, [
+            { label: "Delete rule…", destructive: true, focusKey: key("delete"), run: () => deleteRuleFlow(rule) }]))),
+      rule.instruction ? h("p", { class: "card-quote" }, rule.instruction) : null);
   }));
 }
 
@@ -530,65 +716,59 @@ function openRuleEditorById(id) {
 }
 
 function openRuleEditor(rule) {
-  const container = $("rule-editor");
   const form = rule ? M.ruleToForm(rule) : M.emptyRuleForm();
-  const returnFocus = document.activeElement;
-  const headingId = newId("editor");
   const errorsList = h("ul", { class: "errors", role: "alert" });
-  const close = () => { container.hidden = true; container.replaceChildren(); returnFocus?.focus?.(); };
+  let close = () => {};
 
-  // Hosts
-  const hostsInput = h("textarea", { rows: "3", value: form.hostsText, spellcheck: "false",
+  const hostsInput = h("textarea", { rows: "2", value: form.hostsText, spellcheck: "false", placeholder: "x.com\n*.x.com",
     oninput: event => { form.hostsText = event.target.value; renderRaised(); } });
 
-  // Contexts
   const contextsDetail = h("div", {});
   const renderContextsDetail = () => {
     contextsDetail.hidden = form.contextsMode !== "selected";
     contextsDetail.replaceChildren(
-      h("div", { class: "inline-choices", role: "group", "aria-label": "Context types" },
+      h("div", { class: "inline-choices", role: "group", "aria-label": "Space types" },
         M.CONTEXT_TYPES.map(type => choice({ type: "checkbox", name: "context-type", value: type,
-          checked: form.contextTypes.includes(type), label: `All ${type} contexts`,
+          checked: form.contextTypes.includes(type), label: `All ${type} spaces`,
           onchange: event => { toggle(form.contextTypes, type, event.target.checked); } }))),
-      state.contexts.length ? h("div", { role: "group", "aria-label": "Specific contexts" },
+      state.contexts.length ? h("div", { class: "inline-choices", role: "group", "aria-label": "Specific spaces" },
         state.contexts.map(context => choice({ type: "checkbox", name: "context-workspace", value: context.uuid,
-          checked: form.contextWorkspaces.includes(context.uuid), label: `${context.name} (${context.type})`,
+          checked: form.contextWorkspaces.includes(context.uuid), label: context.name,
           onchange: event => { toggle(form.contextWorkspaces, context.uuid, event.target.checked); } }))) : null);
   };
   const contextsField = h("fieldset", {}, h("legend", {}, "Where it applies"),
-    choice({ type: "radio", name: "contexts-mode", value: "all", checked: form.contextsMode === "all", label: "In every context",
-      onchange: () => { form.contextsMode = "all"; renderContextsDetail(); } }),
-    choice({ type: "radio", name: "contexts-mode", value: "selected", checked: form.contextsMode === "selected", label: "Only in selected contexts",
-      onchange: () => { form.contextsMode = "selected"; renderContextsDetail(); } }),
+    h("div", { class: "inline-choices" },
+      choice({ type: "radio", name: "contexts-mode", value: "all", checked: form.contextsMode === "all", label: "In every space",
+        onchange: () => { form.contextsMode = "all"; renderContextsDetail(); } }),
+      choice({ type: "radio", name: "contexts-mode", value: "selected", checked: form.contextsMode === "selected", label: "Only in some spaces",
+        onchange: () => { form.contextsMode = "selected"; renderContextsDetail(); } })),
     contextsDetail);
   renderContextsDetail();
 
-  // Limits
-  const minutesInput = h("input", { type: "number", min: "1", max: "1440", step: "1", value: form.dailyMinutes,
+  const minutesInput = h("input", { type: "number", min: "1", max: "1440", step: "1", value: form.dailyMinutes, placeholder: "No limit",
     oninput: event => { form.dailyMinutes = event.target.value; } });
-  const windowsBox = h("div", { class: "rows" });
-  const addWindowButton = h("button", { type: "button", onclick: () => {
+  const windowsBox = h("div", { class: "form-rows" });
+  const addWindowButton = h("button", { type: "button", class: "ghost", onclick: () => {
     if (form.windows.length >= M.MAX_WINDOWS) { setStatus(`At most ${M.MAX_WINDOWS} time windows.`); return; }
     form.windows.push({ start: "09:00", end: "17:00", days: [] });
     renderWindows(form.windows.length - 1);
-  } }, "Add time window");
+  } }, icon("plus", 14), "Add allowed hours");
   const renderWindows = focusIndex => {
-    windowsBox.replaceChildren(...form.windows.map((window, index) => h("div", { class: "row", role: "group", "aria-label": `Time window ${index + 1}` },
+    windowsBox.replaceChildren(...form.windows.map((window, index) => h("div", { class: "form-row", role: "group", "aria-label": `Time window ${index + 1}` },
       field({ label: `From (window ${index + 1})`, control: h("input", { type: "time", value: window.start, oninput: event => { window.start = event.target.value; } }) }),
       field({ label: `Until (window ${index + 1})`, control: h("input", { type: "time", value: window.end, oninput: event => { window.end = event.target.value; } }) }),
+      iconButton("close", `Remove time window ${index + 1}`, () => {
+        form.windows.splice(index, 1); renderWindows(Math.min(index, form.windows.length - 1));
+      }),
       h("div", { class: "inline-choices", role: "group", "aria-label": `Days for window ${index + 1}; none selected means every day` },
         M.WEEKDAYS.map((label, day) => choice({ type: "checkbox", name: `window-${index}-days`, value: String(day),
-          checked: window.days.includes(day), label, onchange: event => toggle(window.days, day, event.target.checked) }))),
-      h("button", { type: "button", "aria-label": `Remove time window ${index + 1}`, onclick: () => {
-        form.windows.splice(index, 1); renderWindows(Math.min(index, form.windows.length - 1));
-      } }, "Remove"))));
-    if (!form.windows.length) windowsBox.append(h("p", { class: "deemphasized" }, "No time windows: the site is allowed at any hour."));
+          checked: window.days.includes(day), label, onchange: event => toggle(window.days, day, event.target.checked) }))))));
+    if (!form.windows.length) windowsBox.append(h("p", { class: "help" }, "Any hour is fine."));
     if (focusIndex !== undefined && focusIndex >= 0) windowsBox.children[focusIndex]?.querySelector("input")?.focus();
     else if (focusIndex !== undefined) addWindowButton.focus();
   };
   renderWindows();
 
-  // Observation
   const raisedBox = h("div", {});
   function renderRaised() {
     raisedBox.hidden = form.observation !== "outline";
@@ -600,11 +780,11 @@ function openRuleEditor(rule) {
           label: `Allow Outline on ${host} even if it is a sensitive site`,
           onchange: event => toggle(form.raisedHosts, host, event.target.checked) }))) : null);
   }
-  const observationField = h("fieldset", {}, h("legend", {}, "What may leave this machine"),
+  const observationField = h("fieldset", {}, h("legend", {}, "What may leave this Mac (for optional Jev judgement)"),
     M.OBSERVATIONS.map(level => choice({ type: "radio", name: "observation", value: level, checked: form.observation === level,
-      label: { none: "None", address: "Address", outline: "Outline" }[level], help: M.OBSERVATION_TEXT[level],
+      label: { none: "Nothing", address: "The address", outline: "An outline of the page" }[level], help: M.OBSERVATION_TEXT[level],
       onchange: () => { form.observation = level; renderRaised(); } })),
-    h("p", { class: "help" }, "Data only leaves this machine when Jev consent is on in the Jev settings, a Jev key is stored in the macOS Keychain, and this rule has a level above None and at least one effect. Every call shows the outgoing-data indicator in the address bar."),
+    h("p", { class: "help" }, "Data only leaves this Mac when Jev consent is on in Settings, a Jev key is stored in the macOS Keychain, and this rule has a level above Nothing and at least one effect. Every call shows the outgoing-data indicator in the address bar."),
     raisedBox);
   renderRaised();
 
@@ -614,17 +794,17 @@ function openRuleEditor(rule) {
     h("p", { class: "help" }, "No blocking of network traffic and no changes to page content."));
   const overrideField = h("fieldset", {}, h("legend", {}, "Continuing anyway"),
     M.OVERRIDES.map(value => choice({ type: "radio", name: "override", value, checked: form.override === value,
-      label: M.OVERRIDE_TEXT[value], onchange: () => { form.override = value; } })),
-    h("p", { class: "help" }, "You can always continue; a rule never traps you."));
+      label: M.OVERRIDE_TEXT[value], onchange: () => { form.override = value; } })));
 
-  const agentsField = h("fieldset", { disabled: true },
-    h("legend", {}, "Agents (M2, not active)"),
-    h("p", { class: "help" }, "Stored with the rule and ignored until agent support ships. Your limits never restrict agents."),
-    field({ label: "Agent access", control: h("select", {},
-      M.AGENT_ACCESS.map(value => option(value, value.replaceAll("_", " "), form.agents.access))) }),
-    field({ label: "Instruction for agents", control: h("textarea", { rows: "2", value: form.agents.instruction }) }));
+  const agentsField = h("details", {},
+    h("summary", {}, "Agents (not active yet)"),
+    h("fieldset", { disabled: true },
+      h("p", { class: "help" }, "Stored with the rule and ignored until agent support ships. Your limits never restrict agents."),
+      field({ label: "Agent access", control: h("select", {},
+        M.AGENT_ACCESS.map(value => option(value, value.replaceAll("_", " "), form.agents.access))) }),
+      field({ label: "Instruction for agents", control: h("textarea", { rows: "2", value: form.agents.instruction }) })));
 
-  const enabledChoice = choice({ type: "checkbox", name: "enabled", checked: form.enabled, label: "Rule is enabled",
+  const enabledSwitch = h("input", { type: "checkbox", class: "switch", checked: form.enabled, id: newId("enabled"),
     onchange: event => { form.enabled = event.target.checked; } });
 
   const save = async () => {
@@ -641,32 +821,54 @@ function openRuleEditor(rule) {
     if (saved.ok) { close(); await loadRules(); }
   };
 
-  container.replaceChildren(h("div", { class: "editor", role: "region", "aria-labelledby": headingId },
-    h("h3", { id: headingId, tabindex: "-1" }, rule ? `Edit rule for ${rule.match.hosts.join(", ")}` : "New site rule"),
-    enabledChoice,
-    field({ label: "Sites", control: hostsInput, help: "One per line, for example x.com and *.x.com. *.x.com matches subdomains only." }),
-    contextsField,
-    field({ label: "Your instruction", control: h("textarea", { rows: "3", maxlength: String(M.MAX_INSTRUCTION), value: form.instruction,
-      oninput: event => { form.instruction = event.target.value; } }),
-    help: "Plain language, for example “I come here to post and answer mentions. If I drift into the feed, nudge me.” Shown to you as written and only used as text for optional Jev judgement." }),
-    h("fieldset", {}, h("legend", {}, "Limits (checked on this machine)"),
-      field({ label: "Daily minutes", control: minutesInput, help: "Empty means no daily limit. Counts foreground time in this rule's contexts." }),
-      h("h4", {}, "Allowed hours"),
-      h("p", { class: "help" }, "Outside these windows the rule applies its effects. A window that ends before it starts runs past midnight."),
-      windowsBox, h("div", { class: "toolbar" }, addWindowButton)),
-    observationField, effectsField, overrideField, agentsField, errorsList,
-    h("div", { class: "button-row" },
-      rule ? h("button", { type: "button", class: "destructive", onclick: async () => { if (await deleteRuleFlow(rule)) close(); } }, "Delete rule…") : null,
-      h("button", { type: "button", onclick: close }, "Cancel"),
-      h("button", { type: "button", class: "primary", onclick: save }, "Save rule"))));
-  container.hidden = false;
-  container.querySelector(`#${headingId}`).focus();
+  close = openSheet({
+    title: rule ? `Rule for ${rule.match.hosts.join(", ")}` : "New site rule",
+    body: [
+      field({ label: "Sites", control: hostsInput, help: "One per line. *.x.com matches subdomains only." }),
+      field({ label: "What is this site for?", control: h("textarea", { rows: "3", maxlength: String(M.MAX_INSTRUCTION), value: form.instruction,
+        placeholder: "I come here to post and answer mentions. If I drift into the feed, nudge me.",
+        oninput: event => { form.instruction = event.target.value; } }),
+      help: "Your words. Shown back to you as written; only used as text for optional Jev judgement." }),
+      h("fieldset", {}, h("legend", {}, "Limits (checked on this Mac)"),
+        field({ label: "Minutes per day", control: minutesInput, help: "Empty means no daily limit. Counts time the site is in front, in the spaces this rule covers." }),
+        h("h4", {}, "Allowed hours"),
+        windowsBox, h("div", {}, addWindowButton)),
+      effectsField, overrideField, contextsField, observationField, agentsField, errorsList],
+    footer: [
+      h("div", { class: "setting" }, enabledSwitch, h("label", { for: enabledSwitch.id }, "Rule is on")),
+      h("span", { class: "spacer" }),
+      rule ? h("button", { type: "button", class: "ghost destructive", onclick: async () => { if (await deleteRuleFlow(rule)) close(); } }, "Delete…") : null,
+      h("button", { type: "button", onclick: () => close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: save }, "Save rule")],
+  });
 }
 
 function toggle(list, value, on) {
   const index = list.indexOf(value);
   if (on && index < 0) list.push(value);
   if (!on && index >= 0) list.splice(index, 1);
+}
+
+// ---------------------------------------------------------------- settings
+
+function renderEngineSettings() {
+  const box = $("engine-settings");
+  const on = state.flags.enginePreferences;
+  const rows = state.contexts.map(context => h("li", { class: "row" },
+    spaceIcon(context),
+    h("div", { class: "row-main" }, h("span", { class: "row-title" }, context.name)),
+    h("select", { "aria-label": `Engine for ${context.name}`, "data-focus-key": `engine:${context.uuid}`, disabled: !on,
+      onchange: event => act("setEnginePreference", { uuid: context.uuid, engine: event.target.value || null }, "Engine preference saved.") },
+    option("", "Default (Firefox)", context.engine_preference ?? ""),
+    option("firefox", "Firefox", context.engine_preference),
+    option("chromium", "Chromium", context.engine_preference))));
+  box.replaceChildren(
+    h("div", { class: "block-head" }, h("h3", {}, "Engines"),
+      h("p", { class: "block-help" }, on
+        ? "Pages in a space can open in Chromium by default. If Chromium is unavailable the tab stays in Firefox."
+        : "Every tab runs in Firefox. Rest the pointer on a tab to see its engine; on the tab you are on, click that engine icon to switch. A default engine per space stays off until the Chromium checks pass.")),
+    // While the preference is off the per-space list would be inert; leave it out.
+    on && rows.length ? h("ul", { class: "rows" }, rows) : null);
 }
 
 async function loadJev() {
@@ -680,12 +882,11 @@ async function loadJev() {
 
 function renderJev() {
   const box = $("jev-settings");
-  const headingId = "jev-heading";
   const form = M.jevToForm(state.jev);
   const errorsList = h("ul", { class: "errors", role: "alert" });
   const consent = choice({ type: "checkbox", name: "jev-consent", checked: form.consent,
     label: "Allow Jev to judge pages for rules that permit it",
-    help: "Only rules with an observation level above None can send anything.",
+    help: "Only rules with an observation level above Nothing can send anything.",
     onchange: event => { form.consent = event.target.checked; } });
   const interval = h("input", { type: "number", min: "1", max: "30", step: "1", value: form.intervalMinutes,
     oninput: event => { form.intervalMinutes = event.target.value; } });
@@ -694,21 +895,24 @@ function renderJev() {
   const keyPresent = state.jev?.key_present ?? state.jev?.has_key;
   const keyNote = M.jevKeyNote({ keyEntryEnabled: state.flags.jevKeyEntry === true,
     keyPresent: typeof keyPresent === "boolean" ? keyPresent : undefined });
-  box.replaceChildren(h("section", { "aria-labelledby": headingId, class: "editor" },
-    h("h3", { id: headingId }, "Jev judgement (optional)"),
-    h("p", { class: "notice", id: "jev-statement" }, M.JEV_STATEMENT),
-    h("p", { class: "help" }, keyNote),
-    h("p", { class: "help", id: "jev-sent" }, M.JEV_SENT_TEXT),
-    consent,
-    field({ label: "Check every (minutes)", control: interval, help: "1 to 30. Only while the tab is in front; never for background tabs or private windows." }),
-    field({ label: "Calls per hour at most", control: budget, help: "0 to 30." }),
-    errorsList,
-    h("div", { class: "button-row" }, h("button", { type: "button", "aria-describedby": "jev-statement", onclick: async () => {
-      const { patch, errors } = M.formToJevPatch(form);
-      errorsList.replaceChildren(...errors.map(error => h("li", {}, error.message)));
-      if (!patch) return;
-      await act("setJevSettings", { patch }, "Jev settings saved.").then(loadJev);
-    } }, "Save Jev settings"))));
+  box.replaceChildren(
+    h("div", { class: "block-head" }, h("h3", { id: "jev-heading" }, "Jev judgement"),
+      h("p", { class: "block-help" }, "Optional. Site rules work fully without it.")),
+    h("div", { class: "panel sheet-body", "aria-labelledby": "jev-heading" },
+      h("p", { class: "notice", id: "jev-statement" }, M.JEV_STATEMENT),
+      h("p", { class: "help" }, keyNote),
+      consent,
+      h("div", { class: "form-row" },
+        field({ label: "Check every (minutes)", control: interval, help: "1 to 30. Only for the tab in front; never background tabs or private windows." }),
+        field({ label: "Calls per hour at most", control: budget, help: "0 to 30." })),
+      h("details", {}, h("summary", {}, "What is sent on each call"), h("p", { class: "help", id: "jev-sent" }, M.JEV_SENT_TEXT)),
+      errorsList,
+      h("div", { class: "button-row" }, h("button", { type: "button", class: "primary", "aria-describedby": "jev-statement", onclick: async () => {
+        const { patch, errors } = M.formToJevPatch(form);
+        errorsList.replaceChildren(...errors.map(error => h("li", {}, error.message)));
+        if (!patch) return;
+        await act("setJevSettings", { patch }, "Jev settings saved.").then(loadJev);
+      } }, "Save"))));
 }
 
 // ---------------------------------------------------------------- screen time
@@ -719,8 +923,18 @@ async function loadLedger() {
     state.ledgerSummary = await call("usageSummary", { days });
     renderLedger();
   } catch (error) {
-    $("ledger-body").replaceChildren(h("p", { class: "deemphasized" }, "Could not load screen time. " + errorText(error)));
+    $("ledger-body").replaceChildren(h("p", { class: "empty" }, "Could not load screen time. " + errorText(error)));
   }
+}
+
+function barRow(label, sub, ms, max, text) {
+  const width = max > 0 ? Math.max(2, Math.round((ms / max) * 100)) : 0;
+  const fill = h("span", {});
+  fill.style.width = `${width}%`;
+  return h("li", { class: "bar-row" },
+    h("span", { class: "bar-label" }, h("span", {}, label), sub ? h("span", {}, sub) : null),
+    h("span", { class: "bar", "aria-hidden": "true" }, fill),
+    h("span", { class: "bar-value" }, text));
 }
 
 function renderLedger() {
@@ -728,30 +942,26 @@ function renderLedger() {
   const group = $("ledger-group").value;
   const period = $("ledger-days").selectedOptions[0]?.textContent ?? "";
   if (!state.ledgerSummary.length) {
-    body.replaceChildren(h("p", { class: "deemphasized" }, "No screen time recorded for this period."));
+    body.replaceChildren(h("p", { class: "empty" }, "No screen time recorded for this period."));
     return;
   }
   if (group === "day") {
-    body.replaceChildren(h("table", {},
-      h("caption", {}, `Foreground time per day, ${period.toLowerCase()}`),
-      h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Day"), h("th", { scope: "col", class: "number" }, "Total"),
-        h("th", { scope: "col" }, "Most time on"))),
-      h("tbody", {}, M.ledgerDays(state.ledgerSummary).map(day => h("tr", {},
-        h("th", { scope: "row" }, day.day), h("td", { class: "number" }, day.totalText),
-        h("td", {}, day.hosts.slice(0, 3).map(host => `${host.host} ${host.text}`).join(", ")))))));
+    const days = M.ledgerDays(state.ledgerSummary);
+    const max = Math.max(...days.map(day => day.totalMs));
+    const total = days.reduce((sum, day) => sum + day.totalMs, 0);
+    body.replaceChildren(
+      h("div", { class: "time-total" }, h("strong", {}, M.formatDuration(total)), h("span", {}, period.toLowerCase())),
+      h("ul", { class: "bars", "aria-label": `Time per day, ${period.toLowerCase()}` }, days.map(day =>
+        barRow(day.day, day.hosts.slice(0, 3).map(host => host.host).join(", "), day.totalMs, max, day.totalText))));
     return;
   }
-  body.replaceChildren(h("table", {},
-    h("caption", {}, `Foreground time per site and context, ${period.toLowerCase()}`),
-    h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Site"), h("th", { scope: "col" }, "Context"),
-      h("th", { scope: "col", class: "number" }, "Total"), h("th", { scope: "col" }, "Per day"))),
-    h("tbody", {}, M.ledgerRows(state.ledgerSummary, state.contexts).map(row => h("tr", {},
-      h("th", { scope: "row" }, row.host), h("td", {}, row.contextName),
-      h("td", { class: "number" }, row.totalText),
-      h("td", {}, row.days.length > 1 ? h("details", {},
-        h("summary", { "aria-label": `${row.days.length} days for ${row.host} in ${row.contextName}` }, `${row.days.length} days`),
-        h("ul", { class: "file-list" }, row.days.map(day => h("li", {}, `${day.day}: ${day.text}`))))
-        : row.days.map(day => `${day.day}: ${day.text}`).join("")))))));
+  const rows = M.ledgerRows(state.ledgerSummary, state.contexts);
+  const max = Math.max(...rows.map(row => row.totalMs));
+  const total = rows.reduce((sum, row) => sum + row.totalMs, 0);
+  body.replaceChildren(
+    h("div", { class: "time-total" }, h("strong", {}, M.formatDuration(total)), h("span", {}, period.toLowerCase())),
+    h("ul", { class: "bars", "aria-label": `Time per site and space, ${period.toLowerCase()}` }, rows.map(row =>
+      barRow(row.host, row.contextName, row.totalMs, max, row.totalText))));
 }
 
 async function exportLedgerFlow() {
@@ -770,7 +980,7 @@ async function exportLedgerFlow() {
 
 async function clearLedgerFlow() {
   const ok = await confirmDialog({ title: "Delete all screen time?",
-    message: "All recorded foreground time is deleted from this machine. Site rules keep working and start counting again from now.",
+    message: "All recorded time is deleted from this Mac. Site rules keep working and start counting again from now.",
     accept: "Delete screen time", destructive: true });
   if (ok) await act("clearLedger", {}, "Screen time deleted.").then(loadLedger);
 }
@@ -792,18 +1002,40 @@ function onServicesEvent(event) {
   pending.set(name, setTimeout(() => { pending.delete(name); loaders[name]().catch(console.error); }, 100));
 }
 
+// #project=<id> highlights a project; #rule=<id> opens its editor (the
+// address-bar rule panel's "Edit in Overview" and the sidebar project block).
+let handledHash = null;
+function focusFromHash() {
+  const hash = location.hash;
+  if (hash === handledHash) return;
+  const project = /^#project=(p_[a-z0-9]{4,32})$/.exec(hash);
+  if (project && focusProject(project[1])) { handledHash = hash; return; }
+  const rule = /^#rule=(r_[a-z0-9]{4,32})$/.exec(hash);
+  if (rule && state.rules.length) { handledHash = hash; openRuleEditorById(rule[1]); }
+}
+
+function onHashChange() {
+  handledHash = null;
+  showView(viewFromHash());
+  focusFromHash();
+}
+
 async function init() {
   setupDialog();
+  setupSheet();
+  showView(viewFromHash());
   $("add-project").addEventListener("click", () => addProjectFlow());
   $("add-rule").addEventListener("click", () => openRuleEditor(null));
   $("ledger-days").addEventListener("change", loadLedger);
   $("ledger-group").addEventListener("change", renderLedger);
   $("ledger-export").addEventListener("click", exportLedgerFlow);
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
+  window.addEventListener("hashchange", onHashChange);
   if (!api) {
     state.connected = false;
     renderAttention();
-    for (const button of document.querySelectorAll("main button, main select")) button.disabled = true;
+    renderContexts();
+    for (const control of document.querySelectorAll("main button, main select")) control.disabled = true;
     return;
   }
   try { state.flags = await call("getOverviewFlags"); } catch (error) { if (error?.code === "SENDER_REJECTED") state.connected = false; }
@@ -811,16 +1043,9 @@ async function init() {
   await loadContexts();
   await Promise.allSettled([loadProjects(), loadRules(), loadJev(), loadLedger(), loadOrphans(), loadAttention()]);
   renderContexts();
-  // The address-bar rule panel's "Edit in Overview" opens about:axiosozo#rule=<id>.
-  openFromHash();
-  window.addEventListener("hashchange", openFromHash);
+  focusFromHash();
+  // Service dots are checked when the page opens (declared loopback ports only).
+  for (const project of state.projects) if (project.manifest.services.length) refreshServiceStatus(project, { quiet: true });
 }
 
-function openFromHash() {
-  const match = /^#rule=(r_[a-z0-9]{4,32})$/.exec(location.hash);
-  if (!match) return;
-  openRuleEditorById(match[1]);
-  $("rule-editor").scrollIntoView({ block: "start" });
-}
-
-init().catch(error => { console.error(error); setStatus("The overview could not start.", "error"); });
+init().catch(error => { console.error(error); setStatus("AxioSozo could not start this page.", "error"); });

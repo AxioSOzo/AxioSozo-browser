@@ -353,7 +353,7 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
       if (lastJev && jevActive) {
         fact("Last Jev check", `${lastJev.dataSent ? "sent" : "not sent"} at ${new Date(lastJev.at).toLocaleTimeString()}`);
       }
-      const edit = element(document, "button", { className: "axiosozo-rule-edit", text: "Edit in Overview",
+      const edit = element(document, "button", { className: "axiosozo-rule-edit", text: "Edit rule…",
         attrs: { "data-rule-id": rule.id } }, section);
       edit.addEventListener("click", () => {
         panel.hidePopup?.();

@@ -262,7 +262,7 @@ export function describeRule(rule) {
   if (rule.contexts !== "all") {
     const scope = [...(rule.contexts?.types ?? [])];
     const count = rule.contexts?.workspaces?.length ?? 0;
-    if (count) scope.push(`${count} context${count === 1 ? "" : "s"}`);
+    if (count) scope.push(`${count} space${count === 1 ? "" : "s"}`);
     parts.push("in " + scope.join(", "));
   }
   return parts.join(" · ");
@@ -445,8 +445,8 @@ export function ledgerRows(summary, contexts = []) {
     return {
       host: entry.host,
       contextUuid: entry.context_uuid ?? null,
-      contextName: entry.context_uuid == null ? "No context"
-        : names.get(entry.context_uuid) ?? "Deleted context",
+      contextName: entry.context_uuid == null ? "No space"
+        : names.get(entry.context_uuid) ?? "Deleted space",
       totalMs: total,
       totalText: formatDuration(total),
       days: days.map(day => ({ ...day, text: formatDuration(day.ms) })),

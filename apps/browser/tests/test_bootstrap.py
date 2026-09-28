@@ -96,14 +96,18 @@ class BootstrapTests(unittest.TestCase):
             source.mkdir(parents=True)
             (source / 'zen-general.ftl').write_text('zen-general = Fixture\n')
             (source / 'zen-library.ftl').write_text('zen-library = Fixture\n')
+            # about:preferences requires this one; missing, the whole page loses its text.
+            (source / 'preferences').mkdir()
+            (source / 'preferences/zen-preferences.ftl').write_text('zen-preferences = Fixture\n')
             with self.assertRaisesRegex(RuntimeError, 'ZEN_LOCALE_INPUTS_CHANGED'):
-                zen.zen_import.install_zen_locales(stage, expected_count=3)
-            self.assertEqual(zen.zen_import.install_zen_locales(stage, expected_count=2), 2)
-            self.assertEqual(zen.zen_import.install_zen_locales(stage, expected_count=2), 0)
+                zen.zen_import.install_zen_locales(stage, expected_count=4)
+            self.assertEqual(zen.zen_import.install_zen_locales(stage, expected_count=3), 3)
+            self.assertTrue((stage / 'engine/browser/locales/en-US/browser/preferences/zen-preferences.ftl').is_file())
+            self.assertEqual(zen.zen_import.install_zen_locales(stage, expected_count=3), 0)
             target = stage / 'engine/browser/locales/en-US/browser/zen-library.ftl'
             target.write_text('user edit must survive\n')
             with self.assertRaisesRegex(RuntimeError, 'ZEN_LOCALE_TARGET_MODIFIED'):
-                zen.zen_import.install_zen_locales(stage, expected_count=2)
+                zen.zen_import.install_zen_locales(stage, expected_count=3)
             self.assertEqual(target.read_text(), 'user edit must survive\n')
 
     def test_zen_child_resources_stay_inside_bundle_without_sandbox_exception(self):

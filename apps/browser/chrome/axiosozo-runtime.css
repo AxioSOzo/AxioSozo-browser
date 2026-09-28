@@ -80,7 +80,7 @@
 }
 
 :is(#axiosozo-env-pill, #axiosozo-rule-indicator):focus-visible,
-:is(.axiosozo-project-toggle, .axiosozo-waiting button, .axiosozo-pause button, .axiosozo-rule-edit):focus-visible {
+:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-settings, .axiosozo-waiting button, .axiosozo-pause button, .axiosozo-rule-edit):focus-visible {
   outline: var(--focus-outline, 2px solid AccentColor);
   outline-offset: var(--focus-outline-offset, 1px);
 }
@@ -125,47 +125,107 @@
 }
 :is(.axiosozo-waiting, .axiosozo-pause) button:disabled { opacity: 0.6; }
 
-/* ---- Project block (top of the active project workspace's tab list) -------------- */
+/* ---- Project block (top of the active project space's tab list) -----------------
+ * Reads like part of Zen's tab list: same row height, radius and hover wash.
+ * Collapsed it is one quiet row; expanded, links sit below like tabs. */
 .axiosozo-project-block {
-  margin: 2px var(--zen-tab-margin, 6px) 6px;
-  padding: 2px 0;
-  border-radius: var(--border-radius-medium, 8px);
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  margin: 0 var(--zen-tab-margin, 6px) 4px;
   font-size: 12px;
 }
 :root[zen-compact-mode="true"] .axiosozo-project-block { display: none; }
-.axiosozo-project-toggle {
+.axiosozo-project-toggle,
+.axiosozo-project-link > button,
+.axiosozo-project-settings {
   appearance: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 4px 8px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 0;
+  border-radius: var(--border-radius-medium, 8px);
   background: none;
   color: inherit;
   font: inherit;
-  font-weight: 600;
   text-align: start;
+  transition: background-color 100ms ease;
 }
-.axiosozo-project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-settings):hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-settings):hover:active {
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+.axiosozo-project-toggle { font-weight: 600; opacity: 0.9; }
+.axiosozo-project-glyph,
+.axiosozo-project-chevron,
+.axiosozo-project-link-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.7;
+}
+.axiosozo-project-glyph { background: url("chrome://global/skin/icons/folder.svg") center / 14px no-repeat; }
+.axiosozo-project-chevron {
+  width: 12px;
+  background: url("chrome://global/skin/icons/arrow-down-12.svg") center / 10px no-repeat;
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition: opacity 100ms ease, transform 150ms ease;
+}
+.axiosozo-project-toggle:is(:hover, :focus-visible) .axiosozo-project-chevron { opacity: 1; }
+.axiosozo-project-toggle[aria-expanded="true"] .axiosozo-project-chevron { opacity: 0.8; transform: none; }
+.axiosozo-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .axiosozo-project-summary { display: inline-flex; gap: 3px; }
-.axiosozo-project-toggle[aria-expanded="true"] .axiosozo-project-summary { display: none; }
-.axiosozo-project-services { margin: 0; padding: 0 8px 4px; list-style: none; }
-.axiosozo-project-services[hidden] { display: none; }
-.axiosozo-project-service { display: flex; align-items: center; gap: 6px; padding-block: 2px; }
-.axiosozo-service-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-service-status { opacity: 0.7; white-space: nowrap; }
+.axiosozo-project-body[hidden],
+.axiosozo-project-links[hidden],
+.axiosozo-project-services[hidden],
+.axiosozo-project-settings[hidden] { display: none; }
+.axiosozo-project-body { padding-block: 2px 4px; }
+.axiosozo-project-links,
+.axiosozo-project-services { margin: 0; padding: 0; list-style: none; }
+.axiosozo-project-link > button { font-weight: 400; }
+.axiosozo-project-link > button[aria-current="true"] { background: color-mix(in srgb, currentColor 9%, transparent); }
+.axiosozo-project-link-icon { fill-opacity: 0.75; border-radius: 3px; object-fit: contain; }
+.axiosozo-project-link > button[data-kind="environment"] .axiosozo-project-link-icon {
+  background: url("chrome://global/skin/icons/local-host.svg") center / 14px no-repeat;
+}
+.axiosozo-project-link > button[data-kind="environment"]:not([aria-current="true"]) .axiosozo-project-link-icon { fill-opacity: 0.55; }
+.axiosozo-project-link-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-project-link-detail {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.axiosozo-project-link > button:is(:hover, :focus-visible) .axiosozo-project-link-detail { opacity: 0.6; }
+.axiosozo-project-service {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 8px 0 12px;
+}
+.axiosozo-service-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
+.axiosozo-service-status { font-size: 11px; opacity: 0.6; white-space: nowrap; }
+.axiosozo-project-settings { min-height: 26px; font-size: 11px; opacity: 0.65; }
+.axiosozo-project-settings:hover { opacity: 1; }
 .axiosozo-status-dot {
   display: inline-block;
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: color-mix(in srgb, currentColor 35%, transparent);
 }
-.axiosozo-status-dot[data-status="up"] { background: #1e8e3e; }
-.axiosozo-status-dot[data-status="down"] { background: #d93025; }
+.axiosozo-status-dot[data-status="up"] { background: rgb(52 199 89); }
+.axiosozo-status-dot[data-status="down"] { background: rgb(255 69 58); box-shadow: 0 0 0 2px color-mix(in srgb, rgb(255 69 58) 25%, transparent); }
 
 /* ---- Chrome-owned overlays in the tab's browser stack --------------------------------- */
 .axiosozo-waiting,
@@ -216,3 +276,99 @@
 @media (prefers-reduced-motion: reduce) {
   .axiosozo-waiting-spinner { animation: none; }
 }
+
+/* ---- Engine glyph on tabs (EngineTabs.sys.mjs) --------------------------------------
+ * Resting on a tab turns its favicon into the engine glyph: the favicon element
+ * itself shows the glyph, so it sits exactly where Zen draws the icon in every
+ * sidebar layout. Chromium tabs keep a small glyph at the favicon corner. Zen's
+ * own icon states (media, busy, pinned reset, essentials) always win. The
+ * #tabbrowser-tabs id matches the specificity of Zen's own favicon rules. */
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine-peek]:not([zen-essential], [busy], [pending], [soundplaying], [muted], [activemedia-blocked], [zen-pinned-changed="true"]) .tab-icon-image,
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine-state]:not([zen-essential]) .tab-icon-image {
+  content: url("chrome://browser/content/axiosozo/icons/engine-gecko.svg") !important;
+  background: none !important;
+  border-radius: 5px;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor !important;
+  fill-opacity: 0.9 !important;
+  opacity: 1 !important;
+  animation: axiosozo-engine-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine="chromium"][axiosozo-engine-peek]:not([zen-essential]) .tab-icon-image,
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine="chromium"][axiosozo-engine-state]:not([zen-essential]) .tab-icon-image {
+  content: url("chrome://browser/content/axiosozo/icons/engine-chromium.svg") !important;
+}
+@keyframes axiosozo-engine-in {
+  from { opacity: 0.2; transform: scale(0.55) rotate(-12deg); }
+}
+
+/* On the selected tab the glyph is the switch: a quiet plate on hover. */
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[selected][axiosozo-engine-peek]:not([zen-essential]) .tab-icon-image:hover {
+  background-color: color-mix(in srgb, currentColor 16%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+}
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[selected][axiosozo-engine-peek]:not([zen-essential]) .tab-icon-image:hover:active {
+  transform: scale(0.86);
+}
+
+/* The resting Chromium marker, at the favicon's bottom corner. */
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine="chromium"]:not([zen-essential], [axiosozo-engine-peek], [axiosozo-engine-state]) .tab-icon-stack::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-block-end: -3px;
+  inset-inline-start: calc(var(--toolbarbutton-padding-inner, 10px) / 3 + 9px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--zen-colors-tertiary, Canvas) url("chrome://browser/content/axiosozo/icons/engine-chromium.svg") center / 8px no-repeat;
+  box-shadow: 0 0 0 1px var(--zen-colors-border, color-mix(in srgb, currentColor 18%, transparent));
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 1;
+  pointer-events: none;
+}
+
+/* Switching: the glyph turns while the other engine takes over. */
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine-state="switching"]:not([zen-essential]) .tab-icon-image {
+  animation: axiosozo-engine-turn 900ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+/* Failure: the Firefox tab stays; the glyph shakes once in the warning colour. */
+:root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab[axiosozo-engine-state="failed"]:not([zen-essential]) .tab-icon-image {
+  fill: var(--icon-color-warning, rgb(255 170 0)) !important;
+  fill-opacity: 1 !important;
+  animation: axiosozo-engine-shake 420ms ease 1;
+}
+@keyframes axiosozo-engine-turn {
+  0% { transform: rotateY(0deg); }
+  50% { transform: rotateY(90deg) scale(0.8); opacity: 0.4; }
+  100% { transform: rotateY(0deg); }
+}
+@keyframes axiosozo-engine-shake {
+  0%, 100% { translate: 0; }
+  25% { translate: -2px; }
+  50% { translate: 2px; }
+  75% { translate: -1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[axiosozo-engine-switch] #tabbrowser-tabs .tabbrowser-tab .tab-icon-image { animation: none !important; }
+}
+
+/* ---- Chromium badge in the address bar (CEFPresenter) ------------------------------ */
+#axiosozo-engine-badge {
+  gap: 5px !important;
+  padding: 1px 8px 1px 6px !important;
+  background: color-mix(in srgb, currentColor 9%, transparent) !important;
+  font-weight: 500 !important;
+}
+#axiosozo-engine-badge::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: url("chrome://browser/content/axiosozo/icons/engine-chromium.svg") center / 12px no-repeat;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.9;
+}
+#axiosozo-engine-badge:hover { background: color-mix(in srgb, currentColor 15%, transparent) !important; }
+#axiosozo-engine-badge[insecure] { background: color-mix(in srgb, var(--text-color-error, rgb(217 48 37)) 16%, transparent) !important; }

@@ -108,11 +108,18 @@ test("project block sits at the top of the active project workspace and follows 
   assert.equal(block.querySelector(".axiosozo-project-name").textContent, "Webapp");
   const toggle = block.querySelector(".axiosozo-project-toggle");
   assert.equal(toggle.localName, "button");
-  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false", "collapsed by default: one quiet row");
+  assert.equal(block.querySelector(".axiosozo-project-body").hidden, true);
   assert.match(toggle.getAttribute("aria-label"), /Webapp, 1 of 2 services running/u);
+  toggle.click();
+  await flushMicrotasks();
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(block.querySelector(".axiosozo-project-services").hidden, false);
   const rows = block.querySelectorAll(".axiosozo-project-service").map(li => li.textContent);
   assert.deepEqual(rows, ["webrunning · port 5173", "apinot running · port 8787"]);
   for (const dot of block.querySelectorAll(".axiosozo-status-dot")) assert.equal(dot.getAttribute("aria-hidden"), "true", "dots are decorative; text carries the status");
+  const links = block.querySelectorAll(".axiosozo-project-link").map(li => li.querySelector("button").getAttribute("data-kind"));
+  assert.ok(links.includes("environment"), "environments are one click away");
   toggle.click();
   assert.equal(toggle.getAttribute("aria-expanded"), "false");
   assert.equal(block.querySelector(".axiosozo-project-services").hidden, true);
@@ -129,6 +136,28 @@ test("project block sits at the top of the active project workspace and follows 
   assert.match(css, /:root\[zen-compact-mode="true"\] \.axiosozo-project-block \{ display: none; \}/u);
   t.loop.dispose();
   assert.equal(t.block(), null);
+});
+
+test("project block rows select an open tab of that site in this space before opening a new one", async () => {
+  const t = setup();
+  await flushMicrotasks();
+  const toggle = t.block().querySelector(".axiosozo-project-toggle");
+  toggle.click();
+  await flushMicrotasks();
+  const row = name => t.block().querySelectorAll(".axiosozo-project-link").map(li => li.querySelector("button"))
+    .find(button => button.getAttribute("aria-label").startsWith(`${name},`));
+  const other = t.h.addTab({ url: "http://localhost:5173/app/settings", workspace: WORKSPACE_B, select: false });
+  const local = t.h.addTab({ url: "http://localhost:5173/app/settings", select: false });
+  t.h.addTab({ url: "https://docs.example/" });
+  row("local").click();
+  assert.equal(t.h.gBrowser.selectedTab, local, "the local tab in this space, not the one in another space");
+  assert.notEqual(t.h.gBrowser.selectedTab, other);
+  assert.equal(t.h.opened.length, 0);
+  row("preview").click();
+  assert.equal(t.h.opened.length, 1, "no open preview tab: a new one");
+  assert.equal(t.h.opened[0].url, "https://preview.webapp.example/");
+  assert.equal(t.h.opened[0].where, "tab");
+  t.loop.dispose();
 });
 
 test("service status refreshes only declared services on a bounded interval", async () => {

@@ -517,7 +517,7 @@ def setup(build_native=True):
         zen_import.finish(STAGE, BUILD, import_key, imported_files)
     zen_import.refresh_links(STAGE)
     installed_locales = zen_import.install_zen_locales(STAGE)
-    print(f'PASS: verified 13 Zen en-US Fluent files ({installed_locales} installed)', flush=True)
+    print(f'PASS: verified 14 Zen en-US Fluent files ({installed_locales} installed)', flush=True)
     apply_records(engine, native_patches)
     run_command(['npm', 'run', 'surfer', '--', 'config', 'brand', 'axiosozo-dev'], env=env)
     run_command(['npm', 'run', 'surfer', '--', 'config', 'buildMode', 'dev'], env=env)

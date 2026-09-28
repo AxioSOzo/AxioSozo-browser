@@ -217,7 +217,7 @@ test("ledger views group per host/context and per day with readable durations", 
   ];
   const rows = M.ledgerRows(summary, [{ uuid: UUID, name: "Work" }]);
   assert.deepEqual(rows.map(row => [row.host, row.contextName, row.totalText]),
-    [["docs.example", "No context", "45 min"], ["x.com", "Work", "30 min"], ["gone.example", "Deleted context", "1 min"]]);
+    [["docs.example", "No space", "45 min"], ["x.com", "Work", "30 min"], ["gone.example", "Deleted space", "1 min"]]);
   assert.deepEqual(rows[1].days.map(day => day.day), ["2026-09-27", "2026-09-26"]);
   const days = M.ledgerDays(summary);
   assert.deepEqual(days.map(day => [day.day, day.totalText]), [["2026-09-27", "1 h 05 min"], ["2026-09-26", "10 min"], ["2026-09-25", "1 min"]]);

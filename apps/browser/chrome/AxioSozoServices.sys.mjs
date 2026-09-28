@@ -118,6 +118,9 @@ export class AxioSozoServices {
       if (change.kind === "deleted") this.#emit("attention");
     });
     this.#windows.set(window, adapter);
+    // A restored about:axiosozo tab can load before the first window registers;
+    // without this it would keep showing an empty workspace list.
+    this.#emit("contexts");
     return () => {
       unsubscribe();
       if (this.#windows.get(window) === adapter) this.#windows.delete(window);

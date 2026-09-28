@@ -48,22 +48,28 @@ def restore_signed_search_dump(engine, record, env=None):
     return True
 
 
-def install_zen_locales(stage, expected_count=13):
-    """Install pinned en-US Zen Fluent files without deleting existing data."""
+def install_zen_locales(stage, expected_count=14):
+    """Install pinned en-US Zen Fluent files without deleting existing data.
+
+    Subfolders count: about:preferences links the required
+    browser/preferences/zen-preferences.ftl, and Fluent drops the whole en-US
+    bundle of a document when one required resource is missing (a text-less page).
+    """
     source = stage / 'locales/en-US/browser/browser'
     destination = stage / 'engine/browser/locales/en-US/browser'
-    files = sorted(source.glob('zen-*.ftl'))
+    files = sorted(source.rglob('zen-*.ftl'))
     if len(files) != expected_count or any(path.is_symlink() or not path.is_file() for path in files):
         raise RuntimeError('ZEN_LOCALE_INPUTS_CHANGED')
-    destination.mkdir(parents=True, exist_ok=True)
     installed = 0
     for path in files:
-        target = destination / path.name
-        if target.is_symlink():
-            raise RuntimeError('ZEN_LOCALE_TARGET_SYMLINK: ' + path.name)
+        relative = path.relative_to(source)
+        target = destination / relative
+        if any((destination / Path(*relative.parts[:depth])).is_symlink() for depth in range(1, len(relative.parts) + 1)):
+            raise RuntimeError('ZEN_LOCALE_TARGET_SYMLINK: ' + relative.as_posix())
+        target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             if not target.is_file() or target.read_bytes() != path.read_bytes():
-                raise RuntimeError('ZEN_LOCALE_TARGET_MODIFIED: ' + path.name)
+                raise RuntimeError('ZEN_LOCALE_TARGET_MODIFIED: ' + relative.as_posix())
         else:
             target.write_bytes(path.read_bytes())
             installed += 1

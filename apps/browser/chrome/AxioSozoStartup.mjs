@@ -26,8 +26,53 @@ function neutralDecision(request, reason) {
     reason, data_sent: false, authority: "suggestion_only", action_authorized: false };
 }
 
+// about:axiosozo and its actor (overview workstream). Both calls are idempotent
+// per process inside AboutAxioSozo.sys.mjs, so every window may call them. This
+// runs before Zen restores the session: a restored, selected about:axiosozo tab
+// loads immediately and would otherwise hit an unregistered about module.
+function registerOverview() {
+  if (!Services.prefs.getBoolPref("axiosozo.contexts.enabled", true)) return false;
+  const about = optionalModule("AboutAxioSozo.sys.mjs");
+  const registered = !!guarded("about:axiosozo registration", () => about?.registerAboutAxioSozo());
+  guarded("overview actor registration", () => about?.registerOverviewActor());
+  return registered;
+}
+
+// Tabs that loaded about:axiosozo before registration show a malformed-URI
+// error page; load them again now that the module exists.
+function reloadFailedOverviewTabs() {
+  for (const tab of window.gBrowser?.tabs ?? []) {
+    const browser = tab.linkedBrowser;
+    if (browser?.currentURI?.spec.startsWith("about:axiosozo") &&
+        browser.documentURI?.spec.startsWith("about:neterror")) browser.reload();
+  }
+}
+
+// A plain Tools menu entry; AxioSozo takes no shortcut and adds no toolbar button.
+function installToolsEntry(openOverview) {
+  const popup = document.getElementById("menu_ToolsPopup");
+  if (!popup) return null;
+  const item = document.createXULElement("menuitem");
+  item.id = "axiosozo-tools-home";
+  item.setAttribute("label", "AxioSozo");
+  const command = event => { if (event.isTrusted) openOverview(); };
+  item.addEventListener("command", command);
+  const separator = document.createXULElement("menuseparator");
+  popup.prepend(item, separator);
+  return () => { item.removeEventListener("command", command); item.remove(); separator.remove(); };
+}
+
+// The first normal window of a new profile opens AxioSozo once, beside the
+// restored tabs, so a first-time user sees what was added and where it lives.
+const INTRODUCED_PREF = "axiosozo.home.introduced";
+function introduceOnce(openOverview, zen) {
+  if (Services.prefs.getBoolPref(INTRODUCED_PREF, false) || !zen.isAuthoritative()) return;
+  Services.prefs.setBoolPref(INTRODUCED_PREF, true);
+  openOverview("#home");
+}
+
 // F1–F6, gated by axiosozo.contexts.enabled. Returns disposers in install order.
-async function installContexts({ engineProbe }) {
+async function installContexts({ engineProbe, aboutRegistered }) {
   const disposers = [];
   const runtime = {};
   if (!Services.prefs.getBoolPref("axiosozo.contexts.enabled", true)) return { disposers, services: null, zen: null, runtime };
@@ -42,12 +87,16 @@ async function installContexts({ engineProbe }) {
   if (unregister) disposers.push(unregister);
   await zen.whenReady().catch(error => console.error("AxioSozo: Zen workspaces not ready", error));
 
-  // ── about:axiosozo and its actor (overview workstream). Both calls are
-  // idempotent per process inside AboutAxioSozo.sys.mjs, so every window may call them.
-  const about = optionalModule("AboutAxioSozo.sys.mjs");
-  const aboutRegistered = !!guarded("about:axiosozo registration", () => about?.registerAboutAxioSozo());
-  guarded("overview actor registration", () => about?.registerOverviewActor());
-  const openOverview = aboutRegistered ? () => window.switchToTabHavingURI("about:axiosozo", true) : null;
+  // Reuses an open AxioSozo tab; a #fragment selects a view or item inside it.
+  const openOverview = aboutRegistered ? (fragment = "") => window.switchToTabHavingURI(`about:axiosozo${fragment}`, true,
+    { ignoreFragment: "whenComparingAndReplace" }) : null;
+  const openProjectSettings = openOverview ? id => openOverview(`#project=${id}`) : null;
+  if (aboutRegistered) guarded("overview tab recovery", () => reloadFailedOverviewTabs());
+  if (openOverview) {
+    const entry = guarded("tools menu entry", () => installToolsEntry(openOverview));
+    if (entry) disposers.push(entry);
+    guarded("first-run introduction", () => introduceOnce(openOverview, zen));
+  }
 
   // ── F1: context type in Zen's workspace menu (services workstream).
   const menuModule = optionalModule("ContextMenuContexts.sys.mjs");
@@ -65,7 +114,7 @@ async function installContexts({ engineProbe }) {
     try { return await hostDecide(request, options); } catch { return neutralDecision(request, "HOST_UNAVAILABLE"); }
   };
   const installers = [
-    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen }],
+    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings }],
     ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decide }],
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],
   ];
@@ -84,8 +133,9 @@ async function installContexts({ engineProbe }) {
 // Zen owns the visible frontend. The only additions are a tab-menu engine
 // switch and an address-bar badge on Chromium tabs; no shortcut is taken over.
 async function initialize() {
-  await window.gZenStartup.promiseInitialized;
   if (!Services.prefs.getBoolPref("axiosozo.foundation.enabled", true)) return;
+  const aboutRegistered = registerOverview();
+  await window.gZenStartup.promiseInitialized;
   const adapter = new GeckoEngineAdapter(window);
   // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
   // (`./dev engine-probe`) adds its own explicit toolbar action.
@@ -93,6 +143,8 @@ async function initialize() {
     Presenter: CEFPresenter,
     onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
+  // The engine glyph on hovered tabs; the selected tab's glyph is the switch.
+  const engineTabs = engineProbe ? guarded("engine tabs", () => optionalModule("EngineTabs.sys.mjs")?.installEngineTabs(window, { engineProbe })) : null;
   const fixtureProbe = engineProbe?.diagnostics().browsingMode === "fixture";
   const probeSheet = fixtureProbe ? document.createProcessingInstruction("xml-stylesheet",
     'href="chrome://browser/content/axiosozo/browser-experience.css" type="text/css"') : null;
@@ -125,11 +177,12 @@ async function initialize() {
   window.addEventListener("unload", () => {
     disposed = true; probeSheet?.remove();
     disposeContexts();
+    engineTabs?.dispose();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });
   try {
-    contexts = await installContexts({ engineProbe });
+    contexts = await installContexts({ engineProbe, aboutRegistered });
     if (disposed) disposeContexts();
   } catch (error) { console.error("AxioSozo: contexts unavailable", error); }
 }
