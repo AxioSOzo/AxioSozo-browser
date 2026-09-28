@@ -18,6 +18,9 @@ export const MESSAGES = Object.freeze({
 });
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
+// Provider status and Jev key actions are served by ProviderStatus.sys.mjs
+// directly (Providers workstream), not through AxioSozoServices.
+export const PROVIDER_STATUS_URL = "chrome://browser/content/axiosozo/ProviderStatus.sys.mjs";
 export const PREFS = Object.freeze({
   contexts: "axiosozo.contexts.enabled",
   enginePreferences: "axiosozo.engine.preferences.enabled",
@@ -111,6 +114,21 @@ function checkParams(name, params, shape) {
   return params;
 }
 
+// A Jev key crosses the actor exactly once, for storeJevKey. It is never echoed,
+// logged, stored in prefs or returned; failures carry fixed codes only.
+const jevKey = value => typeof value === "string" && value.length >= 8 && value.length <= 4096
+  && !/[\u0000-\u001f\u007f]/u.test(value);
+const KEY_ERRORS = new Set(["INVALID_KEY", "JEV_KEY_ENTRY_DISABLED", "KEYCHAIN_HELPER_UNAVAILABLE",
+  "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "SETTINGS_CLOSED"]);
+async function keyAction(ctx, name, run) {
+  if (ctx.isPrivate?.()) fail("PRIVATE_WINDOW", `${name}: keys cannot be changed from a private window`);
+  try { return await run(ctx.providers()); }
+  catch (error) {
+    const code = KEY_ERRORS.has(error?.message) ? error.message : "KEYCHAIN_HELPER_UNAVAILABLE";
+    fail(code, `${name} failed (${code})`);
+  }
+}
+
 const JEV_KEYS = { consent: v => typeof v === "boolean",
   interval_minutes: v => Number.isInteger(v) && v >= 1 && v <= 30,
   hourly_budget: v => Number.isInteger(v) && v >= 0 && v <= 30 };
@@ -143,8 +161,9 @@ function requirePickedRoot(ctx, name, root) {
 // ---------------------------------------------------------------- methods
 
 // The closed method list: every §3.3 service method (pickFolder is called
-// with the requesting tab's window) plus openContext, openUrl and the
-// read-only getOverviewFlags. Nothing else is callable.
+// with the requesting tab's window) plus openContext, openUrl, the
+// read-only getOverviewFlags and the provider status / Jev key methods
+// (contracts/provider-v1.md). Nothing else is callable.
 export const METHODS = Object.freeze({
   // contexts
   listContexts: { params: {}, run: ({ services }) => services.listContexts() },
@@ -199,6 +218,14 @@ export const METHODS = Object.freeze({
   getJevSettings: { params: {}, run: ({ services }) => services.getJevSettings() },
   setJevSettings: { params: { patch: T.object },
     run: ({ services }, p) => services.setJevSettings(checkPatch("setJevSettings", p.patch, JEV_KEYS)) },
+  // providers (ProviderStatus.sys.mjs; metadata discovery and Keychain presence only)
+  getProviderStatus: { params: {}, run: ctx => ctx.providers().getProviderStatus() },
+  getJevKeyStatus: { params: {}, run: ctx => ctx.providers().getJevKeyStatus() },
+  storeJevKey: { params: { key: jevKey }, run: (ctx, p) => {
+    const secret = p.key; delete p.key;
+    return keyAction(ctx, "storeJevKey", providers => providers.storeJevKeyAndReport(secret));
+  } },
+  removeJevKey: { params: {}, run: ctx => keyAction(ctx, "removeJevKey", providers => providers.removeJevKeyAndReport()) },
   // ledger
   usageSummary: { params: { days: T.days }, run: ({ services }, p) => services.usageSummary({ days: p.days }) },
   exportLedger: { params: {}, run: async ({ services }) => {
@@ -257,13 +284,14 @@ export function toErrorReply(error) {
 }
 
 export function readFlags(prefs) {
-  const get = (name, fallback) => {
-    try { return prefs.getBoolPref(name, fallback); } catch { return fallback; }
+  const get = (name, fallback, onError = fallback) => {
+    try { return prefs.getBoolPref(name, fallback); } catch { return onError; }
   };
   return {
     contexts: get(PREFS.contexts, true),
     enginePreferences: get(PREFS.enginePreferences, false),
-    jevKeyEntry: get(PREFS.jevKeyEntry, false),
+    // Decided (open decision 4): on by default; the kill switch fails closed like ProviderSettings.
+    jevKeyEntry: get(PREFS.jevKeyEntry, true, false),
   };
 }
 
@@ -271,11 +299,15 @@ export function readFlags(prefs) {
 
 let servicesProvider = () => ChromeUtils.importESModule(SERVICES_URL).AxioSozoServices.get();
 let prefsProvider = () => Services.prefs;
-export function setProvidersForTesting({ services, prefs } = {}) {
-  const previous = { services: servicesProvider, prefs: prefsProvider };
+let providerStatusProvider = () => ChromeUtils.importESModule(PROVIDER_STATUS_URL);
+export function setProvidersForTesting({ services, prefs, providerStatus } = {}) {
+  const previous = { services: servicesProvider, prefs: prefsProvider, providerStatus: providerStatusProvider };
   if (services) servicesProvider = services;
   if (prefs) prefsProvider = prefs;
-  return () => { servicesProvider = previous.services; prefsProvider = previous.prefs; };
+  if (providerStatus) providerStatusProvider = providerStatus;
+  return () => {
+    servicesProvider = previous.services; prefsProvider = previous.prefs; providerStatusProvider = previous.providerStatus;
+  };
 }
 
 const Base = globalThis.JSWindowActorParent ?? class {};
@@ -291,6 +323,8 @@ export class AboutAxioSozoParent extends Base {
       pickedRoots: this.#pickedRoots,
       window: () => this.browsingContext?.topChromeWindow ?? null,
       flags: () => readFlags(prefsProvider()),
+      providers: () => providerStatusProvider(),
+      isPrivate: () => !!this.browsingContext?.usePrivateBrowsing,
     };
   }
 

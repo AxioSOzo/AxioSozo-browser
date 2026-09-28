@@ -148,8 +148,10 @@ test("essentials never peek; without the web switch nothing is installed; dispos
 test("the glyph never covers Zen's own icon states", () => {
   const css = readFileSync(new URL("../chrome/axiosozo-runtime.css", import.meta.url), "utf8");
   assert.match(css, /#tabbrowser-tabs \.tabbrowser-tab\[axiosozo-engine-peek\]:not\(\[zen-essential\], \[busy\], \[pending\], \[soundplaying\], \[muted\], \[activemedia-blocked\], \[zen-pinned-changed="true"\]\) \.tab-icon-image/u);
-  for (const glyph of ["engine-gecko.svg", "engine-chromium.svg"]) {
+  for (const [glyph, source] of [["engine-gecko.svg", /browser\/branding\/official/u], ["engine-chromium.svg", /chrome\/app\/theme\/chromium/u]]) {
     const svg = readFileSync(new URL(`../chrome/icons/${glyph}`, import.meta.url), "utf8");
-    assert.match(svg, /context-fill/u, `${glyph} follows the theme colour`);
+    assert.match(svg, source, `${glyph} is the upstream logo`);
   }
+  // At rest no tab carries an engine mark; the logo only appears on peek.
+  assert.doesNotMatch(css, /tab-icon-stack::before/u);
 });

@@ -40,6 +40,12 @@ test('Actual Keychain query with an empty search list returns missing without ou
   t.diagnostic(result.stderr.trim());
 });
 
+test('Presence check with an empty search list reports missing without any output', t => {
+  const result = run('keychain-negative', 'exists'); assert.equal(result.status, 44, result.stderr);
+  assert.match(result.stderr, /TEST_FIXTURE keychain_status=-25300 search_list=empty/);
+  t.diagnostic(result.stderr.trim());
+});
+
 test('Actual malformed Keychain query returns errSecParam without fallback', t => {
   const result = run('keychain-negative', 'invalid-query'); assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /TEST_FIXTURE keychain_status=-50 search_list=empty/);
@@ -54,6 +60,7 @@ test('Negative Keychain build cannot store or delete any item', () => {
 test('Production JS adapter handles native missing/error results without a plaintext fallback', async () => {
   const keychain = new MacKeychain(artifact('keychain-negative'));
   assert.equal(await keychain.read(), null);
+  assert.equal(await keychain.exists(), false);
   await assert.rejects(keychain.store('synthetic-nonsecret-input'), { code: 'KEYCHAIN_ERROR' });
   await assert.rejects(keychain.remove(), { code: 'KEYCHAIN_ERROR' });
 });

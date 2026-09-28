@@ -11,10 +11,18 @@ export {
   validateHostPattern, validateBaseUrl, validateWebUrl, stripQueryAndFragment, isWorkspaceUuid, isRuleId, newRule,
   DEFAULT_CONTEXT_STORE, DEFAULT_RULE_STORE, DEFAULT_LEDGER, EFFECTS, OUTCOMES, REASON_CODES, JEV_REASON_CODES,
   CONTEXT_TYPES, PROJECT_KINDS, SURFACE_KINDS, OBSERVATIONS, OVERRIDES, AGENT_ACCESS, REFUSAL_REASONS, MANIFEST_STATES,
+  SURFACE_PROMINENCE, PRIMARY_SURFACE_KINDS, MANIFEST_VERSIONS, CONTEXT_STORE_VERSION, surfaceProminence, environmentKey,
+  needsManifestV2, migrateContextStore, projectsInContext,
 } from './schema.mjs';
-export { MAX_FILE_BYTES, DETECTION_FILES, isAllowedPath, detectionRefusal, detectProject } from './detect.mjs';
-export { MANIFEST_PATH, draftToManifest, parseManifest, serializeManifest, assertNoSecrets, draftManifestState } from './manifest.mjs';
-export { ENV_ORDER, orderedEnvironments, matchEnvironment, switchEnvironment, isDeclaredLocalOrigin } from './environments.mjs';
+export {
+  MAX_FILE_BYTES, DETECTION_FILES, isAllowedPath, detectionRefusal, detectProject,
+  MAX_WORKSPACE_PACKAGES, PACKAGE_DETECTION_FILES, CONVENTIONAL_WORKSPACES, isPackageDir, isAllowedPackagePath,
+  packageDetectionRefusal, normalizeWorkspacePattern, workspaceCandidates, expandWorkspaceGlobs,
+} from './detect.mjs';
+export {
+  MANIFEST_PATH, draftToManifest, parseManifest, serializeManifest, assertNoSecrets, draftManifestState, withProductionUrl, mainWebApp,
+} from './manifest.mjs';
+export { ENV_ORDER, orderedEnvironments, matchEnvironment, switchEnvironment, isDeclaredLocalOrigin, matchProjectForUrl } from './environments.mjs';
 export {
   hostMatches, ruleMatches, rulesFor, evaluateDeterministic, applyJevOutcome, effectiveObservation, isSensitiveHost,
   insideAllowedHours, suppress, activeSuppressions, SENSITIVE_HOSTS, SENSITIVE_HOSTS_VERSION, OVERRIDE_DELAY_MS,

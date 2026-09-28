@@ -1,0 +1,170 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* SpaceSwitcher.sys.mjs. Loaded only while the switcher is active, and every
+ * rule is scoped to :root[axiosozo-space-switcher], so turning
+ * axiosozo.ui.spaceSwitcher.enabled off returns stock Zen at once. Zen ids are
+ * listed in ZEN_SIDEBAR / ZEN_ADAPTER_CONTRACT (ZenWorkspaceAdapter.sys.mjs). */
+
+@namespace html url("http://www.w3.org/1999/xhtml");
+
+/* The foot "+" (Zen's Create New menu). New spaces: the space menu (right-click
+ * or click the space name) → "Create Space". */
+:root[axiosozo-space-switcher]:not([customizing]) #zen-create-new-button {
+  display: none !important;
+}
+
+/* The switcher replaces Zen's space icons and the space header in the expanded
+ * sidebar (also in compact mode). The collapsed icon sidebar keeps Zen's strip. */
+:root[axiosozo-space-switcher][zen-sidebar-expanded="true"]:not([customizing]) {
+  & #zen-workspaces-button {
+    display: none !important;
+  }
+
+  /* Hidden, not removed: Zen and DevLoop still find the header. It reappears
+   * while it is needed: renaming the space, picking its icon, or when pinned
+   * tabs are collapsed (its click expands them). */
+  & zen-workspace:not([collapsedpinnedtabs]) > .zen-current-workspace-indicator:not(:has(.tab-label-container-editing, [zen-emoji-open="true"])) {
+    display: none !important;
+  }
+}
+
+#axiosozo-space-switcher {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+  margin-inline: 2px;
+  -moz-window-dragging: no-drag;
+
+  :root:not([zen-sidebar-expanded="true"]) &,
+  :root[customizing] & {
+    display: none;
+  }
+
+  &[empty="true"] {
+    visibility: hidden;
+  }
+}
+
+.axiosozo-space-switcher-name {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: var(--toolbarbutton-border-radius);
+  background-color: transparent;
+  color: inherit;
+  font-size: small;
+  font-weight: 600;
+  -moz-user-focus: normal;
+  transition: background-color 150ms ease;
+
+  &:hover,
+  &[open="true"] {
+    background-color: var(--zen-toolbar-element-bg);
+  }
+
+  &:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-inset);
+  }
+}
+
+.axiosozo-space-switcher-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+  line-height: 1;
+  fill: var(--zen-sidebar-themed-icon-fill);
+  fill-opacity: 1;
+  -moz-context-properties: fill, fill-opacity;
+
+  &[hidden] {
+    display: none;
+  }
+
+  & html|img {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.axiosozo-space-switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.axiosozo-space-dots {
+  display: flex;
+  flex: none;
+  align-items: center;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.axiosozo-space-dot {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 24px;
+  margin: 0;
+  padding: 0 4px;
+  border-radius: var(--toolbarbutton-border-radius);
+  background-color: transparent;
+  color: inherit;
+  -moz-user-focus: normal;
+
+  &[hidden] {
+    display: none;
+  }
+
+  &:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-inset);
+  }
+}
+
+.axiosozo-space-dot-mark {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background-color: color-mix(in srgb, currentColor 32%, transparent);
+  transition: width 200ms ease, background-color 150ms ease, scale 150ms ease;
+
+  .axiosozo-space-dot:hover > & {
+    background-color: color-mix(in srgb, currentColor 60%, transparent);
+  }
+
+  .axiosozo-space-dot[aria-selected="true"] > & {
+    width: 14px;
+    background-color: currentColor;
+  }
+
+  .axiosozo-space-dot[data-size="small"] > & {
+    scale: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .axiosozo-space-switcher-name,
+  .axiosozo-space-dot-mark {
+    transition: none;
+  }
+}

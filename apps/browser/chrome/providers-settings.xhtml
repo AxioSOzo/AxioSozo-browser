@@ -35,14 +35,16 @@
           <button class="primary" type="submit">Add configuration</button>
         </form>
       </details>
-      <details class="card configuration unavailable">
-        <summary id="jev-title">Additional integrations · unavailable</summary>
-        <p id="jev-note" class="section-note">No key is required to browse. Keychain storage awaits native validation in this development build.</p>
+      <section class="card" aria-labelledby="jev-title">
+        <div class="card-header"><h2 id="jev-title">Jev</h2><span id="jev-state" class="badge neutral">Checking…</span></div>
+        <p id="jev-note" class="section-note">Optional. Site rules can ask Jev for a suggestion when you allow it. The key is stored only in the macOS Keychain and is never shown again. No key is required to browse.</p>
         <form id="jev-form" class="inline-form" autocomplete="off">
-          <div class="field grow"><label for="jev-key">API key · macOS Keychain only</label><input id="jev-key" type="password" autocomplete="off" disabled="disabled" maxlength="4096" aria-describedby="jev-note" /></div>
-          <button type="submit" disabled="disabled">Store key</button>
+          <div class="field grow"><label for="jev-key">API key · macOS Keychain only</label><input id="jev-key" type="password" autocomplete="off" disabled="disabled" maxlength="4096" aria-describedby="jev-note jev-detail" /></div>
+          <button id="jev-store" type="submit" disabled="disabled">Store key</button>
+          <button id="jev-remove" class="remove" type="button" disabled="disabled">Remove key</button>
         </form>
-      </details>
+        <p id="jev-detail" class="section-note" aria-live="polite"></p>
+      </section>
       <p id="settings-status" class="status" role="status" aria-live="polite"></p>
     </main>
   </body>

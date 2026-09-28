@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "name": "Tauri Plus Web",
+  "kind": "desktop",
+  "kind_source": {
+    "source": "src-tauri/tauri.conf.json",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:1420/",
+      "app": "desktop",
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    },
+    {
+      "name": "local",
+      "base_url": "http://localhost:5173/",
+      "app": "web",
+      "source": "Vite default port (apps/web/package.json scripts.dev)",
+      "guess": true
+    }
+  ],
+  "services": [
+    {
+      "name": "Tauri dev server",
+      "url": "http://localhost:1420/",
+      "port": 1420,
+      "app": "desktop",
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    },
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5173/",
+      "port": 5173,
+      "app": "web",
+      "source": "Vite default port (apps/web/package.json scripts.dev)",
+      "guess": true
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/tauri-plus-web",
+      "kind": "repository",
+      "prominence": "primary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/tauri-plus-web/issues",
+      "kind": "issues",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/tauri-plus-web/actions",
+      "kind": "ci",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/tauri-plus-web/releases",
+      "kind": "releases",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Vercel (synthetic-web)",
+      "url": "https://vercel.com/dashboard",
+      "kind": "hosting",
+      "prominence": "secondary",
+      "source": "apps/web/.vercel/project.json",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "vite",
+    "tauri"
+  ],
+  "files_read": [
+    "package.json",
+    "src-tauri/tauri.conf.json",
+    ".git/config",
+    "apps/web/package.json",
+    "apps/web/.vercel/project.json"
+  ],
+  "refused": [],
+  "warnings": []
+}

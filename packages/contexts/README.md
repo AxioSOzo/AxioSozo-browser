@@ -82,6 +82,23 @@ What is detected:
   `draftManifestState(draft)` returns `"external"` for it. An invalid one is
   ignored with a warning.
 
+### Monorepos, apps and projects in any space
+
+Workspace packages are detected in a second, equally static phase
+(contexts-api-v1 §2.2): `workspaceCandidates(rootFiles)` gives patterns and the
+parent directories whose child directory *names* the reader may list,
+`expandWorkspaceGlobs(patterns, listing)` gives at most 24 package dirs, and
+the reader passes the `PACKAGE_DETECTION_FILES` it read per dir as
+`detectProject({ …, packages })`. `**`, `..`, absolute paths, hidden dirs,
+`node_modules` and build output are refused. With more than one app,
+environments and services carry `app` (`web · local`, `desktop · local`); a
+Tauri dev URL is always the desktop app, never the generic web dev server.
+Surfaces carry `prominence` (repository/package/store primary, the rest
+secondary). Manifest v2 and context store v2, `migrateContextStore`,
+`withProductionUrl` and `matchProjectForUrl` are described in §2.3–§2.5.
+Fixtures: `tauri-plus-web`, `pnpm-monorepo`, `npm-workspaces`
+(`tests/workspace.test.mjs`, `tests/projects.test.mjs`).
+
 ## Deterministic evaluation (§6.2 layer 1)
 
 `evaluateDeterministic({ rule, usageTodayMs, local: { minutes, weekday }, contextUuid, suppressions, now, host?, contextType? })`:

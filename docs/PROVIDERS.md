@@ -19,6 +19,42 @@ ordinary startup, fixture tests, or native sandbox tests. Never label the browse
 READY from fixture results. Real macOS E1/E2 and separately authorized live checks
 remain the integration gates.
 
+## Which providers are connected (status model)
+
+Settings (Cmd+,) and `about:axiosozo` show the same per-provider status from
+`apps/browser/chrome/ProviderStatus.sys.mjs`, built only from installation
+metadata and a Keychain presence check. No client starts, no login UI opens and
+Jev is not contacted. Because model turns are not verified yet, no provider is
+ever shown as *Ready*:
+
+| State | Shown as | Meaning |
+|---|---|---|
+| `unverified` | Installed · not yet verified | Codex 0.157.1 / Claude Code 2.1.283 found; sign-in happens in the official client (Claude Code: existing sign-in; Codex: one `codex login` for the browser profile), checked on the first question |
+| `not-installed` | Not installed | Official client not on the discovery PATH |
+| `unavailable` | Unavailable in this build | Antigravity; a different or unreadable client version; or no Keychain helper (Jev) |
+| `needs-key` | No key stored | Jev without a key |
+| `key-stored` | Key stored | A Jev key is in the macOS Keychain (calls still need consent and a rule; not verified live) |
+| `disabled` | Turned off | `axiosozo.jev.keyEntry.enabled=false` and no key |
+| `unknown` | Status unknown | Discovery or the Keychain check failed |
+
+## Jev key (open decision 4: ships)
+
+Wout decided on 28 September 2026 that Jev key entry ships. It is on by default;
+`axiosozo.jev.keyEntry.enabled=false` is a kill switch. Add, replace or remove the
+key in Settings → Jev or in `about:axiosozo` → AI & keys. The key goes once to the
+native helper's stdin and is stored only in the macOS Keychain (service
+`nl.axiosozo.browser.dev.jev`, this device only). It is never shown again, never
+returned to chrome, and storing it makes no Jev call. Chrome checks only presence
+with the helper's `exists` operation; it never runs `read`.
+
+Native status: `store`, `remove` and `read` against the login Keychain have not
+been exercised natively with a real key (only the empty-search-list negative
+build and a separate private-keychain positive fixture). `exists` is new: its
+source passes `provider-host check` (clang `-fsyntax-only -Werror`), but the helper
+on the build volume must be rebuilt with `provider-host setup` before presence
+works; until then Settings shows "Status unknown", and without a built helper it
+shows "Keychain helper not available in this build".
+
 ## Browser-to-host protocol
 
 Launch the fixed Node runtime with `packages/provider-host/cli.mjs serve`. It uses
@@ -190,9 +226,8 @@ stderr. Without `--authorized` it exits 78 before any client is launched.
 
 T3 retained code is limited to pure version parsing, stderr redaction and immutable
 continuation identity utilities with the MIT notice. A full T3 UI/server dependency
-graph is not installed. Existing Jev and Keychain fixture work remains optional and
-separate; no Jev network call, provider installation or authentication is needed to
-browse. Historical provenance is in [provider-provenance.json](provider-provenance.json).
+graph is not installed. Jev key entry ships (see above) and remains optional;
+no Jev network call, provider installation or authentication is needed to browse. Historical provenance is in [provider-provenance.json](provider-provenance.json).
 
 ## Approved live diagnostic outcome
 

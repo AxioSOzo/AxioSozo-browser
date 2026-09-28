@@ -19,12 +19,19 @@ export const OVERRIDES = Object.freeze(['none', 'confirm', 'delay_10s']);
 export const AGENT_ACCESS = Object.freeze(['none', 'read', 'act_with_confirmation']);
 export const REFUSAL_REASONS = Object.freeze(['not_allowlisted', 'too_large', 'symlink_outside_root', 'not_regular_file', 'unreadable', 'invalid_utf8']);
 export const MANIFEST_STATES = Object.freeze(['none', 'written', 'external']);
+export const SURFACE_PROMINENCE = Object.freeze(['primary', 'secondary']);
+// Surface kinds shown next to the project by default; every other kind goes
+// behind the "…" menu unless a surface says otherwise.
+export const PRIMARY_SURFACE_KINDS = Object.freeze(['repository', 'package', 'store']);
+export const MANIFEST_VERSIONS = Object.freeze([1, 2]);
+export const CONTEXT_STORE_VERSION = 2;
 
 const UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
 const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
 const RULE_ID = /^r_[a-z0-9]{4,32}$/;
 const NAME = /^[^\u0000-\u001f\u007f]+$/u;
 const ENV_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const APP_LABEL = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 const TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const DAY = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const LEDGER_HOST = /^[a-z0-9.-]+$/;
@@ -160,37 +167,65 @@ export function stripQueryAndFragment(v) {
 
 // ---- context-v1 ----
 
-function environment(v, code, path) {
-  keys(v, code, path, ['name', 'base_url']);
-  return { name: str(v.name, code, `${path}.name`, { pattern: ENV_NAME }), base_url: baseUrl(v.base_url, code, `${path}.base_url`) };
+// `app` (manifest v2 and drafts) names the app inside a multi-app project, for
+// example "web" or "desktop"; single-app projects leave it absent. It is kept
+// only when present so v1 records round-trip byte for byte.
+const withApp = (out, v, code, path, allow) => {
+  if (!Object.prototype.hasOwnProperty.call(v, 'app')) return out;
+  if (!allow) fail(code, `${path}.app`, 'unknown key (app requires manifest version 2)');
+  return { ...out, app: str(v.app, code, `${path}.app`, { pattern: APP_LABEL }) };
+};
+function environment(v, code, path, allowApp = false) {
+  keys(v, code, path, ['name', 'base_url'], ['app']);
+  return withApp({ name: str(v.name, code, `${path}.name`, { pattern: ENV_NAME }), base_url: baseUrl(v.base_url, code, `${path}.base_url`) }, v, code, path, allowApp);
 }
-function service(v, code, path, extra = false) {
-  keys(v, code, path, ['name', 'url', 'port', ...(extra ? ['source', 'guess'] : [])]);
-  const out = { name: name(v.name, code, `${path}.name`), url: webUrl(v.url, code, `${path}.url`), port: int(v.port, code, `${path}.port`, 1, 65535) };
+function service(v, code, path, extra = false, allowNew = extra) {
+  keys(v, code, path, ['name', 'url', 'port', ...(extra ? ['source', 'guess'] : [])], ['app']);
+  const out = withApp({ name: name(v.name, code, `${path}.name`), url: webUrl(v.url, code, `${path}.url`), port: int(v.port, code, `${path}.port`, 1, 65535) }, v, code, path, allowNew);
   return extra ? { ...out, ...provenance(v, code, path) } : out;
 }
-function surface(v, code, path, extra = false) {
-  keys(v, code, path, ['name', 'url', 'kind', ...(extra ? ['source', 'guess'] : [])]);
+function surface(v, code, path, extra = false, allowNew = extra) {
+  keys(v, code, path, ['name', 'url', 'kind', ...(extra ? ['source', 'guess'] : [])], ['prominence']);
   const out = { name: name(v.name, code, `${path}.name`), url: webUrl(v.url, code, `${path}.url`), kind: oneOf(v.kind, SURFACE_KINDS, code, `${path}.kind`) };
+  if (Object.prototype.hasOwnProperty.call(v, 'prominence')) {
+    if (!allowNew) fail(code, `${path}.prominence`, 'unknown key (prominence requires manifest version 2)');
+    out.prominence = oneOf(v.prominence, SURFACE_PROMINENCE, code, `${path}.prominence`);
+  }
   return extra ? { ...out, ...provenance(v, code, path) } : out;
 }
 function provenance(v, code, path) {
   return { source: str(v.source, code, `${path}.source`, { max: 256 }), guess: bool(v.guess, code, `${path}.guess`) };
 }
-function uniqueEnvNames(list, code, path) { return unique(list, e => e.name, code, path); }
+// Environment names are unique per app: "web · local" and "desktop · local" coexist.
+export const environmentKey = e => `${e?.app ?? ''}\u0000${e?.name}`;
+function uniqueEnvNames(list, code, path) { return unique(list, environmentKey, code, path); }
 
+// The prominence a surface is shown with: its own value, else by kind.
+export function surfaceProminence(surface) {
+  const p = own(surface, 'prominence');
+  if (SURFACE_PROMINENCE.includes(p)) return p;
+  return PRIMARY_SURFACE_KINDS.includes(own(surface, 'kind')) ? 'primary' : 'secondary';
+}
+
+// Manifest version 1 is the original shape; version 2 additionally allows
+// `app` on environments/services and `prominence` on surfaces. Writers emit
+// version 1 whenever no v2 field is used, so older builds keep reading them.
 function manifest(v, code, path) {
   keys(v, code, path, ['version', 'name', 'kind', 'environments', 'services', 'surfaces']);
-  if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  if (!MANIFEST_VERSIONS.includes(v.version)) fail(code, `${path}.version`, 'expected 1 or 2');
+  const v2 = v.version === 2;
   return {
-    version: 1,
+    version: v.version,
     name: name(v.name, code, `${path}.name`),
     kind: oneOf(v.kind, PROJECT_KINDS, code, `${path}.kind`),
-    environments: uniqueEnvNames(arr(v.environments, code, `${path}.environments`, { max: 16 }).map((e, i) => environment(e, code, `${path}.environments[${i}]`)), code, `${path}.environments`),
-    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`)),
-    surfaces: arr(v.surfaces, code, `${path}.surfaces`, { max: 64 }).map((s, i) => surface(s, code, `${path}.surfaces[${i}]`)),
+    environments: uniqueEnvNames(arr(v.environments, code, `${path}.environments`, { max: 16 }).map((e, i) => environment(e, code, `${path}.environments[${i}]`, v2)), code, `${path}.environments`),
+    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, false, v2)),
+    surfaces: arr(v.surfaces, code, `${path}.surfaces`, { max: 64 }).map((s, i) => surface(s, code, `${path}.surfaces[${i}]`, false, v2)),
   };
 }
+// True when a manifest-shaped value uses a field that needs version 2.
+export const needsManifestV2 = m => [...(m?.environments ?? []), ...(m?.services ?? [])].some(x => own(x, 'app') !== undefined) ||
+  (m?.surfaces ?? []).some(s => own(s, 'prominence') !== undefined);
 function contextMetadata(v, code, path) {
   keys(v, code, path, ['version', 'workspace_uuid', 'type', 'organization_uuid', 'project_id', 'engine_preference', 'updated_at']);
   if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
@@ -203,7 +238,9 @@ function contextMetadata(v, code, path) {
     engine_preference: nullable(v.engine_preference, x => oneOf(x, ['firefox', 'chromium'], code, `${path}.engine_preference`)),
     updated_at: timestamp(v.updated_at, code, `${path}.updated_at`),
   };
-  if (out.type !== 'project' && (out.organization_uuid !== null || out.project_id !== null)) fail(code, path, 'organization_uuid and project_id are only allowed for type project');
+  // Projects may live in any space (store v2: projects[].context_uuid). The
+  // per-context project_id is a deprecated mirror and no longer tied to a type.
+  if (out.type !== 'project' && out.organization_uuid !== null) fail(code, path, 'organization_uuid is only allowed for type project');
   if (out.organization_uuid !== null && out.organization_uuid === out.workspace_uuid) fail(code, `${path}.organization_uuid`, 'a context cannot belong to itself');
   return out;
 }
@@ -225,14 +262,25 @@ function project(v, code, path) {
     updated_at: timestamp(v.updated_at, code, `${path}.updated_at`),
   };
 }
+// Store version 1: a context links at most one project via contexts[].project_id.
+// Store version 2: projects[].context_uuid is authoritative and a space may hold
+// several projects; contexts[].project_id is a deprecated mirror that must be
+// null or point at a project whose context_uuid is that same space.
 function contextStore(v, code, path) {
   keys(v, code, path, ['version', 'contexts', 'projects']);
-  if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  if (v.version !== 1 && v.version !== 2) fail(code, `${path}.version`, 'expected 1 or 2');
   const contexts = arr(v.contexts, code, `${path}.contexts`, { max: 512 }).map((c, i) => contextMetadata(c, code, `${path}.contexts[${i}]`));
   const projects = arr(v.projects, code, `${path}.projects`, { max: 512 }).map((p, i) => project(p, code, `${path}.projects[${i}]`));
   unique(contexts, c => c.workspace_uuid, code, `${path}.contexts`);
   unique(projects, p => p.id, code, `${path}.projects`);
-  return { version: 1, contexts, projects };
+  if (v.version === 2) {
+    contexts.forEach((c, i) => {
+      if (c.project_id === null) return;
+      const p = projects.find(x => x.id === c.project_id);
+      if (!p || p.context_uuid !== c.workspace_uuid) fail(code, `${path}.contexts[${i}].project_id`, 'must be null or mirror a project whose context_uuid is this space');
+    });
+  }
+  return { version: v.version, contexts, projects };
 }
 function detectionDraft(v, code, path) {
   keys(v, code, path, ['version', 'name', 'kind', 'kind_source', 'environments', 'services', 'surfaces', 'frameworks', 'files_read', 'refused', 'warnings']);
@@ -244,8 +292,9 @@ function detectionDraft(v, code, path) {
     kind: oneOf(v.kind, PROJECT_KINDS, code, `${path}.kind`),
     kind_source: provenance(v.kind_source, code, `${path}.kind_source`),
     environments: uniqueEnvNames(arr(v.environments, code, `${path}.environments`, { max: 16 }).map((e, i) => {
-      const p = `${path}.environments[${i}]`; keys(e, code, p, ['name', 'base_url', 'source', 'guess']);
-      return { ...environment({ name: e.name, base_url: e.base_url }, code, p), ...provenance(e, code, p) };
+      const p = `${path}.environments[${i}]`; keys(e, code, p, ['name', 'base_url', 'source', 'guess'], ['app']);
+      const { source: _s, guess: _g, ...plain } = e;
+      return { ...environment(plain, code, p, true), ...provenance(e, code, p) };
     }), code, `${path}.environments`),
     services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, true)),
     surfaces: arr(v.surfaces, code, `${path}.surfaces`, { max: 64 }).map((s, i) => surface(s, code, `${path}.surfaces[${i}]`, true)),
@@ -264,7 +313,33 @@ export const validateProject = v => deepFreeze(project(v, 'INVALID_PROJECT', '$'
 export const validateManifest = v => deepFreeze(manifest(v, 'INVALID_MANIFEST', '$'));
 export const validateContextStore = v => deepFreeze(contextStore(v, 'INVALID_CONTEXT_STORE', '$'));
 export const validateDetectionDraft = v => deepFreeze(detectionDraft(v, 'INVALID_DRAFT', '$'));
-export const DEFAULT_CONTEXT_STORE = deepFreeze({ version: 1, contexts: [], projects: [] });
+export const DEFAULT_CONTEXT_STORE = deepFreeze({ version: CONTEXT_STORE_VERSION, contexts: [], projects: [] });
+
+// Pure, idempotent migration of a stored contexts.json value to version 2.
+// A v1 link contexts[].project_id moves to projects[].context_uuid when the
+// project has no space yet; a project that already names a space keeps it
+// (projects[].context_uuid was always written together with the link). Links
+// to unknown projects are dropped. Every contexts[].project_id becomes null.
+// No record is otherwise changed (updated_at stays as it was).
+export function migrateContextStore(store) {
+  const s = validateContextStore(store);
+  if (s.version === 2) return s;
+  const target = new Map();
+  for (const c of s.contexts) if (c.project_id !== null && !target.has(c.project_id)) target.set(c.project_id, c.workspace_uuid);
+  return validateContextStore({
+    version: 2,
+    contexts: s.contexts.map(c => (c.project_id === null ? c : { ...c, project_id: null })),
+    projects: s.projects.map(p => (p.context_uuid === null && target.has(p.id) ? { ...p, context_uuid: target.get(p.id) } : p)),
+  });
+}
+
+// Projects that live in a space, in stored order (v1 or v2 store).
+export function projectsInContext(store, contextUuid) {
+  const projects = Array.isArray(store?.projects) ? store.projects : [];
+  const mirrored = new Set((Array.isArray(store?.contexts) ? store.contexts : [])
+    .filter(c => c?.workspace_uuid === contextUuid && c.project_id).map(c => c.project_id));
+  return Object.freeze(projects.filter(p => p && (p.context_uuid === contextUuid || (p.context_uuid === null && mirrored.has(p.id)))));
+}
 
 // ---- site-rule-v1 ----
 

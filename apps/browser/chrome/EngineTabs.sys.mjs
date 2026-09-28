@@ -2,11 +2,10 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // The engine, shown where the tab already is. Resting a pointer on a tab for a
-// moment turns its favicon into the engine glyph (flame = Firefox, crystal =
-// Chromium). On the selected tab that glyph is the switch: one click moves the
-// tab to the other engine. On other tabs it is information only, so clicking
-// a favicon keeps selecting its tab. Chromium tabs keep a small glyph at the
-// favicon corner so the exception stays visible without hovering.
+// moment turns its favicon into the engine's logo (Firefox or Chromium). On the
+// selected tab that logo is the switch: one click moves the tab to the other
+// engine. On other tabs it is information only, so clicking a favicon keeps
+// selecting its tab. At rest no tab carries an engine mark.
 // Everything is chrome-owned attributes plus axiosozo-runtime.css; no element
 // is added to Zen's tab markup and no page is touched.
 import { ensureRuntimeStylesheet } from "./DevLoop.sys.mjs";

@@ -80,16 +80,58 @@ reused for later checkpoints, and exits at the normal two-minute idle.
   as `true` (unknown is disclosed as sent). The host runs with only `PATH`,
   `LANG` and `AXIOSOZO_BUILD_ROOT` in its environment.
 
-## Jev key entry (behind review)
+## Jev key entry (decided: ships)
 
-The key never passes through this host. `storeJevKey` in
-`ProviderSettings.sys.mjs` writes a user-entered key only to the stdin of the
-reviewed native helper `<AXIOSOZO_BUILD_ROOT>/providers/keychain store`
+Open decision 4 is decided (Wout, 28 September 2026): Jev key entry ships and is
+on by default. `axiosozo.jev.keyEntry.enabled` (default `true`) remains a kill
+switch; an unreadable pref fails closed. The key never passes through this host.
+`storeJevKey` in `ProviderSettings.sys.mjs` writes a user-entered key only to the
+stdin of the reviewed native helper `<AXIOSOZO_BUILD_ROOT>/providers/keychain store`
 (the helper `MacKeychain` also uses), with a fixed `PATH`/`LANG` environment.
-It is disabled unless the pref `axiosozo.jev.keyEntry.enabled` is `true`
-(default `false`; open decision 4). The key is never placed in argv,
-environment, prefs, files or logs, is never returned to chrome, and the
-helper's output is discarded.
+The key is never placed in argv, environment, prefs, files or logs, is never
+returned to chrome, and the helper's output is discarded. Storing makes no Jev
+call and there is no "test connection".
+
+Chrome never runs the helper's `read`. Presence uses the helper's `exists`
+operation: `SecItemCopyMatching` without any return-data/attributes flag, exit
+`0` = stored, `44` = missing, anything else = refused/unknown; nothing is written
+to stdout. `remove` treats `44` as already removed and is allowed even with the
+kill switch on. Chrome failure codes are fixed: `INVALID_KEY`,
+`JEV_KEY_ENTRY_DISABLED`, `KEYCHAIN_HELPER_UNAVAILABLE` (helper missing or not
+spawnable, or no T9 build root), `KEYCHAIN_REFUSED` (helper ran and failed; also
+a helper built before `exists` existed), `HELPER_TIMEOUT`, `SETTINGS_CLOSED`.
+
+## Provider status and key actions in about:axiosozo
+
+`ProviderStatus.sys.mjs` builds one status model for the Settings window and
+the `about:axiosozo` actor (`AboutAxioSozoParent.sys.mjs`, which calls this
+module directly, not `AxioSozoServices`). Its inputs are metadata discovery
+(`provider-host discover`: no client is executed) and the Jev key presence
+check. It never starts a client, opens login UI or contacts Jev.
+
+| Actor method | Params | Returns |
+| --- | --- | --- |
+| `getProviderStatus` | `{}` | `{ version: 1, discovery: "ok"\|"unavailable", discovery_error: code\|null, model_turns_verified: false, providers: [codex, claude-code, antigravity, jev] }` |
+| `getJevKeyStatus` | `{}` | the Jev entry |
+| `storeJevKey` | `{ key }` (string, 8–4096 chars, no control characters) | the refreshed Jev entry (never the key) |
+| `removeJevKey` | `{}` | the refreshed Jev entry |
+
+`storeJevKey` and `removeJevKey` are refused with `PRIVATE_WINDOW` from a private
+tab; other failures use the fixed codes above. Each entry is
+`{ id, label, route, installed, version, expected_version, sign_in, state,
+state_label, detail, verified: false }`; the Jev entry adds `key`
+(`stored|missing|unavailable|unknown`) and `key_entry_enabled`.
+
+- `route`: `official-client` (Codex, Claude Code, Antigravity) or `api-key` (Jev).
+- `sign_in`: `handled-by-client-on-first-question` (Claude Code),
+  `codex-login-once` (Codex: one official `codex login` for the browser profile),
+  `api-key` (Jev), `not-applicable`.
+- `state`: `ready` (reserved; nothing is reported ready until a model turn is
+  verified), `unverified` (installed at the audited version; sign-in happens in
+  the official client; not yet verified), `not-installed`, `unavailable`
+  (Antigravity, version mismatch/unreadable, or no Keychain helper), `needs-key`,
+  `key-stored`, `disabled` (kill switch off and no key), `unknown` (discovery or
+  Keychain check failed).
 
 ## Streaming and lifecycle
 

@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     CFRelease(query);
     return status == errSecParam ? 1 : 70;
   }
-  if (strcmp(argv[1], "read")) { CFRelease(query); return 2; }
+  if (strcmp(argv[1], "read") && strcmp(argv[1], "exists")) { CFRelease(query); return 2; }
 #endif
   if (!strcmp(argv[1], "read")) {
     CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
@@ -58,6 +58,11 @@ int main(int argc, char **argv) {
       else fwrite(CFDataGetBytePtr(data), 1, (size_t)CFDataGetLength(data), stdout);
     }
     if (found) CFRelease(found);
+  } else if (!strcmp(argv[1], "exists")) {
+    /* Presence only: no kSecReturnData/Attributes/Ref is requested, so no secret or
+     * attribute leaves Security.framework and nothing is written to stdout.
+     * 0 = an item exists, 44 = no item, 1 = Keychain refused (e.g. locked). */
+    status = SecItemCopyMatching(query, NULL);
   } else if (!strcmp(argv[1], "store")) {
     unsigned char buffer[4097]; size_t size = fread(buffer, 1, sizeof(buffer), stdin);
     if (size < 8 || size > 4096 || memchr(buffer, '\n', size) || memchr(buffer, '\r', size) || memchr(buffer, 0, size)) { memset_s(buffer, sizeof(buffer), 0, sizeof(buffer)); CFRelease(query); return 2; }

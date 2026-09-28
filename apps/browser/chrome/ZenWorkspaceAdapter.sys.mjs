@@ -9,6 +9,9 @@
 
 const SPACES = "src/zen/spaces/ZenSpaceManager.mjs";
 const POPUPS = "src/browser/base/content/zen-panels/popups.inc";
+const ICONS = "src/browser/base/content/zen-sidebar-icons.inc.xhtml";
+const SPACE = "src/zen/spaces/ZenSpace.mjs";
+const UI = "src/zen/common/modules/ZenUIManager.mjs";
 
 export const ZEN_ADAPTER_CONTRACT = Object.freeze([
   { name: "window.gZenWorkspaces", source: SPACES, needle: "window.gZenWorkspaces = new nsZenWorkspaces()" },
@@ -34,7 +37,31 @@ export const ZEN_ADAPTER_CONTRACT = Object.freeze([
   { name: "menu #context_zenWorkspacesOpenInContainerTab", source: POPUPS, needle: "<menu id=\"context_zenWorkspacesOpenInContainerTab\"" },
   { name: "window.gZenStartup", source: "src/zen/common/modules/ZenStartup.mjs", needle: "window.gZenStartup = new ZenStartup();" },
   { name: "gZenStartup.promiseInitialized", source: "src/zen/common/modules/ZenStartup.mjs", needle: "promiseInitialized = new Promise(" },
+  // Sidebar touchpoints used by SpaceSwitcher.sys.mjs and space-switcher.css.
+  { name: "gZenWorkspaces.shouldWrapAroundNavigation", source: SPACES, needle: "\"shouldWrapAroundNavigation\",\n      \"zen.workspaces.wrap-around-navigation\"" },
+  { name: "gZenWorkspaces.naturalScroll", source: SPACES, needle: "\"naturalScroll\",\n      \"zen.workspaces.natural-scroll\"" },
+  { name: "toolbar #zen-sidebar-foot-buttons", source: ICONS, needle: "id=\"zen-sidebar-foot-buttons\"" },
+  { name: "space icon strip #zen-workspaces-button", source: ICONS, needle: "<zen-workspace-icons id=\"zen-workspaces-button\"" },
+  { name: "foot \"+\" #zen-create-new-button", source: ICONS, needle: "id=\"zen-create-new-button\" context=\"zenCreateNewPopup\"" },
+  { name: "CustomizableUI area zen-sidebar-foot-buttons", source: "src/zen/common/sys/ZenCustomizableUI.sys.mjs", needle: "\"zen-sidebar-foot-buttons\",\n      {" },
+  { name: "Library widget #zen-library-button", source: "src/zen/library/ZenLibraryWidget.sys.mjs", needle: "id: \"zen-library-button\"," },
+  { name: "space header .zen-current-workspace-indicator", source: SPACE, needle: "<vbox class=\"zen-workspace-tabs-section zen-current-workspace-indicator " },
+  { name: "space attribute collapsedpinnedtabs", source: SPACE, needle: "setAttribute(\"collapsedpinnedtabs\", \"true\")" },
+  { name: "rename state .tab-label-container-editing", source: UI, needle: "label.classList.add(\"tab-label-container-editing\");" },
+  { name: "emoji picker anchor [zen-emoji-open]", source: "src/zen/common/emojis/ZenEmojiPicker.mjs", needle: "this.#anchor.setAttribute(\"zen-emoji-open\", \"true\");" },
+  { name: "root attribute zen-sidebar-expanded", source: UI, needle: "document.documentElement.setAttribute(\"zen-sidebar-expanded\", \"true\");" },
+  { name: "menu item create space", source: POPUPS, needle: "<menuitem data-l10n-id=\"zen-panel-ui-workspaces-create\" command=\"cmd_zenOpenWorkspaceCreation\"/>" },
 ]);
+
+/** Zen sidebar element ids/selectors, in one place (also used by space-switcher.css). */
+export const ZEN_SIDEBAR = Object.freeze({
+  footToolbar: "zen-sidebar-foot-buttons",
+  spaceIcons: "zen-workspaces-button",
+  createNewButton: "zen-create-new-button",
+  libraryWidget: "zen-library-button",
+  downloadsWidget: "downloads-button",
+  spaceHeader: ".zen-current-workspace-indicator",
+});
 
 const UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/u;
 
@@ -49,8 +76,8 @@ function snapshotOf(workspace) {
 }
 
 export class ZenWorkspaceAdapter {
-  #window; #listeners = new Set(); #known = null; #disposed = false; #changeListener = null;
-  #onData = () => this.#diff();
+  #window; #listeners = new Set(); #updateListeners = new Set(); #known = null; #disposed = false; #changeListener = null;
+  #onData = () => { this.#diff(); this.#notifyUpdate(); };
 
   constructor(window) {
     this.#window = window;
@@ -60,6 +87,7 @@ export class ZenWorkspaceAdapter {
     this.#changeListener = ({ workspace } = {}) => {
       this.#diff();
       if (workspace?.uuid) this.#emit({ kind: "switched", uuid: workspace.uuid });
+      this.#notifyUpdate();
     };
     this.#zen()?.addChangeListeners?.(this.#changeListener);
     this.#known = this.#snapshotMap();
@@ -194,6 +222,92 @@ export class ZenWorkspaceAdapter {
     return () => this.#listeners.delete(callback);
   }
 
+  /** Called after every Zen workspace data, UI or switch event, without a diff
+   * (e.g. reordering or a switch). For views that simply re-render. */
+  onUpdate(callback) {
+    if (typeof callback !== "function") throw new TypeError("callback");
+    this.#updateListeners.add(callback);
+    return () => this.#updateListeners.delete(callback);
+  }
+
+  /** The space `offset` steps from the active one, honouring Zen's wrap-around
+   * pref, and for scroll gestures its natural-scroll pref. Null: nowhere to go. */
+  neighbourWorkspace(offset, { scroll = false } = {}) {
+    const zen = this.#zen();
+    const spaces = this.listWorkspaces();
+    const index = spaces.findIndex(space => space.uuid === this.activeWorkspaceUuid());
+    if (!zen || index < 0 || spaces.length < 2 || !offset) return null;
+    let step = Math.sign(offset);
+    if (scroll) { try { if (zen.naturalScroll === true) step = -step; } catch {} }
+    let wrap = true;
+    try { wrap = zen.shouldWrapAroundNavigation !== false; } catch {}
+    let target = index + step;
+    if (wrap) target = (target + spaces.length) % spaces.length;
+    else if (target < 0 || target >= spaces.length) return null;
+    return target === index ? null : spaces[target].uuid;
+  }
+
+  /** Makes a chrome element a target of Zen's space menu exactly like Zen's own
+   * space icons (a toolbarbutton carrying the space id), so edit, icon, theme,
+   * delete and create act on that space through Zen's unchanged menu. */
+  markMenuTarget(element, uuid) {
+    if (!element?.setAttribute || typeof uuid !== "string" || !UUID.test(uuid)) return false;
+    element.setAttribute("zen-workspace-id", uuid);
+    element.setAttribute("context", "zenWorkspaceMoreActions");
+    return true;
+  }
+
+  /** Opens Zen's space menu anchored to an element; without a space target Zen
+   * lists every space (switch) plus rename, icon, create and delete. */
+  openWorkspaceMenu(anchor, triggerEvent = null) {
+    const popup = this.workspaceMenu();
+    if (!popup?.openPopup || !anchor) return false;
+    popup.openPopup(anchor, "before_start", 0, 0, false, false, triggerEvent);
+    return true;
+  }
+
+  /** Zen's sidebar foot toolbar (bottom row of the sidebar). */
+  sidebarFoot() {
+    return this.#window.document?.getElementById(ZEN_SIDEBAR.footToolbar) ?? null;
+  }
+
+  /** Stable per-space anchor for chrome blocks (DevLoop): Zen's space header.
+   * SpaceSwitcher hides it visually (display: none) but it stays in the DOM, so
+   * `header.after(block)` keeps working; null when Zen has none. */
+  workspaceHeader(uuid) {
+    try { return this.workspaceElement(uuid)?.querySelector?.(ZEN_SIDEBAR.spaceHeader) ?? null; } catch { return null; }
+  }
+
+  /** Replaces Zen's Library button in the sidebar foot with Firefox's Downloads
+   * button through CustomizableUI (global, persisted like a user customization).
+   * Returns true when placements changed. */
+  replaceLibraryButton() {
+    const cui = this.#window.CustomizableUI;
+    const { footToolbar: foot, libraryWidget: library, downloadsWidget: downloads } = ZEN_SIDEBAR;
+    try {
+      const placement = cui?.getPlacementOfWidget(library);
+      if (placement?.area !== foot) return false;
+      if (!cui.getPlacementOfWidget(downloads)) cui.addWidgetToArea(downloads, foot, placement.position);
+      cui.removeWidgetFromArea(library);
+      return true;
+    } catch (error) { console.error("AxioSozo: Library button unchanged", error); return false; }
+  }
+
+  /** Reverses replaceLibraryButton: Library back where Downloads sits in the foot. */
+  restoreLibraryButton() {
+    const cui = this.#window.CustomizableUI;
+    const { footToolbar: foot, libraryWidget: library, downloadsWidget: downloads } = ZEN_SIDEBAR;
+    try {
+      if (!cui || cui.getPlacementOfWidget(library)) return false;
+      const placement = cui.getPlacementOfWidget(downloads);
+      if (placement?.area === foot) {
+        cui.addWidgetToArea(library, foot, placement.position);
+        cui.removeWidgetFromArea(downloads);
+      } else cui.addWidgetToArea(library, foot, 0);
+      return true;
+    } catch (error) { console.error("AxioSozo: Library button not restored", error); return false; }
+  }
+
   #snapshotMap() {
     return new Map(this.listWorkspaces().map(space => [space.uuid, space]));
   }
@@ -213,6 +327,13 @@ export class ZenWorkspaceAdapter {
     }
   }
 
+  #notifyUpdate() {
+    if (this.#disposed) return;
+    for (const listener of [...this.#updateListeners]) {
+      try { listener(); } catch (error) { console.error("AxioSozo workspace view failed", error); }
+    }
+  }
+
   #emit(change) {
     for (const listener of [...this.#listeners]) {
       try { listener(change); } catch (error) { console.error("AxioSozo workspace listener failed", error); }
@@ -226,5 +347,6 @@ export class ZenWorkspaceAdapter {
     try { this.#window.gZenWorkspaces?.removeChangeListeners?.(this.#changeListener); } catch {}
     this.#disposed = true;
     this.#listeners.clear();
+    this.#updateListeners.clear();
   }
 }

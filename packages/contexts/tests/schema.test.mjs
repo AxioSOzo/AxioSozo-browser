@@ -56,7 +56,9 @@ test('context metadata', () => {
   assert.deepEqual(validateContextMetadata(context({ type: 'project', organization_uuid: UUID_B, project_id: 'p_abcd', engine_preference: 'chromium' })).organization_uuid, UUID_B);
   assert.equal(validateContextMetadata(context({ workspace_uuid: '11111111-2222-4333-8444-555555555555' })).workspace_uuid, '11111111-2222-4333-8444-555555555555');
   throwsCode(() => validateContextMetadata(context({ extra: 1 })), 'INVALID_CONTEXT', '$.extra');
-  throwsCode(() => validateContextMetadata(context({ type: 'personal', project_id: 'p_abcd' })), 'INVALID_CONTEXT');
+  // Projects may live in any space: project_id is no longer tied to type project (store v2 keeps it as a deprecated mirror).
+  assert.equal(validateContextMetadata(context({ type: 'personal', project_id: 'p_abcd' })).project_id, 'p_abcd');
+  throwsCode(() => validateContextMetadata(context({ type: 'personal', organization_uuid: UUID_B })), 'INVALID_CONTEXT');
   throwsCode(() => validateContextMetadata(context({ type: 'project', organization_uuid: UUID_A })), 'INVALID_CONTEXT', '$.organization_uuid');
   throwsCode(() => validateContextMetadata(context({ workspace_uuid: '{11111111-2222-4333-8444-555555555555' })), 'INVALID_CONTEXT', '$.workspace_uuid');
   throwsCode(() => validateContextMetadata(context({ type: 'team' })), 'INVALID_CONTEXT', '$.type');

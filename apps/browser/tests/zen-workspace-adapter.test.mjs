@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ZenWorkspaceAdapter, ZEN_ADAPTER_CONTRACT } from "../chrome/ZenWorkspaceAdapter.sys.mjs";
+import { ZenWorkspaceAdapter, ZEN_ADAPTER_CONTRACT, ZEN_SIDEBAR } from "../chrome/ZenWorkspaceAdapter.sys.mjs";
 import { fakeZenWindow } from "./support/fake-zen.mjs";
 
 // Synthetic Zen window model (support/fake-zen.mjs). These tests cover the
@@ -136,8 +136,76 @@ test("ZEN_ADAPTER_CONTRACT names exist in the pinned Zen source", t => {
   assert.deepEqual(missing, [], "Zen changed an API the adapter relies on; update ZenWorkspaceAdapter.sys.mjs only");
   // The adapter must be the only chrome module that names Zen workspace globals.
   const chrome = new URL("../chrome/", import.meta.url);
-  for (const file of ["AxioSozoServices.sys.mjs", "ContextMenuContexts.sys.mjs", "JsonStore.sys.mjs"]) {
+  for (const file of ["AxioSozoServices.sys.mjs", "ContextMenuContexts.sys.mjs", "JsonStore.sys.mjs", "SpaceSwitcher.sys.mjs"]) {
     const text = readFileSync(new URL(file, chrome), "utf8");
     assert.doesNotMatch(text, /gZenWorkspaces|zenWorkspaceMoreActions|zen-workspace-id|ZenWorkspace(DataChanged|sUIUpdate)/u, file);
   }
+});
+
+test("neighbourWorkspace follows Zen's wrap-around and natural-scroll prefs", () => {
+  const C = "33333333-3333-4333-8333-333333333333";
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "A" }, { uuid: B, name: "B" }, { uuid: C, name: "C" }], active: A });
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  assert.equal(adapter.neighbourWorkspace(1), B);
+  assert.equal(adapter.neighbourWorkspace(-1), C, "wraps by default");
+  assert.equal(adapter.neighbourWorkspace(0), null);
+  f.zen.naturalScroll = true;
+  assert.equal(adapter.neighbourWorkspace(1, { scroll: true }), C);
+  assert.equal(adapter.neighbourWorkspace(1), B, "keys ignore natural scroll");
+  f.zen.shouldWrapAroundNavigation = false;
+  assert.equal(adapter.neighbourWorkspace(-1), null);
+  const single = new ZenWorkspaceAdapter(fakeZenWindow({ spaces: [{ uuid: A, name: "A" }] }).window);
+  assert.equal(single.neighbourWorkspace(1), null);
+});
+
+test("menu target marking, menu opening, header anchor and onUpdate", () => {
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "A" }, { uuid: B, name: "B" }], active: A });
+  const opened = [];
+  f.window.elements.zenWorkspaceMoreActions = { openPopup: (...args) => opened.push(args) };
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  const attrs = new Map();
+  const element = { setAttribute: (k, v) => attrs.set(k, v) };
+  assert.equal(adapter.markMenuTarget(element, B), true);
+  assert.deepEqual(Object.fromEntries(attrs), { "zen-workspace-id": B, context: "zenWorkspaceMoreActions" });
+  assert.equal(adapter.markMenuTarget(element, "../x"), false);
+  assert.equal(adapter.openWorkspaceMenu(element, null), true);
+  assert.deepEqual(opened[0].slice(0, 2), [element, "before_start"]);
+  assert.equal(adapter.openWorkspaceMenu(null), false);
+  const header = { id: "header" };
+  f.window.elements[A] = { querySelector: selector => (selector === ZEN_SIDEBAR.spaceHeader ? header : null) };
+  assert.equal(adapter.workspaceHeader(A), header);
+  assert.equal(adapter.workspaceHeader(B), null);
+  f.window.elements[ZEN_SIDEBAR.footToolbar] = { id: "foot" };
+  assert.equal(adapter.sidebarFoot().id, "foot");
+  let updates = 0;
+  const off = adapter.onUpdate(() => updates++);
+  f.window.dispatch("ZenWorkspacesUIUpdate"); // e.g. a reorder: no diff, still an update
+  assert.equal(updates, 1);
+  off();
+  f.window.dispatch("ZenWorkspacesUIUpdate");
+  assert.equal(updates, 1);
+  adapter.onUpdate(() => updates++);
+  adapter.dispose();
+  f.window.dispatch("ZenWorkspacesUIUpdate");
+  assert.equal(updates, 1);
+});
+
+test("Library/Downloads swap goes through CustomizableUI and is reversible", () => {
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "A" }] });
+  const foot = [ZEN_SIDEBAR.libraryWidget, ZEN_SIDEBAR.spaceIcons];
+  const where = id => (foot.includes(id) ? { area: ZEN_SIDEBAR.footToolbar, position: foot.indexOf(id) } : null);
+  f.window.CustomizableUI = {
+    getPlacementOfWidget: where,
+    addWidgetToArea: (id, area, position) => { assert.equal(area, ZEN_SIDEBAR.footToolbar); foot.splice(position, 0, id); },
+    removeWidgetFromArea: id => { if (foot.includes(id)) foot.splice(foot.indexOf(id), 1); },
+  };
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  assert.equal(adapter.replaceLibraryButton(), true);
+  assert.deepEqual(foot, [ZEN_SIDEBAR.downloadsWidget, ZEN_SIDEBAR.spaceIcons]);
+  assert.equal(adapter.replaceLibraryButton(), false, "idempotent");
+  assert.equal(adapter.restoreLibraryButton(), true);
+  assert.deepEqual(foot, [ZEN_SIDEBAR.libraryWidget, ZEN_SIDEBAR.spaceIcons]);
+  assert.equal(adapter.restoreLibraryButton(), false);
+  delete f.window.CustomizableUI;
+  assert.equal(adapter.replaceLibraryButton(), false);
 });

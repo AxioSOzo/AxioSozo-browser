@@ -1,7 +1,10 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { ContextsError } from './errors.mjs';
-import { isPlainObject, own, stripQueryAndFragment, utf8Length, validateDetectionDraft, validateManifest } from './schema.mjs';
+import {
+  PRIMARY_SURFACE_KINDS, environmentKey, isPlainObject, needsManifestV2, own, stripQueryAndFragment, utf8Length, validateBaseUrl,
+  validateDetectionDraft, validateManifest,
+} from './schema.mjs';
 
 // The repository manifest `.axiosozo/project.json`: names, URLs, ports and
 // surfaces a team can commit. It never holds secrets, credentials or local paths.
@@ -38,12 +41,24 @@ export function assertNoSecrets(manifest) {
   return manifest;
 }
 
-const ordered = m => ({
-  version: 1, name: m.name, kind: m.kind,
-  environments: m.environments.map(e => ({ name: e.name, base_url: e.base_url })),
-  services: m.services.map(s => ({ name: s.name, url: s.url, port: s.port })),
-  surfaces: m.surfaces.map(s => ({ name: s.name, url: s.url, kind: s.kind })),
-});
+// Stable key order. Optional v2 fields are emitted only when present; the
+// version is raised to 2 exactly when one is used (never lowered).
+const opt = (key, v) => (v === undefined ? {} : { [key]: v });
+const ordered = m => {
+  const out = {
+    name: m.name, kind: m.kind,
+    environments: m.environments.map(e => ({ name: e.name, ...opt('app', own(e, 'app')), base_url: e.base_url })),
+    services: m.services.map(s => ({ name: s.name, ...opt('app', own(s, 'app')), url: s.url, port: s.port })),
+    surfaces: m.surfaces.map(s => ({ name: s.name, url: s.url, kind: s.kind, ...opt('prominence', own(s, 'prominence')) })),
+  };
+  return { version: needsManifestV2(out) || m.version === 2 ? 2 : 1, ...out };
+};
+// Drafts carry an explicit prominence on every surface; a manifest keeps it
+// only where it differs from the default for the kind.
+const defaultProminence = kind => (PRIMARY_SURFACE_KINDS.includes(kind) ? 'primary' : 'secondary');
+const draftSurface = ({ name, url, kind, prominence }) => ({ name, url, kind, ...(prominence && prominence !== defaultProminence(kind) ? { prominence } : {}) });
+const plain = ({ source: _s, guess: _g, ...rest }) => rest;
+const mapList = (v, fn) => (Array.isArray(v) ? v.map(fn) : v);
 
 // Drafts made before service/surface URLs lost their query and fragment are
 // normalized the same way detection does now; only http(s) strings change.
@@ -57,16 +72,48 @@ const stripDraftUrls = draft => {
 // Confirm a detection draft into a manifest. `edits` may replace name, kind,
 // environments, services or surfaces (manifest shapes, no source/guess). Draft
 // URLs lose any query or fragment; edited URLs with one are rejected.
+//
+// `edits.production_url` is the optional "Production URL" field of the review
+// UI: a string (for the project's main web app), `{ [app]: url }` for
+// multi-app projects, or null/"" for none. It is applied after the other edits
+// and replaces a detected production environment of the same app.
 export function draftToManifest(draft, edits = {}) {
   const d = validateDetectionDraft(stripDraftUrls(draft));
   if (!isPlainObject(edits)) throw new ContextsError('INVALID_INPUT', '$.edits: expected an object', '$.edits');
-  for (const k of Object.keys(edits)) if (!['name', 'kind', 'environments', 'services', 'surfaces'].includes(k)) throw new ContextsError('INVALID_INPUT', `$.edits.${k}: unknown key`, `$.edits.${k}`);
+  for (const k of Object.keys(edits)) if (!['name', 'kind', 'environments', 'services', 'surfaces', 'production_url'].includes(k)) throw new ContextsError('INVALID_INPUT', `$.edits.${k}: unknown key`, `$.edits.${k}`);
   const pick = (k, fallback) => own(edits, k) !== undefined ? own(edits, k) : fallback;
-  const m = validateManifest(ordered({
+  let m = validateManifest(ordered({
     name: pick('name', d.name), kind: pick('kind', d.kind),
-    environments: pick('environments', d.environments), services: pick('services', d.services), surfaces: pick('surfaces', d.surfaces),
+    environments: pick('environments', d.environments.map(plain)), services: pick('services', d.services.map(plain)),
+    surfaces: mapList(pick('surfaces', d.surfaces), s => (isPlainObject(s) ? draftSurface(s) : s)),
   }));
+  const prod = own(edits, 'production_url');
+  if (typeof prod === 'string' && prod.trim()) m = withProductionUrl(m, prod.trim(), { app: mainWebApp(m) });
+  else if (isPlainObject(prod)) for (const [app, url] of Object.entries(prod)) { if (typeof url === 'string' && url.trim()) m = withProductionUrl(m, url.trim(), { app }); }
+  else if (prod !== undefined && prod !== null && prod !== '') throw new ContextsError('INVALID_INPUT', '$.edits.production_url: expected a URL, { app: URL } or null', '$.edits.production_url');
   return assertNoSecrets(m);
+}
+
+// The app a single "Production URL" belongs to: the first app with a local
+// environment that is not a desktop shell, else none (project-wide).
+export function mainWebApp(manifest) {
+  const envs = Array.isArray(manifest?.environments) ? manifest.environments : [];
+  if (!envs.some(e => own(e, 'app') !== undefined)) return undefined;
+  const local = envs.filter(e => e.name === 'local' && own(e, 'app') !== undefined);
+  return (local.find(e => e.app !== 'desktop') ?? local[0])?.app;
+}
+
+// Adds or replaces the production environment of `app` (absent = project-wide).
+// The URL must be a valid base URL (http(s), no userinfo, query or fragment).
+export function withProductionUrl(manifest, url, { app } = {}) {
+  const m = validateManifest(manifest);
+  let base;
+  try { base = validateBaseUrl(url); } catch (e) { throw new ContextsError('INVALID_INPUT', `$.production_url: ${e.message.replace(/^\$: /, '')}`, '$.production_url'); }
+  const env = { name: 'production', ...(app === undefined || app === null ? {} : { app }), base_url: base };
+  const key = environmentKey(env);
+  const environments = m.environments.some(e => environmentKey(e) === key)
+    ? m.environments.map(e => (environmentKey(e) === key ? env : e)) : [...m.environments, env];
+  return assertNoSecrets(validateManifest(ordered({ ...m, environments })));
 }
 
 export function parseManifest(text) {

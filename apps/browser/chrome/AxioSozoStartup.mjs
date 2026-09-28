@@ -145,6 +145,8 @@ async function initialize() {
   });
   // The engine glyph on hovered tabs; the selected tab's glyph is the switch.
   const engineTabs = engineProbe ? guarded("engine tabs", () => optionalModule("EngineTabs.sys.mjs")?.installEngineTabs(window, { engineProbe })) : null;
+  // Bottom space switcher; axiosozo.ui.spaceSwitcher.enabled=false is stock Zen.
+  const spaceSwitcher = guarded("space switcher", () => optionalModule("SpaceSwitcher.sys.mjs")?.installSpaceSwitcher(window));
   const fixtureProbe = engineProbe?.diagnostics().browsingMode === "fixture";
   const probeSheet = fixtureProbe ? document.createProcessingInstruction("xml-stylesheet",
     'href="chrome://browser/content/axiosozo/browser-experience.css" type="text/css"') : null;
@@ -178,6 +180,7 @@ async function initialize() {
     disposed = true; probeSheet?.remove();
     disposeContexts();
     engineTabs?.dispose();
+    spaceSwitcher?.dispose();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });

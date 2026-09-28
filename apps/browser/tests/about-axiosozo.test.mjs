@@ -123,11 +123,11 @@ test("wrong principal is rejected before any service call", async () => {
 
 test("the method list is closed and matches contexts-api-v1 §3.3 plus openContext, openUrl and flags", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
-    "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevSettings", "getOverviewFlags",
-    "getProject", "linkOrganization", "linkProject", "listContexts", "listOrphans", "listProjects", "listRules",
-    "needsAttention", "openContext", "openUrl", "pickFolder", "projectForUrl", "removeOrphans", "removeProject",
-    "saveRule", "serviceStatus", "setContextType", "setEnginePreference", "setJevSettings", "updateProject",
-    "usageSummary", "writeManifest",
+    "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
+    "getOverviewFlags", "getProject", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
+    "listOrphans", "listProjects", "listRules", "needsAttention", "openContext", "openUrl", "pickFolder",
+    "projectForUrl", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus", "setContextType",
+    "setEnginePreference", "setJevSettings", "storeJevKey", "updateProject", "usageSummary", "writeManifest",
   ]);
 });
 
@@ -219,7 +219,7 @@ test("engine preference other than default is refused while the experimental pre
     assert.equal((await request(actor, "setEnginePreference", { uuid: UUID_A, engine: "chromium" })).ok, true);
     assert.deepEqual(calls, [["setEnginePreference", UUID_A, null], ["setEnginePreference", UUID_A, "chromium"]]);
     assert.deepEqual((await request(actor, "getOverviewFlags")).value,
-      { contexts: true, enginePreferences: true, jevKeyEntry: false });
+      { contexts: true, enginePreferences: true, jevKeyEntry: true });
   } finally { restore(); }
 });
 
@@ -305,6 +305,84 @@ test("service events reach subscribed pages as names only, and stop after destro
   } finally { restore(); }
 });
 
+// ---------------------------------------------------------------- providers
+
+function fakeProviderStatus({ storeError = null } = {}) {
+  const calls = [];
+  const jev = key => ({ id: "jev", state: key === "stored" ? "key-stored" : "needs-key", key });
+  let key = "missing";
+  return { calls, module: {
+    getProviderStatus: async () => { calls.push(["getProviderStatus"]); return { version: 1, providers: [jev(key)] }; },
+    getJevKeyStatus: async () => { calls.push(["getJevKeyStatus"]); return jev(key); },
+    storeJevKeyAndReport: async secret => {
+      calls.push(["store", secret.length]);
+      if (storeError) throw new Error(storeError);
+      key = "stored"; return jev(key);
+    },
+    removeJevKeyAndReport: async () => { calls.push(["remove"]); key = "missing"; return jev(key); },
+  } };
+}
+function withProviderStatus(fake, services = fakeServices().services) {
+  return setProvidersForTesting({ services: () => services, prefs: () => prefs({}), providerStatus: () => fake.module });
+}
+
+test("provider status and Jev key methods go to ProviderStatus, never to services, and never echo the key", async () => {
+  const { services, calls: serviceCalls } = fakeServices();
+  const fake = fakeProviderStatus();
+  const restore = withProviderStatus(fake, services);
+  const secret = "synthetic-key-not-real-0123";
+  const logged = []; const originalError = console.error; console.error = (...args) => logged.push(args);
+  try {
+    const actor = fakeActor();
+    assert.deepEqual((await request(actor, "getProviderStatus")).value, { version: 1, providers: [{ id: "jev", state: "needs-key", key: "missing" }] });
+    assert.equal((await request(actor, "getJevKeyStatus")).value.state, "needs-key");
+    const stored = await request(actor, "storeJevKey", { key: secret });
+    assert.deepEqual(stored, { ok: true, value: { id: "jev", state: "key-stored", key: "stored" } });
+    assert.equal((await request(actor, "removeJevKey")).value.state, "needs-key");
+    assert.deepEqual(fake.calls, [["getProviderStatus"], ["getJevKeyStatus"], ["store", secret.length], ["remove"]]);
+    assert.deepEqual(serviceCalls, []);
+    assert(!JSON.stringify(stored).includes(secret)); assert.deepEqual(logged, []);
+  } finally { console.error = originalError; restore(); }
+});
+
+test("Jev key params are strict and failures carry fixed codes without the key", async () => {
+  const secret = "synthetic-key-not-real-0123";
+  const fake = fakeProviderStatus({ storeError: `helper said ${secret}` });
+  const restore = withProviderStatus(fake);
+  try {
+    const actor = fakeActor();
+    for (const params of [{}, { key: "short" }, { key: "line\nbreak-key" }, { key: "x".repeat(4097) }, { key: 12345678 },
+      { key: secret, extra: 1 }]) {
+      const reply = await request(actor, "storeJevKey", params);
+      assert.equal(reply.error.code, "INVALID_PARAMS"); assert(!reply.error.message.includes("short"));
+    }
+    for (const [name, params] of [["removeJevKey", { key: secret }], ["getProviderStatus", { x: 1 }], ["getJevKeyStatus", []]]) {
+      assert.equal((await request(actor, name, params)).error.code, "INVALID_PARAMS");
+    }
+    assert.deepEqual(fake.calls, []);
+    const failed = await request(actor, "storeJevKey", { key: secret });
+    assert.equal(failed.error.code, "KEYCHAIN_HELPER_UNAVAILABLE");
+    assert(!JSON.stringify(failed).includes(secret));
+  } finally { restore(); }
+  for (const code of ["INVALID_KEY", "JEV_KEY_ENTRY_DISABLED", "KEYCHAIN_REFUSED", "HELPER_TIMEOUT"]) {
+    const again = withProviderStatus(fakeProviderStatus({ storeError: code }));
+    try { assert.equal((await request(fakeActor(), "storeJevKey", { key: secret })).error.code, code); } finally { again(); }
+  }
+});
+
+test("Jev keys cannot be stored or removed from a private about:axiosozo tab", async () => {
+  const fake = fakeProviderStatus();
+  const restore = withProviderStatus(fake);
+  try {
+    const sender = goodSender({ usePrivateBrowsing: true, principal: { ...goodSender().principal, privateBrowsingId: 1 } });
+    const actor = fakeActor({ sender });
+    assert.equal((await request(actor, "storeJevKey", { key: "synthetic-key-not-real-0123" })).error.code, "PRIVATE_WINDOW");
+    assert.equal((await request(actor, "removeJevKey")).error.code, "PRIVATE_WINDOW");
+    assert.equal((await request(actor, "getJevKeyStatus")).ok, true);
+    assert.deepEqual(fake.calls, [["getJevKeyStatus"]]);
+  } finally { restore(); }
+});
+
 test("validateRequest and dispatch are usable without an actor", async () => {
   assert.throws(() => validateRequest(null), { code: "INVALID_REQUEST" });
   assert.throws(() => validateRequest({ name: "listRules", params: { a: 1 } }), { code: "INVALID_PARAMS" });
@@ -315,6 +393,8 @@ test("validateRequest and dispatch are usable without an actor", async () => {
   assert.deepEqual(value, [1]);
   assert.deepEqual(readFlags({ getBoolPref() { throw new Error("no prefs"); } }),
     { contexts: true, enginePreferences: false, jevKeyEntry: false });
+  assert.deepEqual(readFlags({ getBoolPref: (_name, fallback) => fallback }),
+    { contexts: true, enginePreferences: false, jevKeyEntry: true });
 });
 
 // ---------------------------------------------------------------- child

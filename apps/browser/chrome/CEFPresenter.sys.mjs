@@ -262,7 +262,8 @@ export class CEFPresenter {
   // ---- Browser chrome: style, tab menu and badge -------------------------------
   #installStyle() {
     // Gecko's identity and permission controls describe the blank Firefox
-    // document, never the CEF page. The badge states Chromium's own state.
+    // document, never the CEF page. The badge states Chromium's own security
+    // state, and only when a page is not secure; Chromium tabs carry no tag.
     const root = this.window.document.documentElement;
     if (!root) return;
     const style = this.window.document.createElementNS(XHTML, "style");
@@ -272,7 +273,7 @@ export class CEFPresenter {
       #axiosozo-engine-badge { display:none; align-items:center; gap:5px; margin-inline:4px 2px; padding:1px 8px;
         border:0; border-radius:999px; background:color-mix(in srgb, #1a73e8 16%, transparent); color:inherit;
         font:inherit; font-size:11px; font-weight:600; white-space:nowrap; cursor:default; }
-      [axiosozo-cef-active] #axiosozo-engine-badge { display:inline-flex; }
+      [axiosozo-cef-active] #axiosozo-engine-badge[insecure] { display:inline-flex; }
       #axiosozo-engine-badge:hover { background:color-mix(in srgb, #1a73e8 26%, transparent); }
       #axiosozo-engine-badge:focus-visible { outline:2px solid var(--focus-outline-color, AccentColor); outline-offset:1px; }
       #axiosozo-engine-badge[insecure] { background:color-mix(in srgb, #d93025 16%, transparent); }
@@ -330,9 +331,9 @@ export class CEFPresenter {
     if (!identity) return;
     const badge = this.window.document.createElementNS(XHTML, "button");
     badge.id = "axiosozo-engine-badge";
-    badge.textContent = "Chromium";
-    badge.setAttribute("tooltiptext", "This tab uses Chromium. Click to open it in Firefox.");
-    badge.setAttribute("aria-label", "Chromium tab. Open in Firefox");
+    badge.textContent = "Not secure";
+    badge.setAttribute("tooltiptext", "This page is not secure. Click to open it in Firefox for details.");
+    badge.setAttribute("aria-label", "Not secure. Open in Firefox");
     const command = event => {
       event.stopPropagation();
       if (this.active) this.#toGecko(this.active).catch(error => this.onFailure(error));
@@ -346,7 +347,6 @@ export class CEFPresenter {
     if (!this.badge || this.active !== record) return;
     const insecure = record.latestURL?.startsWith("http:");
     this.badge.toggleAttribute("insecure", !!insecure);
-    this.badge.textContent = insecure ? "Chromium · Not secure" : "Chromium";
   }
 
   #visibility(record) {

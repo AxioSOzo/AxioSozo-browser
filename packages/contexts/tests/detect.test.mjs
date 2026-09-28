@@ -15,7 +15,9 @@ const pkg = (scripts, more = {}) => ({ 'package.json': JSON.stringify({ name: 'a
 test('allowlist is exactly the contract list', () => {
   assert.deepEqual([...DETECTION_FILES], ['package.json', '.vercel/project.json', 'vercel.json', 'netlify.toml', 'wrangler.toml', 'wrangler.json',
     'fly.toml', 'docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml', 'src-tauri/tauri.conf.json', 'tauri.conf.json',
-    'electron-builder.json', 'electron-builder.yml', 'Cargo.toml', 'pyproject.toml', 'go.mod', '.git/config', '.axiosozo/project.json']);
+    'electron-builder.json', 'electron-builder.yml', 'Cargo.toml', 'pyproject.toml', 'go.mod', '.git/config', '.axiosozo/project.json',
+    // Workspace roots (monorepo detection, contexts-api-v1 §2.2).
+    'pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json']);
   assert.ok(Object.isFrozen(DETECTION_FILES));
   for (const bad of ['.env', '.env.local', '.git/HEAD', '.git/credentials', './package.json', '/package.json', 'a/package.json', 'node_modules/x/package.json',
     'src-tauri/../package.json', 'PACKAGE.JSON', 'package.json ', 'id_rsa', '.npmrc', '.git-credentials', '', null, undefined, {}]) {

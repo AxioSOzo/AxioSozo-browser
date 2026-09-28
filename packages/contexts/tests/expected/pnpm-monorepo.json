@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "name": "pnpm-monorepo",
+  "kind": "web",
+  "kind_source": {
+    "source": "apps/admin/package.json scripts.dev (next)",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:3001/",
+      "app": "admin",
+      "source": "apps/admin/package.json scripts.dev (next port 3001)",
+      "guess": false
+    },
+    {
+      "name": "local",
+      "base_url": "http://localhost:5174/",
+      "app": "web",
+      "source": "apps/web/package.json scripts.dev (vite port 5174)",
+      "guess": false
+    },
+    {
+      "name": "production",
+      "base_url": "https://synthetic-web.pages.dev/",
+      "app": "web",
+      "source": "apps/web/wrangler.toml name (Cloudflare Pages default domain)",
+      "guess": true
+    }
+  ],
+  "services": [
+    {
+      "name": "Next.js dev server",
+      "url": "http://localhost:3001/",
+      "port": 3001,
+      "app": "admin",
+      "source": "apps/admin/package.json scripts.dev (next port 3001)",
+      "guess": false
+    },
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5174/",
+      "port": 5174,
+      "app": "web",
+      "source": "apps/web/package.json scripts.dev (vite port 5174)",
+      "guess": false
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/acme/pnpm-monorepo",
+      "kind": "repository",
+      "prominence": "primary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/acme/pnpm-monorepo/issues",
+      "kind": "issues",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/acme/pnpm-monorepo/actions",
+      "kind": "ci",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/acme/pnpm-monorepo/releases",
+      "kind": "releases",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Cloudflare (synthetic-web)",
+      "url": "https://dash.cloudflare.com/",
+      "kind": "hosting",
+      "prominence": "secondary",
+      "source": "apps/web/wrangler.toml",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "next",
+    "vite"
+  ],
+  "files_read": [
+    "package.json",
+    ".git/config",
+    "pnpm-workspace.yaml",
+    "turbo.json",
+    "apps/admin/package.json",
+    "apps/web/package.json",
+    "apps/web/wrangler.toml",
+    "packages/ui/package.json"
+  ],
+  "refused": [],
+  "warnings": []
+}

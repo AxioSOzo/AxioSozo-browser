@@ -8,7 +8,9 @@ Everything here works without a key, and normal browsing makes zero Jev calls.
 Implementation: `packages/provider-host/src/decision.mjs` (`DecisionProvider`),
 reached from chrome only through the on-demand provider host. Chrome never gets
 a second network client and never sees the key. The key lives in the macOS
-Keychain (`keychain.mjs`).
+Keychain (`keychain.mjs`). Key entry ships (open decision 4, decided): the user
+stores or removes it in Settings or `about:axiosozo`; chrome sees only its
+presence (see [provider-v1](provider-v1.md#jev-key-entry-decided-ships)).
 
 ## Common rules (all choice sets)
 

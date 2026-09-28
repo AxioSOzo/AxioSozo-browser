@@ -66,7 +66,7 @@ The working branch is `zen-reset`. It has uncommitted work in progress; read
 | Engine switch | Per-tab Firefox/Chromium switch in Zen's tab context menu, plus a Chromium badge in the address bar. One shared Chromium host with a persistent profile beside the Zen profile. Live runs are **blocked on the macOS Keychain "Chromium Safe Storage" approval**. E1/E2 are not passed. | `native/chromium-host/`, `CEFEngineAdapter.sys.mjs`, `CEFPresenter.sys.mjs`, `EngineProbeControls.sys.mjs`, `contracts/cef-v1.md` |
 | Coordinator | Rust target registry with one-use grants over inherited pipes, created on demand. | `crates/browser-core/`, `BrowserCoordinator.sys.mjs`, `contracts/ipc-v1.schema.json` |
 | Provider host | On-demand stdio host, conversation transport v1, Codex/Claude Code routes `EXPERIMENTAL_LIVE`. Live auth is not established. Its UI is not loaded after the reset. | `packages/provider-host/`, `contracts/provider-v1.md`, `ProviderPanel.sys.mjs`, `ProviderConversation.sys.mjs` |
-| Jev | `DecisionProvider` (`jev-1.13.0`) with a fixed choice set, a 30 s deadline, a 32 KiB output cap and a Keychain-held key. Only the synthetic diagnostic is enabled; production key entry is disabled. | `packages/provider-host/src/decision.mjs`, `keychain.mjs` |
+| Jev | `DecisionProvider` (`jev-1.13.0`) with a fixed choice set, a 30 s deadline, a 32 KiB output cap and a Keychain-held key. Only the synthetic diagnostic is enabled; production key entry ships (decision 4) — Keychain-only, presence shown, no live call on store. | `packages/provider-host/src/decision.mjs`, `keychain.mjs` |
 | Saved pages, palette | Code exists, but it was retired from the frontend at the reset. It can be reused as a persistence pattern. | `SavedPages.sys.mjs`, `BrowserExperience.sys.mjs` |
 | Source | Public at https://github.com/AxioSOzo/AxioSozo-browser (MPL-2.0). No releases and no signed build. | `LICENSE`, `THIRD_PARTY_NOTICES.md` |
 
@@ -384,5 +384,7 @@ Out of scope are:
 1. The user-facing name for "context".
 2. The download website and domain.
 3. The Apple Developer account used for signing and notarization.
-4. Whether Jev key entry ships in the first preview or stays disabled.
+4. ~~Whether Jev key entry ships in the first preview or stays disabled.~~
+   **Decided (Wout, 28 September 2026): it ships.** On by default;
+   `axiosozo.jev.keyEntry.enabled` stays as a kill switch.
 5. M2 order: send-to-agent first (recommended) or page highlights first.

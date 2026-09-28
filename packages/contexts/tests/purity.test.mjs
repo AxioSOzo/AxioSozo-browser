@@ -66,6 +66,10 @@ test('index exports the contexts-api-v1 §2 surface', () => {
     'SENSITIVE_HOSTS_VERSION', 'suppress', 'OVERRIDE_DELAY_MS',
     'localDay', 'recordForeground', 'usageFor', 'prune', 'summarize', 'exportLedger', 'clearLedger',
     'DEFAULT_INTERVAL_MINUTES', 'DEFAULT_HOURLY_BUDGET', 'createBudget', 'takeBudget', 'nextCheckpoint', 'buildSiteRuleRequest',
+    // Monorepos, projects in any space, prominence, tab linking (contexts-api-v1 §2.2–§2.4).
+    'MAX_WORKSPACE_PACKAGES', 'PACKAGE_DETECTION_FILES', 'isPackageDir', 'isAllowedPackagePath', 'packageDetectionRefusal', 'normalizeWorkspacePattern',
+    'workspaceCandidates', 'expandWorkspaceGlobs', 'detectionRefusal', 'migrateContextStore', 'projectsInContext', 'CONTEXT_STORE_VERSION',
+    'surfaceProminence', 'SURFACE_PROMINENCE', 'PRIMARY_SURFACE_KINDS', 'environmentKey', 'withProductionUrl', 'mainWebApp', 'matchProjectForUrl',
   ];
   for (const name of required) assert.ok(name in api, name);
   assert.equal(api.MAX_FILE_BYTES, 262144);
