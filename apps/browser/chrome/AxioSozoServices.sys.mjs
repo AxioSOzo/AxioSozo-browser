@@ -13,7 +13,7 @@
 // Node tests map ./contexts/ to packages/contexts/src (tests/support/chrome-modules.mjs).
 import * as core from "./contexts/index.mjs";
 import { JsonStore, profileStorage } from "./JsonStore.sys.mjs";
-import { isContextEngine } from "./EngineRegistry.sys.mjs";
+import { isContextEngine, toContextEngine } from "./EngineRegistry.sys.mjs";
 
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
 export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json" });
@@ -188,7 +188,7 @@ export class AxioSozoServices {
       organization_uuid: meta?.organization_uuid ?? null,
       project_id: projectIds[0] ?? null,
       project_ids: projectIds,
-      engine_preference: meta?.engine_preference ?? null,
+      engine_preference: meta?.engine_preference ? toContextEngine(meta.engine_preference) : null,
       // Identity: the Zen workspace's default container (userContextId, 0 = none).
       container: space.containerTabId,
       container_label: adapter?.containerLabel?.(space.containerTabId) ?? null,
@@ -301,7 +301,8 @@ export class AxioSozoServices {
   async setEnginePreference(uuid, engine) {
     this.#requireLive(uuid);
     if (engine !== null && !isContextEngine(engine)) fail("INVALID_ENGINE");
-    await this.#updateContexts(doc => this.#upsertMeta(doc, uuid, { engine_preference: engine }));
+    // Stored as the contract's `gecko`; the deprecated `firefox` is accepted and normalized.
+    await this.#updateContexts(doc => this.#upsertMeta(doc, uuid, { engine_preference: engine === null ? null : toContextEngine(engine) }));
     return this.getContext(uuid);
   }
 

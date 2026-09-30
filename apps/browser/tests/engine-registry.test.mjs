@@ -62,15 +62,16 @@ test("ids normalize: contract `firefox` reads as gecko, legacy values still rest
   assert.equal(engineFromPersisted(null), "gecko");
 });
 
-test("context-v1 mapping is isolated here: gecko <-> firefox, webkit cannot be stored yet", () => {
-  assert.equal(toContextEngine("gecko"), "firefox");
-  assert.equal(toContextEngine("firefox"), "firefox");
+test("context-v1 mapping: gecko is the contract spelling, firefox a deprecated read alias, webkit cannot be stored yet", () => {
+  assert.equal(toContextEngine("gecko"), "gecko");
+  assert.equal(toContextEngine("firefox"), "gecko", "deprecated alias normalizes");
   assert.equal(toContextEngine("chromium"), "chromium");
   assert.equal(toContextEngine("webkit"), null);
   assert.equal(fromContextEngine("firefox"), "gecko");
   assert.equal(isContextEngine("firefox"), true);
   assert.equal(isContextEngine("chromium"), true);
-  assert.equal(isContextEngine("gecko"), false, "the contract still says firefox");
+  assert.equal(isContextEngine("gecko"), true);
+  assert.equal(isContextEngine("Gecko"), false);
   assert.equal(isContextEngine("webkit"), false);
 });
 

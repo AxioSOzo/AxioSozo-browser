@@ -115,6 +115,18 @@ const PAGE_ERRORS = {
   render_process_terminated: ["This page stopped working", "Reload to try again. Anything you entered may be lost."],
   engine_failed: ["Chromium stopped", "The Chromium engine for this tab stopped. Reload to start it again."],
 };
+// Tab titles of Firefox's own error pages (Fluent ids from toolkit/neterror and
+// browser/aboutTabCrashed), so a Chromium tab labels itself like a Firefox tab
+// in the same situation instead of showing Chromium's internal error title.
+const NET_ERROR = "toolkit/neterror/netError.ftl";
+const ERROR_TITLES = {
+  certificate_error: [NET_ERROR, "certerror-page-title", "Warning: Potential Security Risk Ahead"],
+  load_failed: [NET_ERROR, "neterror-page-title", "Problem loading page"],
+  render_process_terminated: ["browser/aboutTabCrashed.ftl", "crashed-title", "Tab crash reporter"],
+  engine_failed: ["browser/aboutTabCrashed.ftl", "crashed-title", "Tab crash reporter"],
+};
+// Attributes with which the address bar shows it is not describing the current page.
+const URLBAR_EDIT_ATTRIBUTES = ["breakout-extend", "zen-floating-urlbar", "usertyping", "searchmode", "persistsearchterms"];
 const NOTICES = {
   permission_denied: "This site asked for a permission Chromium tabs can't grant yet.",
   download_denied: "Downloads aren't supported in Chromium tabs yet. Open this tab in Firefox to download.",
@@ -341,7 +353,7 @@ export class CEFPresenter {
       /* Chromium permission doorhangers (ChromiumBrowserUI) anchor in #notification-popup-box. */
       [axiosozo-cef-active] #identity-box:not(:has(> #notification-popup-box:not([hidden]))),
       [axiosozo-cef-active] #identity-box > :not(#notification-popup-box),
-      [axiosozo-cef-active] :is(#tracking-protection-icon-container,
+      [axiosozo-cef-active] :is(#tracking-protection-icon-container, #trust-icon-container,
         #reader-mode-button, #translations-button, #pageActionButton, #star-button-box) { display:none !important; }
       #axiosozo-engine-badge { display:none; align-items:center; gap:5px; margin-inline:4px 2px; padding:1px 8px;
         border:0; border-radius:999px; background:color-mix(in srgb, #1a73e8 16%, transparent); color:inherit;
@@ -349,6 +361,8 @@ export class CEFPresenter {
       [axiosozo-cef-active] #axiosozo-engine-badge[insecure] { display:inline-flex; }
       #axiosozo-engine-badge:hover { background:color-mix(in srgb, #1a73e8 26%, transparent); }
       #axiosozo-engine-badge:focus-visible { outline:2px solid var(--focus-outline-color, AccentColor); outline-offset:1px; }
+      #urlbar:is([breakout-extend], [zen-floating-urlbar], [usertyping], [searchmode], [focused]) #axiosozo-engine-badge,
+      :root[zen-has-empty-tab="true"] #axiosozo-engine-badge { display:none !important; }
       #axiosozo-engine-badge[insecure] { background:color-mix(in srgb, #d93025 16%, transparent); }
       /* The Chromium tab marker is drawn by EngineTabs in axiosozo-runtime.css. */
       [data-axiosozo-cef] .axiosozo-cef-panel { position:absolute; inset:0; display:flex; flex-direction:column;
@@ -412,11 +426,33 @@ export class CEFPresenter {
     badge.addEventListener("click", command);
     identity.before(badge);
     this.badge = badge;
-    this.restoreHooks.push(() => { badge.removeEventListener("click", command); badge.remove(); this.badge = null; });
+    // The address bar changes state without a page event (new-tab bar, typing, search mode).
+    let observer = null;
+    try {
+      const Observer = this.window.MutationObserver;
+      if (Observer && this.window.gURLBar?.nodeType) {
+        observer = new Observer(() => this.#updateBadge());
+        observer.observe(this.window.gURLBar, { attributes: true, attributeFilter: [...URLBAR_EDIT_ATTRIBUTES, "pageproxystate", "focused"] });
+        if (this.window.document.documentElement) observer.observe(this.window.document.documentElement, { attributes: true, attributeFilter: ["zen-has-empty-tab"] });
+      }
+    } catch { observer = null; }
+    this.restoreHooks.push(() => { observer?.disconnect(); badge.removeEventListener("click", command); badge.remove(); this.badge = null; });
   }
-  #updateBadge(record) {
-    if (!this.badge || this.active !== record) return;
-    const insecure = record.latestURL?.startsWith("http:");
+  /**
+   * True while the address bar describes the active Chromium tab's own page.
+   * In Zen's new-tab/floating bar, while editing, typing or in search mode, the
+   * bar describes something else and the badge must stay hidden.
+   */
+  #urlbarShowsPage() {
+    const bar = this.window.gURLBar;
+    if (!bar) return true;
+    if (bar.focused || bar.searchMode || bar.getAttribute?.("pageproxystate") === "invalid") return false;
+    for (const name of URLBAR_EDIT_ATTRIBUTES) if (bar.hasAttribute?.(name)) return false;
+    return this.window.document.documentElement?.getAttribute?.("zen-has-empty-tab") !== "true";
+  }
+  #updateBadge(record = this.active) {
+    if (!this.badge || !record || this.active !== record) return;
+    const insecure = record.latestURL?.startsWith("http:") && this.#urlbarShowsPage();
     this.badge.toggleAttribute("insecure", !!insecure);
   }
 
@@ -611,6 +647,10 @@ export class CEFPresenter {
     record.lastFrameId = metadata.frame_id;
   }
   #event(record, event) {
+    // The certificate error page is drawn by ChromiumBrowserUI; the tab title follows it here.
+    if (event.event === "error" && !event.request_id && event.code === "certificate_error" && this.browsingMode === "web") {
+      this.#errorTitle(record, "certificate_error");
+    }
     if (this.ui?.handle(record, event)) return; // AxioSozo engine UI delegation
     if (event.event === "url") {
       record.latestURL = event.url;
@@ -663,6 +703,7 @@ export class CEFPresenter {
   #panel(record, code) {
     // Chromium reports a refused certificate, then the cancelled load; keep the specific reason.
     if (code === "load_failed" && record.panelCode === "certificate_error") return;
+    this.#errorTitle(record, code);
     if (!record.panel) {
       if (!code) return;
       const panel = this.#element(record.overlay, "div", "axiosozo-cef-panel");
@@ -703,7 +744,7 @@ export class CEFPresenter {
   }
   #syncChrome(record) {
     if (this.active !== record) return;
-    if (record.title) this.#setLabel(record);
+    if (this.#labelTitle(record)) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
     // The explicit nsIURI updates address text; Gecko security UI is masked.
@@ -713,10 +754,33 @@ export class CEFPresenter {
     }
     this.#updateBadge(record);
   }
+  /** The tab label: Firefox's error-page title while an error page shows, else the page title. */
+  #labelTitle(record) { return record.errorTitle || record.title; }
   #setLabel(record) {
-    const gBrowser = this.window.gBrowser;
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(record.tab, record.title);
-    else record.tab.label = record.title;
+    const gBrowser = this.window.gBrowser, title = this.#labelTitle(record);
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(record.tab, title);
+    else record.tab.label = title;
+  }
+  /** Sets (code) or clears (null) the error-page tab title; the next successful load restores the page title. */
+  #errorTitle(record, code) {
+    const before = record.errorTitle ?? null;
+    record.errorTitle = code ? this.#localizedErrorTitle(code) : null;
+    if (record.errorTitle === before) return;
+    if (record.errorTitle) this.#setLabel(record);
+    else if (record.title) this.#setLabel(record);
+    else if (record.tab.isConnected) this.window.gBrowser.setTabTitle(record.tab);
+    if (this.active === record) this.window.gBrowser.updateTitlebar();
+  }
+  #localizedErrorTitle(code) {
+    const [resource, id, fallback] = ERROR_TITLES[code] ?? ERROR_TITLES.load_failed;
+    try {
+      this.l10nBundles ??= new Map();
+      let bundle = this.l10nBundles.get(resource);
+      if (!bundle) { bundle = new this.window.Localization([resource], true); this.l10nBundles.set(resource, bundle); }
+      const value = bundle.formatValueSync(id);
+      if (typeof value === "string" && value) return value;
+    } catch {}
+    return fallback;
   }
   #cursor(record, cursor) {
     // The adapter admits only CSS keywords; the component re-checks and never takes url().
@@ -1142,7 +1206,7 @@ export class CEFPresenter {
     }, { optional: true });
     wrap(this.window.gBrowser, "setTabTitle", function(presenter, original, args) {
       const record = presenter.records.get(args[0]);
-      if (!record?.title) return original.apply(this, args);
+      if (!record || !presenter.#labelTitle(record)) return original.apply(this, args);
       presenter.#setLabel(record);
       return true;
     }, { optional: true });

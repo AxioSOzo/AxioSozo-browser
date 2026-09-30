@@ -65,6 +65,11 @@ test('context metadata', () => {
   throwsCode(() => validateContextMetadata(context({ version: 2 })), 'INVALID_CONTEXT', '$.version');
   throwsCode(() => validateContextMetadata(context({ updated_at: 1.5 })), 'INVALID_CONTEXT', '$.updated_at');
   throwsCode(() => validateContextMetadata(context({ engine_preference: 'webkit' })), 'INVALID_CONTEXT');
+  assert.equal(validateContextMetadata(context({ engine_preference: 'gecko' })).engine_preference, 'gecko');
+  assert.equal(validateContextMetadata(context({ engine_preference: 'firefox' })).engine_preference, 'gecko', 'deprecated read alias normalizes to gecko');
+  assert.equal(validateContextMetadata(context({ engine_preference: 'chromium' })).engine_preference, 'chromium');
+  throwsCode(() => validateContextMetadata(context({ engine_preference: 'Firefox' })), 'INVALID_CONTEXT', '$.engine_preference');
+  throwsCode(() => validateContextMetadata(context({ engine_preference: '__proto__' })), 'INVALID_CONTEXT', '$.engine_preference');
   const missing = context(); delete missing.engine_preference;
   throwsCode(() => validateContextMetadata(missing), 'INVALID_CONTEXT', '$.engine_preference');
   throwsCode(() => validateContextMetadata([]), 'INVALID_CONTEXT');

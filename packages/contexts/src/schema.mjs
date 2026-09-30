@@ -226,6 +226,13 @@ function manifest(v, code, path) {
 // True when a manifest-shaped value uses a field that needs version 2.
 export const needsManifestV2 = m => [...(m?.environments ?? []), ...(m?.services ?? [])].some(x => own(x, 'app') !== undefined) ||
   (m?.surfaces ?? []).some(s => own(s, 'prominence') !== undefined);
+// `firefox` is the deprecated version 1 spelling of `gecko`: read, then normalized.
+export const ENGINES = Object.freeze(['gecko', 'chromium']);
+export const DEPRECATED_ENGINE_ALIASES = Object.freeze({ firefox: 'gecko' });
+function engine(v, code, path) {
+  const value = typeof v === 'string' && Object.hasOwn(DEPRECATED_ENGINE_ALIASES, v) ? DEPRECATED_ENGINE_ALIASES[v] : v;
+  return oneOf(value, ENGINES, code, path);
+}
 function contextMetadata(v, code, path) {
   keys(v, code, path, ['version', 'workspace_uuid', 'type', 'organization_uuid', 'project_id', 'engine_preference', 'updated_at']);
   if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
@@ -235,7 +242,7 @@ function contextMetadata(v, code, path) {
     type: oneOf(v.type, CONTEXT_TYPES, code, `${path}.type`),
     organization_uuid: nullable(v.organization_uuid, x => workspaceUuid(x, code, `${path}.organization_uuid`)),
     project_id: nullable(v.project_id, x => str(x, code, `${path}.project_id`, { pattern: PROJECT_ID })),
-    engine_preference: nullable(v.engine_preference, x => oneOf(x, ['firefox', 'chromium'], code, `${path}.engine_preference`)),
+    engine_preference: nullable(v.engine_preference, x => engine(x, code, `${path}.engine_preference`)),
     updated_at: timestamp(v.updated_at, code, `${path}.updated_at`),
   };
   // Projects may live in any space (store v2: projects[].context_uuid). The

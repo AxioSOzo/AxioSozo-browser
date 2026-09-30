@@ -316,6 +316,71 @@ test('page errors stay inside the Chromium tab instead of switching engines', as
   await presenter.dispose();
 });
 
+test("error pages label the tab like Firefox's own error pages and the real title returns on the next good load", async () => {
+  const z = zenWindow();
+  const strings = { 'certerror-page-title': 'Warning: Potential Security Risk Ahead', 'neterror-page-title': 'Problem loading page', 'crashed-title': 'Tab crash reporter' };
+  z.win.Localization = class { constructor(resources, sync) { assert.equal(sync, true); this.resources = resources; } formatValueSync(id) { return strings[id]; } };
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  callbacks.onEvent({ event: 'title', title: 'Example page' });
+  assert.equal(z.first.label, 'Example page');
+  // Chromium reports the refused certificate and then its own "Privacy error" title.
+  callbacks.onEvent({ event: 'error', code: 'certificate_error', native_code: -202 });
+  callbacks.onEvent({ event: 'title', title: 'Privacy error' });
+  assert.equal(z.first.label, 'Warning: Potential Security Risk Ahead');
+  callbacks.onEvent({ event: 'title', title: 'Good page' });
+  callbacks.onEvent({ event: 'load', http_status: 200, restored_from_history: false });
+  assert.equal(z.first.label, 'Good page', 'the real title is restored by the next successful load');
+  callbacks.onEvent({ event: 'error', code: 'load_failed', native_code: -105 });
+  assert.equal(z.first.label, 'Problem loading page');
+  z.win.gBrowser.setTabTitle(z.first);
+  assert.equal(z.first.label, 'Problem loading page', "Zen's own title refresh does not undo it");
+  callbacks.onEvent({ event: 'load', http_status: 200, restored_from_history: false });
+  assert.equal(z.first.label, 'Good page');
+  callbacks.onEvent({ event: 'error', code: 'render_process_terminated', native_code: 0 });
+  assert.equal(z.first.label, 'Tab crash reporter');
+  await presenter.dispose();
+  // Without Fluent the English fallbacks apply.
+  const plain = zenWindow();
+  const second = new CEFPresenter(plain.win, plain.gecko, { launch: plain.launch, browsingMode: 'web', onFailure() {} });
+  await second.switchToChromium(plain.first); await settle();
+  plain.launched[0].callbacks.onEvent({ event: 'error', code: 'certificate_error', native_code: -202 });
+  assert.equal(plain.first.label, 'Warning: Potential Security Risk Ahead');
+  await second.dispose();
+});
+
+test('the Not secure badge shows only while the address bar describes the active Chromium tab’s own http page', async () => {
+  const z = zenWindow();
+  const identity = { before(node) { this.badge = node; } };
+  const bar = { focused: false, searchMode: null, attrs: new Map(), uris: [], view: { close() {} },
+    getAttribute(key) { return this.attrs.get(key) ?? null; }, hasAttribute(key) { return this.attrs.has(key); },
+    setURI(value) { this.uris.push(value?.uri?.spec ?? null); } };
+  z.win.gURLBar = bar;
+  z.win.document.getElementById = id => (id === 'identity-box' ? identity : null);
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0], badge = identity.badge;
+  const shown = () => badge.hasAttribute('insecure');
+  callbacks.onEvent({ event: 'url', url: 'https://example.com/' });
+  assert.equal(shown(), false, 'secure page');
+  callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
+  assert.equal(shown(), true, 'the address bar shows the tab’s own insecure page');
+  for (const [name, on, off] of [['breakout-extend', () => bar.attrs.set('breakout-extend', ''), () => bar.attrs.delete('breakout-extend')],
+    ['zen-floating-urlbar', () => bar.attrs.set('zen-floating-urlbar', 'true'), () => bar.attrs.delete('zen-floating-urlbar')],
+    ['usertyping', () => bar.attrs.set('usertyping', 'true'), () => bar.attrs.delete('usertyping')],
+    ['searchmode', () => { bar.searchMode = { engineName: 'x' }; }, () => { bar.searchMode = null; }],
+    ['pageproxystate invalid', () => bar.attrs.set('pageproxystate', 'invalid'), () => bar.attrs.delete('pageproxystate')],
+    ['focused', () => { bar.focused = true; }, () => { bar.focused = false; }],
+    ['empty new tab', () => z.win.document.documentElement.setAttribute('zen-has-empty-tab', 'true'), () => z.win.document.documentElement.removeAttribute('zen-has-empty-tab')]]) {
+    on(); callbacks.onEvent({ event: 'url', url: 'http://plain.example/next' });
+    assert.equal(shown(), false, `hidden while ${name}`);
+    off(); callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
+    assert.equal(shown(), true, `back after ${name}`);
+  }
+  await presenter.dispose();
+});
+
 test('links that open a new tab open a new Chromium tab; background tabs start when shown', async () => {
   const z = zenWindow();
   const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });

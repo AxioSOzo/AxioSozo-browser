@@ -189,7 +189,7 @@ test("contexts: every workspace is personal by default; type and links survive a
   assert.equal(byUuid[BV].type, "organization");
   assert.equal(byUuid[APP].type, "project");
   assert.equal(byUuid[APP].organization_uuid, BV);
-  assert.equal(byUuid[APP].engine_preference, "firefox");
+  assert.equal(byUuid[APP].engine_preference, "gecko", "the deprecated firefox spelling is normalized on write");
   // Zen's own store was never written: the fake has no write API at all.
   assert.deepEqual(Object.keys(JSON.parse(h.storage.files.get("contexts.json"))), ["version", "contexts", "projects"]);
 });

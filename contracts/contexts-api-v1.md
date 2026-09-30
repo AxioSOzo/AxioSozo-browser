@@ -303,10 +303,22 @@ never rejects (failures resolve to outcome `none`).
 `EngineProbeControls` exposes, on the object returned by
 `installEngineProbeControls`, a method
 `applyEnginePreference(tab, engine, { reason }) → Promise<{ applied: boolean, engine, error? }>`.
-`firefox` is a no-op when already Gecko. `chromium` uses the existing per-tab
-switch and keeps the Firefox tab on any failure. It never runs for private
-windows, privileged URLs or while the switch is unavailable, and it returns
-`{ applied: false, error: "UNAVAILABLE" }` instead of throwing.
+Engine ids are `gecko` and `chromium` (`webkit` is reserved as a future engine
+and is not a valid `engine_preference` yet). `gecko` is a no-op when already
+Gecko. `chromium` uses the existing per-tab switch and keeps the Firefox tab on
+any failure. It never runs for private windows, privileged URLs or while the
+switch is unavailable, and it returns `{ applied: false, error: "UNAVAILABLE" }`
+instead of throwing. An engine that is registered but disabled or without a
+presenter in this window (for example `chromium` while the web switch is off, or
+a future `webkit`) also yields `{ applied: false, error: "UNAVAILABLE" }` and the
+Firefox tab stays.
+
+**Naming (changed 30 September 2026).** The context-v1 `engine` enum is
+`gecko | chromium`; earlier drafts used `firefox` for `gecko`. `firefox` remains
+accepted as a *deprecated read alias for one version*: `validateContextMetadata`,
+`setEnginePreference` and `applyEnginePreference` accept it and normalize it to
+`gecko`, so stored version 1 data keeps loading unchanged, and writers always
+emit `gecko`. The alias will be removed in the next contract version.
 
 Implemented error codes (checked in this order): `INVALID_ENGINE`, `DISABLED`
 (pref off), `UNAVAILABLE`, `PRIVATE`, `UNKNOWN_TAB`, `PENDING`,

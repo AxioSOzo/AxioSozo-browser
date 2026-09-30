@@ -34,8 +34,8 @@ const ENGINES = Object.freeze([
   Object.freeze({
     id: "gecko", label: "Firefox", devLabel: "Firefox (Gecko)", icon: `${ICON_BASE}engine-gecko.svg`,
     experimental: false,
-    // Value used by context-v1 `engine_preference` today. TODO(contracts): align on `gecko`.
-    contractValue: "firefox",
+    // context-v1 `engine_preference` value. `firefox` is its deprecated read alias.
+    contractValue: "gecko",
     available: () => yes,
   }),
   Object.freeze({
@@ -83,10 +83,10 @@ export function engineIds() {
 }
 
 /**
- * Accepts a registry id and the legacy/contract spelling `firefox` (context-v1),
- * returns the registry id, or null when unknown. Session values and tab
- * attributes written by earlier builds ("chromium") normalize to themselves.
- * TODO(contracts): once context-v1 uses `gecko`, drop the `firefox` alias.
+ * Accepts a registry id and the deprecated context-v1 spelling `firefox`
+ * (still read for one version, stored data and older callers), returns the
+ * registry id, or null when unknown. Session values and tab attributes written
+ * by earlier builds ("chromium") normalize to themselves.
  */
 export function normalizeEngineId(value) {
   if (value === "firefox") return "gecko";
@@ -98,7 +98,7 @@ export function engineFromPersisted(value) {
   return normalizeEngineId(value) ?? DEFAULT_ENGINE;
 }
 
-/** Registry id → context-v1 spelling (`gecko` → `firefox`); null when the contract cannot carry it yet. */
+/** Registry id (or the deprecated `firefox`) → context-v1 spelling; null when the contract cannot carry it yet. */
 export function toContextEngine(id) {
   return engineById(normalizeEngineId(id))?.contractValue ?? null;
 }
@@ -108,9 +108,9 @@ export function fromContextEngine(value) {
   return normalizeEngineId(value);
 }
 
-/** True when `value` may be stored as a context-v1 `engine_preference`. */
+/** True when `value` may be stored as a context-v1 `engine_preference` (`firefox` is read, then stored as `gecko`). */
 export function isContextEngine(value) {
-  return typeof value === "string" && ENGINES.some(engine => engine.contractValue === value);
+  return typeof value === "string" && (value === "firefox" || ENGINES.some(engine => engine.contractValue === value));
 }
 
 /** {available, reason} for an engine in this window. Unknown ids are unavailable. */

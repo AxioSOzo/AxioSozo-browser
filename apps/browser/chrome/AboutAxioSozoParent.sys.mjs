@@ -91,7 +91,7 @@ const T = {
   projectIdOrNull: value => value === null || T.projectId(value),
   ruleId: value => typeof value === "string" && RULE_ID.test(value),
   contextType: value => ["personal", "organization", "project"].includes(value),
-  engineOrNull: value => value === null || value === "firefox" || value === "chromium",
+  engineOrNull: value => value === null || value === "gecko" || value === "firefox" || value === "chromium",
   root: value => typeof value === "string" && value.length >= 2 && value.length <= 4096 && value.startsWith("/")
     && !value.includes("\0"),
   object: value => isPlainObject(value),
