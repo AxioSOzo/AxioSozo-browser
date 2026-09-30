@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import signal
 import subprocess
@@ -33,6 +34,11 @@ BINARY = APP / 'Contents/MacOS/AxioCEFProbe'
 EVIDENCE = ROOT / 'docs/evidence'
 EXTERNAL = '/Users/wout/.local/bin/dev-external'
 MOUNT = '/Users/wout/.local/bin/mount-dev-storage'
+SECURITY = '/usr/bin/security'
+IDENTITY_ENV = 'AXIOSOZO_CODESIGN_IDENTITY'
+ADHOC_HINT = ('signing: ad hoc (no ' + IDENTITY_ENV + '); macOS Keychain will ask about '
+              '"Chromium Safe Storage" again after every rebuild. See README, '
+              '"Stable local signing identity".')
 
 
 def emit(status, **fields):
@@ -108,14 +114,102 @@ def plist(bundle, executable, helper=False, suffix=''):
     (path / 'PkgInfo').write_bytes(b'APPL????')
 
 
-def fingerprint():
+def parse_identities(listing):
+    """(SHA-1, common name) pairs from `security find-identity -p codesigning` text."""
+    found = {}
+    for line in listing.splitlines():
+        match = re.match(r'^\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"([^"]*)"', line)
+        if match:
+            found.setdefault(match.group(1).upper(), match.group(2))
+    return list(found.items())
+
+
+def resolve_identity(spec, valid, every=None):
+    """Map a certificate common name or SHA-1 to one (SHA-1, name) that can sign.
+
+    `valid` and `every` are `find-identity` outputs with and without `-v`; the second
+    only sharpens the error when the certificate exists but is not trusted for code
+    signing. The hash, never the name, is what codesign receives, so two certificates
+    with the same name cannot be confused.
+    """
+    spec = (spec or '').strip()
+    if not spec:
+        raise RuntimeError('FAIL: ' + IDENTITY_ENV + ' is empty; unset it for ad hoc signing')
+    pool = parse_identities(valid)
+    if re.fullmatch(r'[0-9A-Fa-f]{40}', spec):
+        matches = [item for item in pool if item[0] == spec.upper()]
+    else:
+        matches = [item for item in pool if item[1] == spec]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise RuntimeError('FAIL: ' + IDENTITY_ENV + ' matches several identities; use one SHA-1: '
+                           + ', '.join(sorted(h for h, _ in matches)))
+    listed = parse_identities(every or '')
+    if any(h == spec.upper() or n == spec for h, n in listed):
+        raise RuntimeError('FAIL: identity "' + spec + '" exists but is not valid for code signing '
+                           '(untrusted, expired or missing its private key); in Keychain Access set '
+                           'the certificate trust for Code Signing to Always Trust')
+    raise RuntimeError('FAIL: no valid code-signing identity "' + spec + '" in `security '
+                       'find-identity -v -p codesigning`')
+
+
+def current_signing(env=None, runner=subprocess.run):
+    """Signing mode for this build. Read-only: it never creates or changes a certificate."""
+    spec = (os.environ if env is None else env).get(IDENTITY_ENV)
+    if spec is None:
+        return dict(mode='adhoc', identity=None, name=None)
+    def listing(*flags):
+        done = runner([SECURITY, 'find-identity', *flags, '-p', 'codesigning'],
+                      capture_output=True, text=True, timeout=30)
+        return done.stdout
+    valid = listing('-v')
+    try:
+        digest_, name = resolve_identity(spec, valid)
+    except RuntimeError:
+        # Distinguish "untrusted" from "absent" for the error message only.
+        resolve_identity(spec, valid, listing())
+        raise
+    return dict(mode='identity', identity=digest_, name=name)
+
+
+def signing_label(signing):
+    if signing['mode'] == 'adhoc':
+        return 'adhoc'
+    return 'identity:' + signing['identity']
+
+
+def designated_requirement(identifier, identity_hash):
+    """Stable across rebuilds: bundle identifier plus this exact certificate leaf."""
+    return f'designated => identifier "{identifier}" and certificate leaf = H"{identity_hash.lower()}"'
+
+
+def sign_command(target, signing, identifier=None):
+    """One codesign invocation; ad hoc keeps the historical bare form."""
+    if signing['mode'] == 'adhoc':
+        return ['codesign', '--force', '--sign', '-', target]
+    command = ['codesign', '--force', '--sign', signing['identity'], '--timestamp=none']
+    if identifier:
+        command.append('-r=' + designated_requirement(identifier, signing['identity']))
+    return command + [target]
+
+
+def bundle_identifier(bundle):
+    return plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())['CFBundleIdentifier']
+
+
+def fingerprint(signing=None):
     h = hashlib.sha256()
     h.update(SHA256.encode())
-    for name in ['host.mm', 'stream.inc', 'transport.hpp']:
+    for name in ['host.mm', 'stream.inc', 'input.inc', 'transport.hpp', 'engine_surface_v1.h',
+                 'surface_transport.hpp', 'surface_transport.mm']:
         h.update((ROOT / 'native/chromium-host' / name).read_bytes())
     # Runner-only lifecycle changes do not change the native build recipe.
     h.update(inspect.getsource(setup).encode())
     h.update(inspect.getsource(plist).encode())
+    h.update(inspect.getsource(sign_command).encode())
+    # A different identity (or ad hoc) must re-sign; the SHA-1 is a public cert digest.
+    h.update(signing_label(signing or current_signing()).encode())
     h.update(subprocess.check_output(['xcrun', 'clang++', '--version']))
     return h.hexdigest()
 
@@ -123,6 +217,9 @@ def fingerprint():
 def setup():
     run_command([MOUNT])
     host_check()
+    signing = current_signing()
+    if signing['mode'] == 'adhoc':
+        print(ADHOC_HINT, file=sys.stderr, flush=True)
     if not BUILD_ROOT.exists():
         raise RuntimeError('BLOCKED_ENV: AXIOSOZO_BUILD_ROOT is not ready')
     BASE.mkdir(parents=True, exist_ok=True)
@@ -139,9 +236,9 @@ def setup():
     if not (CEF / 'libcef_dll/wrapper/cef_scoped_sandbox_context_mac.mm').exists():
         run_command([EXTERNAL, 'tar', '-xjf', ARCHIVE, '-C', BASE])
     stamp = BASE / 'build.json'
-    identity = fingerprint()
+    identity = fingerprint(signing)
     if BINARY.exists() and stamp.exists() and json.loads(stamp.read_text()).get('fingerprint') == identity:
-        emit('PASS', action='reused_build', binary=str(BINARY))
+        emit('PASS', action='reused_build', binary=str(BINARY), signing=signing_label(signing))
         return
     plist(APP, 'AxioCEFProbe')
     resources = APP / 'Contents/Resources'
@@ -175,7 +272,10 @@ def setup():
               'CLANG_MODULE_CACHE_PATH=' + str(BASE / 'clang-cache'), 'xcrun', 'clang++', '-std=c++20', '-fobjc-arc',
               '-arch', 'arm64', '-mmacosx-version-min=14.5', '-DCEF_USE_SANDBOX=1', '-DCEF_API_VERSION=15400',
               '-I', CEF, '-framework', 'Cocoa', source]
-    run_command(common + ['-o', BINARY])
+    # Only the browser process links the Mach/IOSurface transport. Helpers compile
+    # inert stubs (AXIO_CEF_HELPER) and never link Metal or IOSurface.
+    run_command(common + [ROOT / 'native/chromium-host/surface_transport.mm', '-framework', 'Metal',
+                          '-framework', 'IOSurface', '-lbsm', '-o', BINARY])
     helper_name = 'AxioCEFProbe Helper'
     helper = frameworks / (helper_name + '.app')
     plist(helper, helper_name, True, '.helper')
@@ -186,27 +286,39 @@ def setup():
         bundle = frameworks / (name + '.app')
         plist(bundle, name, True, '.helper.' + role.lower())
         shutil.copy2(helper / 'Contents/MacOS' / helper_name, bundle / 'Contents/MacOS' / name)
-    # Ad hoc signatures are local development only; no account, notarization or distribution.
+    # Local development only: ad hoc, or a user-created self-signed identity that keeps
+    # the Keychain ACL stable across rebuilds. No account, notarization or distribution.
     for lib in (framework / 'Versions/A/Libraries').glob('*.dylib'):
-        run_command(['codesign', '--force', '--sign', '-', lib])
-    run_command(['codesign', '--force', '--sign', '-', framework])
-    for helper_bundle in frameworks.glob('*Helper*.app'):
-        run_command(['codesign', '--force', '--sign', '-', helper_bundle])
-    run_command(['codesign', '--force', '--sign', '-', APP])
+        run_command(sign_command(lib, signing))
+    run_command(sign_command(framework, signing))
+    for helper_bundle in sorted(frameworks.glob('*Helper*.app')):
+        run_command(sign_command(helper_bundle, signing, bundle_identifier(helper_bundle)))
+    run_command(sign_command(APP, signing, bundle_identifier(APP)))
     stamp.write_text(json.dumps(dict(fingerprint=identity, cef=VERSION, archive_sha256=SHA256,
-                                     built_at=time.time()), indent=2) + '\n')
-    emit('PASS', action='native_build', binary=str(BINARY))
+                                     built_at=time.time(),
+                                     signing=signing_label(signing),
+                                     signing_name=signing['name']), indent=2) + '\n')
+    emit('PASS', action='native_build', binary=str(BINARY), signing=signing_label(signing))
 
 
 def check():
     host_check()
     if not BINARY.exists():
         raise RuntimeError('BLOCKED_ENV: CEF native component is not built; run ./dev setup')
+    signing = current_signing()
     stamp = BASE / 'build.json'
-    if not stamp.exists() or json.loads(stamp.read_text()).get('fingerprint') != fingerprint():
-        raise RuntimeError('BLOCKED_ENV: native CEF rebuild required')
+    if not stamp.exists() or json.loads(stamp.read_text()).get('fingerprint') != fingerprint(signing):
+        raise RuntimeError('BLOCKED_ENV: native CEF rebuild required (signing mode now '
+                           + signing_label(signing) + ')')
     run_command(['codesign', '--verify', '--deep', '--strict', APP])
-    emit('PASS', action='native_build_check', version=VERSION)
+    # codesign prints the requirement on stdout; its other notes go to stderr.
+    requirement = subprocess.run(['codesign', '--display', '--requirements', '-', APP],
+                                 capture_output=True, text=True, timeout=60).stdout.strip()
+    print(requirement, flush=True)
+    if signing['mode'] == 'adhoc':
+        print(ADHOC_HINT, file=sys.stderr, flush=True)
+    emit('PASS', action='native_build_check', version=VERSION, signing=signing_label(signing),
+         signing_name=signing['name'], designated_requirement=requirement)
 
 
 def native_test():

@@ -133,5 +133,81 @@ class FixtureBoundaryTests(unittest.TestCase):
             self.assertEqual(self.request(method, '/engine.html', ['127.0.0.1:41231']), ([405], b''))
 
 
+LISTING = '''  1) B15DFA306504B61B9183D8A6A2F78D4D1541BC12 "AxioSozo Local Development"
+  2) BD7F9BB12BC200E1068A2D8F6E039B24CF393ACA "Duplicate Name"
+  3) 071289FDD0379CE9F537CA251A4F87C962D2FD5D "Duplicate Name"
+     3 valid identities found
+'''
+HASH = 'B15DFA306504B61B9183D8A6A2F78D4D1541BC12'
+
+
+class SigningIdentityTests(unittest.TestCase):
+    def runner(self, valid, every=''):
+        def run(command, **_):
+            return SimpleNamespace(stdout=valid if '-v' in command else every)
+        return run
+
+    def test_parse_identities_ignores_summary_and_dedupes(self):
+        self.assertEqual(probe.parse_identities(LISTING + LISTING.splitlines()[0]),
+                         [(HASH, 'AxioSozo Local Development'),
+                          ('BD7F9BB12BC200E1068A2D8F6E039B24CF393ACA', 'Duplicate Name'),
+                          ('071289FDD0379CE9F537CA251A4F87C962D2FD5D', 'Duplicate Name')])
+        self.assertEqual(probe.parse_identities('     0 valid identities found\n'), [])
+
+    def test_resolve_by_name_and_case_insensitive_hash(self):
+        self.assertEqual(probe.resolve_identity('AxioSozo Local Development', LISTING),
+                         (HASH, 'AxioSozo Local Development'))
+        self.assertEqual(probe.resolve_identity(HASH.lower(), LISTING)[0], HASH)
+
+    def test_resolve_rejects_empty_missing_ambiguous_and_untrusted(self):
+        for spec in ['', '   ', None]:
+            with self.assertRaisesRegex(RuntimeError, 'empty'):
+                probe.resolve_identity(spec, LISTING)
+        with self.assertRaisesRegex(RuntimeError, 'no valid code-signing identity'):
+            probe.resolve_identity('Nope', LISTING)
+        with self.assertRaisesRegex(RuntimeError, 'several identities'):
+            probe.resolve_identity('Duplicate Name', LISTING)
+        with self.assertRaisesRegex(RuntimeError, 'not valid for code signing'):
+            probe.resolve_identity('Untrusted', '', '  1) ' + 'A' * 40 + ' "Untrusted" (CSSMERR_TP_NOT_TRUSTED)\n')
+
+    def test_current_signing_modes(self):
+        self.assertEqual(probe.current_signing({}, self.runner(LISTING))['mode'], 'adhoc')
+        got = probe.current_signing({probe.IDENTITY_ENV: 'AxioSozo Local Development'}, self.runner(LISTING))
+        self.assertEqual((got['mode'], got['identity']), ('identity', HASH))
+        with self.assertRaises(RuntimeError):
+            probe.current_signing({probe.IDENTITY_ENV: 'Nope'}, self.runner(LISTING))
+
+    def test_current_signing_uses_read_only_security_query(self):
+        calls = []
+        def run(command, **_):
+            calls.append(command)
+            return SimpleNamespace(stdout=LISTING)
+        probe.current_signing({probe.IDENTITY_ENV: HASH}, run)
+        self.assertEqual(calls, [['/usr/bin/security', 'find-identity', '-v', '-p', 'codesigning']])
+
+    def test_adhoc_command_is_unchanged(self):
+        adhoc = dict(mode='adhoc', identity=None, name=None)
+        self.assertEqual(probe.sign_command('/x.app', adhoc, 'id'),
+                         ['codesign', '--force', '--sign', '-', '/x.app'])
+
+    def test_identity_command_uses_hash_no_timestamp_and_stable_requirement(self):
+        identity = dict(mode='identity', identity=HASH, name='n')
+        command = probe.sign_command('/x.app', identity, 'dev.axiosozo.cef-probe')
+        self.assertEqual(command[:5], ['codesign', '--force', '--sign', HASH, '--timestamp=none'])
+        self.assertEqual(command[-1], '/x.app')
+        self.assertEqual(command[5], '-r=designated => identifier "dev.axiosozo.cef-probe" '
+                         'and certificate leaf = H"' + HASH.lower() + '"')
+        self.assertEqual(probe.sign_command('/lib.dylib', identity),
+                         ['codesign', '--force', '--sign', HASH, '--timestamp=none', '/lib.dylib'])
+
+    def test_fingerprint_changes_with_identity_only(self):
+        adhoc = dict(mode='adhoc', identity=None, name=None)
+        one = dict(mode='identity', identity=HASH, name='n')
+        two = dict(mode='identity', identity='0' * 40, name='n')
+        prints = {probe.fingerprint(item) for item in (adhoc, one, two)}
+        self.assertEqual(len(prints), 3)
+        self.assertEqual(probe.fingerprint(one), probe.fingerprint(dict(one, name='renamed')))
+
+
 if __name__ == '__main__':
     unittest.main()

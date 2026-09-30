@@ -2,13 +2,15 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // The engine, shown where the tab already is. Resting a pointer on a tab for a
-// moment turns its favicon into the engine's logo (Firefox or Chromium). On the
-// selected tab that logo is the switch: one click moves the tab to the other
-// engine. On other tabs it is information only, so clicking a favicon keeps
-// selecting its tab. At rest no tab carries an engine mark.
+// moment turns its favicon into the engine's logo (Firefox or Chromium, or any
+// engine in EngineRegistry). On the selected tab that logo is the switch: one
+// click moves the tab to the next available engine (the other one, with two).
+// On other tabs it is information only, so clicking a favicon keeps selecting
+// its tab. At rest no tab carries an engine mark.
 // Everything is chrome-owned attributes plus axiosozo-runtime.css; no element
 // is added to Zen's tab markup and no page is touched.
 import { ensureRuntimeStylesheet } from "./DevLoop.sys.mjs";
+import { normalizeEngineId, engineLabel, nextEngine, DEFAULT_ENGINE } from "./EngineRegistry.sys.mjs";
 
 export const PEEK_ATTRIBUTE = "axiosozo-engine-peek";
 export const STATE_ATTRIBUTE = "axiosozo-engine-state";
@@ -33,14 +35,15 @@ export function installEngineTabs(window, { engineProbe, timers = window } = {})
   let disposed = false;
 
   const tabOf = node => node?.closest?.(".tabbrowser-tab") ?? null;
-  const engineOf = tab => (engineProbe.engineOf(tab) === "chromium" ? "chromium" : "firefox");
+  // Registry ids; anything unknown (or a legacy "firefox") reads as a known engine or the default.
+  const engineOf = tab => normalizeEngineId(engineProbe.engineOf(tab)) ?? DEFAULT_ENGINE;
   const available = tab => tab && !tab.closing && tab.getAttribute("zen-essential") !== "true"
     && !window.PrivateBrowsingUtils?.isWindowPrivate?.(window);
 
   function label(tab) {
-    const engine = engineOf(tab) === "chromium" ? "Chromium" : "Firefox";
-    const other = engine === "Chromium" ? "Firefox" : "Chromium";
-    return tab.selected ? `${engine} engine. Click to open this tab in ${other}.` : `${engine} engine`;
+    const engine = engineLabel(engineOf(tab));
+    const next = nextEngine(engineOf(tab), window);
+    return tab.selected && next ? `${engine} engine. Click to open this tab in ${engineLabel(next)}.` : `${engine} engine`;
   }
 
   function clearPeek() {
@@ -72,21 +75,25 @@ export function installEngineTabs(window, { engineProbe, timers = window } = {})
 
   async function toggle(tab) {
     if (tab.hasAttribute(STATE_ATTRIBUTE) && tab.getAttribute(STATE_ATTRIBUTE) === "switching") return;
-    const next = engineOf(tab) === "chromium" ? "firefox" : "chromium";
+    const from = engineOf(tab);
+    const next = nextEngine(from, window);
+    if (!next) return;
     tab.setAttribute(STATE_ATTRIBUTE, "switching");
     diagnostics.switches++;
     try {
       // The selected tab goes through the explicit switch, which owns the
       // pending state and Gecko action authority bookkeeping.
       if (next === "chromium") await engineProbe.switchToChromium();
-      else await engineProbe.switchToGecko();
+      else if (next === "gecko") await engineProbe.switchToGecko();
+      else throw new Error("ENGINE_UNAVAILABLE"); // no presenter for this engine yet
       if (!disposed) tab.removeAttribute(STATE_ATTRIBUTE);
     } catch {
       if (disposed) return;
       diagnostics.failures++;
-      // The Firefox tab is kept; the glyph says so briefly, then settles.
+      // The tab stays in its engine; the glyph says so briefly, then settles.
       tab.setAttribute(STATE_ATTRIBUTE, "failed");
-      tab.querySelector?.(".tab-icon-stack")?.setAttribute("tooltiptext", "Chromium is not available right now. This tab stays in Firefox.");
+      tab.querySelector?.(".tab-icon-stack")?.setAttribute("tooltiptext",
+        `${engineLabel(next)} is not available right now. This tab stays in ${engineLabel(from)}.`);
       timers.setTimeout(() => {
         if (tab.getAttribute(STATE_ATTRIBUTE) === "failed") tab.removeAttribute(STATE_ATTRIBUTE);
       }, FAILURE_MS);

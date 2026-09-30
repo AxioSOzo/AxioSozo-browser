@@ -21,7 +21,7 @@ The process uses real CEF off-screen BGRA frames at 2× device scale and native 
 
 The helper initializes CEF's current scoped macOS sandbox before loading the main framework. The main host configures `no_sandbox=0`, no debugging port, and no arbitrary command-line switches. An exact fixture URL allowlist is applied at launch and for stream sessions that omit `browsing_mode`. There is no content-to-privileged bridge. General HTTP(S) mode is explicit and experimental, with the unsupported capabilities listed below.
 
-`setup` reviews/uses no upstream lifecycle hooks, creates local ad hoc code signatures only, and preserves the required framework resources and license files. The diagnostic bundle includes English UI resources only, as permitted by the pinned distribution README; the full verified archive retains every upstream locale. ICU remains present for Unicode page content. Binary and source pins are in the root lockfile and `docs/evidence/cef-upstream-manifest.json`. A changed local host or toolchain invalidates the build fingerprint, requiring setup. No native hot reload is claimed.
+`setup` reviews/uses no upstream lifecycle hooks, creates local code signatures only (ad hoc, or your own local identity, see "Stable local signing identity"), and preserves the required framework resources and license files. The diagnostic bundle includes English UI resources only, as permitted by the pinned distribution README; the full verified archive retains every upstream locale. ICU remains present for Unicode page content. Binary and source pins are in the root lockfile and `docs/evidence/cef-upstream-manifest.json`. A changed local host or toolchain invalidates the build fingerprint, requiring setup. No native hot reload is claimed.
 
 A probe invocation owns its one child process group and unique profile. Timeout/interruption terminates only that group; no `pkill` or global client discovery is used. Successful native shutdown is recorded as `closed` before the result. Profile directories are retained externally for repeatable diagnostics and can be explicitly removed after their process has exited; they contain only synthetic fixture activity.
 
@@ -31,6 +31,104 @@ Stream `hello` contains `version`, `method`, `token`, `engine_instance`, `fixtur
 
 The host owns CEF's official macOS message loop; a bounded timer dispatches private commands on the UI thread. `cef_key_event_t.size` is set according to the pinned API. Accepted navigation revokes old document/navigation generations even for BFCache restores that skip `OnBeforeBrowse`. The `load` event carries the actual `http_status` plus required `restored_from_history:boolean`; HTTP0 alone never authorizes a frame. Only explicit history restoration to a known successful fixture document can enable subsequent actual paints.
 
+## GPU surface transport (Mach + IOSurface)
+
+When `hello` carries `surface_service` + `surface_token` (see
+[`contracts/engine-surface-v1.md`](../../contracts/engine-surface-v1.md)), the host
+connects to Zen's checked-in Mach port before CEF starts, creates browsers with
+`shared_texture_enabled` (and `external_begin_frame_enabled` when
+`surface_begin_frames:true`), and handles `OnAcceleratedPaint` instead of `OnPaint`.
+CEF's pooled IOSurface is copied by an awaited Metal blit into a host-owned ring of
+three IOSurfaces per target (the pool buffer returns to viz when the callback
+returns, so it is never forwarded), select popups are composited on the GPU into the
+same surface, and the ring surface's Mach send right plus fixed binary metadata goes
+to Zen. Zen releases frames with RELEASE; BEGIN_FRAME ticks drive
+`send_external_begin_frame`. Control and input stay on the JSON pipe; input now wakes
+the UI thread through the main dispatch queue instead of waiting for the 10 ms timer.
+Without `surface_service` the AXCF BGRA pipe remains the only frame path. Optional
+`frame_rate` (60 default, or 120) sets `windowless_frame_rate` for both paths; the
+per-target `frame_rate` command changes it live. Surface mode admits up to 4096 px per
+side without the pipe's 32 MiB cap (`surface_test.py` resizes to 3600×2400).
+
+Files: `engine_surface_v1.h` (wire structs), `surface_transport.hpp/.mm` (Mach +
+Metal, main binary only; helpers compile inert stubs and do not link Metal or
+IOSurface), `tests/surface_receiver.mm` (standalone Zen stand-in) and
+`surface_test.py` (builds the receiver, serves a synthetic animated fixture, runs
+internal/external pacing at 60/120 Hz, a pipe baseline and two negative cases).
+
+```sh
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- \
+  python3 native/chromium-host/surface_test.py            # --only CASE[,CASE] --seconds N
+```
+
+Known environment gate: after every rebuild, Chromium's **teardown** reads the
+"Chromium Safe Storage" Keychain item for the new ad hoc cdhash; macOS waits for the
+user and Chromium's 10 s teardown watchdog (`chrome/browser/shutdown_watchdog_mac.cc`)
+exits 2. The test samples the owned host and reports
+`PASS_TEARDOWN_KEYCHAIN_BLOCKED` only when the sample proves that wait. Nothing
+approves the dialog. The same stall now also makes `stream_test.py` time out at its
+final exit check.
+
+## Input: key verdicts, IME, wheel phases, pinch (`input.inc`)
+
+`ready.capabilities` adds `key_verdict`, `ime`, `wheel_phases`, `pinch` and
+`frame_rate_command` (all `true`). The mechanisms and exactly what Chromium receives
+are specified in "Input extensions" in `contracts/cef-v1.md`. In short: a keydown's
+verdict comes from CEF `OnKeyEvent` plus an inert system-key char probe that Blink
+never dispatches; IME uses CEF `ime_*` and a renderer-helper focused-node report for
+`text_input`; wheel phases cannot be passed through CEF's C API (Chromium synthesizes
+its own); pinch is a synthesized two-point touch sequence (visual-viewport zoom).
+
+```sh
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- \
+  python3 native/chromium-host/input_test.py
+```
+
+`input_test.py` serves a synthetic page that records keydown/keypress/composition/
+wheel/touch/visual-viewport state in its title and checks: verdicts (typing
+`not_consumed`, a `preventDefault` key `consumed` with its keypress suppressed, ⌘L
+`not_consumed`), probe invisibility, IME set/commit/underlines/finish/cancel,
+`text_input` text/password/none and composition caret, phased wheel deltas and
+scroll, pinch zoom and `frame_rate`. Functional checks are asserted before teardown.
+
+## Stable local signing identity
+
+Ad hoc signatures have a designated requirement of `cdhash H"..."`, which changes on
+every rebuild, so macOS asks about the "Chromium Safe Storage" Keychain item again each
+time. With a local code-signing certificate the requirement becomes
+`identifier "..." and certificate leaf = H"<cert sha1>"`, which survives rebuilds.
+`probe.py` only reads (`security find-identity -v -p codesigning`); it never creates
+certificates or touches Keychain entries.
+
+1. Keychain Access, menu Keychain Access, Certificate Assistant, **Create a Certificate...**
+   Name `AxioSozo Local Development`, Identity Type **Self Signed Root**, Certificate Type
+   **Code Signing**. Create it in the login keychain.
+2. Double-click the certificate, expand Trust, set **Code Signing** to **Always Trust**
+   (this is what makes `find-identity -v` list it as valid).
+3. Verify: `security find-identity -v -p codesigning` shows the name.
+4. Rebuild and check:
+
+```sh
+export AXIOSOZO_CODESIGN_IDENTITY="AxioSozo Local Development"   # or the 40-character SHA-1
+/Users/wout/.local/bin/mount-dev-storage
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- python3 native/chromium-host/probe.py setup
+/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- python3 native/chromium-host/probe.py check
+```
+
+`check` prints the signing mode, runs `codesign --verify --strict --deep` and shows the
+designated requirement (it should contain `certificate leaf`, not `cdhash`). Changing or
+unsetting the variable changes the build fingerprint, so the next `setup` re-signs. macOS
+may ask once whether `codesign` may use the certificate's private key; that is your own key.
+
+**First run.** The Safe Storage item is created and read by this host for its synthetic,
+in-memory dev profile, not by your personal Chrome. If the dialog names `AxioCEFProbe`
+(the host), choose **Always Allow**; later rebuilds signed with the same certificate will
+not ask again. Caveat: CEF 154 has no per-app Keychain naming (commit fa874ac is newer),
+so the item is still the generic **"Chromium Safe Storage"**. A personal Chromium build
+using that same item name could be the one the dialog refers to. If the dialog names any
+other app or your Chrome, or you are unsure, choose **Deny**; the host tolerates a denial
+apart from the teardown stall described above. Nothing in this repo answers the dialog.
+
 ## Explicit web sessions
 
 A trusted browser can add `browsing_mode:"web"` to `hello`. `fixture_origin` then
@@ -38,16 +136,23 @@ names the validated HTTP(S) session identity; it is stable for that owned proces
 not a page-origin permission grant. Existing fixture sessions retain their exact
 origin/path/GET restrictions. A web session permits credential-free HTTP(S), normal
 web subresources and form submission, and the inert initial `about:blank` page.
-External protocols, file navigation, popup windows, downloads, file dialogs, HTTP
-authentication, client-certificate selection and permissions remain unavailable.
-TLS errors are denied by CEF and reported without any certificate exception path.
-JavaScript dialogs are suppressed; an unload confirmation retains the current page
-unless the browser has explicitly closed the target. Native HTML select dropdowns
+External protocols, file navigation, native popup windows, client-certificate
+selection and camera/microphone/screen capture remain unavailable. Context menus,
+JavaScript dialogs (including beforeunload), permission prompts, file dialogs,
+downloads, HTTP authentication, blocked pop-ups, find and zoom are delegated to Zen,
+which draws them with Firefox's own UI; each decision is bound to a host-issued
+`prompt_id`, the exact target and its generations, is single use, and times out or
+is cancelled on navigation/close with the safe default (see "Browser UI delegation"
+in `contracts/cef-v1.md`). TLS errors are denied by CEF and reported without any
+certificate exception path. Fixture sessions keep suppressing all of these. Native HTML select dropdowns
 are separate from popup windows and their bounded OSR overlay is composited into
 the same tab surface.
 
-`ready.capabilities` reports these limits, including `ime:false`,
-`accessibility:false`, `private_mode:false`, and `devtools:false`. Gecko remains the
+`ready.capabilities` reports these limits, including
+`accessibility:false`, `private_mode:false`, `devtools:false`, `popups:false` and
+`media_capture:false`; web sessions report `context_menu`, `javascript_dialogs`,
+`permissions`, `file_dialogs`, `downloads`, `http_auth`, `find`, `zoom` and
+`popup_blocked` as `true` (all `false` for fixture sessions). Gecko remains the
 fully featured engine for those workflows. `edit` dispatches an explicit trusted
 `copy`, `cut`, `paste`, `select_all`, `undo` or `redo` to CEF's focused frame; it never
 returns clipboard content across the pipe. `visibility` with a boolean `visible`
@@ -58,7 +163,11 @@ integers, giving constant-memory replay rejection without the fixture session's
 
 HTTP200–599 documents can render in web mode, so a real HTTP404 page is visible.
 HTTP0 requires known history restoration, exact `about:blank`, or the explicit
-`same_document:true` marker for a retained same-origin document. SPA/fragment
+`same_document:true` marker for a retained same-origin document. A `load` is only
+reported for the main-frame RenderFrameHost whose `OnLoadStart` (commit) followed the
+current navigation; a previous document finishing late, such as the committed TLS
+interstitial of a load `OnLoadError` already failed, never completes, authorizes or
+revokes the current request (it could otherwise fail the next navigation). SPA/fragment
 navigation revokes target generations before its URL/frame is exposed. A renderer
 crash revokes the target and requires explicit user recovery; unsafe form requests
 are never automatically replayed.

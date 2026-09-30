@@ -253,3 +253,11 @@ def refresh_links(stage):
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(source)
+    # Native mirror files removed from src/ leave dangling links that moz.build would trip over.
+    native = engine / 'zen/axiosozo-native'
+    if native.is_dir():
+        for link in sorted(native.rglob('*'), reverse=True):
+            if link.is_symlink() and not link.exists() and Path(os.readlink(link)).is_relative_to(stage / 'src'):
+                link.unlink()
+            elif link.is_dir() and not link.is_symlink() and not any(link.iterdir()):
+                link.rmdir()

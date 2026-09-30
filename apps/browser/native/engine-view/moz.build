@@ -1,0 +1,46 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# AxioSozo engine-view: out-of-process engine frames (IOSurface over Mach)
+# composited by WebRender inside a chrome <canvas>. Mirrored by scripts/zen.py
+# from apps/browser/native/engine-view to src/zen/axiosozo-native/engine-view.
+# See docs/design/engine-view-gecko.md.
+#
+# engine_surface_v1.h is a byte-identical COPY of
+# native/chromium-host/engine_surface_v1.h (contracts/engine-surface-v1.md);
+# do not edit it here. Refresh it from the CEF-host workstream's file.
+#
+# tests/ (xpcshell_smoke.js, run_smoke.py) is not mirrored: zen.py mirrors
+# only build inputs. Run tests/run_smoke.py against the built app.
+
+XPIDL_SOURCES += [
+    "nsIAxioEngineSurfaceService.idl",
+]
+XPIDL_MODULE = "axio_engine_view"
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
+    EXPORTS.mozilla.axio += [
+        "AxioEngineSurfaceService.h",
+    ]
+    SOURCES += [
+        "AxioEngineEndpoint.mm",
+        "AxioEngineSurfaceService.mm",
+    ]
+    XPCOM_MANIFESTS += [
+        "components.conf",
+    ]
+    LOCAL_INCLUDES += [
+        "/dom/base",
+        "/gfx/layers",
+        "/layout/style",
+        "/widget",
+        "/widget/cocoa",
+    ]
+    # audit_token_to_pid: libbsm is already linked into libxul by ipc/glue.
+    # Metal (copy-mode blit) is linked into libxul by toolkit/library/moz.build.
+    OS_LIBS += ["bsm"]
+
+include("/ipc/chromium/chromium-config.mozbuild")
+
+FINAL_LIBRARY = "xul"

@@ -20,5 +20,42 @@
         "    /// A string value used by Zen preference queries.\n    String(AtomString),\n"
       ]
     ]
+  },
+  {
+    "path": "dom/html/HTMLCanvasElement.h",
+    "before_sha256": "569330173da9cd7dd075574f18902c36a1214b3c5023814829cb0496a6a64424",
+    "after_sha256": "0558abb0c6619b5ab4e5974c8880709967c248014c4c7bb42efc68951eb05658",
+    "replacements": [
+      [
+        "  layers::ImageContainer* GetImageContainer() const { return mImageContainer; }\n",
+        "  layers::ImageContainer* GetImageContainer() const { return mImageContainer; }\n\n  // AxioSozo engine-view. Parent-process chrome documents only: an async\n  // ImageContainer fed off the main thread by an out-of-process engine. When\n  // set, nsDisplayCanvas presents it instead of any context output.\n  void SetAxioExternalImageContainer(layers::ImageContainer* aContainer);\n  layers::ImageContainer* GetAxioExternalImageContainer() const {\n    return mAxioExternalImageContainer;\n  }\n"
+      ],
+      [
+        "  RefPtr<layers::ImageContainer> mImageContainer;\n",
+        "  RefPtr<layers::ImageContainer> mImageContainer;\n  RefPtr<layers::ImageContainer> mAxioExternalImageContainer;\n"
+      ]
+    ]
+  },
+  {
+    "path": "dom/html/HTMLCanvasElement.cpp",
+    "before_sha256": "8f7ecc111e5b3655c6ce252ad01bb6837d80b511051b27d4d0a36a6097ef57cd",
+    "after_sha256": "8e35312b979d10e2bc120ecccf8f858504d99f634e219915aac5f8b2cc18cd48",
+    "replacements": [
+      [
+        "void HTMLCanvasElement::FlushOffscreenCanvas() {\n",
+        "void HTMLCanvasElement::SetAxioExternalImageContainer(\n    layers::ImageContainer* aContainer) {\n  MOZ_RELEASE_ASSERT(NS_IsMainThread());\n  MOZ_RELEASE_ASSERT(nsContentUtils::IsChromeDoc(OwnerDoc()));\n  MOZ_RELEASE_ASSERT(!aContainer || aContainer->IsAsync());\n  if (mAxioExternalImageContainer == aContainer) {\n    return;\n  }\n  mAxioExternalImageContainer = aContainer;\n  InvalidateCanvas();\n}\n\nvoid HTMLCanvasElement::FlushOffscreenCanvas() {\n"
+      ]
+    ]
+  },
+  {
+    "path": "layout/generic/nsHTMLCanvasFrame.cpp",
+    "before_sha256": "75ea40a6cb7c28bec6c8d906692ad6c47a5c468994364c1999ce6c12436937b8",
+    "after_sha256": "cfe5555dfffce174a4705e8826e0737e7632cdbd2d1994ab3cfa8411828840e0",
+    "replacements": [
+      [
+        "    element->HandlePrintCallback(mFrame->PresContext());\n\n    if (element->IsOffscreen()) {\n",
+        "    element->HandlePrintCallback(mFrame->PresContext());\n\n    if (RefPtr<ImageContainer> external =\n            element->GetAxioExternalImageContainer()) {\n      // AxioSozo engine-view: frames reach the compositor through the\n      // ImageBridge without the main thread. This only (re)registers the\n      // async image pipeline for the element's current geometry.\n      auto* canvasFrame = static_cast<nsHTMLCanvasFrame*>(mFrame);\n      nsRect dest = canvasFrame->GetDestRect(\n          mFrame->GetContentRectRelativeToSelf() + ToReferenceFrame());\n      LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(\n          dest, mFrame->PresContext()->AppUnitsPerDevPixel());\n      aManager->CommandBuilder().PushImage(this, external, aBuilder,\n                                           aResources, aSc, bounds, bounds);\n      return true;\n    }\n\n    if (element->IsOffscreen()) {\n"
+      ]
+    ]
   }
 ]

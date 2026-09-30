@@ -13,6 +13,7 @@
 // Node tests map ./contexts/ to packages/contexts/src (tests/support/chrome-modules.mjs).
 import * as core from "./contexts/index.mjs";
 import { JsonStore, profileStorage } from "./JsonStore.sys.mjs";
+import { isContextEngine } from "./EngineRegistry.sys.mjs";
 
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
 export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json" });
@@ -24,7 +25,6 @@ export const LEDGER_FLUSH_MS = 30000;
 export const MAX_PENDING_LEDGER = 4096;
 const DAY_MS = 86400000;
 const CONTEXT_TYPES = ["personal", "organization", "project"];
-const ENGINES = ["firefox", "chromium"];
 // Only services on this machine are ever contacted, and only by a TCP connect to
 // a loopback address on the declared port. URL.hostname keeps IPv6 brackets.
 const LOOPBACK_ADDRESSES = Object.freeze({ "localhost": ["127.0.0.1", "::1"], "127.0.0.1": ["127.0.0.1"], "[::1]": ["::1"] });
@@ -300,7 +300,7 @@ export class AxioSozoServices {
 
   async setEnginePreference(uuid, engine) {
     this.#requireLive(uuid);
-    if (engine !== null && !ENGINES.includes(engine)) fail("INVALID_ENGINE");
+    if (engine !== null && !isContextEngine(engine)) fail("INVALID_ENGINE");
     await this.#updateContexts(doc => this.#upsertMeta(doc, uuid, { engine_preference: engine }));
     return this.getContext(uuid);
   }

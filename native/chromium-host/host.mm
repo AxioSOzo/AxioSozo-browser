@@ -1,6 +1,7 @@
 // AxioSozo CEF OSR component probe. This is E0, never Zen embedding evidence.
 #import <Cocoa/Cocoa.h>
 #include <dlfcn.h>
+#include <mach/mach_time.h>
 #include <signal.h>
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <string>
 #include <vector>
 #include "transport.hpp"
+#include "surface_transport.hpp"
 #include "include/capi/cef_app_capi.h"
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_client_capi.h"
@@ -167,7 +169,9 @@ int main(int argc,char**argv){@autoreleasepool{
   CefScopedSandboxContext sandbox;
   if(!sandbox.Initialize(argc,argv)){fprintf(stderr,"CEF helper sandbox initialization failed\n");return 71;}
   NSString* lib=[folder stringByAppendingPathComponent:@"../../../Chromium Embedded Framework.framework/Chromium Embedded Framework"];
-  loadFramework(lib);cef_main_args_t args{argc,argv};return p_cef_execute_process(&args,nullptr,nullptr);
+  loadFramework(lib);cef_main_args_t args{argc,argv};
+  // Renderer helpers report focused-node kind/bounds for IME placement (input.inc).
+  return p_cef_execute_process(&args,rendererApp(),nullptr);
 #else
   if(argc!=4){fprintf(stderr,"usage: AxioCEFProbe local-fixture-url private-profile evidence-dir\n");return 64;}
   streaming=strcmp(argv[1],"--stream")==0;
@@ -180,6 +184,7 @@ int main(int argc,char**argv){@autoreleasepool{
   loadFramework([folder stringByAppendingPathComponent:@"../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework"]);
   [AxioCEFApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
   configure();signal(SIGINT,stopSignal);signal(SIGTERM,stopSignal);
+  if(streaming)startSurface();
   cef_settings_t settings{};settings.size=sizeof(settings);settings.windowless_rendering_enabled=1;settings.no_sandbox=0;settings.command_line_args_disabled=1;settings.remote_debugging_port=0;
   auto profile=utf16([NSString stringWithUTF8String:argv[2]]);settings.root_cache_path=view(profile);
   auto logpath=utf16([evidence stringByAppendingPathComponent:@"cef-runtime.log"]);settings.log_file=view(logpath);settings.log_severity=LOGSEVERITY_WARNING;
@@ -200,8 +205,8 @@ int main(int argc,char**argv){@autoreleasepool{
       if(!streaming&&loaded&&firstLoadAt<0)firstLoadAt=elapsed;
       double exerciseElapsed=firstLoadAt<0?-1:elapsed-firstLoadAt;
       if(streaming){
-        for(int count=0;count<32&&!streamClosing;++count){auto line=transport.pop();if(!line)break;streamCommand(*line);}
-        if(interrupted||transport.failed()||transport.eof())streamClosing=true;
+        pumpCommands();
+        if(interrupted||transport.failed()||transport.eof()||surfaceFailed)streamClosing=true;
         if(streamClosing&&!closing){closing=true;closeStarted=std::chrono::steady_clock::now();}
         if(closing){streamCloseAll();if(streamIdle())closed=true;}
         if(closing&&std::chrono::duration<double>(std::chrono::steady_clock::now()-closeStarted).count()>10){exitStatus=75;p_cef_quit_message_loop();return;}
@@ -228,7 +233,7 @@ int main(int argc,char**argv){@autoreleasepool{
   p_cef_shutdown();
   if(!streaming)event(@"shutdown_returned",@{});
   if(exitStatus)return exitStatus;
-  if(streaming){if(shutdownRequest)complete(shutdownRequest,@"success");transport.finishEvents(std::chrono::milliseconds(1000));return transport.failed()?64:0;}
+  if(streaming){axio::surface::shutdown();if(shutdownRequest)complete(shutdownRequest,@"success");transport.finishEvents(std::chrono::milliseconds(1000));return transport.failed()||surfaceFailed?64:0;}
   event(@"result",@{@"E0":(loaded&&frames>0&&inputObserved&&navigated?@"PASS":@"FAIL"),@"frames":@(frames),@"inputObserved":@(inputObserved),@"navigationObserved":@(navigated),@"elapsedSeconds":@(std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()),@"E1":@"BLOCKED_ENV",@"E2":@"BLOCKED_ENV"});
   return loaded&&frames>0&&inputObserved&&navigated?0:1;
 #endif

@@ -236,6 +236,7 @@ function zenWindow() {
       async stop() { this.calls.push(['stop']); return { status: 'success' }; },
       async visibility() { return { status: 'success' }; }, async focus() { return { status: 'success' }; },
       async resize() { return { status: 'success' }; }, async input() { return { status: 'success' }; },
+      async reply(target, method, fields) { this.calls.push(['reply', method, fields, target]); return { status: 'success' }; },
       async close() { this.calls.push(['close']); } };
     launched.push({ callbacks, adapter });
     return adapter;
@@ -297,10 +298,14 @@ test('page errors stay inside the Chromium tab instead of switching engines', as
   callbacks.onEvent({ event: 'error', code: 'certificate_error', native_code: -202 });
   callbacks.onEvent({ event: 'error', code: 'load_failed', native_code: -202 });
   assert.equal(presenter.engineOf(z.first), 'chromium');
-  assert.equal(record.panelCode, 'certificate_error', 'the specific reason is kept');
-  assert.equal(record.panel.panel.hidden, false);
+  // Firefox's certificate error page (ChromiumBrowserUI) replaces the generic panel;
+  // the cancelled load that follows keeps the specific reason.
+  const certificate = record.overlay.children.find(child => child.className?.includes('axiosozo-cef-certerror'));
+  assert.ok(certificate, 'certificate error page shown in the tab');
+  assert.equal(certificate.hidden, false); assert.equal(record.panelCode ?? null, null);
+  assert.match(certificate.children[2].textContent, /NET::ERR_CERT_AUTHORITY_INVALID/u);
   callbacks.onEvent({ event: 'load', http_status: 200, restored_from_history: false });
-  assert.equal(record.panel.panel.hidden, true); assert.equal(record.panelCode, null);
+  assert.equal(certificate.hidden, true);
   callbacks.onFailure(new Error('CEF_CRASH_OUTCOME_UNCERTAIN')); await settle();
   assert.equal(record.panelCode, 'engine_failed'); assert.equal(presenter.engineOf(z.first), 'chromium');
   assert.deepEqual(failures, ['CEF_CRASH_OUTCOME_UNCERTAIN']);
@@ -399,6 +404,23 @@ test('switching back while Chromium is still launching releases the late engine 
   assert.deepEqual(z.launched[0].adapter.calls.at(-1), ['close']);
   assert.equal(presenter.engineOf(z.first), 'gecko');
   await presenter.dispose();
+});
+
+test('Chromium prompts reach ChromiumBrowserUI through the presenter; UI that cannot be shown answers with the safe default', async () => {
+  const z = zenWindow(), failures = [];
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure: error => failures.push(error.message) });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks, adapter } = z.launched[0];
+  const target = { ...adapter.target };
+  // This synthetic window has no TabDialogBox/ChromeUtils: the dialog cannot open, so it is refused.
+  callbacks.onEvent({ event: 'prompt', prompt_id: 'prompt-1', kind: 'dialog', timeout_ms: 5000, target,
+    details: { dialog_type: 'confirm', origin_url: 'https://example.com/', message: 'Sure?', default_text: '' } });
+  await settle();
+  assert.deepEqual(adapter.calls.at(-1), ['reply', 'dialog_reply', { prompt_id: 'prompt-1', accept: false, text: '' }, target]);
+  assert.equal(failures.length, 1, 'the local failure is reported, not hidden');
+  assert.equal(presenter.engineOf(z.first), 'chromium', 'the tab keeps working');
+  await presenter.dispose();
+  assert.equal(presenter.ui, null);
 });
 
 test('a page that closes itself leaves a reloadable Chromium tab, not a frozen one', async () => {

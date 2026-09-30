@@ -588,3 +588,25 @@ test('active media or capture cannot hide behind Chromium, including capture tha
   assert.equal(presenter.diagnostics().engine,'gecko');assert.equal(f.browser.style.visibility,'');assert.equal(f.closeCount,1);
   await presenter.dispose();
 });
+
+test('IME commands admit the optional cef-v1 fields only by name and within UTF-16 bounds',()=>{
+  const surface={width:900,height:650},ime={ime:true};
+  const base={text:'ka',selection_start:2,selection_end:2};
+  assert.deepEqual(validateCEFInput('ime_set_composition',base,surface,ime),base);
+  const full={...base,underlines:[{start:0,end:2,thick:true}],replacement_range:{start:3,end:3}};
+  assert.deepEqual(validateCEFInput('ime_set_composition',full,surface,ime),full);
+  for(const bad of [{...base,underlines:[{start:0,end:3,thick:true}]},{...base,underlines:[{start:1,end:0,thick:false}]},
+    {...base,underlines:[{start:0,end:1}]},{...base,underlines:Array.from({length:17},()=>({start:0,end:1,thick:false}))},
+    {...base,replacement_range:{start:2,end:1}},{...base,replacement_range:{start:-1,end:1}},{...base,replacement_range:{start:0}},
+    {...base,relative_cursor_pos:0},{...base,selection_range:{start:0,end:0}}])
+    assert.throws(()=>validateCEFInput('ime_set_composition',bad,surface,ime),/INVALID_CEF_IME/);
+  assert.ok(validateCEFInput('ime_commit_text',{text:'日本',replacement_range:{start:0,end:2},relative_cursor_pos:-1},surface,ime));
+  assert.throws(()=>validateCEFInput('ime_commit_text',{text:'x',relative_cursor_pos:1.5},surface,ime),/INVALID_CEF_IME/);
+  assert.throws(()=>validateCEFInput('ime_commit_text',{text:'x',relative_cursor_pos:70000},surface,ime),/INVALID_CEF_IME/);
+  assert.ok(validateCEFInput('ime_finish_composing',{keep_selection:true},surface,ime));
+  assert.ok(validateCEFInput('ime_finish_composing',{},surface,ime));
+  assert.throws(()=>validateCEFInput('ime_finish_composing',{keep_selection:1},surface,ime),/INVALID_CEF_IME/);
+  assert.throws(()=>validateCEFInput('ime_cancel_composition',{keep_selection:true},surface,ime),/INVALID_CEF_IME/);
+  // The copy is detached from the caller's nested objects.
+  const copy=validateCEFInput('ime_set_composition',full,surface,ime);full.underlines[0].end=9;assert.equal(copy.underlines[0].end,2);
+});

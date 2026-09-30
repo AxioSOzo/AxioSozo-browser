@@ -1,8 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
-import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROMIUM_VERSION, BLANK_IDENTITY } from "./CEFEngineAdapter.sys.mjs";
+import { installEngineTabMenu } from "./EngineTabMenu.sys.mjs";
+import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROMIUM_VERSION, BLANK_IDENTITY,
+  RENDER_PATH_PIPE, WHEEL_PHASES } from "./CEFEngineAdapter.sys.mjs";
+import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 
 const MAX_CEF_TABS = 24;
+// Window changes after which the display refresh class is re-checked.
+const DISPLAY_EVENTS = ["resize", "sizemodechange", "activate"];
 const XHTML = "http://www.w3.org/1999/xhtml";
 // Persisted with Zen's own session so a Chromium tab restores as a Chromium tab.
 const ENGINE_ATTRIBUTE = "axiosozo-engine";
@@ -54,7 +59,13 @@ export function cefModifiers(event) {
     | (event.ctrlKey ? 4 : 0) | (event.altKey ? 8 : 0) | (event.metaKey ? 128 : 0)
     | ((event.buttons & 1) ? 16 : 0) | ((event.buttons & 4) ? 32 : 0) | ((event.buttons & 2) ? 64 : 0);
 }
-export function keyboardRoute(event, { editing = false } = {}) {
+/**
+ * The fixed shortcut heuristic. With a host that reports key verdicts, surface
+ * mode instead offers every non-reserved key to the page first and returns the
+ * unconsumed ones to Zen (the remote-tab reply model); `native` marks a key
+ * whose macOS keyCode the engine-view component supplied.
+ */
+export function keyboardRoute(event, { editing = false, native = false } = {}) {
   if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
   const key = event.key.toLowerCase();
   if (event.metaKey && ["c", "v", "x", "a", "z"].includes(key)) return editing ? "edit" : "unsupported";
@@ -62,13 +73,14 @@ export function keyboardRoute(event, { editing = false } = {}) {
   // commands) belongs to the browser, exactly as over a Firefox page.
   if ((event.metaKey && !PAGE_CHORDS.has(key)) || (event.ctrlKey && ["tab", "pageup", "pagedown"].includes(key))
       || /^F\d{1,2}$/u.test(event.key)) return "chrome";
-  return Object.hasOwn(MAC_KEYS, event.code) ? "cef" : "unsupported";
+  return Object.hasOwn(MAC_KEYS, event.code) || native ? "cef" : "unsupported";
 }
 export function cefKey(event, type) {
   if (keyboardRoute(event) !== "cef") throw new Error("UNSUPPORTED_KEY");
   return { type, native_key_code: MAC_KEYS[event.code], windows_key_code: Math.min(255, event.keyCode || 0),
     modifiers: cefModifiers(event), text: event.key.length <= 2 ? event.key : "" };
 }
+/** Pipe fallback only: surface mode never touches pixels in JS. */
 export function bgraToRGBA(buffer) {
   // AXCF read() gives this presenter its own ArrayBuffer. Convert that buffer
   // in place: a 5K capped frame is ~33 MiB, so allocating a second pixel copy
@@ -84,6 +96,18 @@ export function bgraToRGBA(buffer) {
   return rgba;
 }
 
+// Component phase names (NSEventPhase) as cef-v1 wheel/pinch phase values.
+export function wheelPhase(name) {
+  if (name === "mayBegin") return "may_begin";
+  return WHEEL_PHASES.has(name) ? name : "none";
+}
+const EDIT_ACTIONS = { c:"copy", x:"cut", v:"paste", a:"select_all" };
+const editAction = event => event.key.toLowerCase() === "z" ? (event.shiftKey ? "redo" : "undo") : EDIT_ACTIONS[event.key.toLowerCase()];
+// Transparent proxy editor: focusable (so Gecko enables the IME) but never visible.
+const PROXY_STYLE = "position:absolute;left:0;top:0;width:2px;height:1em;margin:0;padding:0;border:0;"
+  + "opacity:0;pointer-events:none;resize:none;overflow:hidden;background:transparent;color:transparent;"
+  + "caret-color:transparent;outline:none;white-space:pre";
+
 const PAGE_ERRORS = {
   certificate_error: ["Your connection isn't private",
     "Chromium could not verify this site's certificate and did not load it. Firefox can show you the details."],
@@ -92,7 +116,7 @@ const PAGE_ERRORS = {
   engine_failed: ["Chromium stopped", "The Chromium engine for this tab stopped. Reload to start it again."],
 };
 const NOTICES = {
-  permission_denied: "Chromium tabs can't grant site permissions yet.",
+  permission_denied: "This site asked for a permission Chromium tabs can't grant yet.",
   download_denied: "Downloads aren't supported in Chromium tabs yet. Open this tab in Firefox to download.",
   popup_denied: "A pop-up was blocked.",
   file_dialog_unavailable: "File uploads aren't supported in Chromium tabs yet.",
@@ -130,7 +154,7 @@ export class CEFPresenter {
       this.#indicator(this.active);
       if (this.active) {
         this.#syncChrome(this.active); this.#resize(this.active);
-        if (!this.window.gURLBar.focused) this.active.canvas.focus();
+        if (!this.window.gURLBar.focused) this.#focusContent(this.active);
       } else this.#activateIfMarked(this.window.gBrowser.selectedTab);
     };
     this.onTabRestored = event => this.#adoptRestoredTab(event.target);
@@ -146,9 +170,14 @@ export class CEFPresenter {
       });
     };
     win.document.addEventListener?.("visibilitychange", this.onVisibilityChange);
+    // A window moved to, resized on or fullscreened onto another display may
+    // change its refresh class (ProMotion 120 Hz <-> 60 Hz). Gecko has no window
+    // move event; these, the scale watch and tab selection re-check the rate.
+    this.onDisplayChange = () => { if (!this.disposed) this.#syncFrameRate(this.active); };
+    for (const type of DISPLAY_EVENTS) win.addEventListener?.(type, this.onDisplayChange);
     try {
-      this.#installCommands(); this.#installStyle();
-      if (this.browsingMode === "web") { this.#installTabMenu(); this.#installBadge(); }
+      this.#installCommands(); this.#installStyle(); this.#watchScale();
+      if (this.browsingMode === "web") { this.#installTabMenu(); this.#installBadge(); this.#installBrowserUI(); }
     } catch (error) {
       for (const restore of this.restoreHooks.reverse()) restore();
       this.#removeListeners();
@@ -168,6 +197,7 @@ export class CEFPresenter {
     container.removeEventListener("TabAttrModified", this.onTabAttrModified);
     container.removeEventListener("SSTabRestored", this.onTabRestored);
     this.window.document.removeEventListener?.("visibilitychange", this.onVisibilityChange);
+    for (const type of DISPLAY_EVENTS) this.window.removeEventListener?.(type, this.onDisplayChange);
   }
   #assertNoActiveMedia(tab) {
     const sharing = this.window.gBrowser.getTabSharingState?.(tab);
@@ -195,12 +225,51 @@ export class CEFPresenter {
     if (!record.adapter.allowedURL(url)) throw new Error("CEF_UNSUPPORTED_URL");
     const result = await record.adapter.navigate(record.adapter.target, url);
     if (!["success", "unsupported"].includes(result.status) && result.reason !== "NAVIGATION_SUPERSEDED") throw new Error("CEF_NAVIGATION_FAILED");
-    if (this.active === record) record.canvas.focus();
+    if (this.active === record) this.#focusContent(record);
     return true;
   }
   focus() {
     if (!this.active) return false;
-    this.active.canvas.focus(); return true;
+    this.#focusContent(this.active); return true;
+  }
+  /** Page focus: the IME proxy editor while the page's editable is focused, else the engine view. */
+  #focusContent(record) {
+    (record.ime?.active ?? record.canvas)?.focus?.();
+  }
+  /**
+   * Zen and Firefox return focus to the page with gBrowser.selectedBrowser.focus()
+   * (urlbar Escape and close, tab switch). The hidden Gecko browser of a Chromium
+   * tab cannot take focus, so this browser's focus() moves it to the engine view.
+   */
+  #redirectBrowserFocus(record) {
+    const browser = record.browser, presenter = this;
+    record.priorBrowserFocus = Object.getOwnPropertyDescriptor(browser, "focus") ?? null;
+    record.browserFocus = function focus() { presenter.#focusContent(record); };
+    try { browser.focus = record.browserFocus; } catch { record.browserFocus = null; }
+  }
+  #restoreBrowserFocus(record) {
+    const browser = record.browser;
+    if (!record.browserFocus || browser.focus !== record.browserFocus) return;
+    if (record.priorBrowserFocus) Object.defineProperty(browser, "focus", record.priorBrowserFocus);
+    else delete browser.focus;
+    record.browserFocus = null;
+  }
+  /** A move to a display with another scale (Retina <-> 1×) resizes the native surface. */
+  #watchScale() {
+    const query = this.window.matchMedia?.(`(resolution: ${this.window.devicePixelRatio}dppx)`);
+    if (!query?.addEventListener) return;
+    const changed = () => {
+      query.removeEventListener("change", changed); this.scaleWatch = null;
+      if (this.disposed) return;
+      if (this.active) { this.#resize(this.active); this.#syncFrameRate(this.active); }
+      this.#watchScale();
+    };
+    query.addEventListener("change", changed);
+    this.scaleWatch = () => query.removeEventListener("change", changed);
+    if (!this.scaleWatchHook) {
+      this.scaleWatchHook = true;
+      this.restoreHooks.push(() => { this.scaleWatch?.(); this.scaleWatch = null; });
+    }
   }
 
   // ---- Engine choice, persisted per tab -------------------------------------
@@ -244,6 +313,7 @@ export class CEFPresenter {
   }
   /** The explicit per-tab switch behind the tab menu and the address-bar badge. */
   async setTabEngine(tab, engine) {
+    if (engine !== "chromium" && engine !== "gecko") throw new Error("ENGINE_UNAVAILABLE"); // only these two have presenters
     if (engine === "chromium") {
       if (this.records.has(tab) || this.pending?.tab === tab) return;
       if (tab !== this.window.gBrowser.selectedTab) {
@@ -268,8 +338,11 @@ export class CEFPresenter {
     if (!root) return;
     const style = this.window.document.createElementNS(XHTML, "style");
     style.textContent = `
-      [axiosozo-cef-active] :is(#identity-box, #tracking-protection-icon-container,
-        #notification-popup-box, #reader-mode-button, #translations-button, #pageActionButton, #star-button-box) { display:none !important; }
+      /* Chromium permission doorhangers (ChromiumBrowserUI) anchor in #notification-popup-box. */
+      [axiosozo-cef-active] #identity-box:not(:has(> #notification-popup-box:not([hidden]))),
+      [axiosozo-cef-active] #identity-box > :not(#notification-popup-box),
+      [axiosozo-cef-active] :is(#tracking-protection-icon-container,
+        #reader-mode-button, #translations-button, #pageActionButton, #star-button-box) { display:none !important; }
       #axiosozo-engine-badge { display:none; align-items:center; gap:5px; margin-inline:4px 2px; padding:1px 8px;
         border:0; border-radius:999px; background:color-mix(in srgb, #1a73e8 16%, transparent); color:inherit;
         font:inherit; font-size:11px; font-weight:600; white-space:nowrap; cursor:default; }
@@ -294,37 +367,35 @@ export class CEFPresenter {
     root.appendChild(style);
     this.restoreHooks.push(() => { root.removeAttribute("axiosozo-cef-active"); style.remove(); });
   }
-  #installTabMenu() {
-    const menu = this.window.document.getElementById?.("tabContextMenu");
-    if (!menu) return;
-    const item = this.window.document.createXULElement("menuitem");
-    item.id = "axiosozo-context-engine";
-    const contextTab = () => this.window.TabContextMenu?.contextTab;
-    // Firefox's MenuSectionLayout rearranges this menu on popupshowing and
-    // rejects unknown items anywhere but the trailing (extensions) run. Keep
-    // the item trailing while closed; place it by Reload Tab once arranged.
-    const showing = event => {
-      if (event.target !== menu) return;
-      const tab = contextTab();
-      const available = tab && !this.window.PrivateBrowsingUtils?.isWindowPrivate?.(this.window);
-      item.hidden = !available;
-      if (available) item.setAttribute("label", this.engineOf(tab) === "chromium" ? "Open in Firefox" : "Open in Chromium");
-      const anchor = this.window.document.getElementById("context_reloadSelectedTabs")
-        ?? this.window.document.getElementById("context_reloadTab");
-      if (anchor?.parentNode === menu) anchor.after(item);
-    };
-    const hidden = event => { if (event.target === menu) menu.appendChild(item); };
-    const command = () => {
-      const tab = contextTab();
-      if (tab) this.setTabEngine(tab, this.engineOf(tab) === "chromium" ? "gecko" : "chromium").catch(error => this.onFailure(error));
-    };
-    item.addEventListener("command", command);
-    menu.addEventListener("popupshowing", showing);
-    menu.addEventListener("popuphidden", hidden);
-    menu.appendChild(item);
-    this.restoreHooks.push(() => {
-      menu.removeEventListener("popupshowing", showing); menu.removeEventListener("popuphidden", hidden); item.remove();
+  // >>> AxioSozo engine UI delegation: Chromium's context menus, dialogs, permissions,
+  // file pickers, downloads, auth, certificate errors, pop-ups, find and zoom are
+  // drawn by ChromiumBrowserUI with Firefox's own UI. Presenter surface: this
+  // constructor, one call in #event, one in #removeOnce.
+  #installBrowserUI() {
+    this.ui = new ChromiumBrowserUI(this.window, {
+      send: (record, method, fields, target) => record.adapter.reply(target, method, fields),
+      target: record => record.adapter?.target ?? null,
+      records: () => this.records.values(),
+      hooks: {
+        openTab: (record, url, background) => this.#openInNewTab(record, url, background),
+        openInFirefox: record => this.#toGecko(record).catch(error => this.onFailure(error)),
+        openInFirefoxTab: (url, postData) => this.window.openTrustedLinkIn(url, "tab", { postData, relatedToCurrent: true }),
+        navigate: (record, action) => this.#action(record, target => record.adapter[action](target)),
+        focusContent: record => this.#focusContent(record),
+        contentElement: record => record.overlay,
+        currentURL: record => record.latestURL,
+        notice: (record, message) => this.#notice(record, message),
+        failure: error => this.onFailure(error),
+      },
     });
+    this.restoreHooks.push(() => { this.ui?.dispose(); this.ui = null; });
+  }
+  // <<<
+  #installTabMenu() {
+    // List-driven by EngineRegistry: one "Open in <engine>" item, or an "Open in" submenu with more engines.
+    const menu = installEngineTabMenu(this.window, { engineOf: tab => this.engineOf(tab),
+      setTabEngine: (tab, engine) => this.setTabEngine(tab, engine), onFailure: error => this.onFailure(error) });
+    if (menu) this.restoreHooks.push(() => menu.dispose());
   }
   #installBadge() {
     const identity = this.window.document.getElementById?.("identity-box");
@@ -352,14 +423,45 @@ export class CEFPresenter {
   #visibility(record) {
     const visible = this.active === record && !this.window.document.hidden;
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
-    if (record.visible === visible) return;
-    record.visible = visible;
-    if (this.browsingMode === "web" && record.adapter?.target) this.#action(record, target => record.adapter.visibility(target, visible));
+    if (record.visible !== visible) {
+      record.visible = visible;
+      // Surface mode also gates the endpoint's begin frames, fixture sessions included.
+      if ((this.browsingMode === "web" || record.surfaceMode) && record.adapter?.target) {
+        this.#action(record, target => record.adapter.visibility(target, visible));
+      }
+    }
+    this.#syncFrameRate(record);
+  }
+  /**
+   * cef-v1 `frame_rate`: a visible target follows its window's display refresh
+   * class, read from the same vsync source as the hello rate. Sent only on a
+   * change; hidden targets catch up when shown. The endpoint's begin frames
+   * already follow Gecko's vsync interval (no endpoint setter exists).
+   */
+  #syncFrameRate(record) {
+    const adapter = record?.adapter;
+    if (!record?.committed || !record.visible || record.frameRatePending || !adapter?.target
+        || typeof adapter.frameRate !== "function") return;
+    const rate = adapter.displayFrameRate ?? null;
+    if (rate === null || rate === adapter.appliedFrameRate) return;
+    record.frameRatePending = true;
+    let result = null;
+    Promise.resolve().then(() => adapter.frameRate(adapter.target, rate)).then(value => { result = value; }, error => {
+      // A navigation raced the command: the next display check retries. Anything
+      // else is reported once and never blocks the page.
+      if (error?.message !== "STALE_CEF_TARGET" && error?.message !== "CEF_UNAVAILABLE") console.warn("AXIOSOZO_CEF_FRAME_RATE", error?.message);
+    }).finally(() => {
+      record.frameRatePending = false;
+      // The display may have changed again while this one was in flight.
+      if (result?.status === "success" && !this.disposed && this.active === record) this.#syncFrameRate(record);
+    });
   }
   #surface(record) {
     const rect = record.browser.getBoundingClientRect();
+    // Surface mode: bounded only by 4096 px per dimension, unless the host still
+    // enforces the pipe's 32 MiB (it answered surface_limit once).
     const surface = fitCEFRenderSurface({ width: Math.max(1, Math.floor(rect.width)), height: Math.max(1, Math.floor(rect.height)),
-      device_scale: this.window.devicePixelRatio });
+      device_scale: this.window.devicePixelRatio }, { maxBytes: record.surfaceMode && !record.hostByteCap ? Infinity : undefined });
     record.renderScaleLimited = surface.device_scale < this.window.devicePixelRatio;
     return surface;
   }
@@ -412,7 +514,9 @@ export class CEFPresenter {
       priorVisibility:browser.style.visibility, priorPosition:stack.style.position, originalLabel:tab.label,
       priorDocShellIsActive:browser.docShellIsActive, pendingURL:this.browsingMode === "web" ? url : null,
       latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
-      firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 } };
+      firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 },
+      surfaceMode:false, native:null, hostByteCap:false, keyVerdicts:new Map(), keyDowns:new Map(),
+      wheelRemainder:{ x:0, y:0 }, ime:null };
     let settle;
     record.settled = new Promise(resolve => { settle = resolve; });
     this.pending = record;
@@ -421,17 +525,35 @@ export class CEFPresenter {
     stack.appendChild(overlay);
     try {
       record.adapter = await this.launch(this.window, { tabId:originalTarget.tab_id, origin, browsingMode:this.browsingMode,
+        // Surface mode: the endpoint presents frames in this canvas; onFrame is the pipe fallback.
+        element:canvas, onGeometry:geometry => this.#geometry(record, geometry),
         onFrame:(metadata, pixels) => this.#draw(record, metadata, pixels),
         onEvent:event => this.#event(record, event),
         onFailure:error => this.#failed(record, error) });
       if (this.disposed || this.pending !== record) throw new Error("ENGINE_SWITCH_CANCELLED");
-      const target = await record.adapter.create(this.browsingMode === "web" ? "about:blank" : url, this.#surface(record));
+      record.surfaceMode = record.adapter.surfaceMode === true;
+      record.native = record.surfaceMode ? record.adapter.nativeInput ?? null : null;
+      if (record.surfaceMode) {
+        // A context-less canvas bound to the endpoint: one surface pixel per device
+        // pixel, anchored top-left while a resize is in flight. No JS pixel work.
+        canvas.setAttribute("moz-opaque", "");
+        canvas.style.objectFit = "none"; canvas.style.objectPosition = "0 0";
+      }
+      const startURL = this.browsingMode === "web" ? "about:blank" : url;
+      let target;
+      try { target = await record.adapter.create(startURL, this.#surface(record)); }
+      catch (error) {
+        if (error.message !== "CEF_SURFACE_LIMIT" || !record.surfaceMode || record.hostByteCap) throw error;
+        record.hostByteCap = true;
+        target = await record.adapter.create(startURL, this.#surface(record));
+      }
       this.gecko.resolve(originalTarget); // no navigation/identity change during asynchronous preparation
       this.#assertNoActiveMedia(tab);
       if (this.disposed || this.pending !== record || this.window.gBrowser.selectedTab !== tab) throw new Error("ENGINE_SWITCH_CANCELLED");
       this.pending = null; this.records.set(tab, record); record.committed = true;
       browser.style.visibility = "hidden"; overlay.style.display = "block";
       this.#input(record);
+      this.#redirectBrowserFocus(record);
       record.observer = new this.window.ResizeObserver(() => this.#resize(record));
       record.observer.observe(stack);
       this.#visibility(record);
@@ -441,7 +563,7 @@ export class CEFPresenter {
         this.#loadInGecko(record, "about:blank");
         if (url) this.#action(record, current => record.adapter.navigate(current, url));
       }
-      canvas.focus(); this.#indicator(record); this.#syncChrome(record);
+      this.#focusContent(record); this.#indicator(record); this.#syncChrome(record);
       return target;
     } catch (error) {
       await this.#remove(record, { keepEngine: this.browsingMode === "web" && error.message === "ENGINE_SWITCH_CANCELLED" });
@@ -465,6 +587,16 @@ export class CEFPresenter {
         { triggeringPrincipal: this.window.Services.scriptSecurityManager.getSystemPrincipal() });
     } catch (error) { this.onFailure(error); }
   }
+  /** Surface mode: the endpoint presented a first frame, or its size/scale changed. */
+  #geometry(record, geometry) {
+    if (this.disposed) return;
+    // Logical size, so object-fit:none maps one surface pixel to one device pixel.
+    if (record.canvas.width !== geometry.logicalWidth) record.canvas.width = geometry.logicalWidth;
+    if (record.canvas.height !== geometry.logicalHeight) record.canvas.height = geometry.logicalHeight;
+    record.surfaceGeometry = geometry;
+    record.firstFrameAt ??= this.window.performance.now();
+  }
+  /** Pipe fallback only (no engine-view component): CPU BGRA frames drawn with putImageData. */
   #draw(record, metadata, pixels) {
     if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
     const started = this.window.performance.now();
@@ -479,6 +611,7 @@ export class CEFPresenter {
     record.lastFrameId = metadata.frame_id;
   }
   #event(record, event) {
+    if (this.ui?.handle(record, event)) return; // AxioSozo engine UI delegation
     if (event.event === "url") {
       record.latestURL = event.url;
       if (record.committed && this.browsingMode === "web") this.#rememberURL(record.tab, event.url);
@@ -488,7 +621,8 @@ export class CEFPresenter {
       record.loading = event;
       record.tab.toggleAttribute?.("busy", !!event.loading);
     }
-    if (event.event === "cursor") record.canvas.style.cursor = event.cursor;
+    if (event.event === "cursor") this.#cursor(record, event.cursor);
+    if (event.event === "text_input") this.#textInput(record, event);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -507,6 +641,14 @@ export class CEFPresenter {
     }
     this.onTargetEvent(event);
     if (record.committed && event.event === "navigation") { record.visible = undefined; this.#visibility(record); }
+    // Page focus must be restated for each new document: a focus command that
+    // crossed the navigation was rejected as stale (the first focus of a new tab
+    // always is), and one sent while it started reached the old document's
+    // widget. Without it Chromium never focuses page elements: no focus events,
+    // no <select> popup (E1 2026-09-30).
+    if (record.committed && event.event === "load" && record.contentFocused) {
+      this.#action(record, target => record.adapter.focus(target, true));
+    }
     if (record.committed) this.#syncChrome(record);
   }
   #openInNewTab(record, url, background) {
@@ -576,9 +718,15 @@ export class CEFPresenter {
     if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(record.tab, record.title);
     else record.tab.label = record.title;
   }
+  #cursor(record, cursor) {
+    // The adapter admits only CSS keywords; the component re-checks and never takes url().
+    if (!record.native) { record.canvas.style.cursor = cursor; return; }
+    try { record.native.setCursor(record.canvas, cursor); } catch {}
+  }
+  /** Resolves to the native result, or null when the operation failed (already reported). */
   #action(record, operation) {
     const target = record.adapter.target;
-    Promise.resolve().then(() => operation(target)).then(result => {
+    return Promise.resolve().then(() => operation(target)).then(result => {
       if (result?.status === "unsupported") {
         if (!["NAVIGATION_SUPERSEDED", "NAVIGATION_CANCELLED", "history_boundary"].includes(result.reason)) {
           this.#indicator(record, result.reason || "Operation unsupported in fixture engine");
@@ -586,11 +734,12 @@ export class CEFPresenter {
       } else if (result && result.status === "failed" && this.browsingMode === "web") {
         // A failed navigation already reported its own page error.
       } else if (result && result.status !== "success") throw new Error("CEF_ACTION_FAILED");
+      return result ?? null;
     }).catch(error => {
-      if (!record.committed) return;
+      if (!record.committed) return null;
       if (error.message === "STALE_CEF_TARGET") this.#indicator(record, "Input discarded after navigation");
-      else if (error.message === "CEF_UNAVAILABLE") return;
-      else this.#failed(record, error);
+      else if (error.message !== "CEF_UNAVAILABLE") this.#failed(record, error);
+      return null;
     });
   }
   #resize(record) {
@@ -598,6 +747,7 @@ export class CEFPresenter {
     if (record.resizePending) { record.resizeDirty = true; return; }
     record.resizePending = true;
     record.nextPointer = null; // do not send a queued old-size move after resize begins
+    record.pendingWheel = null;
     this.window.requestAnimationFrame(async () => {
       try {
         do {
@@ -606,7 +756,13 @@ export class CEFPresenter {
           const surface = this.#surface(record);
           if (JSON.stringify(surface) === JSON.stringify(record.adapter.surface)) continue;
           const result = await record.adapter.resize(record.adapter.target, surface);
-          if (result?.status !== "success") throw new Error("UNSUPPORTED_SURFACE");
+          if (result?.status !== "success") {
+            // A host that still applies the pipe's 32 MiB bound: step down once, then retry.
+            if (record.surfaceMode && !record.hostByteCap && result?.status === "unsupported" && result.reason === "surface_limit") {
+              record.hostByteCap = true; record.resizeDirty = true; continue;
+            }
+            throw new Error("UNSUPPORTED_SURFACE");
+          }
           this.#indicator(record);
         } while (record.resizeDirty);
       } catch (error) {
@@ -625,32 +781,60 @@ export class CEFPresenter {
       }
     });
   }
-  #listen(record, type, handler, options) {
-    record.canvas.addEventListener(type, handler, options);
-    record.listeners.push(() => record.canvas.removeEventListener(type, handler, options));
+  #listen(record, type, handler, options) { this.#listenOn(record, record.canvas, type, handler, options); }
+  #listenOn(record, element, type, handler, options) {
+    element.addEventListener(type, handler, options);
+    record.listeners.push(() => element.removeEventListener(type, handler, options));
   }
   #clickCount(record, event, position) {
-    // Pointer events carry no reliable click count; derive it like the OS does.
+    // Pipe fallback: pointer events carry no reliable click count; derive it like the OS does.
     const clicks = record.clicks, now = event.timeStamp ?? this.window.performance.now();
     const near = Math.abs(position.x - clicks.x) <= 4 && Math.abs(position.y - clicks.y) <= 4;
     clicks.count = near && now - clicks.time <= 500 ? Math.min(3, clicks.count + 1) : 1;
     Object.assign(clicks, { time:now, x:position.x, y:position.y });
     return clicks.count;
   }
+  /** Native detail (NSEvent) of a trusted event during its dispatch, from the engine-view component. */
+  #describe(record, event) {
+    if (!record.native) return null;
+    try {
+      const value = record.native.describeNativeEvent(event);
+      return value && typeof value === "object" ? value : null;
+    } catch { return null; }
+  }
+  #send(record, method, fields) { return this.#action(record, target => record.adapter.input(target, method, fields)); }
+  #point(record, event) {
+    const bounds = record.canvas.getBoundingClientRect();
+    return { x:Math.max(0, Math.min(record.adapter.surface.width, Math.floor(event.clientX - bounds.left))),
+      y:Math.max(0, Math.min(record.adapter.surface.height, Math.floor(event.clientY - bounds.top))), modifiers:cefModifiers(event) };
+  }
   #input(record) {
-    const send = (method, fields) => this.#action(record, target => record.adapter.input(target, method, fields));
-    const point = event => {
-      const bounds = record.canvas.getBoundingClientRect();
-      return { x:Math.max(0, Math.min(record.adapter.surface.width, Math.floor(event.clientX - bounds.left))),
-        y:Math.max(0, Math.min(record.adapter.surface.height, Math.floor(event.clientY - bounds.top))), modifiers:cefModifiers(event) };
-    };
+    // Gecko hit testing and focus decide the target (Zen overlays stay on top);
+    // the component adds only what DOM events lose (docs/design/engine-view-gecko.md §7).
+    this.#pointerInput(record);
+    if (record.native) { this.#surfaceKeyboard(record); this.#surfaceFocus(record); }
+    else this.#pipeKeyboard(record);
+    // Chromium asks for its menu natively (run_context_menu); Zen draws it via ChromiumBrowserUI.
+    this.#listen(record, "contextmenu", event => { event.preventDefault(); });
+  }
+  #pointerInput(record) {
+    const send = (method, fields) => this.#send(record, method, fields);
+    const point = event => this.#point(record, event);
     for (const type of ["pointerdown", "pointerup", "pointermove"]) this.#listen(record, type, event => {
       if (!event.isTrusted || !record.committed) return;
-      if (type === "pointerdown" && !record.resizePending) { record.canvas.focus(); record.canvas.setPointerCapture(event.pointerId); }
+      if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
       event.preventDefault();
       const position = point(event);
-      const count = type === "pointerdown" ? this.#clickCount(record, event, position) : record.clicks.count;
+      let count = record.clicks.count;
+      if (type === "pointerdown") {
+        count = this.#clickCount(record, event, position);
+        // The native click count (system double-click interval and slop) wins when known.
+        const native = this.#describe(record, event);
+        if (native?.kind === "mouse" && Number.isInteger(native.clickCount) && native.clickCount > 0) {
+          count = record.clicks.count = Math.min(3, native.clickCount);
+        }
+      }
       const fields = { ...position, type:type === "pointermove" ? "move" : (type === "pointerdown" ? "down" : "up"),
         button:["left", "middle", "right"][Math.max(0, event.button)] || "left", click_count:count, mouse_leave:false };
       if (record.resizePending) {
@@ -658,6 +842,7 @@ export class CEFPresenter {
         return;
       }
       if (type === "pointermove") {
+        // Input still crosses the JSON pipe, so moves are coalesced to one per frame.
         record.nextPointer = fields;
         if (!record.pointerPending) {
           record.pointerPending = true;
@@ -668,8 +853,8 @@ export class CEFPresenter {
           });
         }
       } else {
-        // Flush the last drag point before button-up; never send a stale
-        // buttons-down move after releasing the native selection gesture.
+        // Keep order: pending scroll, then the last drag point, then the button.
+        this.#flushWheel(record);
         if (record.nextPointer) { send("mouse", record.nextPointer); record.nextPointer = null; }
         send("mouse", fields);
       }
@@ -679,24 +864,71 @@ export class CEFPresenter {
       record.nextPointer = null;
       send("mouse", { ...point(event), type:"move", button:"left", click_count:1, mouse_leave:true });
     });
-    this.#listen(record, "wheel", event => {
-      if (!event.isTrusted) return;
-      event.preventDefault();
-      if (record.resizePending) return;
+    this.#listen(record, "wheel", event => this.#wheel(record, event), { passive:false });
+  }
+  #wheel(record, event) {
+    if (!event.isTrusted) return;
+    // Stops Gecko scrolling ancestors and starting a history swipe over the view.
+    event.preventDefault();
+    if (record.resizePending || !record.committed) return;
+    const features = record.adapter.inputFeatures ?? {};
+    const native = this.#describe(record, event);
+    const position = this.#point(record, event);
+    if (native?.native === "magnify" && features.pinch) {
+      this.#coalesce(record, "pinch", { ...position, phase:wheelPhase(native.phase) }, { magnification:Number(native.magnification) || 0 });
+      return;
+    }
+    let dx, dy;
+    if (native?.native === "scroll" && native.precise && Number.isFinite(native.scrollingDeltaX) && Number.isFinite(native.scrollingDeltaY)) {
+      // Trackpad points as the NSEvent reported them (CEF's sign), without DOM multipliers.
+      dx = native.scrollingDeltaX; dy = native.scrollingDeltaY;
+    } else {
       const scale = event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? record.adapter.surface.height : 1);
-      const limit = value => Math.max(-4096, Math.min(4096, Math.round(value)));
-      send("wheel", { ...point(event), delta_x:limit(-event.deltaX * scale), delta_y:limit(-event.deltaY * scale) });
-    }, { passive:false });
+      dx = -event.deltaX * scale; dy = -event.deltaY * scale;
+    }
+    const phases = features.wheelPhases ? { phase:wheelPhase(native?.phase), momentum_phase:wheelPhase(native?.momentumPhase),
+      precise:!!native?.precise } : {};
+    this.#coalesce(record, "wheel", { ...position, ...phases }, { delta_x:dx, delta_y:dy });
+  }
+  /** Sum wheel (or pinch) deltas per frame; a phase or modifier change flushes first. */
+  #coalesce(record, method, fields, sums) {
+    const key = JSON.stringify([method, fields.modifiers, fields.phase ?? null, fields.momentum_phase ?? null, fields.precise ?? null]);
+    if (record.pendingWheel && record.pendingWheel.key !== key) this.#flushWheel(record);
+    if (record.pendingWheel) {
+      record.pendingWheel.fields = fields; // the latest position
+      for (const [name, value] of Object.entries(sums)) record.pendingWheel.sums[name] += value;
+    } else record.pendingWheel = { key, method, fields, sums:{ ...sums } };
+    if (record.wheelScheduled) return;
+    record.wheelScheduled = true;
+    this.window.requestAnimationFrame(() => { record.wheelScheduled = false; this.#flushWheel(record); });
+  }
+  #flushWheel(record) {
+    const pending = record.pendingWheel;
+    record.pendingWheel = null;
+    if (!pending || !record.committed || record.resizePending) return;
+    if (pending.method === "pinch") {
+      this.#send(record, "pinch", { ...pending.fields, magnification:Math.max(-10, Math.min(10, pending.sums.magnification)) });
+      return;
+    }
+    // Keep sub-pixel remainders so slow precise scrolling is not lost to rounding.
+    const remainder = record.wheelRemainder, limit = value => Math.max(-4096, Math.min(4096, value));
+    const x = pending.sums.delta_x + remainder.x, y = pending.sums.delta_y + remainder.y;
+    const delta_x = limit(Math.round(x)) || 0, delta_y = limit(Math.round(y)) || 0;
+    remainder.x = Math.abs(x - delta_x) < 1 ? x - delta_x : 0; remainder.y = Math.abs(y - delta_y) < 1 ? y - delta_y : 0;
+    const phased = pending.fields.phase !== undefined && (pending.fields.phase !== "none" || pending.fields.momentum_phase !== "none");
+    if (!delta_x && !delta_y && !phased) return;
+    this.#send(record, "wheel", { ...pending.fields, delta_x, delta_y });
+  }
+  /** BGRA pipe fallback: default-group listeners and the fixed shortcut heuristic. */
+  #pipeKeyboard(record) {
+    const send = (method, fields) => this.#send(record, method, fields);
     for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, eventName, event => {
       if (!event.isTrusted) return;
       const route = keyboardRoute(event, { editing:this.browsingMode === "web" });
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
-        if (type === "down") {
-          const action = { c:"copy", x:"cut", v:"paste", a:"select_all", z:event.shiftKey ? "redo" : "undo" }[event.key.toLowerCase()];
-          this.#action(record, target => record.adapter.edit(target, action));
-        }
+        if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event)));
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
@@ -708,8 +940,150 @@ export class CEFPresenter {
     });
     this.#listen(record, "focus", () => this.#action(record, target => record.adapter.focus(target, true)));
     this.#listen(record, "blur", () => this.#action(record, target => record.adapter.focus(target, false)));
-    this.#listen(record, "contextmenu", event => { event.preventDefault(); this.#indicator(record, "Chromium context menu is not integrated"); });
     this.#listen(record, "compositionstart", event => { event.preventDefault(); this.#indicator(record, "IME is unsupported in the experimental Chromium surface"); });
+  }
+  /**
+   * Surface mode keys follow Firefox's remote-tab model (engine-view-gecko §7.2):
+   * a system-group capture listener asks the component to hold every trusted key
+   * that chrome has not reserved (⌘T, ⌘W, ⌘Q… stay with Zen), stops it before
+   * Zen's key handlers, forwards it, and later hands unconsumed keys back so Zen
+   * and menu shortcuts run exactly as over a Gecko tab. keydown is never
+   * default-prevented, so the widget still runs the IME.
+   */
+  #surfaceKeyboard(record) {
+    const web = this.browsingMode === "web";
+    const handler = event => {
+      if (!event.isTrusted || !record.committed) return;
+      // IME-owned keys go through the widget into the proxy editor's composition.
+      if (event.isComposing || event.keyCode === 229 || event.key === "Process" || event.key === "Dead") return;
+      const features = record.adapter.inputFeatures ?? {};
+      const native = this.#describe(record, event);
+      const nativeCode = native?.kind === "key" && Number.isInteger(native.keyCode) ? native.keyCode : undefined;
+      const route = keyboardRoute(event, { editing:web, native:nativeCode !== undefined });
+      // Hosts without key verdicts: the fixed heuristic decides up front (labelled fallback).
+      if (!features.keyVerdict && route === "chrome") return;
+      let ticket = 0;
+      try { ticket = record.native.holdKeyEvent(event); } catch { ticket = 0; }
+      if (!ticket) return; // reserved by chrome, or our own reply: it proceeds as over a Gecko tab
+      event.stopPropagation();
+      // No default action (Tab focus move, space scroll, text insertion) while the page decides.
+      if (event.type === "keypress") event.preventDefault();
+      const finish = consumed => this.#finishKey(record, ticket, consumed);
+      if (route === "edit") {
+        if (event.type === "keydown") this.#action(record, target => record.adapter.edit(target, editAction(event)));
+        finish(true);
+        return;
+      }
+      const code = nativeCode ?? MAC_KEYS[event.code];
+      if (route === "unsupported" || code === undefined) { finish(false); return; }
+      const base = { native_key_code:code, windows_key_code:Math.min(255, event.keyCode || 0), modifiers:cefModifiers(event),
+        text:event.key.length <= 2 ? event.key : "" };
+      const verdict = promise => (features.keyVerdict
+        ? promise.then(result => result !== null && result.reason !== "key_not_consumed")
+        : Promise.resolve(true));
+      if (event.type === "keydown") {
+        record.keyDowns.set(event.code, base);
+        const result = verdict(this.#send(record, "key", { ...base, type:"down" }));
+        record.keyVerdicts.set(event.code, result);
+        result.then(finish);
+      } else if (event.type === "keypress") {
+        const text = event.key === "Enter" ? "\r" : (event.key.length <= 2 ? event.key : "");
+        if (text && !event.metaKey && !event.ctrlKey) {
+          this.#send(record, "key", { ...(record.keyDowns.get(event.code) ?? base), type:"char", text });
+        }
+        // A keypress shares its keydown's verdict: ⌘L's keypress returns to Zen with it.
+        (record.keyVerdicts.get(event.code) ?? Promise.resolve(true)).then(finish);
+      } else {
+        const down = record.keyVerdicts.get(event.code);
+        record.keyVerdicts.delete(event.code); record.keyDowns.delete(event.code);
+        this.#send(record, "key", { ...base, type:"up" });
+        (down ?? Promise.resolve(true)).then(finish);
+      }
+    };
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      this.#listenOn(record, record.overlay, type, handler, { capture:true, mozSystemGroup:true });
+    }
+  }
+  #finishKey(record, ticket, consumed) {
+    const finish = () => {
+      // Replies are re-dispatched at the engine view, so Zen's handlers see them in the chrome document.
+      const target = record.canvas.isConnected !== false ? record.canvas : this.window.document.documentElement;
+      try { record.native.finishKeyEvent(ticket, consumed, target); } catch {}
+    };
+    // A consumed key is only released; an unconsumed one is replayed after the current dispatch.
+    if (consumed) finish(); else this.window.setTimeout(finish, 0);
+  }
+  #contentElement(record, node) {
+    return !!node && (node === record.canvas || node === record.ime?.text || node === record.ime?.password);
+  }
+  /** Page focus follows chrome focus of the engine view or its proxy editor, not moves between them. */
+  #surfaceFocus(record) {
+    this.#listenOn(record, record.overlay, "focusin", event => {
+      if (!this.#contentElement(record, event.target) || record.contentFocused) return;
+      record.contentFocused = true;
+      this.#action(record, target => record.adapter.focus(target, true));
+    });
+    this.#listenOn(record, record.overlay, "focusout", event => {
+      if (!this.#contentElement(record, event.target) || this.#contentElement(record, event.relatedTarget)) return;
+      record.contentFocused = false;
+      if (record.composing) { record.composing = false; this.#send(record, "ime_finish_composing", {}); }
+      this.#action(record, target => record.adapter.focus(target, false));
+    });
+  }
+  /**
+   * IME (engine-view-gecko §7.3), only when the host announces `ime`: while the
+   * page's editable has focus, a transparent proxy editor at its caret takes chrome
+   * focus so Gecko drives the macOS IME against it; password fields use an
+   * <input type=password> so secure event input turns on as for a Gecko field.
+   */
+  #textInput(record, event) {
+    if (!record.native || !record.adapter.inputFeatures?.ime) return;
+    const ime = record.ime ??= this.#createIME(record);
+    const focused = this.window.document.activeElement;
+    const hadFocus = this.#contentElement(record, focused);
+    if (event.mode === "none") {
+      ime.active = null;
+      if (hadFocus && focused !== record.canvas) record.canvas.focus();
+      return;
+    }
+    const element = event.mode === "password" ? ime.password : ime.text;
+    const height = Math.max(1, Math.round(event.caret_height));
+    Object.assign(element.style, { left:`${Math.round(event.caret_x)}px`, top:`${Math.round(event.caret_y)}px`,
+      height:`${height}px`, fontSize:`${height}px`, lineHeight:`${height}px` });
+    ime.active = element;
+    if (hadFocus && focused !== element) element.focus();
+  }
+  #createIME(record) {
+    const make = (tag, type) => {
+      const element = this.#element(record.overlay, tag);
+      if (type) element.setAttribute("type", type);
+      element.setAttribute("aria-hidden", "true"); element.setAttribute("tabindex", "-1");
+      element.setAttribute("autocomplete", "off"); element.setAttribute("spellcheck", "false");
+      element.style.cssText = PROXY_STYLE;
+      const clear = () => { element.value = ""; };
+      this.#listenOn(record, element, "compositionstart", () => { record.composing = true; });
+      this.#listenOn(record, element, "compositionupdate", event => {
+        const text = String(event.data ?? "").slice(0, 256);
+        this.#send(record, "ime_set_composition", { text, selection_start:text.length, selection_end:text.length });
+      });
+      this.#listenOn(record, element, "compositionend", event => {
+        record.composing = false;
+        const text = String(event.data ?? "").slice(0, 256);
+        if (text) this.#send(record, "ime_commit_text", { text });
+        else this.#send(record, "ime_cancel_composition", {});
+      });
+      // Text that arrives without keys (dictation, emoji and character viewer).
+      this.#listenOn(record, element, "input", event => {
+        if (event.isComposing) return;
+        const text = String(event.data ?? "").slice(0, 256);
+        if (!record.composing && text && ["insertText", "insertReplacementText"].includes(event.inputType)) {
+          this.#send(record, "ime_commit_text", { text });
+        }
+        clear();
+      });
+      return element;
+    };
+    return { text:make("textarea"), password:make("input", "password"), active:null };
   }
   #recordForBrowser(browser) {
     for (const record of this.records.values()) if (record.browser === browser) return record;
@@ -783,7 +1157,7 @@ export class CEFPresenter {
         presenter.window.gURLBar.view?.close?.({ elementPicked:true });
         record.latestURL = url; presenter.#panel(record, null);
         presenter.#action(record, target => record.adapter.navigate(target, url));
-        record.canvas.focus();
+        presenter.#focusContent(record);
         return undefined;
       }
       // Firefox-only destinations (about:, file:, POST searches) open in Firefox.
@@ -812,12 +1186,15 @@ export class CEFPresenter {
     return record.removing;
   }
   async #removeOnce(record, keepEngine) {
+    this.ui?.forget(record); // AxioSozo engine UI delegation
     if (this.pending === record) this.pending = null;
     if (this.records.get(record.tab) === record) this.records.delete(record.tab);
     record.committed = false;
     record.observer?.disconnect();
     for (const remove of record.listeners) remove();
     record.listeners = [];
+    record.pendingWheel = null; record.nextPointer = null;
+    this.#restoreBrowserFocus(record);
     this.window.clearTimeout?.(record.noticeTimer);
     record.browser.style.visibility = record.priorVisibility;
     if (typeof record.priorDocShellIsActive === "boolean") {
@@ -856,14 +1233,22 @@ export class CEFPresenter {
   }
   diagnostics() {
     const record = this.active;
-    return record ? { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
-      frames:record.displayedFrames, meanDrawMilliseconds:record.drawMilliseconds / record.displayedFrames,
+    if (!record) return { engine:"gecko", ownedTabIds:this.owners() };
+    // Surface mode: frames never reach JS; the endpoint counts them (presented, composited, released…).
+    const stats = record.surfaceMode ? record.adapter.surfaceStats?.() ?? null : null;
+    return { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
+      renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
+      frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
+      meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       firstFrameMilliseconds:record.firstFrameAt - record.startedAt, lastFrameId:record.lastFrameId,
-      surface:record.adapter.surface, renderScaleLimited:!!record.renderScaleLimited,
-      fixtureOnly:this.browsingMode === "fixture", ownedTabIds:this.owners() } : { engine:"gecko", ownedTabIds:this.owners() };
+      surface:record.adapter.surface, surfaceGeometry:record.surfaceGeometry ?? null, surfaceStats:stats,
+      renderScaleLimited:!!record.renderScaleLimited, inputFeatures:record.adapter.inputFeatures ?? null,
+      fixtureOnly:this.browsingMode === "fixture", ownedTabIds:this.owners() };
   }
   captureFixtureFrame() {
     const record = this.active;
+    // Surface frames never exist in chrome JS (drawSnapshot shows an empty canvas); use screencapture.
+    if (record?.surfaceMode) throw new Error("CEF_SURFACE_CAPTURE_UNAVAILABLE");
     if (!record || !record.displayedFrames || !allowedFixtureURL(record.latestURL, record.originalTarget.identity)) {
       throw new Error("NO_VERIFIED_CEF_FIXTURE_FRAME");
     }

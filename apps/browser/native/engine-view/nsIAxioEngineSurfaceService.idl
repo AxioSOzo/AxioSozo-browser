@@ -1,0 +1,159 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+webidl Element;
+webidl Event;
+
+/**
+ * Main-thread notifications from one engine endpoint. Implemented by chrome JS.
+ */
+[scriptable, uuid(6f0c2b1e-5d0a-4a57-9c3e-0d8a2f7b4c11)]
+interface nsIAxioEngineEndpointListener : nsISupports {
+  /** The host passed the checks (CONNECT accepted, CONNECTED sent). */
+  void onConnected(in long hostPid);
+
+  /**
+   * The first frame for a target arrived, or its size/scale changed. Chrome JS
+   * sets the bound canvas width/height attributes to the logical size so
+   * `object-fit: none; object-position: 0 0` maps one surface pixel to one
+   * device pixel, anchored top-left, while a resize is in flight.
+   */
+  void onTargetGeometry(in unsigned long long targetId,
+                        in unsigned long width, in unsigned long height,
+                        in unsigned long logicalWidth,
+                        in unsigned long logicalHeight, in double scale);
+
+  /**
+   * The endpoint is closed: "closed", "host-died", "host-unresponsive" or
+   * "protocol:<detail>". All bindings have been cleared.
+   */
+  void onClosed(in ACString reason);
+};
+
+/**
+ * One Mach receive endpoint for one engine host process. Parent process only.
+ * Frames never pass through JS: the host sends IOSurface send rights over
+ * Mach and they are posted to the bound canvas' async ImageContainer on the
+ * endpoint's private queue.
+ */
+[scriptable, builtinclass, uuid(0a9f4d62-3b7e-4f0e-8a51-2c6d9e1b7f34)]
+interface nsIAxioEngineEndpoint : nsISupports {
+  const unsigned long STATE_LISTENING = 0;
+  const unsigned long STATE_CONNECTED = 1;
+  const unsigned long STATE_CLOSED = 2;
+
+  /** Random bootstrap service name the host passes to bootstrap_look_up. */
+  readonly attribute ACString serviceName;
+
+  /**
+   * The one-time 256-bit token as 64 lowercase hex characters. Returns it
+   * exactly once; later calls throw. Chrome JS writes it to the host's
+   * authenticated stdin JSON pipe, never to argv or the environment.
+   */
+  ACString takeToken();
+
+  /**
+   * The pid of the spawned host (Subprocess `proc.pid`). Must be called
+   * before the token is written to the host. Throws unless the pid is a
+   * direct child of this process; CONNECT is accepted only from it (kernel
+   * audit trailer).
+   */
+  void expectHostPid(in long pid);
+
+  readonly attribute unsigned long state;
+
+  /** Whether BEGIN_FRAME ticks are sent (hello `surface_begin_frames:true`). */
+  readonly attribute boolean externalBeginFrames;
+
+  attribute nsIAxioEngineEndpointListener listener;
+
+  /**
+   * Present frames for targetId (== cef-v1 native_target_id as u64) in
+   * `canvas`, an HTML <canvas> in a chrome document with no rendering
+   * context. At most 32 targets. A target can be re-bound to another canvas
+   * (tab moved to another window) after unbindTarget. The generations are the
+   * target's current document/navigation generations from the JSON pipe.
+   */
+  void bindElement(in Element canvas, in unsigned long long targetId,
+                   in unsigned long long documentGeneration,
+                   in unsigned long long navigationGeneration);
+
+  /**
+   * Chrome JS acknowledged a generation change from the JSON pipe. Frames of
+   * older generations are released unseen; frames of newer generations are
+   * held (not shown) until acknowledged here, so page content never appears
+   * before chrome processed the navigation (no address bar spoof window).
+   */
+  void setTargetGenerations(in unsigned long long targetId,
+                            in unsigned long long documentGeneration,
+                            in unsigned long long navigationGeneration);
+
+  void unbindTarget(in unsigned long long targetId);
+
+  /**
+   * Whether the target is on screen. With external begin frames, visible
+   * targets (and bound targets still awaiting their first frame) receive one
+   * BEGIN_FRAME per display refresh; hidden ones none. Hidden targets unpin
+   * superseded surfaces at once.
+   */
+  void setTargetVisible(in unsigned long long targetId, in boolean visible);
+
+  /** Counters for tests and about:axiosozo diagnostics. */
+  [implicit_jscontext] jsval getTargetStats(in unsigned long long targetId);
+
+  void close();
+};
+
+[scriptable, builtinclass, uuid(c3e1a7d4-9b2f-4e86-b0a5-7f4d1c2e9a60)]
+interface nsIAxioEngineSurfaceService : nsISupports {
+  /**
+   * @param externalBeginFrames true when the hello will carry
+   *        `surface_begin_frames:true`; BEGIN_FRAME is never sent otherwise
+   *        (the host treats it as a protocol error).
+   */
+  nsIAxioEngineEndpoint createEndpoint(in boolean externalBeginFrames);
+
+  /**
+   * Current display refresh rate from Gecko's vsync source, in Hz, for the
+   * hello `frame_rate` (60 or 120).
+   */
+  readonly attribute double displayRefreshRate;
+
+  /**
+   * Set the element's CSS cursor from a host cursor. Only CSS keyword cursors
+   * are accepted (no url()); anything else throws NS_ERROR_INVALID_ARG.
+   */
+  void setCursor(in Element element, in ACString cursor);
+
+  /**
+   * Native detail for a trusted event while it is being dispatched: key
+   * (macOS keyCode, characters, charactersIgnoringModifiers, repeat), wheel
+   * and ctrl+wheel pinch (NSEvent phase, momentumPhase, scrollingDelta,
+   * precise, inverted, magnification) and mouse (clickCount, pressure).
+   * Returns null when nothing native is known.
+   */
+  [implicit_jscontext] jsval describeNativeEvent(in Event event);
+
+  /**
+   * Called from a system-group capture listener on the engine view while a
+   * trusted keydown/keypress/keyup is dispatched. Returns 0 when chrome owns
+   * the key (reserved shortcut, or a reply already handled by the engine);
+   * the caller must then leave it alone. Otherwise returns a ticket: the
+   * caller stops propagation, forwards the key to the engine and later calls
+   * finishKeyEvent with the engine's verdict.
+   */
+  unsigned long holdKeyEvent(in Event keyEvent);
+
+  /**
+   * Like BrowserParent::RecvReplyKeyEvent: when the engine did not consume
+   * the key, re-dispatch it to `target` as a reply so Zen and Firefox
+   * shortcuts and native menu key equivalents run exactly as over a Gecko
+   * tab.
+   */
+  [can_run_script]
+  void finishKeyEvent(in unsigned long ticket, in boolean consumedByEngine,
+                      in Element target);
+};

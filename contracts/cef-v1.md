@@ -56,7 +56,10 @@ commands bind the complete BrowserTarget from `ipc-v1.schema.json`, including
 `engine:chromium`, and reject any stale field before native dispatch.
 
 Commands: `create`, `navigate`, `back`, `forward`, `reload`, `stop`, `resize`, `focus`, `key`,
-`mouse`, `wheel`, `frame_ack`, `visibility`, `edit`, `close`, `shutdown`. `close`
+`mouse`, `wheel`, `pinch`, `ime_set_composition`, `ime_commit_text`, `ime_finish_composing`,
+`ime_cancel_composition`, `frame_rate`, `frame_ack`, `visibility`, `edit`, `close`,
+`shutdown`, plus the web-only
+browser-UI replies and commands in "Browser UI delegation" below. `close`
 ends only its target. A new navigation supersedes one still loading: the earlier
 request completes `unsupported` with reason `NAVIGATION_SUPERSEDED`. Navigation
 requests have no parent-side deadline; they complete on load, error or replacement. The adapter declares capabilities
@@ -64,8 +67,8 @@ and returns `unsupported` for unavailable operations; `devtools` must not silent
 succeed. Input coordinates use logical content points plus an explicit device scale.
 Keyboard fields are `type:down|up|char`, `native_key_code`, `windows_key_code`,
 `modifiers`, and `text`. Mouse fields are `type`, `x`, `y`, `modifiers`, `button`,
-`click_count`, and `mouse_leave`. IME remains unsupported until the native
-composition path is tested.
+`click_count`, and `mouse_leave`. Key verdicts, IME, wheel phases, pinch and frame-rate
+renegotiation are specified in "Input extensions" below.
 
 `visibility` carries `visible:boolean` and maps to native `was_hidden`. Hidden
 tabs/windows stop presenting frames. `edit` accepts only `copy`, `cut`, `paste`,
@@ -84,14 +87,97 @@ switch carries only the visible address, as if the user retyped it: an HTTP(S)
 URL without credentials whose Gecko history entry has no POST data. It never
 transfers cookies, storage, history or page state, and never resubmits a form;
 anything else starts Chromium blank.
-Certificate validation remains native and has no bypass command. Unsupported
-permissions, downloads, file selectors and JavaScript dialogs fail closed with
-explicit native diagnostics. A user-gesture link that targets a new tab or window
+Certificate validation remains native and has no bypass command. Context menus,
+JavaScript dialogs, permission requests, file selectors, downloads, HTTP
+authentication, blocked pop-ups, find and zoom are delegated to Zen's own UI (see
+"Browser UI delegation"); fixture sessions keep failing them closed with explicit
+native diagnostics. A user-gesture link that targets a new tab or window
 never creates a native window: the host emits `open_url` (`url`, `background`) and
 Zen opens a new Chromium tab; other pop-ups are denied. OSR select/autocomplete popup pixels
 are composited into the same frame stream; they are not external browser windows.
-Web mode remains experimental while IME, accessibility and developer tools are
+Web mode remains experimental while accessibility and developer tools are
 unavailable; adding HTTP(S) navigation is not full E1/E2 certification.
+
+## Input extensions
+
+`ready.capabilities` announces each extension (`key_verdict`, `ime`, `wheel_phases`,
+`pinch`, `frame_rate_command`, all `true` on the current host); a client sends the
+extension fields and methods only when announced. Optional fields are admitted by
+exact name; any other key, an out-of-range value or a wrong type is a protocol error.
+All offsets are UTF-16 code units.
+
+**Key verdicts.** A `key` `down` completes `success` with `reason:"key_consumed"` or
+`reason:"key_not_consumed"`; `up` and `char` complete without a reason. Chromium acks
+keyboard events in order per widget and passes only unconsumed ones to
+`CefKeyboardHandler::OnKeyEvent`. After each keydown (and after its own `char`, or
+before the next command of that target, or after 30 ms) the host sends one inert
+probe: a `KEYEVENT_CHAR` with `is_system_key` set, which Blink answers "not handled"
+before any DOM dispatch (`WebFrameWidgetImpl::HandleCharEvent`, Chromium 154). A
+keydown whose unhandled report arrives before its probe is `key_not_consumed`; one
+whose probe arrives first was consumed (page `preventDefault`, editing command, focus
+move). The probe waits for the keydown's `char` because it also clears Blink's
+suppress-next-keypress flag. No answer within 500 ms, a closed target, or an open
+select/date popup (no probe is sent while a popup is shown) completes
+`key_not_consumed`. Nothing blocks the UI thread. For non-text keys with empty
+`text` (arrows, Escape, Return, F-keys) the host supplies AppKit's `[NSEvent
+characters]` value, because CEF's macOS translator turns an event with no characters
+into a flags-changed (modifier) event.
+
+**IME** (`ime:true`), bound to the focused target:
+
+| method | fields (optional in brackets) |
+| --- | --- |
+| `ime_set_composition` | `text` (≤ 1024), `selection_start`, `selection_end` (0 ≤ start ≤ end ≤ text length), [`underlines`: ≤ 16 × `{start, end, thick}` within `text`], [`replacement_range` `{start, end}`] |
+| `ime_commit_text` | `text`, [`replacement_range`], [`relative_cursor_pos` (\|n\| ≤ 65536)] |
+| `ime_finish_composing` | [`keep_selection` boolean, default false] |
+| `ime_cancel_composition` | — |
+
+An omitted `replacement_range` is CEF's invalid range (current composition or
+selection). Omitted `underlines` means one thin solid underline in the text colour.
+The host emits `text_input {mode, caret_x, caret_y, caret_width, caret_height}` in
+logical points of the target view, `mode` ∈ `none`, `text`, `password`. The renderer
+helper reports focused-node changes (editable, password input, element bounds) with
+one bounded process message; the host validates and clamps it and, until composition
+reports real character bounds, uses a one-line caret at the start of the field.
+During composition `OnImeCompositionRangeChanged` character bounds give the caret.
+Events are sent only on change and at most about 60 per second per target. A new
+document resets the mode to `none`. Focus inside out-of-process iframes is not
+reported (CEF's renderer focus callback runs only for the main frame tree).
+
+**Wheel phases** (`wheel_phases:true`): `wheel` may add the group `phase`,
+`momentum_phase` (each `none`, `may_begin`, `began`, `changed`, `stationary`, `ended`,
+`cancelled`) and `precise` (boolean). What Chromium receives: the pinned C API has no
+phase fields, and on macOS CEF ignores `EVENTFLAG_PRECISION_SCROLLING_DELTA` and
+`EVENTFLAG_SCROLL_BY_PAGE`: every wheel event is `kScrollByPrecisePixel` with
+`kPhaseNone` (`TranslateWebWheelEvent`, `browser_platform_delegate_native_mac.mm`).
+The OSR view's `MouseWheelPhaseHandler` then synthesizes phases: Began, Changed (or
+Stationary for zero deltas), and Ended 500 ms after the last event; latching also
+breaks after 10 px of pointer travel, a modifier change or a direction change. macOS
+momentum events therefore reach Chromium as more non-momentum scroll updates: the
+page scrolls with the system's inertia curve, but Chromium sees no fling and no
+momentum phase, and a new gesture within 500 ms continues the previous latched
+scroll. Elastic overscroll and scroll-snap behaviour at the end of momentum were not
+verified. The host uses the phases only to drop zero-delta boundary events, which
+would otherwise extend Chromium's latch by 500 ms; `precise` is validated and has no
+effect.
+
+**Pinch** (`pinch:true`): `pinch {x, y, modifiers, phase, magnification}`
+(`|magnification|` ≤ 10, macOS increment). CEF's OSR view has no pinch API, so the
+host synthesizes a two-point touch sequence (`send_touch_event`) centred on `x, y`:
+`began` presses two points 160–400 points apart, each update multiplies the span by
+`1 + magnification` (bounded to at most 12× the start span and never below 140
+points, above Chromium's minimum scaling span), and `ended`/`cancelled` releases or cancels them. Chromium's
+gesture provider turns this into GesturePinchBegin/Update/End: visual-viewport
+pinch-zoom as in Chrome's trackpad pinch; layout and the Chromium zoom level are
+unchanged. The page sees touch and pointer events (`pointerType:"touch"`) instead of
+Chrome's synthetic ctrl+wheel, and can cancel them. A pinch with no update for 1 s,
+a hidden target or a new document cancels the sequence.
+
+**Frame rate** (`frame_rate_command:true`): `frame_rate {frame_rate: 60|120}` on a
+target calls `set_windowless_frame_rate`, which CEF applies live to the compositor
+v-sync interval and the capture period. Send it when the window moves to a display
+with another refresh rate; new targets keep the `hello` rate, which `ready`
+continues to report.
 
 ## Output
 
@@ -117,7 +203,8 @@ All generations are safe JSON integers (0..9007199254740991).
 
 Events include `ready` with actual CEF/Chromium/platform/capabilities, `created`,
 `accepted`, `completed`, `navigation`, `loading`, `title`, `url`, `closed`, `error`,
-`cursor` (a CSS cursor keyword) and `open_url`. A shared host must report
+`cursor` (a CSS cursor keyword) and `open_url`; web sessions add `prompt`,
+`prompt_closed`, `download_updated`, `find_result` and `popup_blocked`. A shared host must report
 `multi_target`, `stop`, `cursor`, `persistent_profile` and `open_in_tab`. A malformed
 event about one target's document ends that target; framing, authentication,
 identity and response errors end the host and every target.
@@ -136,6 +223,85 @@ previously committed with HTTP 200, with no intervening load error. The privileg
 adapter checks that command and URL independently and waits for a subsequent frame
 before considering the restored page ready. Other unsolicited HTTP 0 or a new
 network URL never counts as a successful load.
+
+## Browser UI delegation
+
+Chromium never draws browser UI, exactly as Gecko content never does. In web
+sessions every CEF UI callback becomes one targeted `prompt` event
+`{prompt_id, kind, details, timeout_ms}`; Zen renders it with Firefox's own UI
+(`apps/browser/chrome/ChromiumBrowserUI.sys.mjs`) and answers with one reply
+command. `prompt_id` is host-issued (`prompt-<n>`, strictly increasing, never
+reused). A reply is executed only when its `prompt_id` is still open, its method
+matches the prompt kind, its `target` equals the tab's current target and, for page
+prompts (all kinds except `download`), that target still equals the one the prompt
+was issued for. Otherwise native answers `error {code:"stale_prompt"}` and does
+nothing; this is not fatal because timeouts race with the user. A malformed reply
+field is a protocol error. Every prompt is single use. Timeout (`timeout_ms`),
+navigation (before generations advance), `on_reset_dialog_state`, tab close and
+shutdown answer with the safe default and emit `prompt_closed {prompt_id, reason}`
+(`timeout`, `navigation`, `reset`, `withdrawn`, `closed`, or `answered` after a
+reply). The safe defaults: menu cancelled, dialog cancelled, beforeunload stays
+(leaves only while the tab or host is closing), permission dismissed, file dialog
+cancelled, download not started, auth cancelled. At most 8 open prompts per tab and
+64 per host; a prompt whose event would exceed the metadata bound is denied, never
+truncated (URLs are sent whole or as `""`). Details are strictly schema-checked by
+`validateDelegationEvent`; a violation ends that tab (`INVALID_CEF_PROMPT`).
+
+| kind | CEF callback | details | reply (`prompt_id` +) | timeout |
+| --- | --- | --- | --- | --- |
+| `context_menu` | `run_context_menu` | `x, y, type_flags, link_url, source_url, frame_url, selection_text, link_text, editable, edit_flags, media_type, media_flags, misspelled_word, suggestions, spellcheck` | `context_menu_command {command, index}`; `command` ∈ `dismiss, copy, cut, paste, select_all, undo, redo, copy_image, save_image, save_link, spelling, add_to_dictionary` | 120 s |
+| `dialog` | `on_jsdialog` | `dialog_type` (`alert/confirm/prompt`), `origin_url, message, default_text` | `dialog_reply {accept, text}` | 300 s |
+| `before_unload` | `on_before_unload_dialog` | `dialog_type:"beforeunload", is_reload` (no page text) | `dialog_reply {accept, text:""}` (accept = leave) | 300 s |
+| `permission` | `on_show_permission_prompt` | `origin, permissions[]` | `permission_reply {decision}` (`allow/deny/dismiss`) | 300 s |
+| `file_dialog` | `on_file_dialog` | `mode` (`open/open_multiple/open_folder/save`), `title, default_name` (file name only), `filters[] {filter, extensions, description}` | `file_dialog_reply {paths}` (`[]` = cancel) | 600 s |
+| `download` | `on_before_download` | `download_id, suggested_name, url, mime_type, total_bytes` | `download_reply {path}` (`""` = cancel) | 600 s |
+| `auth` | `get_auth_credentials` (IO thread, hopped to UI) | `origin, host, port, is_proxy, realm, scheme` | `auth_reply {accept, username, password}` | 300 s |
+
+Context-menu actions run on the host-held link/source URL and frame of that prompt,
+never a URL supplied in the reply; "Open link in new tab", "Copy link", search,
+back/forward/reload and "Open page in Firefox" are Zen-local and answer `dismiss`.
+File replies must be absolute paths without `..`; open modes require existing files
+(or a directory for `open_folder`), save and download paths need an existing parent
+directory and must not name a directory. Zen sends only paths the user chose in
+`nsIFilePicker`, or a download path derived from Firefox's download-directory prefs.
+Camera, microphone and screen capture are denied natively with
+`error {code:"media_capture_unavailable"}`: the ad hoc signed OSR host has no macOS
+privacy usage descriptions, so TCC cannot grant capture (`capabilities.media_capture:false`).
+Unknown permission kinds are denied (`permission_denied`). Permission decisions are
+remembered only in Zen's Chromium-scoped store (`<profile>/axiosozo/chromium/site-permissions.json`),
+never in Firefox's permission manager. Credentials are never logged or saved.
+
+Other web-only commands, bound to the current target: `find {text, forward,
+match_case, find_next}` → `find_result {identifier, count, active, final}`;
+`stop_finding {clear_selection}`; `zoom {level}` (Chromium level, |level| ≤ 10);
+`download_control {download_id, action}` (`cancel/pause/resume`, only for a download
+Zen accepted in the same tab; otherwise `error {code:"stale_download"}`). Accepted
+downloads report `download_updated {download_id, state, received_bytes, total_bytes,
+speed, paused}` (`state`: `in_progress/complete/canceled/interrupted`); they survive
+navigation and are cancelled when their tab closes. A pop-up without a user gesture
+never opens: native emits `popup_blocked {url}` (HTTP(S) only) and Zen shows
+Firefox's pop-up-blocked bar; only an explicit user choice (or a remembered
+per-origin allowance) opens it, as a new Chromium tab. `ready.capabilities` reports
+`context_menu`, `javascript_dialogs`, `permissions`, `file_dialogs`, `downloads`,
+`http_auth`, `find`, `zoom` and `popup_blocked` as `true` for web sessions and
+`false` for fixtures; `popups` (native windows) and `media_capture` stay `false`.
+
+## Surface mode (Mach IOSurface frames)
+
+`hello` may add `surface_service` + `surface_token` (together), optional
+`surface_begin_frames:true` and optional `frame_rate` (`60` default or `120`; the
+latter is also valid without a surface). The frame channel, its handshake,
+release/backpressure and begin-frame ticks are specified engine-neutrally in
+[engine-surface-v1](engine-surface-v1.md). Surface mode has no 32 MiB payload cap:
+`create`/`resize` need only 1..4096 physical px per side (at most 64 MiB per BGRA
+IOSurface); the pipe keeps its cap. In surface mode `ready.render_path` is
+`native-osr-iosurface` and capabilities add `surface`, `external_begin_frame` and
+`frame_rate`; the pipe then carries only JSON events (no kind-2 frames), and a
+JSON `frame_ack` is a protocol error because frames are released over Mach.
+Channel failures emit `error {code:"surface_failed", reason}` and end the host
+(exit 64). Everything else in this contract (commands, targets, generations,
+events, security) is unchanged. Without `surface_service` the AXCF frames below
+remain the fallback.
 
 ## Backpressure and lifecycle
 

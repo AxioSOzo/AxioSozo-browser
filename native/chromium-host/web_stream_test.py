@@ -48,6 +48,9 @@ class WebFixture(http.server.BaseHTTPRequestHandler):
             return self.reply(200, 'synthetic-download', 'application/octet-stream', Content_Disposition='attachment; filename="synthetic.txt"')
         if self.path == '/animate':
             return self.reply(200, '<title>animation</title><body style="background:#12384a"><script>let n=0;setInterval(()=>document.body.style.background=`rgb(${n++%255},60,80)`,30)</script>')
+        if self.path == '/dialog':
+            # alert() from a timer after load; the title changes only once it returns.
+            return self.reply(200, '<title>dialog</title><script>setTimeout(()=>{alert("E1 alert");document.title="alert returned";},50)</script>')
         if self.path.startswith('/page'):
             return self.reply(200, f'''<!doctype html><title>web fixture</title><link rel="stylesheet" href="/style.css">
                 <h1>Real CEF web mode</h1><form method="POST" action="/submit"><input name="value" autofocus value=""><button>Send</button></form>
@@ -125,7 +128,10 @@ def run(interaction_timeout=15):
             completed('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='CEF')
             completed('edit', action='select_all')
             completed('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='WEB')
+            # As the presenter sends Return: keydown, then its keypress as char "\r".
+            # Implicit submission is Blink's keypress default action.
             completed('key', type='down', native_key_code=36, windows_key_code=13, modifiers=0, text='')
+            completed('key', type='char', native_key_code=36, windows_key_code=13, modifiers=0, text='\r')
             session.until(lambda _, item: item.get('title') == 'post received')
             session.until(lambda kind, _: kind == 2, capture=directory / 'post.png')
             assert main.submitted == ['value=WEB'], main.submitted
@@ -141,15 +147,64 @@ def run(interaction_timeout=15):
             navigate(origin + '/missing', directory / 'http-404.png')
             assert any(item.get('http_status') == 404 for item in session.events)
             result['tests'].append('HTTP404_rendered_as_document')
-            completed('navigate', url=f'https://127.0.0.1:{secure.server_port}/page')
-            assert any(item.get('code') == 'certificate_error' for item in session.events)
-            assert not secure.requests, secure.requests
-            navigate(origin + '/page')
+            # The denied load commits Chromium's interstitial, whose own OnLoadEnd
+            # (HTTP0) can arrive after the next navigation was accepted. Recover
+            # immediately, several times, so that stale load is actually raced.
+            for _ in range(3):
+                denied = completed('navigate', url=f'https://127.0.0.1:{secure.server_port}/page')
+                assert denied['status'] == 'failed', denied
+                denied_generation = session.target['document_generation']
+                assert any(item.get('code') == 'certificate_error' for item in session.events)
+                assert not secure.requests, secure.requests
+                mark = len(session.events)
+                navigate(origin + '/page')
+                recovered = session.target['document_generation']
+                loads = [item for item in session.events[mark:] if item.get('event') == 'load'
+                         and item['target']['document_generation'] == recovered]
+                assert [item['http_status'] for item in loads] == [200], loads
+                assert not any(target['document_generation'] == denied_generation
+                               for target in session.frame_targets), 'denied TLS page painted'
             result['tests'].append('invalid_TLS_denied_and_explicit_navigation_recovery')
             # More than the former session lifetime, without generating100k events.
             session.counter = 100001
             assert completed('focus', focused=True)['status'] == 'success'
             result['tests'].append('web_monotonic_sequence_beyond100000')
+            # JS dialogs delegated to Zen: answered once, and a navigation that
+            # cancels an open dialog must not re-enter prompt teardown (E1
+            # 2026-09-30: the host hung in ~Prompt after a use-after-free).
+            def since(mark, match):
+                seen = [item for item in session.events[mark:] if match(item)]
+                return seen[0] if seen else session.until(lambda _, item: match(item))
+            is_dialog = lambda item: item.get('event') == 'prompt' and item.get('kind') == 'dialog'
+            # A blocked renderer may not paint before its alert: wait for the prompt, not a frame.
+            mark = len(session.events)
+            assert completed('navigate', url=origin + '/dialog')['status'] == 'success'
+            asked = since(mark, is_dialog)
+            assert asked['details']['dialog_type'] == 'alert' and asked['details']['message'] == 'E1 alert', asked
+            assert completed('dialog_reply', prompt_id=asked['prompt_id'], accept=True, text='')['status'] == 'success'
+            since(mark, lambda item: item.get('event') == 'prompt_closed' and item.get('prompt_id') == asked['prompt_id'])
+            since(mark, lambda item: item.get('event') == 'title' and item.get('title') == 'alert returned')
+            result['tests'].append('javascript_alert_delegated_and_answered_once')
+            mark = len(session.events)
+            assert completed('navigate', url=origin + '/dialog')['status'] == 'success'
+            pending_dialog = since(mark, is_dialog)
+            navigate(origin + '/page')
+            closed = [item for item in session.events[mark:] if item.get('event') == 'prompt_closed'
+                      and item.get('prompt_id') == pending_dialog['prompt_id']]
+            assert len(closed) == 1 and closed[0]['reason'] in ('navigation', 'reset'), closed
+            assert completed('focus', focused=True)['status'] == 'success', 'host UI thread still answers'
+            assert session.process.poll() is None
+            result['tests'].append('navigation_cancels_open_javascript_dialog_without_hang')
+            # Right-click off any link: CEF reports the empty link/source URLs as NULL
+            # userfree strings (E1 2026-09-30: freeing them hung the host).
+            mark = len(session.events)
+            for kind in ('down', 'up'):
+                completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1, mouse_leave=False)
+            menu = since(mark, lambda item: item.get('event') == 'prompt' and item.get('kind') == 'context_menu')
+            assert menu['details']['link_url'] == '' and menu['details']['source_url'] == '', menu['details']
+            assert completed('context_menu_command', prompt_id=menu['prompt_id'], command='dismiss', index=0)['status'] == 'success'
+            assert completed('focus', focused=True)['status'] == 'success' and session.process.poll() is None
+            result['tests'].append('context_menu_off_link_delegated_and_dismissed')
             navigate(origin + '/animate')
             completed('visibility', visible=False)
             # Drain a paint already outstanding at hide, then measure new traffic.
@@ -190,6 +245,10 @@ def run(interaction_timeout=15):
                           peer_requests=peer.requests, rejected_tls_requests=secure.requests)
     except (Exception, KeyboardInterrupt) as error:
         result['error'] = type(error).__name__ + ': ' + str(error)
+        if session:
+            # Protocol events only (no pixels): the last few explain where it stopped.
+            result['last_events'] = [{key: value for key, value in item.items() if key != 'target'}
+                                     for item in session.events[-12:]]
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if session:

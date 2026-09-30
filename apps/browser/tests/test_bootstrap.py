@@ -321,6 +321,7 @@ class PackagingTests(unittest.TestCase):
         root = Path(self.directory.name)
         self.chrome = root / 'chrome'
         self.contexts = root / 'contexts-src'
+        self.native = root / 'native'
         self.upstream = root / 'upstream'
         (self.chrome / 'overview').mkdir(parents=True)
         self.contexts.mkdir()
@@ -340,6 +341,7 @@ class PackagingTests(unittest.TestCase):
         jar.parent.mkdir(parents=True)
         (self.upstream / 'prefs').mkdir()
         (self.upstream / 'prefs/zen.yaml').write_text('- name: zen\n  value: true\n')
+        (self.upstream / 'src/zen/moz.build').write_text('DIRS += [\n    "toolkit",\n    "window-drag",\n]\n')
         stock = '# header\n        content/browser/zen-sets.js (x)\n\n        content/browser/ZenStartup.mjs (y)\n'
         jar.write_text(stock)
         env = zen.zen_toolchain.environment()
@@ -352,9 +354,16 @@ class PackagingTests(unittest.TestCase):
         digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
         self.record = {'path': 'src/zen/common/jar.inc.mn', 'before_sha256': digest(stock),
                        'after_sha256': digest(stock.replace(old, new, 1)), 'replacements': [[old, new]]}
+        moz = (self.upstream / 'src/zen/moz.build').read_text()
+        moz_old = '    "window-drag",\n]'
+        moz_new = moz_old + '\nDIRS += ["axiosozo-native"]'
+        self.native_record = {'path': 'src/zen/moz.build', 'when': 'native', 'before_sha256': digest(moz),
+                              'after_sha256': digest(moz.replace(moz_old, moz_new, 1)), 'replacements': [[moz_old, moz_new]]}
+        self.moz_stock = moz
         self.patches = [patch.object(zen, 'CHROME_SOURCE', self.chrome),
+                        patch.object(zen, 'NATIVE_SOURCE', self.native),
                         patch.object(zen, 'CONTEXTS_SOURCE', self.contexts),
-                        patch.object(zen, 'overlay_records', return_value=[self.record]),
+                        patch.object(zen, 'overlay_records', return_value=[self.record, self.native_record]),
                         patch.object(zen, 'retired_records', return_value=[])]
         for item in self.patches:
             item.start()
@@ -489,6 +498,144 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'SYMLINKED_CHROME_FILE'):
             zen.packaged_files()
         self.assertEqual((outside / 'secret.mjs').read_text(), 'export const secret = 1;\n')
+
+    def write_native(self, files):
+        for name, text in files.items():
+            (self.native / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.native / name).write_text(text)
+
+    def native_mirror(self, name):
+        return self.upstream / 'src/zen/axiosozo-native' / name
+
+    def test_native_sources_mirror_with_generated_moz_build_and_conditional_dirs(self):
+        moz = self.upstream / 'src/zen/moz.build'
+        zen.overlay(self.upstream)  # no native source: nothing mirrored, moz.build untouched
+        self.assertEqual(moz.read_text(), self.moz_stock)
+        self.assertFalse((self.upstream / 'src/zen/axiosozo-native').exists())
+        self.write_native({'zeta/moz.build': 'Library("zeta")\n', 'zeta/Zeta.cpp': 'int z;\n', 'alpha/moz.build': '',
+                           'alpha/nsIAlpha.idl': 'interface X {};\n', 'alpha/Alpha.h': '#pragma once\n',
+                           'alpha/Alpha.mm': '', 'alpha/notes.txt': 'not native', 'alpha/.hidden.cpp': '',
+                           'alpha/deep/Impl.hpp': '', 'orphan/Only.cpp': '', 'Root.h': ''})
+        (self.native / 'alpha/._Alpha.mm').write_text('AppleDouble sidecar')
+        changed = zen.overlay(self.upstream)
+        self.assertEqual(moz.read_text().count('DIRS += ["axiosozo-native"]'), 1)
+        generated = self.native_mirror('moz.build').read_text()
+        self.assertIn('DIRS += [\n    "alpha",\n    "zeta",\n]\n', generated)  # sorted, orphan has no moz.build
+        self.assertNotIn('orphan', generated)
+        for name in ['zeta/Zeta.cpp', 'alpha/nsIAlpha.idl', 'alpha/Alpha.h', 'alpha/Alpha.mm', 'alpha/deep/Impl.hpp', 'orphan/Only.cpp', 'Root.h']:
+            self.assertEqual(self.native_mirror(name).read_bytes(), (self.native / name).read_bytes())
+        for name in ['alpha/notes.txt', 'alpha/.hidden.cpp']:
+            self.assertFalse(self.native_mirror(name).exists(), name)
+        # exFAT may create its own ._ sidecars next to mirrors; sources are never mirrored from them.
+        self.assertNotIn('alpha/._Alpha.mm', [name for name, _ in zen.native_files()])
+        self.assertIn('src/zen/axiosozo-native/moz.build', changed)
+        state = json.loads((self.upstream / '.axiosozo-overlay-state.json').read_text())['files']
+        self.assertIn('src/zen/axiosozo-native/alpha/Alpha.h', state)
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        after = moz.read_text()
+        self.assertEqual(zen.overlay(self.upstream), [])  # idempotent, nothing rewritten
+        self.assertEqual(moz.read_text(), after)
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+
+    def test_native_dirs_absent_without_subdirectory_moz_build(self):
+        self.write_native({'Lonely.cpp': ''})
+        zen.overlay(self.upstream)
+        self.assertNotIn('DIRS', self.native_mirror('moz.build').read_text())
+
+    def test_stale_native_files_are_removed_and_dirs_reverted(self):
+        moz = self.upstream / 'src/zen/moz.build'
+        self.write_native({'alpha/moz.build': '', 'alpha/A.cpp': 'a', 'beta/moz.build': '', 'beta/B.cpp': 'b'})
+        zen.overlay(self.upstream)
+        (self.native / 'beta/B.cpp').unlink()
+        (self.native / 'beta/moz.build').unlink()
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+        changed = zen.overlay(self.upstream)
+        self.assertIn('src/zen/axiosozo-native/beta/B.cpp', changed)
+        self.assertFalse(self.native_mirror('beta').exists())
+        self.assertNotIn('beta', self.native_mirror('moz.build').read_text())
+        # A locally edited stale mirror survives and is reported, like the chrome mirror.
+        self.native_mirror('alpha/A.cpp').write_text('edited')
+        (self.native / 'alpha/A.cpp').unlink()
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), ['src/zen/axiosozo-native/alpha/A.cpp'])
+        # Removing every native source removes the mirror and reverts the DIRS line.
+        (self.native / 'alpha/moz.build').unlink()
+        self.native_mirror('alpha/A.cpp').write_text('a')
+        zen.overlay(self.upstream)
+        self.assertFalse((self.upstream / 'src/zen/axiosozo-native').exists())
+        self.assertEqual(moz.read_text(), self.moz_stock)
+        self.assertEqual(zen.unexpected_source_changes(self.upstream), [])
+
+    def test_native_paths_are_validated_and_symlinks_refused(self):
+        outside = Path(self.directory.name) / 'outside-native'
+        outside.mkdir()
+        (outside / 'Secret.cpp').write_text('secret')
+        self.write_native({'alpha/moz.build': ''})
+        (self.native / 'alpha/bad name.cpp').write_text('')
+        with self.assertRaisesRegex(RuntimeError, 'UNPACKAGEABLE_NATIVE_FILE'):
+            zen.native_files()
+        (self.native / 'alpha/bad name.cpp').unlink()
+        (self.native / 'moz.build').write_text('')
+        with self.assertRaisesRegex(RuntimeError, 'RESERVED_NATIVE_PATH'):
+            zen.native_files()
+        (self.native / 'moz.build').unlink()
+        for link, target in [(self.native / 'alpha/Linked.cpp', outside / 'Secret.cpp'), (self.native / 'linked-dir', outside)]:
+            link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, 'SYMLINKED_CHROME_FILE'):
+                zen.native_files()
+            self.assertEqual(zen.unexpected_source_changes(self.upstream)[0].split(':')[0], 'SYMLINKED_CHROME_FILE')
+            link.unlink()
+        root = Path(self.directory.name)
+        (root / '.gitignore').write_text('native/alpha/Ignored.cpp\n')
+        (self.native / 'alpha/Ignored.cpp').write_text('ignored')
+        self.assertEqual([name for name, _ in zen.native_files()], ['alpha/moz.build'])
+        self.assertEqual((outside / 'Secret.cpp').read_text(), 'secret')
+        self.assertTrue(zen.owned_output('src/zen/axiosozo-native/alpha/A.cpp'))
+        self.assertFalse(zen.owned_output('src/zen/axiosozo-nativeX/A.cpp'))
+
+    def test_native_changes_alter_the_build_fingerprint_and_digests(self):
+        self.write_native({'alpha/moz.build': '', 'alpha/A.cpp': 'a', 'beta/moz.build': '', 'beta/B.cpp': 'b'})
+        base, full, digests = zen.fingerprint(native=False), zen.fingerprint(), zen.native_digests()
+        self.assertEqual(sorted(digests), ['.', 'alpha', 'beta'])
+        self.assertEqual(zen.fingerprint(), full)
+        (self.native / 'alpha/A.cpp').write_text('changed')
+        self.assertEqual(zen.fingerprint(native=False), base)
+        self.assertNotEqual(zen.fingerprint(), full)
+        changed = zen.native_digests()
+        self.assertEqual([name for name in digests if digests[name] != changed[name]], ['alpha'])
+        (self.native / 'alpha/notes.txt').write_text('not native')
+        self.assertEqual(zen.native_digests(), changed)
+
+    def test_build_jobs_default_is_memory_bounded_and_overridable(self):
+        with patch.dict(os.environ):
+            os.environ.pop('AXIOSOZO_BUILD_JOBS', None)
+            gib = 2**30
+            with patch.object(zen.os, 'cpu_count', return_value=10), \
+                 patch.object(zen.os, 'sysconf', side_effect=lambda name: {'SC_PAGE_SIZE': 1, 'SC_PHYS_PAGES': 16 * gib}[name]):
+                self.assertEqual(zen.build_jobs(), 6)
+            with patch.object(zen.os, 'cpu_count', return_value=4), \
+                 patch.object(zen.os, 'sysconf', side_effect=lambda name: {'SC_PAGE_SIZE': 1, 'SC_PHYS_PAGES': 64 * gib}[name]):
+                self.assertEqual(zen.build_jobs(), 4)
+            os.environ['AXIOSOZO_BUILD_JOBS'] = '3'
+            self.assertEqual(zen.build_jobs(), 3)
+            for bad in ['0', '-1', 'x', '2 ', '']:
+                os.environ['AXIOSOZO_BUILD_JOBS'] = bad
+                with self.assertRaisesRegex(RuntimeError, 'INVALID_AXIOSOZO_BUILD_JOBS'):
+                    zen.build_jobs()
+
+    def test_native_dirs_overlay_record_matches_pinned_moz_build(self):
+        record = [item for item in json.loads((ROOT / 'patches/zen/overlay.json').read_text())
+                  if item['path'] == 'src/zen/moz.build']
+        self.assertEqual(len(record), 1)
+        self.assertEqual(record[0]['when'], 'native')
+        stock = zen.capture(['git', '--no-optional-locks', '-c', 'core.hooksPath=/dev/null',
+                             'show', 'HEAD:src/zen/moz.build'], zen.UPSTREAM)
+        if stock is None:
+            self.skipTest('upstream/zen absent; stock moz.build hash not re-derived')
+        text = stock + '\n'
+        self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), record[0]['before_sha256'])
+        after = text.replace(*record[0]['replacements'][0], 1)
+        self.assertEqual(hashlib.sha256(after.encode()).hexdigest(), record[0]['after_sha256'])
+        self.assertIn('DIRS += ["axiosozo-native"]', after)
 
     def test_symlinked_mirror_entry_is_refused(self):
         zen.overlay(self.upstream)

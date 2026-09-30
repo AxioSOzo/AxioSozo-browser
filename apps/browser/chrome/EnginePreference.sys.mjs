@@ -9,6 +9,7 @@
 // and keeps the Firefox tab on any failure. Never in private windows. Per-site
 // preferences are not part of M1 here: the context preference is the only source.
 import { WPL, webURL, addTabsProgressListener } from "./DevLoop.sys.mjs";
+import { normalizeEngineId, DEFAULT_ENGINE } from "./EngineRegistry.sys.mjs";
 
 export const ENGINE_PREFERENCE_PREF = "axiosozo.engine.preferences.enabled";
 export const PREFERENCE_REASON = "context_preference";
@@ -46,17 +47,18 @@ export function installEnginePreference(window, { services, adapter, engineProbe
     const url = webURL(tab.linkedBrowser?.currentURI?.spec);
     if (!url) return null;
     const contextUuid = adapter.workspaceForTab(tab);
-    const preference = contextUuid ? contexts.find(context => context.uuid === contextUuid)?.engine_preference ?? null : null;
+    // Registry id; the contract's `firefox` reads as `gecko`. Unknown values are ignored.
+    const preference = contextUuid ? normalizeEngineId(contexts.find(context => context.uuid === contextUuid)?.engine_preference) : null;
     handled.add(tab);
-    // The tab just loaded in Firefox, so a firefox preference is already satisfied.
-    if (preference !== "chromium") return null;
+    // The tab just loaded in the default engine, so that preference is already satisfied.
+    if (!preference || preference === DEFAULT_ENGINE) return null;
     let result;
     try {
-      result = await engineProbe.applyEnginePreference(tab, "chromium", { reason: PREFERENCE_REASON });
+      result = await engineProbe.applyEnginePreference(tab, preference, { reason: PREFERENCE_REASON });
     } catch {
-      result = { applied: false, engine: "chromium", error: "UNAVAILABLE" }; // the Firefox tab stays
+      result = { applied: false, engine: preference, error: "UNAVAILABLE" }; // the Firefox tab stays
     }
-    const outcome = { applied: result?.applied === true, engine: "chromium", error: result?.applied === true ? null : result?.error ?? "SWITCH_FAILED" };
+    const outcome = { applied: result?.applied === true, engine: preference, error: result?.applied === true ? null : result?.error ?? "SWITCH_FAILED" };
     attempts.push(outcome);
     if (attempts.length > 32) attempts.shift();
     return outcome;

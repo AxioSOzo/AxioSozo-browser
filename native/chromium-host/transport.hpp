@@ -40,6 +40,7 @@ class Transport {
   uint64_t outstanding_ = 0;
   std::string outstandingTarget_;
   bool writing_ = false;
+  void (*onInput_)() = nullptr;  // Set before start(); called on the reader thread.
 
   void fail() { failed_ = true; changed_.notify_all(); }
   bool transfer(const uint8_t* data, size_t size) {
@@ -74,6 +75,8 @@ class Transport {
           if (inputQueue_.size() >= 256) { fail(); break; }
           inputQueue_.push_back(std::move(line)); line.clear();
         }
+        // Wake the UI thread instead of waiting for its polling timer.
+        if (bytes[i] == '\n' && onInput_) onInput_();
       }
     }
   }
@@ -113,7 +116,8 @@ public:
   Transport() = default;
   Transport(const Transport&) = delete;
   ~Transport() { stop(); }
-  bool start() {
+  bool start(void (*onInput)() = nullptr) {
+    onInput_ = onInput;
     // Helpers must neither read the authentication pipe nor corrupt AXCF output.
     input_ = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, 10);
     output_ = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 10);

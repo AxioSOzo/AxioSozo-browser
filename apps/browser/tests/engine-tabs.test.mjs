@@ -50,7 +50,8 @@ function setup({ engine = new Map(), fail = false, mode = "web" } = {}) {
     async switchToChromium() { calls.push("chromium"); if (fail) throw new Error("CEF_UNAVAILABLE"); },
     async switchToGecko() { calls.push("gecko"); },
   };
-  const window = { gBrowser: { tabContainer: container, tabs }, document: {
+  const window = { Services: { env: { get: key => (key === "AXIOSOZO_ENGINE_SWITCHING" ? "1" : "") } },
+    gBrowser: { tabContainer: container, tabs }, document: {
     documentElement: root, createProcessingInstruction: () => ({ remove() {} }), insertBefore() {} } };
   const clock = createClock();
   const installed = installEngineTabs(window, { engineProbe, timers: clock.timersApi });

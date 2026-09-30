@@ -83,6 +83,7 @@ class Session:
         self.target = None
         self.targets = {}
         self.events, self.frames = [], 0
+        self.frame_targets = []  # target of every received frame, in order
         hello = dict(version=1, method='hello', token=self.token, engine_instance=self.instance,
                      fixture_origin=origin)
         if browsing_mode:
@@ -118,6 +119,7 @@ class Session:
                         self.target = target
             else:
                 self.frames += 1
+                self.frame_targets.append(item['target'])
                 self.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
                 if capture:
                     png(capture, item['width'], item['height'], pixels)

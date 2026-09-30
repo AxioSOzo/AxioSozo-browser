@@ -230,9 +230,12 @@ test("F6 hook refuses private windows, private tabs, unknown tabs and invalid en
     await f.controls.dispose();
   }
   const f = webFixture();
-  for (const engine of ["gecko", "Chromium", "", null, { toString: () => "chromium" }]) {
+  for (const engine of ["Chromium", "", null, "servo", { toString: () => "chromium" }]) {
     assert.deepEqual(await f.controls.applyEnginePreference(f.tab, engine), { applied: false, engine: null, error: "INVALID_ENGINE" });
   }
+  // Registry ids are accepted next to the contract's `firefox`: `gecko` is a no-op on a Gecko tab; webkit is listed but unavailable.
+  assert.deepEqual(await f.controls.applyEnginePreference(f.tab, "gecko"), { applied: false, engine: "gecko" });
+  assert.deepEqual(await f.controls.applyEnginePreference(f.tab, "webkit"), { applied: false, engine: "webkit", error: "UNAVAILABLE" });
   assert.deepEqual(await f.controls.applyEnginePreference(null, "chromium"), { applied: false, engine: "chromium", error: "UNKNOWN_TAB" });
   assert.deepEqual(f.calls, ["constructed"]);
   await f.controls.dispose();

@@ -2,6 +2,7 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { allowedFixtureURL, validFixtureOrigin } from "./CEFEngineAdapter.sys.mjs";
 import { transferableGeckoURL } from "./CEFPresenter.sys.mjs";
+import { normalizeEngineId, isEngineAvailable } from "./EngineRegistry.sys.mjs";
 
 const LIMITATIONS = "Local GET fixture only. Experimental: automatic Chromium control, IME, clipboard, native accessibility, downloads and permissions are unavailable.";
 // F6 gate (contexts-api-v1 §4). Default false; the lead owns the pref default.
@@ -113,7 +114,8 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
   async function applyPreference(tab, engine, options) {
     let reason = null;
     try { reason = options?.reason; } catch {}
-    const requested = engine === "firefox" || engine === "chromium" ? engine : null;
+    const wanted = normalizeEngineId(engine); // registry id; `firefox` (context-v1) reads as `gecko`
+    const requested = wanted ? engine : null; // outcomes echo the caller's spelling
     const result = (applied, error) => {
       const outcome = error ? { applied, engine: requested, error } : { applied, engine: requested };
       lastPreference = { ...outcome, reason: typeof reason === "string" && PREFERENCE_REASON.test(reason) ? reason : null };
@@ -123,6 +125,8 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
       if (!requested) return result(false, "INVALID_ENGINE");
       if (!preferenceEnabled()) return result(false, "DISABLED");
       // Only the daily web switch applies preferences; the fixture probe stays manual.
+      // Registered but without a presenter or not enabled here (for example webkit): keep the tab.
+      if ((wanted !== "gecko" && wanted !== "chromium") || !isEngineAvailable(wanted, win)) return result(false, "UNAVAILABLE");
       if (disposed || fixtureMode || !presenter || typeof presenter.setTabEngine !== "function") return result(false, "UNAVAILABLE");
       if (win.PrivateBrowsingUtils?.isWindowPrivate?.(win)) return result(false, "PRIVATE");
       const browser = tab?.linkedBrowser;
@@ -131,17 +135,17 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
       if (!target || typeof target.tab_id !== "string") return result(false, "UNKNOWN_TAB");
       if (target.private_mode) return result(false, "PRIVATE");
       if (pending || presenter.pending) return result(false, "PENDING");
-      const current = presenter.engineOf(tab) === "chromium" ? "chromium" : "firefox";
-      if (current === engine) return result(false); // already in the preferred engine
-      if (engine === "chromium") {
+      const current = presenter.engineOf(tab) === "chromium" ? "chromium" : "gecko";
+      if (current === wanted) return result(false); // already in the preferred engine
+      if (wanted === "chromium") {
         // Only a credential-free HTTP(S) page without POST data moves across;
         // about:, chrome:, file: and other privileged pages always stay in Firefox.
         if (!transferableGeckoURL(browser)) return result(false, "UNSUPPORTED_URL");
       }
       pending = true; failure = null; updateButton();
-      if (engine === "chromium") cefOwners.add(target.tab_id); // before any async work
+      if (wanted === "chromium") cefOwners.add(target.tab_id); // before any async work
       try {
-        await presenter.setTabEngine(tab, engine === "chromium" ? "chromium" : "gecko");
+        await presenter.setTabEngine(tab, wanted);
       } catch (error) {
         failed(error);
         return result(false, error?.message === "ENGINE_SWITCH_CANCELLED" ? "CANCELLED" : "SWITCH_FAILED");
@@ -150,7 +154,7 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
       }
       if (disposed) return result(false, "UNAVAILABLE");
       // A switch counts only when the presenter now reports the requested engine.
-      if ((presenter.engineOf(tab) === "chromium" ? "chromium" : "firefox") !== engine) return result(false, "SWITCH_FAILED");
+      if ((presenter.engineOf(tab) === "chromium" ? "chromium" : "gecko") !== wanted) return result(false, "SWITCH_FAILED");
       return result(true);
     } catch {
       return result(false, "UNAVAILABLE");

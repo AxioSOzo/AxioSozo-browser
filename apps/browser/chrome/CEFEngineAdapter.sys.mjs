@@ -1,11 +1,22 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
+// >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
+import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
+// <<<
+
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
 export const CHROMIUM_VERSION = "154.0.8037.17";
 // Inert identity of a target created at about:blank; never resolvable or loaded.
 export const BLANK_IDENTITY = "https://axiosozo.invalid";
 const MAX_PIXELS = 33554432;
+// Engine-surface-v1 bounds every IOSurface to 1..4096 px per dimension; frames
+// never cross the pipe in surface mode, so its 32 MiB payload cap does not apply.
+export const MAX_SURFACE_DIMENSION = 4096;
+// Render paths negotiated in hello/ready (contracts/cef-v1.md "Surface mode").
+export const RENDER_PATH_SURFACE = "native-osr-iosurface";
+export const RENDER_PATH_PIPE = "native-osr-bgra";
+export const SURFACE_SERVICE_CONTRACT = "@axiosozo.nl/engine-surface-service;1";
 const MAX_INFLIGHT_REQUESTS = 16;
 const MAX_INFLIGHT_INPUT = 8;
 const MAX_QUEUED_INPUT = 64;
@@ -69,24 +80,33 @@ export function allowedFixtureURL(value, origin) {
   } catch { return false; }
 }
 
-export function validateSurface({ width, height, device_scale }) {
-  if (![width, height].every(value => Number.isInteger(value) && value > 0 && value <= 4096)
+/**
+ * `maxBytes` is the BGRA pipe's 32 MiB payload bound by default. Surface mode
+ * passes Infinity: only the 4096 px per dimension IOSurface bound remains.
+ */
+export function validateSurface({ width, height, device_scale }, { maxBytes = MAX_PIXELS } = {}) {
+  if (![width, height].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
       || !Number.isFinite(device_scale) || device_scale < 1 || device_scale > 4) throw new Error("INVALID_SURFACE");
   const physicalWidth = Math.ceil(width * device_scale), physicalHeight = Math.ceil(height * device_scale);
-  if (physicalWidth > 4096 || physicalHeight > 4096 || physicalWidth * physicalHeight * 4 > MAX_PIXELS) {
+  if (physicalWidth > MAX_SURFACE_DIMENSION || physicalHeight > MAX_SURFACE_DIMENSION
+      || physicalWidth * physicalHeight * 4 > maxBytes) {
     throw new Error("UNSUPPORTED_SURFACE");
   }
   return { width, height, device_scale };
 }
 
-/** Keep the fixed 32 MiB pipe bound when a Retina window grows, including fullscreen. */
-export function fitCEFRenderSurface({ width, height, device_scale }) {
-  try { return validateSurface({ width, height, device_scale }); }
+/**
+ * Pipe fallback: keep the fixed 32 MiB bound when a Retina window grows,
+ * including fullscreen. Surface mode (`maxBytes: Infinity`) steps the scale
+ * down only past 4096 physical px per dimension (e.g. a fullscreen 5K window).
+ */
+export function fitCEFRenderSurface({ width, height, device_scale }, { maxBytes = MAX_PIXELS } = {}) {
+  try { return validateSurface({ width, height, device_scale }, { maxBytes }); }
   catch (error) { if (error.message !== "UNSUPPORTED_SURFACE") throw error; }
   // Quarter steps avoid huge, unconstrained full-resolution frames. CEF still
   // receives the full logical viewport and its input coordinates do not change.
   for (let quarter = Math.ceil(device_scale * 4) - 1; quarter >= 4; quarter--) {
-    try { return validateSurface({ width, height, device_scale: quarter / 4 }); }
+    try { return validateSurface({ width, height, device_scale: quarter / 4 }, { maxBytes }); }
     catch (error) { if (error.message !== "UNSUPPORTED_SURFACE") throw error; }
   }
   throw new Error("UNSUPPORTED_SURFACE");
@@ -103,11 +123,45 @@ export function validCEFSessionRuntime(root, session, geckoProfile) {
     && geckoProfile === `${session}/gecko`;
 }
 
-export function validateCEFInput(method, fields, surface) {
+// Trackpad phases as reported by the engine-view component's NSEvent monitor.
+export const WHEEL_PHASES = new Set(["none", "may_begin", "began", "changed", "stationary", "ended", "cancelled"]);
+const IME_TEXT_LIMIT = 256, IME_UNDERLINE_LIMIT = 16, IME_RANGE_LIMIT = 2147483647, IME_CURSOR_LIMIT = 65536;
+const IME_METHODS = new Set(["ime_set_composition", "ime_commit_text", "ime_finish_composing", "ime_cancel_composition"]);
+/**
+ * Input commands. `wheel` phase fields, `pinch` and the `ime_*` methods are
+ * cef-v1 input extensions: they are only valid when the host's ready
+ * capabilities announce `wheel_phases`, `pinch` or `ime` (an older host
+ * rejects unknown keys and methods as protocol errors).
+ */
+export function validateCEFInput(method, fields, surface, { wheelPhases = false, pinch = false, ime = false } = {}) {
+  if (IME_METHODS.has(method)) {
+    const keys = { ime_set_composition: ["text", "selection_start", "selection_end"], ime_commit_text: ["text"],
+      ime_finish_composing: [], ime_cancel_composition: [] }[method];
+    // Optional cef-v1 fields, each admitted by name (UTF-16 offsets, as the host checks).
+    const optional = { ime_set_composition: ["underlines", "replacement_range"],
+      ime_commit_text: ["replacement_range", "relative_cursor_pos"], ime_finish_composing: ["keep_selection"] }[method] ?? [];
+    if (!ime || !isObject(fields)) throw new Error("INVALID_CEF_IME");
+    if (!hasKeys(fields, [...keys, ...optional.filter(key => key in fields)])) throw new Error("INVALID_CEF_IME");
+    if ("text" in fields && (typeof fields.text !== "string" || fields.text.length > IME_TEXT_LIMIT)) throw new Error("INVALID_CEF_IME");
+    const within = (value, max) => uint(value) && value <= max;
+    const span = (value, max) => within(value.start, max) && within(value.end, max) && value.start <= value.end;
+    const range = (value, max) => hasKeys(value, ["start", "end"]) && span(value, max);
+    if (method === "ime_set_composition" && !(uint(fields.selection_start) && uint(fields.selection_end)
+        && fields.selection_start <= fields.selection_end && fields.selection_end <= fields.text.length)) throw new Error("INVALID_CEF_IME");
+    if ("underlines" in fields && !(Array.isArray(fields.underlines) && fields.underlines.length <= IME_UNDERLINE_LIMIT
+        && fields.underlines.every(line => hasKeys(line, ["start", "end", "thick"]) && span(line, fields.text.length)
+          && typeof line.thick === "boolean"))) throw new Error("INVALID_CEF_IME");
+    if ("replacement_range" in fields && !range(fields.replacement_range, IME_RANGE_LIMIT)) throw new Error("INVALID_CEF_IME");
+    if ("relative_cursor_pos" in fields && !(Number.isInteger(fields.relative_cursor_pos)
+        && Math.abs(fields.relative_cursor_pos) <= IME_CURSOR_LIMIT)) throw new Error("INVALID_CEF_IME");
+    if ("keep_selection" in fields && typeof fields.keep_selection !== "boolean") throw new Error("INVALID_CEF_IME");
+    return structuredClone(fields);
+  }
   const required = {
     key: ["type", "native_key_code", "windows_key_code", "modifiers", "text"],
     mouse: ["type", "x", "y", "modifiers", "button", "click_count", "mouse_leave"],
-    wheel: ["x", "y", "modifiers", "delta_x", "delta_y"],
+    wheel: ["x", "y", "modifiers", "delta_x", "delta_y", ...(wheelPhases ? ["phase", "momentum_phase", "precise"] : [])],
+    pinch: pinch ? ["x", "y", "modifiers", "phase", "magnification"] : null,
   }[method];
   const bounded = (value, max) => uint(value) && value <= max;
   if (!required || !hasKeys(fields, required) || !bounded(fields.modifiers, 131071)) throw new Error("INVALID_CEF_INPUT");
@@ -120,6 +174,10 @@ export function validateCEFInput(method, fields, surface) {
         || !["left", "middle", "right"].includes(fields.button) || !bounded(fields.click_count, 3)
         || fields.click_count < 1 || typeof fields.mouse_leave !== "boolean")) throw new Error("INVALID_CEF_MOUSE");
     if (method === "wheel" && ![fields.delta_x, fields.delta_y].every(value => Number.isInteger(value) && Math.abs(value) <= 4096)) throw new Error("INVALID_CEF_WHEEL");
+    if (method === "wheel" && wheelPhases && (!WHEEL_PHASES.has(fields.phase) || !WHEEL_PHASES.has(fields.momentum_phase)
+        || typeof fields.precise !== "boolean")) throw new Error("INVALID_CEF_WHEEL");
+    if (method === "pinch" && (!WHEEL_PHASES.has(fields.phase) || !Number.isFinite(fields.magnification)
+        || Math.abs(fields.magnification) > 10)) throw new Error("INVALID_CEF_PINCH");
   }
   return { ...fields };
 }
@@ -168,7 +226,15 @@ const EVENT_FIELDS = {
   navigation: [], loading: ["loading", "can_go_back", "can_go_forward"],
   title: ["title"], url: ["url"], closed: [], error: ["request_id", "code", "native_code"], load: ["http_status", "restored_from_history", "same_document"],
   cursor: ["cursor"], open_url: ["url", "background"],
+  // Proposed with `ime`: the focused editable's kind and caret, in logical points.
+  text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
+  // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
+  prompt: ["prompt_id", "kind", "details", "timeout_ms"], prompt_closed: ["prompt_id", "reason"],
+  download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
+  find_result: ["identifier", "count", "active", "final"], popup_blocked: ["url"],
+  // <<<
 };
+const DELEGATION_EVENTS = new Set(["prompt", "prompt_closed", "download_updated", "find_result", "popup_blocked"]);
 
 // Preserve only our fixed diagnostic codes. Never display native payloads,
 // arbitrary exception messages, pipe contents or authentication material.
@@ -180,8 +246,9 @@ const READ_FAILURE_CODES = new Set([
   "FUTURE_CEF_FRAME", "INVALID_CEF_EVENT", "UNVERIFIED_CEF_RUNTIME", "UNREQUESTED_CEF_CREATION",
   "MISSING_CEF_TARGET", "UNKNOWN_CEF_RESPONSE", "INVALID_CEF_COMPLETION", "INVALID_CEF_TITLE",
   "INVALID_CEF_LOADING", "INVALID_CEF_URL", "INVALID_CEF_LOAD", "INVALID_CEF_HISTORY_RESTORE",
-  "INVALID_CEF_CURSOR", "INVALID_CEF_OPEN_URL",
+  "INVALID_CEF_CURSOR", "INVALID_CEF_OPEN_URL", "INVALID_CEF_PROMPT", "INVALID_CEF_TEXT_INPUT",
   "CEF_FRAME_PRESENTATION_FAILED", "CEF_EVENT_CALLBACK_FAILED",
+  "CEF_SURFACE_BIND_FAILED", "CEF_SURFACE_CLOSED",
 ]);
 // A violation that concerns one target's own document. On a shared host it ends
 // only that tab; framing, identity and response errors end the whole host.
@@ -190,6 +257,34 @@ class TargetError extends Error {}
 // symbol identifies a host connection from either one.
 const HOST_BRAND = Symbol.for("axiosozo.cef.host-connection");
 const targetError = code => new TargetError(code);
+/** cef-v1 `native_target_id` as the engine-surface-v1 u64 (a safe JS integer here). */
+export function surfaceTargetId(target) {
+  const value = target?.native_target_id;
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,15}$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw targetError("CEF_SURFACE_BIND_FAILED");
+  }
+  return Number(value);
+}
+
+/**
+ * The Gecko engine-view component (apps/browser/native/engine-view), or null when
+ * this build or test has none. Null selects the labelled BGRA pipe fallback.
+ */
+export function engineSurfaceService() {
+  try {
+    const factory = globalThis.Cc?.[SURFACE_SERVICE_CONTRACT];
+    const iface = globalThis.Ci?.nsIAxioEngineSurfaceService;
+    return factory && iface ? factory.getService(iface) : null;
+  } catch { return null; }
+}
+/** Hello `frame_rate` from Gecko's vsync source: 120 on ProMotion, otherwise 60. */
+export function surfaceFrameRate(service) {
+  let rate = 60;
+  try { rate = Number(service?.displayRefreshRate); } catch {}
+  return rate >= 100 ? 120 : 60;
+}
+/** cef-v1 `frame_rate` command values. */
+export const FRAME_RATES = Object.freeze([60, 120]);
 
 /**
  * One authenticated native process. A web host serves every Chromium tab of a
@@ -198,11 +293,14 @@ const targetError = code => new TargetError(code);
 export class CEFHostConnection {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
+  // Surface mode: one nsIAxioEngineEndpoint per host process; frames never reach JS.
+  #endpoint = null; #frameRate = null; #surfaceTargets = new Map(); #surfaceClosed = false;
   // Native creates one target at a time; a tab_id is reused only after its old target closed.
   #createQueue = Promise.resolve(); #retiring = new Map();
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
-    shared = false, onFailure = () => {} }) {
+    shared = false, onFailure = () => {}, surface = null }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
+    if (surface && (!surface.endpoint || ![60, 120].includes(surface.frameRate))) throw new Error("INVALID_CEF_BOOTSTRAP");
     if (!["fixture", "web"].includes(browsingMode)) throw new Error("INVALID_CEF_MODE");
     if (!id(instance) || !(browsingMode === "web" ? validWebOrigin(identity) : validFixtureOrigin(identity))) throw new Error("INVALID_CEF_BOOTSTRAP");
     this.browsingMode = browsingMode; this.shared = shared; this.instance = instance; this.identity = identity;
@@ -210,9 +308,21 @@ export class CEFHostConnection {
     this.onFailure = onFailure;
     this.status = "starting"; this.readPhase = "before_connect"; this.lastFrameBytes = 0; this.lastFrame = 0;
     this.nativeExitCode = null; this.capabilities = null;
+    this.#endpoint = surface?.endpoint ?? null; this.#frameRate = surface?.frameRate ?? null;
+    // Native input helpers (holdKeyEvent, describeNativeEvent, setCursor) of the same component.
+    this.nativeInput = surface ? surface.service ?? null : null;
+    this.renderPath = surface ? RENDER_PATH_SURFACE : RENDER_PATH_PIPE;
+    this.surfaceConnected = false; this.surfaceClosedReason = null;
     this.exited = process.wait().then(() => {}, () => {});
   }
   get [HOST_BRAND]() { return true; }
+  get surfaceMode() { return !!this.#endpoint; }
+  get frameRate() { return this.#frameRate; }
+  /**
+   * The display refresh class now, from the same vsync source as the hello
+   * `frame_rate`; null without the engine-view component (no rate source).
+   */
+  get displayFrameRate() { return this.nativeInput ? surfaceFrameRate(this.nativeInput) : null; }
   get ended() { return this.#ended; }
   get targetCount() { return this.#targets.size; }
   waiter(label, onTimeout) {
@@ -236,12 +346,81 @@ export class CEFHostConnection {
       else if (!this.#closing) this.fail("CEF_UNEXPECTED_EXIT");
       if (this.status === "failed") console.error("AXIOSOZO_CEF_EXIT", JSON.stringify({ exitCode:result.exitCode }));
     }, () => this.fail("CEF_PROCESS_FAILURE"));
-    await this.#write({ version: 1, method: "hello", token: this.#token,
+    const hello = { version: 1, method: "hello", token: this.#token,
       engine_instance: this.instance, fixture_origin: this.identity,
-      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}) });
+      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}) };
+    if (this.#endpoint) {
+      const endpoint = this.#endpoint;
+      try {
+        endpoint.listener = this.#surfaceListener();
+        // CONNECT is accepted only from this direct child; register it before its token leaves.
+        endpoint.expectHostPid(this.#process.pid);
+        // The service name and single-use token travel only in this authenticated hello.
+        Object.assign(hello, { surface_service: endpoint.serviceName, surface_token: endpoint.takeToken(),
+          ...(endpoint.externalBeginFrames ? { surface_begin_frames: true } : {}), frame_rate: this.#frameRate });
+      } catch (error) { this.fail("CEF_SURFACE_SETUP_FAILED"); throw new Error("CEF_SURFACE_SETUP_FAILED"); }
+    }
+    await this.#write(hello);
     await this.#readyWait.promise;
     this.status = "connected";
     return this;
+  }
+  #surfaceListener() {
+    const listener = {
+      onConnected: pid => { this.surfaceConnected = pid === this.#process.pid; },
+      onTargetGeometry: (targetId, width, height, logicalWidth, logicalHeight, scale) => {
+        const adapter = this.#surfaceTargets.get(String(targetId));
+        if (!adapter) return;
+        try { adapter.surfaceGeometry({ width, height, logicalWidth, logicalHeight, scale }); }
+        catch (error) {
+          // Never throw back into the native caller: a host-wide violation ends the host here.
+          try { this.#targetFailed(adapter, error); } catch (fatal) { this.fail(fatal.message); }
+        }
+      },
+      onClosed: reason => {
+        this.surfaceClosedReason = String(reason);
+        this.#surfaceClosed = true; this.#surfaceTargets.clear();
+        // host-died, host-unresponsive or protocol:<detail>: every Chromium tab of this host ends.
+        if (!this.#ended && !this.#closing) this.fail("CEF_SURFACE_CLOSED");
+      },
+    };
+    const qi = globalThis.ChromeUtils?.generateQI?.(["nsIAxioEngineEndpointListener"]);
+    if (qi) listener.QueryInterface = qi;
+    return listener;
+  }
+  /** Present `target` in `element` (a context-less chrome <canvas>); frames bypass JS. */
+  bindSurface(adapter, element, target) {
+    const id = surfaceTargetId(target);
+    if (!this.#endpoint || this.#surfaceClosed || this.#ended || !element) throw targetError("CEF_SURFACE_BIND_FAILED");
+    try { this.#endpoint.bindElement(element, id, target.document_generation, target.navigation_generation); }
+    catch { throw targetError("CEF_SURFACE_BIND_FAILED"); }
+    this.#surfaceTargets.set(String(id), adapter);
+    return id;
+  }
+  /** Chrome processed this generation: the endpoint may now show its held frames. */
+  confirmSurface(id, target) {
+    if (!this.#endpoint || this.#surfaceClosed || this.#ended) return;
+    try { this.#endpoint.setTargetGenerations(id, target.document_generation, target.navigation_generation); }
+    catch { throw targetError("CEF_SURFACE_BIND_FAILED"); }
+  }
+  unbindSurface(id, adapter) {
+    if (this.#surfaceTargets.get(String(id)) !== adapter) return;
+    this.#surfaceTargets.delete(String(id));
+    if (!this.#surfaceClosed && !this.#ended) try { this.#endpoint.unbindTarget(id); } catch {}
+  }
+  /** Begin-frame gating: hidden targets receive no BEGIN_FRAME and unpin old surfaces. */
+  surfaceVisible(id, visible) {
+    if (this.#surfaceClosed || this.#ended) return;
+    try { this.#endpoint?.setTargetVisible(id, visible); } catch {}
+  }
+  surfaceStats(id) {
+    if (this.#surfaceClosed || this.#ended) return null;
+    try { return this.#endpoint?.getTargetStats(id) ?? null; } catch { return null; }
+  }
+  #closeSurface() {
+    if (!this.#endpoint || this.#surfaceClosed) return;
+    this.#surfaceClosed = true; this.#surfaceTargets.clear();
+    try { this.#endpoint.close(); } catch {}
   }
   register(adapter) {
     if (this.#ended || this.#closing) throw new Error("CEF_UNAVAILABLE");
@@ -277,6 +456,8 @@ export class CEFHostConnection {
     catch (error) { this.fail("CEF_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }
   request(method, fields, target, { acknowledge = false, owner = null } = {}) {
+    // Surface frames are released over Mach; a JSON frame_ack is a host protocol error.
+    if (method === "frame_ack" && this.#endpoint) return Promise.reject(new Error("CEF_SURFACE_FRAME_ACK"));
     if (this.#ended || (this.#closing && !["frame_ack", "shutdown", "close"].includes(method))) return Promise.reject(new Error("CEF_UNAVAILABLE"));
     if (++this.#sequence > (this.browsingMode === "web" ? Number.MAX_SAFE_INTEGER : 100000)
         || (!acknowledge && this.#requests.size >= MAX_INFLIGHT_REQUESTS * Math.max(1, this.#targets.size))) return Promise.reject(new Error("CEF_REQUEST_LIMIT"));
@@ -326,6 +507,8 @@ export class CEFHostConnection {
       const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout);
       if (kind === 2) {
         this.readPhase = "frame_validate";
+        // Surface mode: the pipe carries JSON events only; frames travel over Mach.
+        if (this.#endpoint) throw new Error("UNEXPECTED_CEF_FRAME");
         if (value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_CEF_FRAME");
         this.lastFrame = value.frame_id;
         const adapter = this.#adapterFor(value.target);
@@ -359,7 +542,8 @@ export class CEFHostConnection {
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
-      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url"].includes(value.event)) {
+      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input"].includes(value.event)
+          || DELEGATION_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
       if (["accepted", "completed"].includes(value.event) || (value.event === "error" && value.request_id)) {
@@ -385,19 +569,24 @@ export class CEFHostConnection {
     }
   }
   #acceptReady(value) {
-    const web = this.browsingMode === "web", capabilities = value.capabilities;
+    const web = this.browsingMode === "web", capabilities = value.capabilities, surface = !!this.#endpoint;
     if (this.#ready || this.status !== "starting" || value.cef !== CEF_VERSION || value.chromium !== CHROMIUM_VERSION
         || value.runtime_cef !== CEF_VERSION.split("+")[0] || value.runtime_chromium !== CHROMIUM_VERSION
         || value.engine_instance !== this.instance || value.platform !== "macosarm64"
-        || value.render_path !== "native-osr-bgra" || value.sandbox_configured !== true
+        || value.render_path !== (surface ? RENDER_PATH_SURFACE : RENDER_PATH_PIPE) || value.sandbox_configured !== true
+        // Surface mode must be exactly what the hello negotiated; the pipe never claims it.
+        || (surface ? capabilities?.surface !== true || capabilities?.external_begin_frame !== this.#endpoint.externalBeginFrames
+          || capabilities?.frame_rate !== this.#frameRate : capabilities?.surface === true)
         || capabilities?.fixture_only !== !web || capabilities?.devtools !== false
         || (web && (capabilities?.edit !== true || capabilities?.visibility !== true
-          || capabilities?.permissions !== false || capabilities?.downloads !== false
+          // Permissions, downloads, dialogs, file pickers: false = denied natively,
+          // true = delegated to Zen's own UI. Native pop-up windows never exist.
+          || typeof capabilities?.permissions !== "boolean" || typeof capabilities?.downloads !== "boolean"
           || capabilities?.popups !== false || capabilities?.accessibility !== false))
         // One shared host needs native multi-target isolation and its profile model.
         || (this.shared && (capabilities?.multi_target !== true || capabilities?.stop !== true
           || capabilities?.cursor !== true || capabilities?.persistent_profile !== web || capabilities?.open_in_tab !== web))
-        || capabilities?.private_mode !== false || capabilities?.ime !== false) throw new Error("UNVERIFIED_CEF_RUNTIME");
+        || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean") throw new Error("UNVERIFIED_CEF_RUNTIME");
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
   }
@@ -414,6 +603,8 @@ export class CEFHostConnection {
     this.#requests.clear();
     for (const adapter of [...this.#targets.values()]) adapter.hostFailed(error);
     this.#targets.clear();
+    // Crash, protocol error or exit: the Mach endpoint and every binding end too.
+    this.#closeSurface();
     this.#process.stdin.close().catch(() => {});
     this.#process.kill(500).catch(() => {});
     this.onFailure(error);
@@ -432,6 +623,7 @@ export class CEFHostConnection {
       this.#requests.clear();
       for (const adapter of [...this.#targets.values()]) adapter.hostFailed(unavailable);
       this.#targets.clear();
+      this.#closeSurface();
       await this.#process.stdin.close();
     } catch (error) { this.#closing = false; this.fail("CEF_CLOSE_OUTCOME_UNCERTAIN"); throw error; }
   }
@@ -447,8 +639,14 @@ export class CEFEngineAdapter {
   #committedURLs = new Set(); #currentURL = null;
   #previousURL = null; #previousLoaded = false;
   #frameWait; #creating = null; #lastFrame = 0; #ended = false; #closing = false; #created = false; #loaded = false;
+  // Native windowless frame rate of this target's browser: the hello rate (host
+  // default 60) until a `frame_rate` command succeeds. It survives navigation.
+  #frameRate = null;
+  // Surface mode: the bound canvas, its endpoint target id, the generations chrome
+  // confirmed to the endpoint, and whether the endpoint presented a first frame.
+  #surfaceElement; #surfaceId = null; #confirmed = null; #surfacePresented = false;
   constructor(processOrHost, { token, pendingTarget, timers, deadline = 15000, browsingMode = "fixture",
-    onEvent = () => {}, onFrame = () => {}, onFailure = () => {} }) {
+    onEvent = () => {}, onFrame = () => {}, onFailure = () => {}, element = null, onGeometry = () => {} }) {
     this.#owned = processOrHost?.[HOST_BRAND] !== true;
     const mode = this.#owned ? browsingMode : processOrHost.browsingMode;
     if (!["fixture", "web"].includes(mode)) throw new Error("INVALID_CEF_MODE");
@@ -457,8 +655,9 @@ export class CEFEngineAdapter {
     this.#host = this.#owned ? new CEFHostConnection(processOrHost, { token, timers, deadline, browsingMode: mode,
       instance: this.#pending.engine_instance, identity: this.#pending.identity }) : processOrHost;
     if (!this.#owned && this.#pending.engine_instance !== this.#host.instance) throw new Error("FOREIGN_CEF_TARGET");
-    this.onEvent = onEvent; this.onFrame = onFrame; this.onFailure = onFailure;
-    this.target = null; this.surface = null; this.nativeClosed = false;
+    this.onEvent = onEvent; this.onFrame = onFrame; this.onFailure = onFailure; this.onGeometry = onGeometry;
+    this.#surfaceElement = element;
+    this.target = null; this.surface = null; this.nativeClosed = false; this.geometry = null;
     this.status = this.#owned ? "starting" : "connected";
     this.#host.register(this);
   }
@@ -468,10 +667,28 @@ export class CEFEngineAdapter {
   get readPhase() { return this.#host.readPhase; }
   get lastFrameBytes() { return this.#host.lastFrameBytes; }
   get nativeExitCode() { return this.#host.nativeExitCode; }
+  /** GPU surface presentation (engine-surface-v1). False only in the labelled BGRA pipe fallback. */
+  get surfaceMode() { return this.#host.surfaceMode === true; }
+  get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
+  /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
+  get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }
+  get maxSurfaceBytes() { return this.surfaceMode ? Infinity : MAX_PIXELS; }
+  /**
+   * Host input capabilities (cef-v1 "Input"; absent on older hosts): `key_verdict`
+   * (key `down` completes with reason key_consumed/key_not_consumed), `wheel_phases`,
+   * `pinch` and `ime` (text_input events plus ime_* commands).
+   */
+  get inputFeatures() {
+    const capabilities = this.#host.capabilities ?? {};
+    return Object.freeze({ keyVerdict: capabilities.key_verdict === true, wheelPhases: capabilities.wheel_phases === true,
+      pinch: capabilities.pinch === true, ime: capabilities.ime === true });
+  }
+  surfaceStats() { return this.#surfaceId === null ? null : this.#host.surfaceStats(this.#surfaceId); }
   capabilities() {
     return Object.freeze({ version: 1, engine: "chromium", navigation: true,
       observation: ["url", "title", "loading"], content_capture: false, developer_tools: false,
-      fixture_only: this.browsingMode === "fixture", private_mode: false, ime: false, experimental: true });
+      fixture_only: this.browsingMode === "fixture", private_mode: false, ime: this.inputFeatures.ime,
+      render_path: this.renderPath, experimental: true });
   }
   async connect() {
     if (this.#owned) await this.#host.connect();
@@ -539,16 +756,61 @@ export class CEFEngineAdapter {
     catch { throw targetError("CEF_FRAME_PRESENTATION_FAILED"); }
     this.#frameWait?.resolve(this.target);
   }
+  /** onTargetGeometry from the endpoint: the first frame arrived, or its size/scale changed. */
+  surfaceGeometry(geometry) {
+    if (this.#ended || this.#surfaceId === null) return;
+    const { width, height, logicalWidth, logicalHeight, scale } = geometry;
+    if (![width, height, logicalWidth, logicalHeight].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
+        || !Number.isFinite(scale) || scale <= 0 || scale > 4) throw targetError("CEF_SURFACE_BIND_FAILED");
+    this.geometry = Object.freeze({ width, height, logicalWidth, logicalHeight, scale });
+    this.#surfacePresented = true;
+    try { this.onGeometry(this.geometry); }
+    catch { throw targetError("CEF_FRAME_PRESENTATION_FAILED"); }
+    this.#surfaceFirstFrame();
+  }
+  #surfaceFirstFrame() {
+    // Parity with acceptFrame(): a live presented frame of the loaded, current target.
+    if (this.#surfacePresented && this.#loaded && this.target && !this.#closing) this.#frameWait?.resolve(this.target);
+  }
+  /**
+   * Frames of a newer generation stay held in the endpoint until chrome has
+   * processed that navigation (its url and load events), so page pixels never
+   * precede the address Zen shows. Mirrors acceptFrame()'s `same && loaded` rule.
+   */
+  #confirmSurface() {
+    if (this.#surfaceId === null || !this.target || !this.#loaded || this.#closing || this.#ended) return;
+    const { document_generation, navigation_generation } = this.target;
+    if (this.#confirmed?.document_generation === document_generation
+        && this.#confirmed?.navigation_generation === navigation_generation) return;
+    this.#host.confirmSurface(this.#surfaceId, this.target);
+    this.#confirmed = { document_generation, navigation_generation };
+  }
   acceptEvent(value) {
     if (value.target) {
       this.#adopt(value.target, value.event);
       if (value.event === "navigation") this.pumpInput();
+      if (value.event === "created" && this.surfaceMode) {
+        // Bound before the host may paint (it paints only after load end), with the
+        // created target's generations; later generations wait for #confirmSurface.
+        this.#surfaceId = this.#host.bindSurface(this, this.#surfaceElement, this.target);
+        this.#confirmed = { document_generation: this.target.document_generation,
+          navigation_generation: this.target.navigation_generation };
+      }
     }
     if (value.event === "title" && (typeof value.title !== "string" || value.title.length > 1024)) throw targetError("INVALID_CEF_TITLE");
     if (value.event === "loading" && ![value.loading, value.can_go_back, value.can_go_forward].every(item => typeof item === "boolean")) throw targetError("INVALID_CEF_LOADING");
     if (value.event === "cursor" && !CURSORS.has(value.cursor)) throw targetError("INVALID_CEF_CURSOR");
     if (value.event === "open_url" && (this.browsingMode !== "web" || !allowedWebURL(value.url)
         || value.url === "about:blank" || typeof value.background !== "boolean")) throw targetError("INVALID_CEF_OPEN_URL");
+    if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
+        || ![value.caret_x, value.caret_y, value.caret_width, value.caret_height]
+          .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
+    // >>> AxioSozo engine UI delegation: web sessions only, strict schema
+    if (DELEGATION_EVENTS.has(value.event)) {
+      if (this.browsingMode !== "web") throw targetError("INVALID_CEF_PROMPT");
+      try { validateDelegationEvent(value); } catch { throw targetError("INVALID_CEF_PROMPT"); }
+    }
+    // <<<
     if (value.event === "url") {
       if (!this.allowedURL(value.url)) throw targetError("INVALID_CEF_URL");
       this.#currentURL = value.url;
@@ -578,6 +840,8 @@ export class CEFEngineAdapter {
     if (value.event === "closed") this.nativeClosed = true;
     try { this.onEvent(value); }
     catch { throw targetError("CEF_EVENT_CALLBACK_FAILED"); }
+    // After chrome handled the event (address bar, title): release held frames.
+    if (value.event === "load") { this.#confirmSurface(); this.#surfaceFirstFrame(); }
   }
   #historyMethods = new Set();
   get #pendingHistory() { return this.#historyMethods.size > 0; }
@@ -588,11 +852,18 @@ export class CEFEngineAdapter {
   }
   async create(url, surface) {
     if (this.#created || this.status !== "connected" || !this.allowedURL(url)) throw new Error("INVALID_CEF_CREATE");
-    this.surface = validateSurface(surface);
+    this.surface = validateSurface(surface, { maxBytes: this.maxSurfaceBytes });
     this.#frameWait = this.#host.waiter("CEF_FIRST_FRAME", code => this.fail(code));
     this.#creating = this.#host.serializeCreate(this.tabId, () => this.#request("create", { url, ...this.surface }, this.#pending));
     const result = await this.#creating;
-    if (result.status !== "success") throw new Error("CEF_CREATE_UNSUPPORTED_OR_FAILED");
+    if (result.status !== "success") {
+      // A host that still applies the pipe's byte bound refuses large surfaces
+      // before creating anything; the caller may retry once with a bounded scale.
+      const error = new Error(result.status === "unsupported" && result.reason === "surface_limit"
+        ? "CEF_SURFACE_LIMIT" : "CEF_CREATE_UNSUPPORTED_OR_FAILED");
+      if (!this.#created) { this.#frameWait.reject(error); this.#creating = null; }
+      throw error;
+    }
     // Acceptance/creation alone cannot replace the original Gecko presentation.
     await this.#frameWait.promise;
     this.status = "active";
@@ -623,14 +894,42 @@ export class CEFEngineAdapter {
     return this.#request("stop");
   }
   developerTools() { return Promise.resolve({ status: "unsupported", reason: "DEVTOOLS_NOT_INTEGRATED" }); }
+  // >>> AxioSozo engine UI delegation
+  /**
+   * One Zen UI answer or UI command (prompt replies, find, zoom, download control)
+   * for exactly `target`: a navigation since the prompt makes it STALE_CEF_TARGET.
+   */
+  reply(target, method, fields) {
+    this.resolve(target);
+    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    return this.#request(method, validateDelegationCommand(method, fields), target);
+  }
+  // <<<
   resize(target, surface) {
     this.resolve(target);
-    const next = validateSurface(surface), previous = this.surface;
+    const next = validateSurface(surface, { maxBytes: this.maxSurfaceBytes }), previous = this.surface;
     this.surface = next;
     return this.#request("resize", next).then(result => {
       if (result.status !== "success") this.surface = previous;
       return result;
     }, error => { this.surface = previous; throw error; });
+  }
+  /** Rate this target's native browser runs at (hello rate until changed). */
+  get appliedFrameRate() { return this.#frameRate ?? this.#host.frameRate ?? 60; }
+  /** Display refresh class for this target's window now; null when unknown. */
+  get displayFrameRate() { return this.#host.displayFrameRate ?? null; }
+  /**
+   * cef-v1 `frame_rate` (capability `frame_rate_command`): the window's display
+   * refresh class changed. Live `set_windowless_frame_rate` for this target only.
+   */
+  frameRate(target, rate) {
+    this.resolve(target);
+    if (!FRAME_RATES.includes(rate)) throw new Error("INVALID_FRAME_RATE");
+    if (this.#host.capabilities?.frame_rate_command !== true) return Promise.resolve({ status: "unsupported", reason: "FRAME_RATE_UNSUPPORTED" });
+    return this.#request("frame_rate", { frame_rate: rate }).then(result => {
+      if (result?.status === "success") this.#frameRate = rate;
+      return result;
+    });
   }
   focus(target, focused) {
     this.resolve(target);
@@ -640,7 +939,12 @@ export class CEFEngineAdapter {
   visibility(target, visible) {
     this.resolve(target);
     if (typeof visible !== "boolean") throw new Error("INVALID_VISIBILITY");
-    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    // Begin-frame gating first, so a shown target gets ticks as native unhides it.
+    if (this.#surfaceId !== null) this.#host.surfaceVisible(this.#surfaceId, visible);
+    if (this.browsingMode !== "web") {
+      return Promise.resolve(this.#surfaceId !== null ? { status: "success", reason: "SURFACE_ONLY" }
+        : { status: "unsupported", reason: "FIXTURE_ONLY" });
+    }
     return this.#request("visibility", { visible });
   }
   edit(target, action) {
@@ -651,7 +955,7 @@ export class CEFEngineAdapter {
   }
   input(target, method, fields) {
     this.resolve(target);
-    const validated = validateCEFInput(method, fields, this.surface);
+    const validated = validateCEFInput(method, fields, this.surface, this.inputFeatures);
     if (this.#inputQueue.length >= MAX_QUEUED_INPUT) {
       // Further input could strand key-up or pointer-up after an earlier down.
       // Stop this experimental engine rather than drop a mutating command and
@@ -682,6 +986,7 @@ export class CEFEngineAdapter {
   #end(reason, status) {
     this.#ended = true; this.status = status;
     const error = new Error(reason);
+    if (this.#surfaceId !== null) { this.#host.unbindSurface(this.#surfaceId, this); this.#surfaceId = null; }
     this.#frameWait?.reject(error);
     this.#host.rejectRequestsOf(this, error);
     this.#rejectQueuedInput(error);
@@ -749,11 +1054,22 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   await IOUtils.makeDirectory(profile, { permissions: 0o700, createAncestors: false, ignoreExisting: browsingMode === "web" });
   const random = Cc["@mozilla.org/security/random-generator;1"].getService(Ci.nsIRandomGenerator).generateRandomBytes(32);
   const token = [...random].map(value => value.toString(16).padStart(2, "0")).join("");
+  // GPU surface path (engine-surface-v1): the endpoint exists before the host is
+  // spawned, so the host can connect before CEF starts. Without the engine-view
+  // component this build uses the BGRA pipe fallback, and says so.
+  const service = engineSurfaceService();
+  let endpoint = null;
+  try { endpoint = service?.createEndpoint(true) ?? null; } catch { endpoint = null; }
+  if (!endpoint) {
+    console.warn("AXIOSOZO_CEF_RENDER_PATH", JSON.stringify({ renderPath: RENDER_PATH_PIPE,
+      reason: service ? "surface_endpoint_failed" : "surface_service_unavailable" }));
+  }
   let process;
   try {
     process = await Subprocess.call({ command, arguments: ["--stream", profile, profile],
       environmentAppend: false, environment: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: profile }, stderr: "pipe" });
   } catch (error) {
+    try { endpoint?.close(); } catch {}
     if (browsingMode !== "web") await IOUtils.remove(profile, { recursive: true });
     throw error;
   }
@@ -764,7 +1080,7 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
-    shared: browsingMode === "web" });
+    shared: browsingMode === "web", surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
   try { return await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
 }
@@ -773,7 +1089,8 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
  * Attach one Zen tab as a Chromium target. Web tabs share the profile's host;
  * the fixture probe keeps its own strict single-origin host per tab.
  */
-export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure }) {
+export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure,
+  element = null, onGeometry }) {
   if (!id(tabId)) throw new Error("CEF_PROJECT_RUNTIME_UNAVAILABLE");
   if (browsingMode === "web") {
     if (!validWebOrigin(origin)) throw new Error("CEF_PROJECT_RUNTIME_UNAVAILABLE");
@@ -781,11 +1098,12 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
     const shared = ChromeUtils.importESModule("chrome://browser/content/axiosozo/CEFEngineAdapter.sys.mjs");
     const host = await shared.chromiumHost();
     return new shared.CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
-      document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure });
+      document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure, element, onGeometry });
   }
   const host = await launchHost("fixture", origin);
   const adapter = new CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
-    identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure });
+    identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
+    element, onGeometry });
   // A fixture host exists for exactly this one tab.
   const close = adapter.close.bind(adapter);
   adapter.close = async () => { try { await close(); } finally { await host.shutdown().catch(() => {}); } };
