@@ -2,8 +2,9 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { installEngineTabMenu } from "./EngineTabMenu.sys.mjs";
 import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROMIUM_VERSION, BLANK_IDENTITY,
-  RENDER_PATH_PIPE, WHEEL_PHASES } from "./CEFEngineAdapter.sys.mjs";
+  RENDER_PATH_PIPE, WHEEL_PHASES, surfaceTargetId } from "./CEFEngineAdapter.sys.mjs";
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
+import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -461,6 +462,7 @@ export class CEFPresenter {
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
     if (record.visible !== visible) {
       record.visible = visible;
+      record.a11y?.setVisible(record.a11yTarget, visible);
       // Surface mode also gates the endpoint's begin frames, fixture sessions included.
       if ((this.browsingMode === "web" || record.surfaceMode) && record.adapter?.target) {
         this.#action(record, target => record.adapter.visibility(target, visible));
@@ -592,6 +594,7 @@ export class CEFPresenter {
       this.#redirectBrowserFocus(record);
       record.observer = new this.window.ResizeObserver(() => this.#resize(record));
       record.observer.observe(stack);
+      this.#attachAccessibility(record, target);
       this.#visibility(record);
       if (this.browsingMode === "web") {
         this.#markEngine(tab, "chromium", url);
@@ -623,6 +626,34 @@ export class CEFPresenter {
         { triggeringPrincipal: this.window.Services.scriptSecurityManager.getSystemPrincipal() });
     } catch (error) { this.onFailure(error); }
   }
+  /**
+   * Accessibility (docs/design/engine-accessibility.md): surface mode only, where the
+   * engine-view a11y component exposes Chromium's tree under this canvas. Without the
+   * component (pipe fallback) the canvas keeps its "not available" label.
+   */
+  #attachAccessibility(record, target) {
+    if (!record.surfaceMode) return;
+    let a11y = null, targetId;
+    try { a11y = sharedChromiumAccessibility(); targetId = surfaceTargetId(target); } catch { return; }
+    const adapter = record.adapter;
+    const attached = a11y.attach({ targetId, canvas: record.canvas, focusContent: () => this.#focusContent(record),
+      adapter: { accessibility: enabled => adapter.accessibility(enabled),
+        axAction: (id, action, value) => adapter.axAction(id, action, value),
+        axAck: (eventTarget, seq) => adapter.axAck(eventTarget, seq) } });
+    if (!attached) return;
+    record.a11y = a11y; record.a11yTarget = targetId;
+    if (record.title) a11y.setTitle(targetId, record.title);
+    this.#a11yViewport(record);
+  }
+  #a11yViewport(record) {
+    if (!record.a11y) return;
+    const logicalWidth = record.surfaceGeometry?.logicalWidth ?? record.adapter?.surface?.width;
+    const logicalHeight = record.surfaceGeometry?.logicalHeight ?? record.adapter?.surface?.height;
+    if (!logicalWidth || !logicalHeight) return;
+    const bounds = record.canvas.getBoundingClientRect();
+    record.a11y.setViewport(record.a11yTarget, { logicalWidth, logicalHeight,
+      cssWidth: bounds.width || logicalWidth, cssHeight: bounds.height || logicalHeight });
+  }
   /** Surface mode: the endpoint presented a first frame, or its size/scale changed. */
   #geometry(record, geometry) {
     if (this.disposed) return;
@@ -631,6 +662,7 @@ export class CEFPresenter {
     if (record.canvas.height !== geometry.logicalHeight) record.canvas.height = geometry.logicalHeight;
     record.surfaceGeometry = geometry;
     record.firstFrameAt ??= this.window.performance.now();
+    this.#a11yViewport(record);
   }
   /** Pipe fallback only (no engine-view component): CPU BGRA frames drawn with putImageData. */
   #draw(record, metadata, pixels) {
@@ -647,6 +679,14 @@ export class CEFPresenter {
     record.lastFrameId = metadata.frame_id;
   }
   #event(record, event) {
+    if (event.event === "ax_tree_update" || event.event === "ax_location") {
+      // Applied (and acknowledged) by the accessibility controller; an event for a
+      // detached view still returns its flow-control credit to the host.
+      if (!(record.a11y?.view(record.a11yTarget) && record.a11y.handleEvent(record.a11yTarget, event))) {
+        record.adapter?.axAck(event.target, event.seq)?.catch?.(() => {});
+      }
+      return;
+    }
     // The certificate error page is drawn by ChromiumBrowserUI; the tab title follows it here.
     if (event.event === "error" && !event.request_id && event.code === "certificate_error" && this.browsingMode === "web") {
       this.#errorTitle(record, "certificate_error");
@@ -656,7 +696,7 @@ export class CEFPresenter {
       record.latestURL = event.url;
       if (record.committed && this.browsingMode === "web") this.#rememberURL(record.tab, event.url);
     }
-    if (event.event === "title") record.title = event.title;
+    if (event.event === "title") { record.title = event.title; record.a11y?.setTitle(record.a11yTarget, event.title); }
     if (event.event === "loading") {
       record.loading = event;
       record.tab.toggleAttribute?.("busy", !!event.loading);
@@ -828,6 +868,7 @@ export class CEFPresenter {
             throw new Error("UNSUPPORTED_SURFACE");
           }
           this.#indicator(record);
+          this.#a11yViewport(record);
         } while (record.resizeDirty);
       } catch (error) {
         if (error.message === "STALE_CEF_TARGET" && record.committed) record.resizeDirty = true;
@@ -1251,6 +1292,7 @@ export class CEFPresenter {
   }
   async #removeOnce(record, keepEngine) {
     this.ui?.forget(record); // AxioSozo engine UI delegation
+    if (record.a11y) { record.a11y.detach(record.a11yTarget); record.a11y = null; }
     if (this.pending === record) this.pending = null;
     if (this.records.get(record.tab) === record) this.records.delete(record.tab);
     record.committed = false;

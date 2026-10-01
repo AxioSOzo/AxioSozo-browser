@@ -187,6 +187,57 @@ def check_heartbeat(session, ready):
                 heartbeats_before_stop=seen_before, resumed_sequence=resumed['sequence'])
 
 
+def check_accessibility(session, ready):
+    """cef-v1 Accessibility: gated tree, credit-acked ax_tree_update batches, actions."""
+    caps = ready['capabilities']
+    assert caps.get('accessibility') is True, caps
+    assert caps.get('ax_actions') == ['press', 'focus', 'scroll_to', 'set_value', 'show_menu',
+                                      'increment', 'decrement'], caps
+    # Activation gate: nothing is mirrored before Zen enables this target.
+    assert not any(str(item.get('event', '')).startswith('ax_') for item in session.events)
+    enable = session.command('accessibility', enabled=True)
+    session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == enable)
+    nodes, batches = {}, []
+    def tree(kind, item):
+        if kind != 1 or item.get('event') not in ('ax_tree_update', 'ax_location'):
+            return False
+        # Like frame_ack, ax_ack names the exact target of the event it answers.
+        session.command('ax_ack', target=item['target'], seq=item['seq'])
+        if item['event'] == 'ax_location':
+            return False
+        if item['reset'] and not batches:
+            nodes.clear()
+        for record in item['nodes']:
+            if 'append' not in record:
+                nodes.setdefault(record['id'], {}).update(record)
+        if item['final']:
+            batches.append(item)
+        roots = [b['root'] for b in batches if b['root']]
+        names = ' '.join(str(n.get('name', '')) for n in nodes.values())
+        return bool(roots) and 'Increment' in names and 'Live rendering and input' in names
+    session.until(tree, seconds=20)
+    assert batches[0]['reset'] is True, batches[0]
+    roles = {n.get('role') for n in nodes.values()}
+    assert {'rootWebArea', 'heading', 'button', 'link', 'textField'} <= roles, sorted(map(str, roles))
+    for raw in session.events:
+        if raw.get('event') == 'ax_tree_update':
+            assert len(json.dumps(raw, separators=(',', ':'))) <= 8192
+    button = next(n for n in nodes.values() if n.get('role') == 'button' and n.get('name') == 'Increment')
+    press = session.command('ax_action', node_id=button['id'], action='press')
+    session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == press
+                  and item.get('status') == 'success')
+    session.until(lambda kind, item: item.get('event') == 'title' and 'count=1' in item.get('title', ''))
+    stale = session.command('ax_action', node_id=4000000000, action='press')
+    session.until(lambda kind, item: item.get('request_id') == stale and item.get('status') == 'unsupported'
+                  and item.get('reason') == 'stale_node')
+    disable = session.command('accessibility', enabled=False)
+    session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == disable)
+    refused = session.command('ax_action', node_id=button['id'], action='press')
+    session.until(lambda kind, item: item.get('request_id') == refused and item.get('reason') == 'accessibility_disabled')
+    return dict(ax_nodes=len(nodes), ax_batches=len(batches), ax_roles=sorted(map(str, roles)),
+                ax_press_changed_title=True)
+
+
 def run():
     probe.check()
     directory = Path(tempfile.mkdtemp(prefix='cef-stream-', dir=probe.EVIDENCE))
@@ -246,15 +297,16 @@ def run():
         back_stale = session.command('focus', target=before_back, focused=True)
         session.until(lambda kind, item: item.get('request_id') == back_stale and item.get('code') == 'stale_target')
         heartbeat = check_heartbeat(session, ready)
+        accessibility = check_accessibility(session, ready)
         close_id = session.command('close')
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close_id)
         session.process.wait(timeout=8)
         assert session.process.returncode == 0
         result.update(status='PASS', cef=ready['cef'], chromium=ready['chromium'], frames=session.frames,
-                      native_pid=session.process.pid, native_exit_code=0, heartbeat=heartbeat,
+                      native_pid=session.process.pid, native_exit_code=0, heartbeat=heartbeat, accessibility=accessibility,
                       tests=['real_OSR_frame', 'input', 'retina_resize', 'fullscreen_size_capped_1_5x',
                              'fullscreen_focus_and_tab', 'GET_navigation', 'back',
-                             'stale_target_rejected', 'BFCache_generation_revoked', 'heartbeat_cadence_and_frozen_host', 'HTTP0_explicit_history_only', 'native_close_completed'])
+                             'stale_target_rejected', 'BFCache_generation_revoked', 'heartbeat_cadence_and_frozen_host', 'accessibility_gate_tree_ack_press', 'HTTP0_explicit_history_only', 'native_close_completed'])
     except (Exception, KeyboardInterrupt) as exc:
         result['error'] = type(exc).__name__ + ': ' + str(exc)
     finally:

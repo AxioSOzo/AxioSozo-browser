@@ -41,6 +41,12 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
     # Metal (copy-mode blit) is linked into libxul by toolkit/library/moz.build.
     OS_LIBS += ["bsm"]
 
+# Accessibility for engine tabs (docs/design/engine-accessibility.md). scripts/zen.py
+# generates DIRS only for top-level native directories, so the subdirectory is
+# listed here. Needs the accessible/mac/mozAccessible.mm record in
+# patches/zen/firefox-native.json (SetAxioForeignAXProvider).
+DIRS += ["a11y"]
+
 include("/ipc/chromium/chromium-config.mozbuild")
 
 FINAL_LIBRARY = "xul"

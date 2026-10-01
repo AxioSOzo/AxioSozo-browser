@@ -95,8 +95,11 @@ native diagnostics. A user-gesture link that targets a new tab or window
 never creates a native window: the host emits `open_url` (`url`, `background`) and
 Zen opens a new Chromium tab; other pop-ups are denied. OSR select/autocomplete popup pixels
 are composited into the same frame stream; they are not external browser windows.
-Web mode remains experimental while accessibility and developer tools are
-unavailable; adding HTTP(S) navigation is not full E1/E2 certification.
+Web mode remains experimental. Developer tools are unavailable. The Chromium
+accessibility tree is exposed to macOS assistive clients (VoiceOver) with the
+limits in [engine-accessibility](../docs/design/engine-accessibility.md) (see
+"Accessibility" below; EXPERIMENTAL, no VoiceOver E1 yet). Adding HTTP(S)
+navigation is not full E1/E2 certification.
 
 ## Input extensions
 
@@ -331,6 +334,60 @@ but frozen (SIGSTOP, a deadlocked UI thread) is detected by a heartbeat:
   running time, never on time the machine or Gecko was not running.
 - The watchdog timer and wake observer are removed on close, failure and shutdown, and
   the timer is unref'd where the runtime supports it.
+
+## Accessibility
+
+`ready.capabilities.accessibility` is a boolean (`true` on the current host, web and
+fixture sessions alike); when `true`, `ax_actions` lists the supported actions. The
+host never enables renderer accessibility on its own and never globally (no
+`--force-renderer-accessibility`). Semantics, privacy rules and limits are in
+[docs/design/engine-accessibility.md](../docs/design/engine-accessibility.md) §5.
+
+Commands, all bound to the current target unless noted:
+
+- `accessibility {enabled}` maps to `set_accessibility_state` for that browser only
+  (TreeOnly for windowless browsers) and completes `success`. Zen sends `true` only
+  while a macOS assistive client is active and has queried that tab's canvas, and
+  `false` when the tab is hidden or closed, or the client goes away.
+- `ax_action {node_id, action, [value]}`:
+  - `action` is one of `press`, `focus`, `scroll_to`, `set_value`, `show_menu`,
+    `increment` or `decrement`.
+  - `value` (<= 4096 UTF-16) is required for, and only allowed with, `set_value`.
+  - It completes `success`, or `unsupported` with `stale_node`, `offscreen`,
+    `focus_unavailable`, `focus_required`, `not_editable`, `accessibility_disabled`,
+    `no_focused_frame` or `rate_limited` (20 actions per second per target).
+  - CEF 154's C API has no accessibility action entry point for OSR browsers, so
+    actions are synthesized as trusted mouse, wheel, key, `select_all` and IME-commit
+    input at the node's visible rect (design doc §5.5).
+- `ax_ack {seq}` names the exact target of the event it answers (it may predate a
+  navigation), like `frame_ack`. It gets no `accepted` or `completed`. An unknown
+  `seq` is a protocol error; a `seq` from before a reset is ignored; an ack for a
+  closed or replaced target is ignored.
+
+Events, at most 4 unacknowledged per target (each <= 8 KiB):
+
+- `ax_tree_update {seq, batch, reset, final, root, focus, px, events, truncated, nodes}`.
+  - Chunks with the same `batch` form one atomic update, applied when `final:true`
+    arrives. `reset:true` replaces the whole tree (first batch after enabling, and
+    after a main-frame document change).
+  - `root` and `focus` are wire ids (0 = none). `px` is 1 or the device scale.
+  - `events` holds at most 32 `{type, id}` from the renderer's allowlist.
+  - `nodes` holds records `{id, role, b:[x,y,w,h], oc, kids, [states], [actions],
+    [scroll], [tf], [name], [value], [desc], [placeholder], [url], [roledesc],
+    [shortcuts], [lang], [level], [checked], [invalid], [restriction], [popup],
+    [setsize], [posinset], [sel], [range], [table], [live], [relevant], [atomic],
+    [busy], [selected], [modal], [current], [input], [action], [tag], [activedesc],
+    [linktarget], [redacted]}`, or continuations `{id, append:"name"|"value", text}` /
+    `{id, append:"kids", kids}` of a record earlier in the same batch.
+- `ax_location {seq, nodes:[{id, b, oc, [tf]}]}`: geometry only, applied immediately.
+
+Further rules:
+
+- Wire ids are per target and never reused; Chromium tree ids never leave the host.
+- Password fields (state `protected` or input type `password`) carry
+  `redacted:true` and never a value, selection or children; Zen redacts again.
+- Every key is exact-checked. A malformed accessibility event, or one from a host
+  that did not announce the capability, ends that tab (`INVALID_CEF_ACCESSIBILITY`).
 
 ## Backpressure and lifecycle
 

@@ -149,6 +149,7 @@ static void tabEvent(Tab* tab,NSString* kind,NSDictionary* fields){
 static void complete(NSString* request,NSString* status){event(@"completed",@{@"request_id":request,@"status":status});}
 static void unsupported(NSString* request,NSString* reason){event(@"completed",@{@"request_id":request,@"status":@"unsupported",@"reason":reason});}
 static void streamCommand(const std::string& line);
+#include "a11y_forward.inc"
 static void pumpCommands(){
   for(int count=0;count<32&&!streamClosing;++count){auto line=transport.pop();if(!line)break;streamCommand(*line);}
 }
@@ -200,7 +201,7 @@ static void streamReadyEvent(){
   // These values are queried from the loaded framework, not merely headers.
   NSString* runtimeCEF=[NSString stringWithFormat:@"%d.%d.%d",p_cef_version_info(0),p_cef_version_info(1),p_cef_version_info(2)];
   NSString* runtimeChromium=[NSString stringWithFormat:@"%d.%d.%d.%d",p_cef_version_info(4),p_cef_version_info(5),p_cef_version_info(6),p_cef_version_info(7)];
-  event(@"ready",@{@"cef":@CEF_VERSION,@"chromium":runtimeChromium,@"runtime_cef":runtimeCEF,@"runtime_chromium":runtimeChromium,@"platform":@"macosarm64",@"sandbox_configured":@YES,@"engine_instance":streamInstance,@"render_path":surfaceMode?@"native-osr-iosurface":@"native-osr-bgra",@"capabilities":@{@"surface":@(surfaceMode),@"external_begin_frame":@(surfaceBeginFrames),@"frame_rate":@(frameRate),@"observe":@YES,@"navigate":@YES,@"back":@YES,@"forward":@YES,@"reload":@YES,@"stop":@YES,@"close":@YES,@"input":@YES,@"edit":@YES,@"visibility":@YES,@"cursor":@YES,@"multi_target":@YES,@"max_targets":@(MaxTabs),@"persistent_profile":@(webBrowsing),@"open_in_tab":@(webBrowsing),@"devtools":@NO,@"ime":@YES,@"key_verdict":@YES,@"wheel_phases":@YES,@"pinch":@YES,@"frame_rate_command":@YES,@"private_mode":@NO,@"fixture_only":@(!webBrowsing),@"permissions":@(webBrowsing),@"downloads":@(webBrowsing),@"popups":@NO,@"accessibility":@NO,@"file_dialogs":@(webBrowsing),@"javascript_dialogs":@(webBrowsing),
+  event(@"ready",@{@"cef":@CEF_VERSION,@"chromium":runtimeChromium,@"runtime_cef":runtimeCEF,@"runtime_chromium":runtimeChromium,@"platform":@"macosarm64",@"sandbox_configured":@YES,@"engine_instance":streamInstance,@"render_path":surfaceMode?@"native-osr-iosurface":@"native-osr-bgra",@"capabilities":@{@"surface":@(surfaceMode),@"external_begin_frame":@(surfaceBeginFrames),@"frame_rate":@(frameRate),@"observe":@YES,@"navigate":@YES,@"back":@YES,@"forward":@YES,@"reload":@YES,@"stop":@YES,@"close":@YES,@"input":@YES,@"edit":@YES,@"visibility":@YES,@"cursor":@YES,@"multi_target":@YES,@"max_targets":@(MaxTabs),@"persistent_profile":@(webBrowsing),@"open_in_tab":@(webBrowsing),@"devtools":@NO,@"ime":@YES,@"key_verdict":@YES,@"wheel_phases":@YES,@"pinch":@YES,@"frame_rate_command":@YES,@"private_mode":@NO,@"fixture_only":@(!webBrowsing),@"permissions":@(webBrowsing),@"downloads":@(webBrowsing),@"popups":@NO,@"accessibility":axCapability(),@"ax_actions":axActionNames(),@"file_dialogs":@(webBrowsing),@"javascript_dialogs":@(webBrowsing),
     @"heartbeat_interval_ms":@(HeartbeatIntervalMs),@"context_menu":@(webBrowsing),@"http_auth":@(webBrowsing),@"find":@(webBrowsing),@"zoom":@(webBrowsing),@"popup_blocked":@(webBrowsing),@"media_capture":@NO}});
 }
 static bool surface(id w,id h,id scale){
@@ -381,7 +382,7 @@ static void streamCommand(const std::string& line){
     @"pinch":@[@"x",@"y",@"modifiers",@"phase",@"magnification"],@"frame_rate":@[@"frame_rate"],
     @"ime_set_composition":@[@"text",@"selection_start",@"selection_end"],@"ime_commit_text":@[@"text"],
     @"ime_finish_composing":@[],@"ime_cancel_composition":@[]};
-  NSArray* fields=extra[method];if(!fields){failProtocol();return;}
+  NSArray* fields=extra[method]?:axCommandFields()[method];if(!fields){failProtocol();return;}
   NSMutableArray* expected=[@[@"version",@"method",@"request_id",@"token"] mutableCopy];
   if(![method isEqual:@"shutdown"])[expected addObject:@"target"];
   [expected addObjectsFromArray:fields];
@@ -391,6 +392,7 @@ static void streamCommand(const std::string& line){
   NSArray* optional=@{@"ime_set_composition":@[@"underlines",@"replacement_range"],@"ime_commit_text":@[@"replacement_range",@"relative_cursor_pos"],
     @"ime_finish_composing":@[@"keep_selection"]}[method];
   for(NSString* name in optional)if(command[name])[expected addObject:name];
+  for(NSString* name in axOptionalFields(method))if(command[name])[expected addObject:name];
   if(!keys(command,expected)){failProtocol();return;}
   if([method isEqual:@"shutdown"]){event(@"accepted",@{@"request_id":requestId});shutdownRequest=requestId;streamClosing=true;return;}
   bool creating_=[method isEqual:@"create"];
@@ -402,6 +404,7 @@ static void streamCommand(const std::string& line){
     if(!integer(command[@"frame_id"])||!transport.acknowledge([command[@"frame_id"] unsignedLongLongValue],json(supplied))){failProtocol();return;}
     return;
   }
+  if([method isEqual:@"ax_ack"]){if(!axAcknowledge(supplied,command))failProtocol();return;}
   auto found=tabsByKey.find(keyOf(supplied[@"tab_id"]));
   Tab* tab=found==tabsByKey.end()?nullptr:found->second;
   if(creating_){
@@ -422,8 +425,8 @@ static void streamCommand(const std::string& line){
     auto value=utf16(command[@"url"]);auto url=view(value);
     event(@"accepted",@{@"request_id":requestId});
     isolatedContext->base.base.add_ref(&isolatedContext->base.base); // CEF takes this reference
-    if(!p_cef_browser_host_create_browser(&wi,client.retain(),&url,&settings,nullptr,isolatedContext)){
-      complete(requestId,@"failed");creating=nullptr;tabsByKey.erase(keyOf(tab->key));axio::surface::destroyTarget(tab->surface);delete tab;
+    if(!p_cef_browser_host_create_browser(&wi,axClientFor(tab),&url,&settings,nullptr,isolatedContext)){
+      axTabClosed(tab);complete(requestId,@"failed");creating=nullptr;tabsByKey.erase(keyOf(tab->key));axio::surface::destroyTarget(tab->surface);delete tab;
     }
     return;
   }
@@ -435,6 +438,7 @@ static void streamCommand(const std::string& line){
   if(!([method isEqual:@"key"]&&[command[@"type"] isEqual:@"char"]))sendKeyProbe(tab);
   if([method isEqual:@"devtools"]){unsupported(requestId,@"devtools_not_integrated");return;}
   if(inputCommand(tab,method,command,requestId))return;
+  if(axCommand(tab,method,command,requestId))return;
   if(uiCommand(tab,method,command,requestId))return;
   if([method isEqual:@"navigate"]&&!allowedURL(command[@"url"])){failProtocol();return;}
   if([method isEqual:@"resize"]){
@@ -826,6 +830,7 @@ static void blockedPopup(Tab* tab,const cef_string_t* value){
   else tabEvent(tab,@"error",@{@"code":@"popup_denied"});
 }
 #include "input.inc"
+#include "a11y.inc"
 static void configureStream(){
   render.api.get_view_rect=[](cef_render_handler_t*,cef_browser_t* value,cef_rect_t* r){HOLD(value);Tab* tab=tabFor(value,true);*r={0,0,tab?tab->width:900,tab?tab->height:650};};
   render.api.get_screen_info=[](cef_render_handler_t*,cef_browser_t* value,cef_screen_info_t* i){
@@ -863,7 +868,7 @@ static void configureStream(){
   lifespan.api.on_before_close=[](cef_life_span_handler_t*,cef_browser_t* value){
     HOLD(value);Tab* tab=tabFor(value);if(!tab||tab==creating)return;
     tab->paintAllowed=false;transport.invalidatePendingFrame(keyOf(tab->key));
-    closePromptsFor(tab,@"closed",false);cancelDownloadsFor(tab);finishKeyWaits(tab);tabEvent(tab,@"closed",@{});
+    closePromptsFor(tab,@"closed",false);cancelDownloadsFor(tab);finishKeyWaits(tab);axTabClosed(tab);tabEvent(tab,@"closed",@{});
     if(tab->closeRequest){complete(tab->closeRequest,@"success");tab->closeRequest=nil;}
     if(tab->navigationRequest){complete(tab->navigationRequest,@"failed");tab->navigationRequest=nil;}
     tabsByBrowser.erase(value->get_identifier(value));tabsByKey.erase(keyOf(tab->key));

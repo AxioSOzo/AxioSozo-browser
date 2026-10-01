@@ -293,6 +293,8 @@ Recommendation (cleanest):
   - cefclient's `osr_accessibility_helper` and `osr_accessibility_node_mac.mm`
     (BSD, fixed 2026-09-11) is a working reference for roles, values, children and
     positions.
+  - Chosen and integrated as described in
+    [engine-accessibility.md](../design/engine-accessibility.md) (status in §11).
   - Honest limit: this reimplements a subset of Chromium's
     `BrowserAccessibilityCocoa`. Rich text navigation (AXTextMarker ranges),
     live regions and editing parity would be basic at first.
@@ -423,6 +425,28 @@ the planned surface kind for WebKit. **Rejected:** (b) in-process CEF.
   4–80 ms when Zen is idle (outliers 320/718 ms under load); renderer kill 18–376 ms;
   Reload recovers. A frozen-but-alive host is still not detected.
 - **Not measured:** Gecko's own composite GPU time, input-to-photon, 120 Hz.
+
+**Accessibility status (Phase 3, Q5), 2026-10-01 [local]: EXPERIMENTAL, not READY.**
+Design: [engine-accessibility.md](../design/engine-accessibility.md) (NSAccessibility
+splice, §8 near-term path). Evidence:
+[a11y-2026-10-01/result.json](../evidence/a11y-2026-10-01/result.json).
+
+- **Integrated and built:** host `ax_tree_update`/`ax_location`/`ax_action`/`ax_ack`
+  (contract "Accessibility"), chrome-JS model, `engine-view/a11y` component and the
+  `accessible/mac/mozAccessible.mm` record. Host, Zen and all unit/stream/smoke tests pass.
+- **Real AX client, actual Zen window (no VoiceOver speech):** a public-AXUIElement probe
+  set `AXEnhancedUserInterface` and found the Chromium tab's tree under the canvas 0.23 s
+  after its first `AXChildren` query: web area, h1–h3 with levels, navigation landmark,
+  links with URLs, button, text field, secure text field with an empty value, and a list.
+  `AXPress` clicked the button, and setting `AXValue` filled the text field. The typed
+  synthetic password appeared in no accessibility event. Frames matched the screenshot.
+  With no client, nothing was enabled and no `ax_*` event flowed. After the client left,
+  the tab was disabled within the 15 s poll.
+- **Fixed during the run:** the controller was per window, not per process (Zen preloads
+  chrome modules per window).
+- **Not yet done:** the VoiceOver plan (design §10, A1–A18). That covers speech, rotor,
+  focus following, live regions, OOPIF, scrolling, split view and navigation. Also
+  missing: text markers and table semantics.
 
 ## 12. Open risks
 

@@ -1,0 +1,60 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+webidl Element;
+
+/**
+ * Main-thread notifications from the engine accessibility component.
+ * Implemented by chrome JS (ChromiumAccessibility.sys.mjs). Both are dispatched
+ * as runnables, never re-entered from inside an AppKit accessibility call.
+ */
+[scriptable, uuid(9d630f2d-d379-4fd1-a5b7-ecf2c96cc8e5)]
+interface nsIAxioEngineAccessibilityListener : nsISupports {
+  /**
+   * A platform assistive client asked for the children of the attached canvas
+   * of targetId, for the first time since attach() or clear().
+   */
+  void onAccessibilityRequested(in unsigned long long targetId);
+
+  /**
+   * An assistive client asked for an action on a node: "press", "focus",
+   * "scroll_to", "set_value" (value is the new text), "show_menu", "increment",
+   * "decrement". nodeId is the host wire id.
+   */
+  void onAction(in unsigned long long targetId, in unsigned long nodeId,
+                in ACString action, in AString value);
+};
+
+/**
+ * Exposes an out-of-process engine's accessibility tree (fed by chrome JS) as
+ * native NSAccessibility elements under the engine view's canvas accessible.
+ * Parent process, main thread, macOS only. See
+ * docs/design/engine-accessibility.md.
+ */
+[scriptable, builtinclass, uuid(bfb28865-b97b-44ca-869d-c891bce45408)]
+interface nsIAxioEngineAccessibility : nsISupports {
+  /**
+   * True while macOS platform accessibility is enabled for this process
+   * (mozilla::a11y::ShouldA11yBeEnabled: an assistive client set
+   * AXEnhancedUserInterface or queried the application role).
+   */
+  readonly attribute boolean platformClientActive;
+
+  attribute nsIAxioEngineAccessibilityListener listener;
+
+  /**
+   * Expose targetId's tree under `canvas`, an HTML <canvas> in a chrome
+   * document (the engine view of that target). At most 32 targets.
+   */
+  void attach(in Element canvas, in unsigned long long targetId);
+  void detach(in unsigned long long targetId);
+
+  /** One native patch (JSON) produced by ChromiumAXTree for targetId. */
+  void applyPatch(in unsigned long long targetId, in AUTF8String patchJSON);
+
+  /** Drop the tree (the host tree was disabled); the next query re-requests it. */
+  void clear(in unsigned long long targetId);
+};

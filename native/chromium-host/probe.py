@@ -202,7 +202,8 @@ def fingerprint(signing=None):
     h = hashlib.sha256()
     h.update(SHA256.encode())
     for name in ['host.mm', 'stream.inc', 'input.inc', 'transport.hpp', 'engine_surface_v1.h',
-                 'surface_transport.hpp', 'surface_transport.mm', 'crash_guard.hpp']:
+                 'surface_transport.hpp', 'surface_transport.mm', 'crash_guard.hpp',
+                 'a11y.inc', 'a11y_forward.inc', 'a11y_core.hpp']:
         h.update((ROOT / 'native/chromium-host' / name).read_bytes())
     # Runner-only lifecycle changes do not change the native build recipe.
     h.update(inspect.getsource(setup).encode())
@@ -341,6 +342,14 @@ def native_test():
                  'xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra',
                  ROOT / 'native/chromium-host/tests/crash_guard_test.cc', '-o', guard])
     run_command([guard], timeout_seconds=30)
+    # Accessibility mirror (a11y_core.hpp): tree, redaction, chunking, credits. No CEF.
+    a11y = BASE / 'a11y-core-test'
+    run_command([EXTERNAL, 'env', 'TMPDIR=' + str(BASE / 'tmp'),
+                 'CLANG_MODULE_CACHE_PATH=' + str(BASE / 'clang-cache'),
+                 'xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra',
+                 '-I', ROOT / 'native/chromium-host',
+                 ROOT / 'native/chromium-host/tests/a11y_core_test.cc', '-o', a11y])
+    run_command([a11y], timeout_seconds=30)
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):

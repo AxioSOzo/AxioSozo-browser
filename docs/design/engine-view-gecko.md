@@ -620,42 +620,16 @@ Build wiring is owned by the mirror-route agent:
 libbsm is already linked by `ipc/glue/moz.build:291`. Metal is already linked by
 `toolkit/library/moz.build:217`.
 
-## 10. Accessibility (design only)
+## 10. Accessibility
 
-Two attachment points:
-
-1. **Gecko's accessible tree (long-term, cross-platform).**
-   - The engine view becomes an `OuterDoc`-like accessible
-     (`accessible/mac/MOXOuterDoc.h`) whose child document is fed from the host's
-     AX tree.
-   - CEF OSR exposes `CefAccessibilityHandler::OnAccessibilityTreeChange` and
-     `OnAccessibilityLocationChange`. Those updates would be translated into
-     Gecko's `RemoteAccessible` cache model (`DocAccessibleParent`) without a
-     `BrowserParent`.
-   - This gives VoiceOver, Windows UIA/IA2 and ATK, and the devtools
-     accessibility inspector one tree. Hit testing already flows through
-     `ChildAtPoint` (`accessible/mac/mozAccessible.mm:231-258`).
-   - Cost: a new accessible class plus a synthetic `DocAccessibleParent`. That is
-     a sizeable Gecko patch.
-2. **NSAccessibility splice (macOS v1).**
-   - The component builds lightweight `NSAccessibilityElement` objects from the
-     same CEF AX updates. It owns them on the main thread and positions them in
-     screen coordinates from the canvas bounds plus the AX locations.
-   - A small hunk in `mozAccessible moxChildren` (`mozAccessible.mm:295-314`) and
-     `moxHitTest` (`:231-258`) returns them as children of the canvas's
-     accessible when the canvas carries an engine view.
-   - Actions (press, focus, set value) go to the host over the pipe.
-   - `NSAccessibilityRemoteUIElement` (private, as used by Chromium RemoteCocoa and
-     WebKit) is not usable: in OSR mode Chromium has no native
-     `BrowserAccessibilityCocoa` tree.
-
-Both options:
-
-- enable renderer accessibility in CEF only while an AT is active. The parent knows
-  this from the `a11y-init-or-shutdown` observer topic. It avoids the cost of
-  `--force-renderer-accessibility`;
-- keep the canvas `role="document"`, with the page title as its label, until the
-  tree attaches.
+Replaced by [engine-accessibility.md](engine-accessibility.md), which chose the
+NSAccessibility splice (macOS v1): the host streams Chromium's tree
+(`ax_tree_update` / `ax_location`, contract "Accessibility" in
+[cef-v1](../../contracts/cef-v1.md)), chrome JS models it, and the
+`engine-view/a11y` component exposes it as native elements under the canvas
+accessible through one `accessible/mac/mozAccessible.mm` record in
+`patches/zen/firefox-native.json`. Renderer accessibility is enabled per tab only
+while a macOS assistive client is active and has queried that canvas.
 
 ## 11. Security
 

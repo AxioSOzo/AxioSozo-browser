@@ -3,6 +3,7 @@
 
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
+import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -241,7 +242,11 @@ const EVENT_FIELDS = {
   download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
   find_result: ["identifier", "count", "active", "final"], popup_blocked: ["url"],
   // <<<
+  // Accessibility (docs/design/engine-accessibility.md; validated by ChromiumAccessibility).
+  ax_tree_update: ["seq", "batch", "reset", "final", "root", "focus", "px", "events", "truncated", "nodes"],
+  ax_location: ["seq", "nodes"],
 };
+const AX_EVENTS = new Set(["ax_tree_update", "ax_location"]);
 const DELEGATION_EVENTS = new Set(["prompt", "prompt_closed", "download_updated", "find_result", "popup_blocked"]);
 
 // Preserve only our fixed diagnostic codes. Never display native payloads,
@@ -257,6 +262,7 @@ const READ_FAILURE_CODES = new Set([
   "INVALID_CEF_CURSOR", "INVALID_CEF_OPEN_URL", "INVALID_CEF_PROMPT", "INVALID_CEF_TEXT_INPUT",
   "CEF_FRAME_PRESENTATION_FAILED", "CEF_EVENT_CALLBACK_FAILED",
   "CEF_SURFACE_BIND_FAILED", "CEF_SURFACE_CLOSED", "INVALID_CEF_HEARTBEAT", "CEF_HOST_UNRESPONSIVE",
+  "INVALID_CEF_ACCESSIBILITY",
 ]);
 // A violation that concerns one target's own document. On a shared host it ends
 // only that tab; framing, identity and response errors end the whole host.
@@ -558,7 +564,7 @@ export class CEFHostConnection {
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
       } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input"].includes(value.event)
-          || DELEGATION_EVENTS.has(value.event)) {
+          || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
       if (["accepted", "completed"].includes(value.event) || (value.event === "error" && value.request_id)) {
@@ -597,7 +603,11 @@ export class CEFHostConnection {
           // Permissions, downloads, dialogs, file pickers: false = denied natively,
           // true = delegated to Zen's own UI. Native pop-up windows never exist.
           || typeof capabilities?.permissions !== "boolean" || typeof capabilities?.downloads !== "boolean"
-          || capabilities?.popups !== false || capabilities?.accessibility !== false))
+          || capabilities?.popups !== false))
+        // Accessibility (design doc §6): announced either way; when true, with its action list.
+        || typeof capabilities?.accessibility !== "boolean"
+        || (capabilities.accessibility === true && !(Array.isArray(capabilities.ax_actions)
+          && capabilities.ax_actions.every(action => typeof action === "string" && action.length <= 16)))
         // One shared host needs native multi-target isolation and its profile model.
         || (this.shared && (capabilities?.multi_target !== true || capabilities?.stop !== true
           || capabilities?.cursor !== true || capabilities?.persistent_profile !== web || capabilities?.open_in_tab !== web))
@@ -867,6 +877,11 @@ export class CEFEngineAdapter {
     if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
         || ![value.caret_x, value.caret_y, value.caret_width, value.caret_height]
           .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
+    if (AX_EVENTS.has(value.event)) {
+      if (this.#host.capabilities?.accessibility !== true) throw targetError("INVALID_CEF_ACCESSIBILITY");
+      try { (value.event === "ax_tree_update" ? validateAXTreeUpdate : validateAXLocation)(value); }
+      catch { throw targetError("INVALID_CEF_ACCESSIBILITY"); }
+    }
     // >>> AxioSozo engine UI delegation: web sessions only, strict schema
     if (DELEGATION_EVENTS.has(value.event)) {
       if (this.browsingMode !== "web") throw targetError("INVALID_CEF_PROMPT");
@@ -1009,6 +1024,26 @@ export class CEFEngineAdapter {
     }
     return this.#request("visibility", { visible });
   }
+  // >>> Accessibility (docs/design/engine-accessibility.md §6)
+  /** `accessibility {enabled}` for the current target (TreeOnly renderer accessibility). */
+  accessibility(enabled) {
+    const fields = validateAXCommand("accessibility", { enabled });
+    if (this.#host.capabilities?.accessibility !== true) return Promise.resolve({ status: "unsupported", reason: "ACCESSIBILITY_UNSUPPORTED" });
+    return this.#request("accessibility", fields);
+  }
+  /** One assistive action on a host wire node id of the current target. */
+  axAction(node_id, action, value) {
+    const fields = validateAXCommand("ax_action", value === undefined ? { node_id, action } : { node_id, action, value });
+    if (this.#host.capabilities?.accessibility !== true) return Promise.resolve({ status: "unsupported", reason: "ACCESSIBILITY_UNSUPPORTED" });
+    return this.#request("ax_action", fields);
+  }
+  /** Credit for one applied ax event; like frame_ack it names that event's exact target. */
+  axAck(target, seq) {
+    if (!Number.isSafeInteger(seq) || seq < 1) return Promise.reject(new Error("INVALID_AX_ACK"));
+    if (this.#ended) return Promise.resolve();
+    return this.#host.request("ax_ack", { seq }, target, { acknowledge: true });
+  }
+  // <<<
   edit(target, action) {
     this.resolve(target);
     if (!["copy", "cut", "paste", "select_all", "undo", "redo"].includes(action)) throw new Error("INVALID_EDIT_ACTION");

@@ -1,0 +1,35 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# AxioSozo engine-view accessibility: Chromium's accessibility tree (streamed by
+# the CEF host, modelled in ChromiumAccessibility.sys.mjs) exposed to VoiceOver as
+# NSAccessibility elements under the engine view's canvas accessible.
+# See docs/design/engine-accessibility.md.
+#
+# Built only through engine-view/moz.build `DIRS += ["a11y"]` (scripts/zen.py
+# generates DIRS for top-level native directories only). Needs the
+# accessible/mac/mozAccessible.mm hunk (SetAxioForeignAXProvider) from
+# patches/zen/firefox-native.json, see the design doc §8.2.
+
+XPIDL_SOURCES += [
+    "nsIAxioEngineAccessibility.idl",
+]
+XPIDL_MODULE = "axio_engine_a11y"
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa" and CONFIG["ACCESSIBILITY"]:
+    EXPORTS.mozilla.axio += [
+        "AxioEngineAccessibility.h",
+    ]
+    SOURCES += [
+        "AxioEngineAccessibility.mm",
+    ]
+    XPCOM_MANIFESTS += [
+        "components.conf",
+    ]
+    LOCAL_INCLUDES += [
+        "/accessible/base",
+        "/dom/base",
+    ]
+
+FINAL_LIBRARY = "xul"

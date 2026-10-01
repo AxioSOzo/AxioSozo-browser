@@ -253,6 +253,48 @@ check("fake host: zero-copy/copy frames and dead-name host-died", () => {
   }
 });
 
+// Accessibility component (engine-view/a11y, docs/design/engine-accessibility.md §7.2).
+const AX_CONTRACT = "@axiosozo.nl/engine-accessibility;1";
+check("a11y: contract registered, singleton, no platform client headless", () => {
+  if (!(AX_CONTRACT in Cc)) {
+    throw new Error("contract id missing from Cc");
+  }
+  const ax = Cc[AX_CONTRACT].getService(Ci.nsIAxioEngineAccessibility);
+  if (Cc[AX_CONTRACT].getService(Ci.nsIAxioEngineAccessibility) !== ax) {
+    throw new Error("not a singleton");
+  }
+  if (ax.platformClientActive !== false) {
+    throw new Error("platformClientActive without an assistive client");
+  }
+  return { platformClientActive: ax.platformClientActive };
+});
+check("a11y: attach/applyPatch/clear/detach on a chrome canvas; bad input rejected", () => {
+  const ax = Cc[AX_CONTRACT].getService(Ci.nsIAxioEngineAccessibility);
+  const browser = Services.appShell.createWindowlessBrowser(true);
+  try {
+    const doc = browser.document;
+    const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+    const div = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    (doc.body || doc.documentElement).append(canvas, div);
+    const notCanvas = expectThrow(() => ax.attach(div, 9));
+    const zeroTarget = expectThrow(() => ax.attach(canvas, 0));
+    const unknownPatch = expectThrow(() => ax.applyPatch(9, "{}"));
+    ax.attach(canvas, 9);
+    const patch = { reset: true, root: 1, focus: 0, px: 1, removed: [], notifications: [],
+      viewport: { logicalWidth: 100, logicalHeight: 100, cssWidth: 100, cssHeight: 100 },
+      nodes: [{ id: 1, role: "AXWebArea", title: "Fixture", frame: [0, 0, 100, 100], kids: [] }] };
+    ax.applyPatch(9, JSON.stringify(patch));
+    const malformed = expectThrow(() => ax.applyPatch(9, "[1]"));
+    ax.clear(9);
+    ax.detach(9);
+    ax.detach(9);
+    const afterDetach = expectThrow(() => ax.applyPatch(9, "{}"));
+    return { notCanvas, zeroTarget, unknownPatch, malformed, afterDetach };
+  } finally {
+    browser.close();
+  }
+});
+
 const ok = checks.every(c => c.ok);
 dump("AXIO_ENGINE_VIEW_SMOKE " + JSON.stringify({ status: ok ? "PASS" : "FAIL",
   pid: Services.appinfo.processID,

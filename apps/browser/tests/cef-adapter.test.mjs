@@ -49,9 +49,9 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
       const command=JSON.parse(text);writes.push(command);
       if(command.method==='hello') event({event:'ready',cef:CEF_VERSION,chromium:CHROMIUM_VERSION,
         runtime_cef:CEF_VERSION.split('+')[0],runtime_chromium:CHROMIUM_VERSION,platform:'macosarm64',sandbox_configured:true,
-        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{fixture_only:browsingMode==='fixture',devtools:false,private_mode:false,ime:false,
+        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{fixture_only:browsingMode==='fixture',devtools:false,private_mode:false,ime:false,accessibility:false,
           ...(browsingMode==='web'?{edit:true,visibility:true,permissions:false,downloads:false,popups:false,accessibility:false}:{})},...overrideReady});
-      else if(command.method==='frame_ack') return;
+      else if(command.method==='frame_ack'||command.method==='ax_ack') return;
       else if(command.method==='create') {
         event({event:'accepted',request_id:command.request_id});
         event({event:'created',request_id:command.request_id,target:current});
@@ -609,4 +609,50 @@ test('IME commands admit the optional cef-v1 fields only by name and within UTF-
   assert.throws(()=>validateCEFInput('ime_cancel_composition',{keep_selection:true},surface,ime),/INVALID_CEF_IME/);
   // The copy is detached from the caller's nested objects.
   const copy=validateCEFInput('ime_set_composition',full,surface,ime);full.underlines[0].end=9;assert.equal(copy.underlines[0].end,2);
+});
+
+// Accessibility (docs/design/engine-accessibility.md §6, §8.3). Controlled packets only.
+const AX_READY={capabilities:{fixture_only:true,devtools:false,private_mode:false,ime:false,accessibility:true,
+  ax_actions:['press','focus','scroll_to','set_value','show_menu','increment','decrement']}};
+const axUpdate=(target,extra={})=>({event:'ax_tree_update',target,seq:1,batch:1,reset:true,final:true,root:1,focus:0,px:2,
+  events:[],truncated:false,nodes:[{id:1,role:'rootWebArea',b:[0,0,2,2],oc:0,kids:[]}],...extra});
+
+test('ready must announce accessibility as a boolean, and its action list when true',async()=>{
+  for(const capabilities of [{...AX_READY.capabilities,accessibility:undefined},{...AX_READY.capabilities,ax_actions:undefined},
+    {...AX_READY.capabilities,accessibility:'yes'}]){
+    const f=fixture({overrideReady:{capabilities}});
+    await assert.rejects(f.adapter.connect());assert.equal(f.failures[0].message,'UNVERIFIED_CEF_RUNTIME');
+  }
+});
+
+test('accessibility events are validated, delivered, and credited against their exact target',async()=>{
+  const f=fixture({overrideReady:AX_READY});await f.adapter.connect();
+  await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  f.event(axUpdate(f.adapter.target));
+  f.event({event:'ax_location',target:f.adapter.target,seq:2,nodes:[{id:1,b:[0,0,2,2],oc:0}]});
+  await tick();await tick();
+  assert.deepEqual(f.events.filter(item=>item.event.startsWith('ax_')).map(item=>item.event),['ax_tree_update','ax_location']);
+  const enabled=await f.adapter.accessibility(true);assert.equal(enabled.status,'success');
+  assert.deepEqual(f.writes.find(item=>item.method==='accessibility').enabled,true);
+  await f.adapter.axAction(1,'set_value','typed');
+  const action=f.writes.find(item=>item.method==='ax_action');
+  assert.deepEqual([action.node_id,action.action,action.value],[1,'set_value','typed']);
+  assert.throws(()=>f.adapter.axAction(1,'press','x'));
+  assert.throws(()=>f.adapter.accessibility('on'));
+  const original=f.adapter.target;
+  await f.adapter.axAck(original,1);
+  const ack=f.writes.find(item=>item.method==='ax_ack');assert.equal(ack.seq,1);assert.deepEqual(ack.target,original);
+  assert.equal(f.failures.length,0);await f.adapter.close();
+});
+
+test('a malformed or unannounced accessibility event ends the tab with a fixed code',async()=>{
+  for(const [overrideReady,mutate] of [[AX_READY,event=>({...event,nodes:[{...event.nodes[0],onclick:'x'}]})],
+    [AX_READY,event=>({...event,nodes:[{...event.nodes[0],url:'javascript:alert(1)'}]})],
+    [{},event=>event]]){
+    const f=fixture({overrideReady});await f.adapter.connect();
+    await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+    if(!overrideReady.capabilities)assert.equal((await f.adapter.accessibility(true)).reason,'ACCESSIBILITY_UNSUPPORTED');
+    f.event(mutate(axUpdate(f.adapter.target)));await tick();await tick();
+    assert.equal(f.failures.at(-1)?.message,'INVALID_CEF_ACCESSIBILITY');
+  }
 });

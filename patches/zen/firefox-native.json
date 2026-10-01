@@ -57,5 +57,28 @@
         "    element->HandlePrintCallback(mFrame->PresContext());\n\n    if (RefPtr<ImageContainer> external =\n            element->GetAxioExternalImageContainer()) {\n      // AxioSozo engine-view: frames reach the compositor through the\n      // ImageBridge without the main thread. This only (re)registers the\n      // async image pipeline for the element's current geometry.\n      auto* canvasFrame = static_cast<nsHTMLCanvasFrame*>(mFrame);\n      nsRect dest = canvasFrame->GetDestRect(\n          mFrame->GetContentRectRelativeToSelf() + ToReferenceFrame());\n      LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(\n          dest, mFrame->PresContext()->AppUnitsPerDevPixel());\n      aManager->CommandBuilder().PushImage(this, external, aBuilder,\n                                           aResources, aSc, bounds, bounds);\n      return true;\n    }\n\n    if (element->IsOffscreen()) {\n"
       ]
     ]
+  },
+  {
+    "path": "accessible/mac/mozAccessible.mm",
+    "before_sha256": "139337d8645c8b3bc43fdb76a7acde6563dddc92b7c8af8485d2b88153b6d37a",
+    "after_sha256": "03c60b526443d771dd584126e8eefba48fe944908ee4df7e756e41860a0cdff9",
+    "replacements": [
+      [
+        "using namespace mozilla;\nusing namespace mozilla::a11y;\n\n#pragma mark -\n",
+        "using namespace mozilla;\nusing namespace mozilla::a11y;\n\n// AxioSozo engine-view: the chrome <canvas> of an out-of-process engine tab may\n// expose foreign NSAccessibility children, owned by the engine-view component\n// (zen/axiosozo-native/engine-view/a11y). Without a provider nothing changes.\nnamespace mozilla::a11y {\nstruct AxioForeignAXProvider {\n  NSArray* (*children)(id aOwner, nsIContent* aContent);\n  id (*hitTest)(id aOwner, nsIContent* aContent, NSPoint aPoint);\n  id (*focused)(id aOwner, mozilla::dom::Document* aDocument);\n};\nstatic const AxioForeignAXProvider* sAxioForeignAX = nullptr;\nvoid SetAxioForeignAXProvider(const AxioForeignAXProvider* aProvider) {\n  MOZ_RELEASE_ASSERT(NS_IsMainThread());\n  sAxioForeignAX = aProvider;\n}\nstatic nsIContent* AxioForeignContent(Accessible* aAcc) {\n  if (!sAxioForeignAX || !aAcc || !aAcc->IsLocal()) {\n    return nullptr;\n  }\n  nsIContent* content = aAcc->AsLocal()->GetContent();\n  return content && content->IsHTMLElement(nsGkAtoms::canvas) ? content\n                                                              : nullptr;\n}\n}  // namespace mozilla::a11y\n\n#pragma mark -\n"
+      ],
+      [
+        "  mozAccessible* focusedChild =\n      GetNativeFromGeckoAccessible(doc->FocusedChild());\n\n  if ([focusedChild isAccessibilityElement]) {\n",
+        "  mozAccessible* focusedChild =\n      GetNativeFromGeckoAccessible(doc->FocusedChild());\n\n  if (sAxioForeignAX && doc->IsLocal() && doc->AsLocal()->IsDoc()) {\n    if (id foreign = sAxioForeignAX->focused(\n            focusedChild, doc->AsLocal()->AsDoc()->DocumentNode())) {\n      return foreign;\n    }\n  }\n\n  if ([focusedChild isAccessibilityElement]) {\n"
+      ],
+      [
+        "  if (child) {\n    mozAccessible* nativeChild = GetNativeFromGeckoAccessible(child);\n    return [nativeChild isAccessibilityElement]\n",
+        "  if (child) {\n    mozAccessible* nativeChild = GetNativeFromGeckoAccessible(child);\n    if (nsIContent* content = AxioForeignContent(child)) {\n      if (id foreign = sAxioForeignAX->hitTest(nativeChild, content, point)) {\n        return foreign;\n      }\n    }\n    return [nativeChild isAccessibilityElement]\n"
+      ],
+      [
+        "- (NSValue*)moxPosition {\n",
+        "// AxioSozo engine-view: foreign children follow Gecko's own (see top of file).\n- (NSArray*)moxUnignoredChildren {\n  NSArray* children = [super moxUnignoredChildren];\n  if (nsIContent* content = AxioForeignContent(mGeckoAccessible)) {\n    if (NSArray* foreign = sAxioForeignAX->children(self, content)) {\n      return [children arrayByAddingObjectsFromArray:foreign];\n    }\n  }\n  return children;\n}\n\n- (NSValue*)moxPosition {\n"
+      ]
+    ]
   }
 ]
