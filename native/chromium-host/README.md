@@ -76,6 +76,16 @@ exits 2. The test samples the owned host and reports
 approves the dialog. The same stall now also makes `stream_test.py` time out at its
 final exit check.
 
+## Heartbeat
+
+Stream mode announces `capabilities.heartbeat_interval_ms:1000` and, once `ready` was sent,
+emits `{"event":"heartbeat","sequence":N}` every second from the CEF UI-thread timer in
+`host.mm` (strictly increasing, no event while closing, no catch-up after a stall). The
+Zen adapter fails a host that is silent for 5 s as `CEF_HOST_UNRESPONSIVE` (see
+`contracts/cef-v1.md` "Heartbeat"). `stream_test.py` asserts ~1 s cadence with increasing
+sequences, then SIGSTOPs its own host child, confirms no heartbeat is produced, SIGCONTs
+it and checks that beats resume before the normal close.
+
 ## Input: key verdicts, IME, wheel phases, pinch (`input.inc`)
 
 `ready.capabilities` adds `key_verdict`, `ime`, `wheel_phases`, `pinch` and

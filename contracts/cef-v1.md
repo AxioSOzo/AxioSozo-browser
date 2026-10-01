@@ -203,7 +203,8 @@ All generations are safe JSON integers (0..9007199254740991).
 
 Events include `ready` with actual CEF/Chromium/platform/capabilities, `created`,
 `accepted`, `completed`, `navigation`, `loading`, `title`, `url`, `closed`, `error`,
-`cursor` (a CSS cursor keyword) and `open_url`; web sessions add `prompt`,
+`cursor` (a CSS cursor keyword), `open_url` and the host-level `heartbeat` (see
+"Heartbeat"); web sessions add `prompt`,
 `prompt_closed`, `download_updated`, `find_result` and `popup_blocked`. A shared host must report
 `multi_target`, `stop`, `cursor`, `persistent_profile` and `open_in_tab`. A malformed
 event about one target's document ends that target; framing, authentication,
@@ -302,6 +303,34 @@ Channel failures emit `error {code:"surface_failed", reason}` and end the host
 (exit 64). Everything else in this contract (commands, targets, generations,
 events, security) is unchanged. Without `surface_service` the AXCF frames below
 remain the fallback.
+
+## Heartbeat (host liveness)
+
+Process exit and Mach dead-name detection only cover a *dead* host. A host that is alive
+but frozen (SIGSTOP, a deadlocked UI thread) is detected by a heartbeat:
+
+- `ready.capabilities.heartbeat_interval_ms` (integer, 100..2000; the host sends `1000`)
+  announces the feature. Absent = an older host: the adapter runs no watchdog and a
+  `heartbeat` event from it is a protocol error.
+- `{"event":"heartbeat","sequence":N}` is host-level (no `target`, no other fields).
+  `sequence` is a uint, strictly increasing from the first beat (first >= 1). It is emitted
+  every `heartbeat_interval_ms` from the CEF **UI thread** timer, so it proves the UI thread
+  runs, not just the transport threads. Never before `ready`, never once the host is closing
+  (shutdown, EOF, protocol or surface failure), and with no catch-up burst after a stall.
+- Adapter rule: if the capability was announced, the host is not closing and no heartbeat
+  has been accepted for 5 s (`HEARTBEAT_TIMEOUT_MS`), the host fails with the fixed code
+  `CEF_HOST_UNRESPONSIVE`. That runs the normal failure path: the owned process is killed
+  (SIGTERM, then SIGKILL after 500 ms, so a stopped process dies too), the surface endpoint
+  closes and every Chromium tab of that host gets the crash panel and reload recovery.
+- A malformed heartbeat (target present, extra field, non-uint, equal or lower sequence,
+  before `ready`, or without the capability) is a host protocol error
+  (`INVALID_CEF_HEARTBEAT`) and fails the host like any framing error.
+- System sleep: the 5 s window restarts on the `wake_notification` observer topic, and
+  also whenever the watchdog's own 1 s check fires more than 2.5 s late (sleep, or a Gecko
+  main thread that could not read the pipe). A host is then judged on 5 s of Gecko-side
+  running time, never on time the machine or Gecko was not running.
+- The watchdog timer and wake observer are removed on close, failure and shutdown, and
+  the timer is unref'd where the runtime supports it.
 
 ## Backpressure and lifecycle
 

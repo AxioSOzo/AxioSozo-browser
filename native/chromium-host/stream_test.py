@@ -152,6 +152,41 @@ class Session:
                     self.cleanup_error = type(error).__name__ + ': ' + str(error)
 
 
+def check_heartbeat(session, ready):
+    """cef-v1 liveness: ~1 s UI-thread heartbeats that stop while the host process is frozen."""
+    assert ready['capabilities'].get('heartbeat_interval_ms') == 1000, ready['capabilities']
+    beats = []
+    def collect(kind, item):
+        if kind == 1 and item.get('event') == 'heartbeat':
+            assert set(item) == {'version', 'event', 'sequence'}, item  # host-level: no target
+            beats.append((time.monotonic(), item['sequence']))
+        return len(beats) >= 4
+    session.until(collect, seconds=8)
+    sequences = [sequence for _, sequence in beats]
+    assert sequences == sorted(set(sequences)) and sequences[0] >= 1, sequences
+    gaps = [later[0] - earlier[0] for earlier, later in zip(beats, beats[1:])]
+    assert all(0.5 <= gap <= 2.0 for gap in gaps), gaps
+    # Freeze only our own child: its UI thread stops, so no further heartbeat may be produced.
+    seen_before = sum(1 for item in session.events if item.get('event') == 'heartbeat')
+    os.kill(session.process.pid, signal.SIGSTOP)
+    try:
+        time.sleep(3.5)
+        buffered = 0
+        while select.select([session.process.stdout], [], [], 0)[0]:
+            kind, item, _ = read_packet(session.process.stdout, time.monotonic() + 2)
+            if kind == 1:
+                session.events.append(item)
+                buffered += item.get('event') == 'heartbeat'
+        # At most one beat could already have been in flight when the signal landed.
+        assert buffered <= 1, f'{buffered} heartbeats from a SIGSTOPped host'
+    finally:
+        os.kill(session.process.pid, signal.SIGCONT)
+    last = max(item['sequence'] for item in session.events if item.get('event') == 'heartbeat')
+    resumed = session.until(lambda kind, item: kind == 1 and item.get('event') == 'heartbeat' and item['sequence'] > last, seconds=5)
+    return dict(heartbeat_gaps=[round(gap, 3) for gap in gaps], heartbeats_while_stopped=buffered,
+                heartbeats_before_stop=seen_before, resumed_sequence=resumed['sequence'])
+
+
 def run():
     probe.check()
     directory = Path(tempfile.mkdtemp(prefix='cef-stream-', dir=probe.EVIDENCE))
@@ -210,15 +245,16 @@ def run():
         assert any(item.get('event') == 'load' and item.get('http_status') == 0 and item.get('restored_from_history') is True for item in session.events)
         back_stale = session.command('focus', target=before_back, focused=True)
         session.until(lambda kind, item: item.get('request_id') == back_stale and item.get('code') == 'stale_target')
+        heartbeat = check_heartbeat(session, ready)
         close_id = session.command('close')
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close_id)
         session.process.wait(timeout=8)
         assert session.process.returncode == 0
         result.update(status='PASS', cef=ready['cef'], chromium=ready['chromium'], frames=session.frames,
-                      native_pid=session.process.pid, native_exit_code=0,
+                      native_pid=session.process.pid, native_exit_code=0, heartbeat=heartbeat,
                       tests=['real_OSR_frame', 'input', 'retina_resize', 'fullscreen_size_capped_1_5x',
                              'fullscreen_focus_and_tab', 'GET_navigation', 'back',
-                             'stale_target_rejected', 'BFCache_generation_revoked', 'HTTP0_explicit_history_only', 'native_close_completed'])
+                             'stale_target_rejected', 'BFCache_generation_revoked', 'heartbeat_cadence_and_frozen_host', 'HTTP0_explicit_history_only', 'native_close_completed'])
     except (Exception, KeyboardInterrupt) as exc:
         result['error'] = type(exc).__name__ + ': ' + str(exc)
     finally:

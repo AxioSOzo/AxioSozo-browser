@@ -22,6 +22,13 @@ const MAX_INFLIGHT_INPUT = 8;
 const MAX_QUEUED_INPUT = 64;
 // Navigation completes on load, cancellation or replacement, however long the
 // site (or a first-run Keychain approval) takes. It never times out the engine.
+// cef-v1 liveness: a host that announces `heartbeat_interval_ms` must emit a UI-thread
+// `heartbeat` event; none for this long (while not closing) ends the host as unresponsive.
+export const HEARTBEAT_TIMEOUT_MS = 5000;
+// The watchdog wakes this often. A wake later than HEARTBEAT_STALL_MS means Gecko itself
+// (or the whole machine, asleep) did not run, so the host could not have been heard.
+const HEARTBEAT_CHECK_MS = 1000;
+const HEARTBEAT_STALL_MS = 2500;
 const UNTIMED_METHODS = new Set(["navigate", "back", "forward", "reload"]);
 const CURSORS = new Set(["default", "pointer", "text", "vertical-text", "wait", "progress", "help",
   "crosshair", "move", "not-allowed", "grab", "grabbing", "context-menu", "cell", "alias", "copy",
@@ -221,6 +228,7 @@ export async function readAXCF(pipe) {
 }
 
 const EVENT_FIELDS = {
+  heartbeat: ["sequence"],
   ready: ["cef", "chromium", "runtime_cef", "runtime_chromium", "platform", "sandbox_configured", "engine_instance", "render_path", "capabilities"],
   created: ["request_id"], accepted: ["request_id"], completed: ["request_id", "status", "reason"],
   navigation: [], loading: ["loading", "can_go_back", "can_go_forward"],
@@ -248,7 +256,7 @@ const READ_FAILURE_CODES = new Set([
   "INVALID_CEF_LOADING", "INVALID_CEF_URL", "INVALID_CEF_LOAD", "INVALID_CEF_HISTORY_RESTORE",
   "INVALID_CEF_CURSOR", "INVALID_CEF_OPEN_URL", "INVALID_CEF_PROMPT", "INVALID_CEF_TEXT_INPUT",
   "CEF_FRAME_PRESENTATION_FAILED", "CEF_EVENT_CALLBACK_FAILED",
-  "CEF_SURFACE_BIND_FAILED", "CEF_SURFACE_CLOSED",
+  "CEF_SURFACE_BIND_FAILED", "CEF_SURFACE_CLOSED", "INVALID_CEF_HEARTBEAT", "CEF_HOST_UNRESPONSIVE",
 ]);
 // A violation that concerns one target's own document. On a shared host it ends
 // only that tab; framing, identity and response errors end the whole host.
@@ -297,14 +305,20 @@ export class CEFHostConnection {
   #endpoint = null; #frameRate = null; #surfaceTargets = new Map(); #surfaceClosed = false;
   // Native creates one target at a time; a tab_id is reused only after its old target closed.
   #createQueue = Promise.resolve(); #retiring = new Map();
+  // Heartbeat watchdog (armed by a ready capability): last accepted sequence, the time anything
+  // was last heard or the watchdog last reset, the pending check timer and the wake observer.
+  #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatInterval = null; #heartbeatSeen = 0;
+  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
-    shared = false, onFailure = () => {}, surface = null }) {
+    shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
+    now = () => Date.now(), observers = globalThis.Services?.obs ?? null }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
     if (surface && (!surface.endpoint || ![60, 120].includes(surface.frameRate))) throw new Error("INVALID_CEF_BOOTSTRAP");
     if (!["fixture", "web"].includes(browsingMode)) throw new Error("INVALID_CEF_MODE");
     if (!id(instance) || !(browsingMode === "web" ? validWebOrigin(identity) : validFixtureOrigin(identity))) throw new Error("INVALID_CEF_BOOTSTRAP");
     this.browsingMode = browsingMode; this.shared = shared; this.instance = instance; this.identity = identity;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
+    this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
     this.status = "starting"; this.readPhase = "before_connect"; this.lastFrameBytes = 0; this.lastFrame = 0;
     this.nativeExitCode = null; this.capabilities = null;
@@ -534,6 +548,7 @@ export class CEFHostConnection {
       const fields = EVENT_FIELDS[value.event];
       if (!fields || Object.keys(value).some(key => !["version", "event", "target", ...fields].includes(key))) throw new Error("INVALID_CEF_EVENT");
       if (value.event === "ready") { this.#acceptReady(value); continue; }
+      if (value.event === "heartbeat") { this.#acceptHeartbeat(value); continue; }
       let adapter = null;
       if (value.target) {
         const creation = value.event === "created" && this.#requests.get(value.request_id);
@@ -586,13 +601,58 @@ export class CEFHostConnection {
         // One shared host needs native multi-target isolation and its profile model.
         || (this.shared && (capabilities?.multi_target !== true || capabilities?.stop !== true
           || capabilities?.cursor !== true || capabilities?.persistent_profile !== web || capabilities?.open_in_tab !== web))
-        || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean") throw new Error("UNVERIFIED_CEF_RUNTIME");
+        || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean"
+        // Optional liveness announcement; a value that could never fit the 5 s rule is not trusted.
+        || (capabilities?.heartbeat_interval_ms !== undefined && !(Number.isInteger(capabilities.heartbeat_interval_ms)
+          && capabilities.heartbeat_interval_ms >= 100 && capabilities.heartbeat_interval_ms <= 2000))) throw new Error("UNVERIFIED_CEF_RUNTIME");
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
+    this.#startHeartbeatWatchdog(capabilities.heartbeat_interval_ms);
+  }
+  #acceptHeartbeat(value) {
+    // Host-level only: never targeted, only after ready, only when announced, strictly increasing.
+    if (value.target || !this.#ready || this.#heartbeatInterval === null || !uint(value.sequence)
+        || value.sequence <= this.#heartbeatSequence) throw new Error("INVALID_CEF_HEARTBEAT");
+    this.#heartbeatSequence = value.sequence;
+    this.#heartbeatSeen = this.#now();
+  }
+  #startHeartbeatWatchdog(interval) {
+    if (interval === undefined || this.#ended || this.#closing) return;
+    this.#heartbeatInterval = interval;
+    this.#heartbeatSeen = this.#heartbeatCheckedAt = this.#now();
+    // System wake: the host was frozen with the machine, not by itself. Start the window anew.
+    if (this.#observers?.addObserver) {
+      this.#wakeObserver = { observe: () => { this.#heartbeatSeen = this.#heartbeatCheckedAt = this.#now(); } };
+      try { this.#observers.addObserver(this.#wakeObserver, "wake_notification"); } catch { this.#wakeObserver = null; }
+    }
+    this.#scheduleHeartbeatCheck();
+  }
+  #scheduleHeartbeatCheck() {
+    const timer = this.#heartbeatTimer = this.#timers.setTimeout(() => {
+      this.#heartbeatTimer = null;
+      if (this.#ended || this.#closing) return;
+      const now = this.#now();
+      // This check itself ran late (sleep, or a stalled Gecko main thread that could not
+      // read the pipe): unread heartbeats are not evidence of a frozen host.
+      if (now - this.#heartbeatCheckedAt > HEARTBEAT_STALL_MS) this.#heartbeatSeen = now;
+      this.#heartbeatCheckedAt = now;
+      if (now - this.#heartbeatSeen >= this.#heartbeatTimeout) { this.fail("CEF_HOST_UNRESPONSIVE"); return; }
+      this.#scheduleHeartbeatCheck();
+    }, HEARTBEAT_CHECK_MS);
+    // A watchdog must never keep a test runner (or shutdown) alive; Gecko timer IDs are numbers.
+    if (typeof timer?.unref === "function") timer.unref();
+  }
+  #stopHeartbeatWatchdog() {
+    if (this.#heartbeatTimer !== null) { this.#timers.clearTimeout(this.#heartbeatTimer); this.#heartbeatTimer = null; }
+    if (this.#wakeObserver) {
+      try { this.#observers.removeObserver(this.#wakeObserver, "wake_notification"); } catch {}
+      this.#wakeObserver = null;
+    }
   }
   fail(reason) {
     if (this.#ended) return;
     this.#ended = true; this.status = "failed";
+    this.#stopHeartbeatWatchdog();
     // Fixed metadata only: no URLs, input, target IDs, profile paths or tokens.
     console.error("AXIOSOZO_CEF_DIAGNOSTIC", JSON.stringify({ code:reason, phase:this.readPhase,
       lastFrameId:this.lastFrame, lastFrameBytes:this.lastFrameBytes, targets:this.#targets.size,
@@ -614,10 +674,12 @@ export class CEFHostConnection {
     try {
       const done = this.request("shutdown", {}, null);
       this.#closing = true;
+      this.#stopHeartbeatWatchdog();
       await done;
       const result = await this.#process.wait();
       if (result.exitCode !== 0) throw new Error("CEF_SHUTDOWN_FAILED");
       this.#ended = true; this.status = "closed";
+      this.#stopHeartbeatWatchdog();
       const unavailable = new Error("CEF_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
       this.#requests.clear();

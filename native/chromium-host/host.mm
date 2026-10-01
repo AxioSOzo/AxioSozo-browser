@@ -68,6 +68,7 @@ static bool webBrowsing=false;
 static NSMutableSet* requestIds;
 static NSString* shutdownRequest;
 static uint64_t frameId=0;
+static const int HeartbeatIntervalMs=1000; // announced as capabilities.heartbeat_interval_ms
 static NSString* captureName=@"cef-e0-initial.png";
 static volatile sig_atomic_t interrupted=0;
 static void stopSignal(int) { interrupted=1; }
@@ -206,6 +207,8 @@ int main(int argc,char**argv){@autoreleasepool{
   __block bool closing=false;
   __block double firstLoadAt=-1;
   __block auto closeStarted=start;
+  __block uint64_t heartbeatSequence=0;
+  __block auto nextHeartbeat=std::chrono::steady_clock::time_point{};
   // This separate native process can own CEF's official AppKit message loop.
   // A bounded timer handles our private pipe and synthetic input on its UI thread.
   NSTimer* tick=[NSTimer timerWithTimeInterval:.01 repeats:YES block:^(NSTimer*){
@@ -223,6 +226,13 @@ int main(int argc,char**argv){@autoreleasepool{
           // 25 s for a requested shutdown (10 s close + Chromium's own 10 s watchdog),
           // 5 s after EOF, a protocol/surface failure or a signal.
           axio::crash::armExitWatchdog(shutdownRequest?25:5,76,shutdownRequest?"shutdown":"failure");
+        }
+        // cef-v1 liveness: emitted from this CEF UI-thread timer (not a transport thread), so a
+        // frozen or deadlocked UI thread stops it. Never while closing; no catch-up after a stall.
+        if(streamReady&&!closing&&!streamClosing&&!transport.failed()){
+          auto now=std::chrono::steady_clock::now();
+          if(nextHeartbeat==std::chrono::steady_clock::time_point{})nextHeartbeat=now+std::chrono::milliseconds(HeartbeatIntervalMs);
+          else if(now>=nextHeartbeat){event(@"heartbeat",@{@"sequence":@(++heartbeatSequence)});nextHeartbeat=now+std::chrono::milliseconds(HeartbeatIntervalMs);}
         }
         if(closing){streamCloseAll();if(streamIdle())closed=true;}
         if(closing&&std::chrono::duration<double>(std::chrono::steady_clock::now()-closeStarted).count()>10){exitStatus=75;p_cef_quit_message_loop();return;}

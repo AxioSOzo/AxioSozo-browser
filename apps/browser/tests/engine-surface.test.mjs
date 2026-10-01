@@ -64,13 +64,13 @@ const surfaceReady = (overrides = {}) => ({ fixture_only: false, devtools: false
 
 /** A shared web host in surface mode: JSON events only on the pipe, frames over (fake) Mach. */
 function surfaceHost({ component = fakeComponent(), renderPath = 'native-osr-iosurface', capabilities = {}, resize = 'success',
-  create = 'success', frameRate = 120 } = {}) {
+  create = 'success', frameRate = 120, hostOptions = {}, kills = { count: 0 } } = {}) {
   const pipe = new Pipe(), writes = [], targets = new Map();
   let finished, nativeId = 1;
   const exit = new Promise(resolve => { finished = resolve; });
   const event = value => pipe.push(packet(1, { version: 1, ...value }));
   const process = { pid: 4242, stdout: { read: count => pipe.read(count) }, wait: () => exit,
-    kill: async () => { pipe.close(); finished({ exitCode: -9 }); },
+    kill: async () => { kills.count++; pipe.close(); finished({ exitCode: -9 }); },
     stdin: { close: async () => { pipe.close(); finished({ exitCode: 0 }); }, write: async text => {
       const command = JSON.parse(text); writes.push(command);
       component.calls.push(['write', command.method]);
@@ -112,8 +112,8 @@ function surfaceHost({ component = fakeComponent(), renderPath = 'native-osr-ios
     } } };
   const host = new CEFHostConnection(process, { token, instance: 'host-instance', identity: BLANK_IDENTITY, timers,
     deadline: 1000, browsingMode: 'web', shared: true,
-    surface: { endpoint: component.service.createEndpoint(true), service: component.service, frameRate } });
-  return { host, writes, targets, event, pipe, process, component, finish: result => finished(result) };
+    surface: { endpoint: component.service.createEndpoint(true), service: component.service, frameRate }, ...hostOptions });
+  return { host, writes, targets, event, pipe, process, component, kills, finish: result => finished(result) };
 }
 const pendingTarget = tabId => ({ tab_id: tabId, engine_instance: 'host-instance', identity: BLANK_IDENTITY,
   document_generation: 1, navigation_generation: 1, private_mode: false });
@@ -650,4 +650,142 @@ test('native click counts and host cursors use the component; a button flushes p
   assert.deepEqual(service.cursors, [[record.canvas, 'pointer']]);
   assert.equal(record.canvas.style.cursor, undefined, 'the component sets it; JS never writes arbitrary cursor CSS');
   await presenter.dispose();
+});
+
+// --- cef-v1 heartbeat watchdog (fake clock; nothing here proves a real host is alive) ---
+function fakeClock() {
+  const clock = { time: 1_000_000, jobs: [], next: 1 };
+  clock.now = () => clock.time;
+  clock.timers = {
+    setTimeout(fn, delay) { const job = { id: clock.next++, at: clock.time + delay, fn }; clock.jobs.push(job); return job.id; },
+    clearTimeout(id) { clock.jobs = clock.jobs.filter(job => job.id !== id); },
+  };
+  /** Advance in 1 s steps, running due timers and letting pipe reads settle after each. */
+  clock.advance = async ms => {
+    for (let left = ms; left > 0; left -= 1000) {
+      clock.time += Math.min(1000, left);
+      for (;;) {
+        const due = clock.jobs.filter(job => job.at <= clock.time).sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        clock.jobs = clock.jobs.filter(job => job !== due); due.fn();
+      }
+      await settle();
+    }
+  };
+  /** One real wall-clock jump with no timer run in between (a machine that slept). */
+  clock.sleep = ms => { clock.time += ms; };
+  return clock;
+}
+function fakeObservers() {
+  const registered = [];
+  return { registered, addObserver(observer, topic) { registered.push({ observer, topic }); },
+    removeObserver(observer, topic) { const i = registered.findIndex(item => item.observer === observer && item.topic === topic); if (i >= 0) registered.splice(i, 1); },
+    wake() { for (const item of [...registered]) if (item.topic === 'wake_notification') item.observer.observe(null, 'wake_notification', null); } };
+}
+function heartbeatHost({ capability = 1000, kills } = {}) {
+  const clock = fakeClock(), observers = fakeObservers();
+  const f = surfaceHost({ kills, capabilities: capability === null ? {} : { heartbeat_interval_ms: capability },
+    hostOptions: { timers: clock.timers, now: clock.now, observers } });
+  return { ...f, clock, observers, beat: sequence => f.event({ event: 'heartbeat', sequence }) };
+}
+
+test('heartbeats keep a host alive well past the 5 s rule', async () => {
+  const f = heartbeatHost(); await f.host.connect();
+  assert.equal(f.host.capabilities.heartbeat_interval_ms, 1000);
+  for (let sequence = 1; sequence <= 12; sequence++) { await f.clock.advance(1000); f.beat(sequence); await settle(); }
+  assert.equal(f.host.status, 'connected'); assert.equal(f.kills.count, 0);
+  assert.equal(f.observers.registered.length, 1);
+  await f.host.shutdown();
+  assert.equal(f.clock.jobs.length, 0, 'closing clears the watchdog timer');
+  assert.equal(f.observers.registered.length, 0, 'and the wake observer');
+});
+
+test('a host that stops heartbeating is failed as CEF_HOST_UNRESPONSIVE after 5 s and killed', async () => {
+  const f = heartbeatHost(); await f.host.connect(); f.host.component = f.component;
+  const tab = attach(f.host, 'tab-a'), other = attach(f.host, 'tab-b'); await created(f, tab); await created(f, other);
+  f.beat(1); await settle();
+  await f.clock.advance(4000);
+  assert.equal(f.host.status, 'connected', 'under the limit');
+  await f.clock.advance(1000);
+  assert.equal(f.host.status, 'failed');
+  assert.equal(f.kills.count, 1, 'the owned process is killed');
+  assert.deepEqual(tab.seen.failures, ['CEF_HOST_UNRESPONSIVE']);
+  assert.deepEqual(other.seen.failures, ['CEF_HOST_UNRESPONSIVE'], 'every tab of the host gets the crash path');
+  assert.equal(f.clock.jobs.length, 0); assert.equal(f.observers.registered.length, 0);
+});
+
+test('a missed beat inside the window is tolerated, and a late beat restarts it', async () => {
+  const f = heartbeatHost(); await f.host.connect();
+  await f.clock.advance(4000); f.beat(1); await settle();
+  await f.clock.advance(4000);
+  assert.equal(f.host.status, 'connected');
+  await f.clock.advance(1000);
+  assert.equal(f.host.status, 'failed');
+});
+
+test('heartbeat sequence must strictly increase; the fixed protocol code is preserved', async () => {
+  for (const bad of [[1, 1], [2, 1], [1, 0]]) {
+    const f = heartbeatHost(); await f.host.connect();
+    for (const sequence of bad) f.beat(sequence);
+    await settle();
+    assert.equal(f.host.status, 'failed', JSON.stringify(bad));
+    const failure = await f.host.request('navigate', {}, null).catch(error => error.message);
+    assert.equal(failure, 'CEF_UNAVAILABLE');
+    assert.equal(f.clock.jobs.length, 0);
+  }
+  for (const event of [{ sequence: -1 }, { sequence: 1.5 }, { sequence: '1' }, {}, { sequence: 1, extra: true },
+    { sequence: 1, target: { tab_id: 'x' } }]) {
+    const f = heartbeatHost(); await f.host.connect();
+    f.event({ event: 'heartbeat', ...event }); await settle();
+    assert.equal(f.host.status, 'failed', JSON.stringify(event));
+  }
+});
+
+test('without the capability there is no watchdog and a heartbeat is a protocol error', async () => {
+  const f = heartbeatHost({ capability: null }); await f.host.connect();
+  assert.equal(f.clock.jobs.length, 0); assert.equal(f.observers.registered.length, 0);
+  await f.clock.advance(30000);
+  assert.equal(f.host.status, 'connected'); assert.equal(f.kills.count, 0);
+  f.beat(1); await settle();
+  assert.equal(f.host.status, 'failed');
+  const bad = heartbeatHost({ capability: 5000 });
+  await assert.rejects(bad.host.connect(), /UNVERIFIED_CEF_RUNTIME|CEF_/);
+});
+
+test('a heartbeat before ready is a protocol error', async () => {
+  const f = heartbeatHost();
+  f.beat(1); // queued ahead of the ready the hello will provoke
+  await assert.rejects(f.host.connect());
+  assert.equal(f.host.status, 'failed');
+});
+
+test('system wake resets the window instead of killing the host', async () => {
+  const f = heartbeatHost(); await f.host.connect();
+  f.beat(1); await settle();
+  // The machine sleeps 60 s: the wake notification and the late timer both land before any beat.
+  f.clock.sleep(60000); f.observers.wake();
+  await f.clock.advance(1000);
+  assert.equal(f.host.status, 'connected');
+  assert.equal(f.kills.count, 0);
+  await f.clock.advance(3000);
+  assert.equal(f.host.status, 'connected', 'the window restarted at wake');
+  await f.clock.advance(2000);
+  assert.equal(f.host.status, 'failed', 'a host still silent 5 s after wake is unresponsive');
+});
+
+test('a watchdog that itself ran late (sleep without a wake observer) resets rather than kills', async () => {
+  const f = heartbeatHost(); await f.host.connect();
+  f.beat(1); await settle();
+  f.clock.sleep(60000);
+  await f.clock.advance(1000);
+  assert.equal(f.host.status, 'connected');
+  await f.clock.advance(5000);
+  assert.equal(f.host.status, 'failed');
+});
+
+test('heartbeats are not demanded once the host is closing', async () => {
+  const f = heartbeatHost(); await f.host.connect();
+  const closing = f.host.shutdown(); await settle(); await closing;
+  await f.clock.advance(20000);
+  assert.equal(f.host.status, 'closed'); assert.equal(f.kills.count, 0);
 });
