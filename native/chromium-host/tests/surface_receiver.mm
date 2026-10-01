@@ -17,8 +17,11 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <mach-o/dyld.h>
 #include <algorithm>
 #include <atomic>
+#include <deque>
+#include <set>
 #include <condition_variable>
 #include <functional>
 #include <map>
@@ -38,6 +41,10 @@ uint64_t now() { return mach_absolute_time(); }
 struct Options {
   std::string host, profile, evidence, origin, mode = "surface", beginFrames = "internal", negative;
   int rate = 60;
+  // Zero-copy stand-in: keep an IOSurface use count on every frame until this
+  // long after its RELEASE (Gecko's compositor / CALayer / WindowServer still
+  // reading it). 0 = drop immediately (previous behaviour).
+  int holdUseMs = 0;
   double seconds = 5;
 } options;
 
@@ -68,6 +75,23 @@ std::atomic<bool> ticking{false}, running{true};
 mach_port_t service = MACH_PORT_NULL, hostReply = MACH_PORT_NULL;
 bool connected = false;
 uint32_t popupFrames = 0;
+// Zero-copy contract checks (guarded by `lock`).
+uint64_t globalFlagFrames = 0, overwriteInUse = 0, maxPinned = 0;
+std::set<uint32_t> surfaceIds;
+std::vector<int> crossProcessLookups;  // exit codes of `--lookup ID` children (0 = found)
+
+// A process that does not hold the surface resolves it by global ID, exactly
+// like Gecko's GPU process (IOSurfaceLookup). Returns the child's exit code.
+int lookupInOtherProcess(uint32_t id) {
+  char self[PATH_MAX]; uint32_t size = sizeof(self);
+  if (_NSGetExecutablePath(self, &size)) return -1;
+  std::string text = std::to_string(id);
+  const char* args[] = {self, "--lookup", text.c_str(), nullptr};
+  pid_t pid = -1; int status = 0;
+  if (posix_spawn(&pid, self, nullptr, nullptr, (char* const*)args, environ)) return -1;
+  waitpid(pid, &status, 0);
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
 double nonEmptyFraction = -1; int distinctColors = -1;
 
 std::string hex(const uint8_t* bytes, size_t size) {
@@ -141,11 +165,24 @@ bool sendRelease(uint64_t targetValue, uint64_t frame) {
 
 void machLoop(const uint8_t* expectedToken) {
   struct Held { IOSurfaceRef surface = nullptr; uint64_t target = 0, frame = 0; } displayed;
+  // Released frames whose use count we still hold (zero-copy compositor stand-in).
+  struct Pinned { IOSurfaceRef surface; uint64_t until; };
+  std::deque<Pinned> pinned;
+  uint64_t holdTicks = uint64_t(options.holdUseMs) * 1000000 * timebase.denom / timebase.numer;
+  auto unpin = [&](bool all) {
+    while (!pinned.empty() && (all || pinned.front().until <= now())) {
+      IOSurfaceDecrementUseCount(pinned.front().surface);
+      CFRelease(pinned.front().surface);
+      pinned.pop_front();
+    }
+  };
   while (running) {
+    unpin(false);
     Received buffer{};
     mach_msg_return_t status = mach_msg(&buffer.header,
         MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) |
-        MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT), 0, sizeof(buffer), service, 100, MACH_PORT_NULL);
+        MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT), 0, sizeof(buffer), service, pinned.empty() ? 100 : 1,
+        MACH_PORT_NULL);
     if (status == MACH_RCV_TIMED_OUT) continue;
     if (status != MACH_MSG_SUCCESS) { failCheck(@"mach_receive_failed"); break; }
     uint64_t arrival = now();
@@ -180,6 +217,13 @@ void machLoop(const uint8_t* expectedToken) {
     mach_port_deallocate(mach_task_self(), m.surface.name);
     const auto& d = m.data;
     if (!surface) { failCheck(@"iosurface_lookup_failed"); continue; }
+    if (options.holdUseMs) {
+      // The host must never hand out a surface we (the "compositor") still use.
+      bool inUse = displayed.surface && IOSurfaceGetID(displayed.surface) == IOSurfaceGetID(surface);
+      for (auto& item : pinned) inUse |= IOSurfaceGetID(item.surface) == IOSurfaceGetID(surface);
+      if (inUse) { std::lock_guard guard(lock); overwriteInUse++; }
+      IOSurfaceIncrementUseCount(surface);
+    }
     if (IOSurfaceGetWidth(surface) != d.width || IOSurfaceGetHeight(surface) != d.height ||
         IOSurfaceGetPixelFormat(surface) != 'BGRA' || d.format != AXIO_SURFACE_FORMAT_BGRA8_PREMULTIPLIED_SRGB ||
         d.frame_id <= lastFrameId || IOSurfaceGetID(surface) != d.surface_id) failCheck(@"frame_metadata_mismatch");
@@ -188,6 +232,10 @@ void machLoop(const uint8_t* expectedToken) {
       lastFrameId = d.frame_id; framesTotal++;
       samples.push_back({arrival, d.paint_time, d.send_time, d.begin_frame_sequence, d.width, d.height, d.device_scale, d.flags});
       if (d.flags & AXIO_SURFACE_FLAG_POPUP_COMPOSITED) popupFrames++;
+      if (d.flags & AXIO_SURFACE_FLAG_GLOBAL_SURFACE) globalFlagFrames++;
+      bool firstOfSize = surfaceIds.insert(d.surface_id).second && crossProcessLookups.size() < 4;
+      if (firstOfSize) crossProcessLookups.push_back(lookupInOtherProcess(d.surface_id));
+      maxPinned = std::max<uint64_t>(maxPinned, pinned.size() + 1);
       IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nullptr);
       inspect(static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface)), IOSurfaceGetBytesPerRow(surface),
               int(d.width), int(d.height), d.device_scale, arrival);
@@ -195,10 +243,18 @@ void machLoop(const uint8_t* expectedToken) {
       changed.notify_all();
     }
     // Present-then-release: the previous frame is released once this one "displays".
-    if (displayed.surface) { sendRelease(displayed.target, displayed.frame); CFRelease(displayed.surface); }
+    if (displayed.surface) {
+      sendRelease(displayed.target, displayed.frame);
+      if (options.holdUseMs) pinned.push_back({displayed.surface, now() + holdTicks});
+      else CFRelease(displayed.surface);
+    }
     displayed = {surface, d.native_target_id, d.frame_id};
   }
-  if (displayed.surface) CFRelease(displayed.surface);
+  unpin(true);
+  if (displayed.surface) {
+    if (options.holdUseMs) IOSurfaceDecrementUseCount(displayed.surface);
+    CFRelease(displayed.surface);
+  }
 }
 
 void tickLoop() {
@@ -529,6 +585,16 @@ int run() {
   if ([result[@"host_exit_code"] intValue] != 0) failCheck(@"host_exit_nonzero");
   std::lock_guard guard(lock);
   result[@"frames_total"] = @(framesTotal);
+  if (surface) {
+    NSMutableArray* lookups = [NSMutableArray array];
+    for (int code : crossProcessLookups) [lookups addObject:@(code)];
+    result[@"zero_copy"] = @{@"global_flag_frames": @(globalFlagFrames), @"distinct_surface_ids": @(surfaceIds.size()),
+                             @"cross_process_lookup_exit_codes": lookups, @"hold_use_ms": @(options.holdUseMs),
+                             @"overwrite_in_use": @(overwriteInUse), @"max_pinned_by_receiver": @(maxPinned)};
+    if (globalFlagFrames != framesTotal) [failures addObject:@"global_flag_missing"];
+    for (int code : crossProcessLookups) if (code != 0) { [failures addObject:@"global_lookup_failed_cross_process"]; break; }
+    if (overwriteInUse) [failures addObject:@"ring_overwrote_in_use_surface"];
+  }
   result[@"non_empty_fraction"] = @(nonEmptyFraction);
   result[@"distinct_colors_sampled"] = @(distinctColors);
   if (nonEmptyFraction < 0.9 || distinctColors < 4) [failures addObject:@"frame_pixels_empty_or_uniform"];
@@ -547,6 +613,13 @@ int main(int argc, char** argv) {
       else if (key == "--mode") options.mode = value; else if (key == "--begin-frames") options.beginFrames = value;
       else if (key == "--rate") options.rate = std::stoi(value); else if (key == "--seconds") options.seconds = std::stod(value);
       else if (key == "--negative") options.negative = value;
+      else if (key == "--hold-use-ms") options.holdUseMs = std::stoi(value);
+      else if (key == "--lookup") {
+        // Child role for lookupInOtherProcess: exit 0 iff the ID resolves here.
+        IOSurfaceRef found = IOSurfaceLookup(IOSurfaceID(std::stoul(value)));
+        if (found) CFRelease(found);
+        return found ? 0 : 3;
+      }
     }
     result = [@{@"mode": @(options.mode.c_str()), @"begin_frames": @(options.beginFrames.c_str()), @"rate": @(options.rate),
                 @"negative": @(options.negative.c_str())} mutableCopy];

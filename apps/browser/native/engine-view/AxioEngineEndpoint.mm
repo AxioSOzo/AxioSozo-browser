@@ -25,10 +25,12 @@
 #include "ImageContainer.h"
 #include "MacIOSurfaceImage.h"
 #include "gfxPlatform.h"
+#include "js/Array.h"
 #include "js/PropertyAndElement.h"
 #include "jsapi.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/RandomNum.h"
 #include "mozilla/VsyncDispatcher.h"
 #include "mozilla/dom/Element.h"
@@ -57,11 +59,12 @@ namespace axio {
 // Contract limits (engine-surface-v1: 1..4096 px per dimension, 32 targets).
 static constexpr uint32_t kMaxDimension = 4096;
 static constexpr uint32_t kMaxTargets = 32;
-// PROPOSED contract amendment (not in engine_surface_v1.h yet): the host
-// created this ring surface with kIOSurfaceIsGlobal, so Gecko's GPU process
-// can look it up by IOSurfaceID and the frame is composited zero-copy.
-// Without it Gecko copies into its own global surface (one GPU blit).
-static constexpr uint32_t kFlagGlobalSurfaceProposed = 1u << 1;
+// engine-surface-v1 AXIO_SURFACE_FLAG_GLOBAL_SURFACE: the host created this
+// ring surface with kIOSurfaceIsGlobal, so Gecko's GPU process can look it up
+// by IOSurfaceID and the frame is composited zero-copy. Without it (or when
+// the pref below is false) Gecko copies into its own global surface.
+static constexpr uint32_t kFlagGlobalSurface = AXIO_SURFACE_FLAG_GLOBAL_SURFACE;
+static constexpr const char* kZeroCopyPref = "axiosozo.engine_view.zero_copy";
 // Gecko-owned copy targets per target (copy mode).
 static constexpr size_t kMaxPoolSurfaces = 4;
 static constexpr size_t kReceiveBufferSize = 2048;
@@ -101,7 +104,7 @@ class EngineSurfaceCopier final {
   }
 
   bool Copy(IOSurfaceRef aSource, IOSurfaceRef aDest, uint32_t aWidth,
-            uint32_t aHeight) {
+            uint32_t aHeight, uint64_t* aGpuNs) {
     @autoreleasepool {
       MTLTextureDescriptor* desc = [MTLTextureDescriptor
           texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
@@ -135,6 +138,8 @@ class EngineSurfaceCopier final {
         // compositor must never sample a half-written destination.
         [buffer waitUntilCompleted];
         ok = buffer.status == MTLCommandBufferStatusCompleted;
+        CFTimeInterval gpu = buffer.GPUEndTime - buffer.GPUStartTime;
+        *aGpuNs = ok && gpu > 0 ? uint64_t(gpu * 1e9) : 0;
       }
       [src release];
       [dst release];
@@ -265,6 +270,48 @@ static bool ValidateSurface(IOSurfaceRef aSurface,
          IOSurfaceGetID(aSurface) == aData.surface_id;
 }
 
+// The GPU process resolves the frame by global ID (MacIOSurfaceTextureHostOGL
+// -> IOSurfaceLookup), which fails for a non-global surface in any process that
+// does not already hold it. IOSurfaceLookup in *this* process succeeds either
+// way (we hold the surface), so it cannot verify the flag. Instead read the
+// creation properties IOSurface records ("CreationProperties", observable via
+// IOSurfaceCopyValue): when they are present and do not say global, the flag
+// is wrong and the frame is copied (degrades to copy mode, never to a blank
+// tab). When the key is absent the authenticated host's flag is trusted.
+static bool CreatedGlobal(IOSurfaceRef aSurface) {
+  CFTypeRef created = IOSurfaceCopyValue(aSurface, CFSTR("CreationProperties"));
+  if (!created) {
+    return true;
+  }
+  bool global = true;
+  if (CFGetTypeID(created) == CFDictionaryGetTypeID()) {
+    CFTypeRef value = CFDictionaryGetValue(static_cast<CFDictionaryRef>(created),
+                                           CFSTR("IOSurfaceIsGlobal"));
+    int number = 0;
+    if (value && CFGetTypeID(value) == CFBooleanGetTypeID()) {
+      global = CFBooleanGetValue(static_cast<CFBooleanRef>(value));
+    } else {
+      global = value && CFGetTypeID(value) == CFNumberGetTypeID() &&
+               CFNumberGetValue(static_cast<CFNumberRef>(value),
+                                kCFNumberIntType, &number) &&
+               number != 0;
+    }
+  }
+  CFRelease(created);
+  return global;
+}
+
+// Percentile over the recorded ring (nearest rank), 0 when empty.
+static double Percentile(const uint64_t* aValues, size_t aCount, double aQ) {
+  if (!aCount) {
+    return 0;
+  }
+  std::vector<uint64_t> sorted(aValues, aValues + aCount);
+  std::sort(sorted.begin(), sorted.end());
+  size_t rank = size_t(std::ceil(aQ * double(aCount)));
+  return double(sorted[std::min(aCount - 1, rank ? rank - 1 : 0)]);
+}
+
 NS_IMPL_ISUPPORTS(EngineEndpoint, nsIAxioEngineEndpoint)
 
 EngineEndpoint::EngineEndpoint() { SecureZero(mToken, sizeof(mToken)); }
@@ -287,6 +334,7 @@ nsresult EngineEndpoint::Create(bool aExternalBeginFrames,
 
   RefPtr<EngineEndpoint> ep = new EngineEndpoint();
   ep->mExternalBeginFrames = aExternalBeginFrames;
+  ep->mZeroCopyAllowed = mozilla::Preferences::GetBool(kZeroCopyPref, true);
 
   uint8_t nameRandom[16];
   if (!mozilla::GenerateRandomBytesFromOS(nameRandom, sizeof(nameRandom)) ||
@@ -560,9 +608,11 @@ void EngineEndpoint::HandleFrameOnQueue(mach_msg_header_t* aHeader,
   t.mStats.mReceived++;
   uint64_t now = mach_absolute_time();
   if (data.paint_time && now > data.paint_time) {
-    t.mStats.mLastPaintToReceiveNs =
-        uint64_t((unsigned __int128)(now - data.paint_time) * mTimebase.numer /
-                 mTimebase.denom);
+    t.mStats.mLastPaintToReceiveNs = Nanoseconds(now - data.paint_time);
+  }
+  if (data.paint_time && data.send_time >= data.paint_time) {
+    t.mStats.mLastHostCopyNs = Nanoseconds(data.send_time - data.paint_time);
+    t.mStats.mHostCopy.Add(t.mStats.mLastHostCopyNs);
   }
 
   if (!ValidateSurface(surface.get(), data)) {
@@ -638,6 +688,11 @@ CFTypeRefPtr<IOSurfaceRef> EngineEndpoint::AcquirePoolSurfaceOnQueue(
   return ref;
 }
 
+uint64_t EngineEndpoint::Nanoseconds(uint64_t aTicks) const {
+  return uint64_t((unsigned __int128)aTicks * mTimebase.numer /
+                  mTimebase.denom);
+}
+
 bool EngineEndpoint::TryPresentOnQueue(Target& aTarget,
                                        const axio_surface_frame_body_t& aData,
                                        const CFTypeRefPtr<IOSurfaceRef>& aSurface) {
@@ -645,9 +700,15 @@ bool EngineEndpoint::TryPresentOnQueue(Target& aTarget,
   CFTypeRefPtr<IOSurfaceRef> shown = aSurface;
   uint64_t hostFrameId = aData.frame_id;
 
-  if (!(aData.flags & kFlagGlobalSurfaceProposed)) {
-    // Copy mode: the host's ring surface is not global, so the GPU process
-    // could not look it up by ID. Blit into a Gecko-owned global surface.
+  bool zeroCopy = mZeroCopyAllowed && (aData.flags & kFlagGlobalSurface);
+  if (zeroCopy && !CreatedGlobal(aSurface.get())) {
+    t.mStats.mGlobalLookupFailed++;
+    zeroCopy = false;
+  }
+  if (!zeroCopy) {
+    // Copy mode: the host's ring surface is not global (or zero-copy is
+    // disabled), so the GPU process could not look it up by ID. Blit into a
+    // Gecko-owned global surface.
     CFTypeRefPtr<IOSurfaceRef> dest =
         AcquirePoolSurfaceOnQueue(t, aData.width, aData.height);
     if (!dest) {
@@ -657,8 +718,9 @@ bool EngineEndpoint::TryPresentOnQueue(Target& aTarget,
       mCopier = EngineSurfaceCopier::Create();
     }
     TimeStamp start = TimeStamp::Now();
+    uint64_t gpuNs = 0;
     bool copied = mCopier && mCopier->Copy(aSurface.get(), dest.get(),
-                                           aData.width, aData.height);
+                                           aData.width, aData.height, &gpuNs);
     // Nothing reads the host surface any more: release it right away.
     if (!SendReleaseOnQueue(t.mId, aData.frame_id)) {
       return true;
@@ -670,8 +732,12 @@ bool EngineEndpoint::TryPresentOnQueue(Target& aTarget,
     t.mStats.mCopied++;
     t.mStats.mLastCopyNs =
         uint64_t((TimeStamp::Now() - start).ToMicroseconds() * 1000.0);
+    t.mStats.mLastCopyGpuNs = gpuNs;
+    t.mStats.mCopyGpu.Add(gpuNs);
     shown = dest;
     hostFrameId = 0;
+  } else {
+    t.mStats.mZeroCopy++;
   }
 
   // One MacIOSurface per presented frame: its constructor takes one IOSurface
@@ -687,17 +753,33 @@ bool EngineEndpoint::TryPresentOnQueue(Target& aTarget,
   images.AppendElement(ImageContainer::NonOwningImage(
       image, TimeStamp(), geckoFrameId, t.mProducerId));
   t.mContainer->SetCurrentImages(images);
+  uint64_t presentedAt = mach_absolute_time();
+  if (t.mStats.mLastPresentTicks) {
+    t.mStats.mPresentInterval.Add(
+        Nanoseconds(presentedAt - t.mStats.mLastPresentTicks));
+  }
+  t.mStats.mLastPresentTicks = presentedAt;
+  if (aData.paint_time && presentedAt > aData.paint_time) {
+    t.mStats.mPaintToPresent.Add(Nanoseconds(presentedAt - aData.paint_time));
+  }
 
   for (auto& p : t.mPresented) {
     p.mCurrent = false;
   }
   Presented& p = t.mPresented.emplace_back();
   p.mHostFrameId = hostFrameId;
+  p.mPresentedTicks = presentedAt;
   p.mSurface = shown;
   p.mUse = mac;
   p.mCurrent = true;
   t.mCurrentGeckoFrameId = geckoFrameId;
   t.mStats.mPresented++;
+  uint64_t inFlight = t.mHeld ? 1 : 0;
+  for (const auto& f : t.mPresented) {
+    inFlight += f.mHostFrameId ? 1 : 0;
+  }
+  t.mStats.mMaxHostFramesInFlight =
+      std::max(t.mStats.mMaxHostFramesInFlight, inFlight);
 
   if (!t.mHasFirstFrame) {
     t.mHasFirstFrame = true;
@@ -794,6 +876,10 @@ void EngineEndpoint::PollReleasesOnQueue() {
         return;
       }
       t.mStats.mReleased++;
+      if (f->mPresentedTicks) {
+        t.mStats.mReleaseDelay.Add(
+            Nanoseconds(mach_absolute_time() - f->mPresentedTicks));
+      }
       f = t.mPresented.erase(f);
     }
 
@@ -1218,6 +1304,14 @@ EngineEndpoint::GetTargetStats(uint64_t aTargetId, JSContext* aCx,
   __block uint32_t inFlight = 0;
   __block uint32_t poolSize = 0;
   __block uint32_t paintCount = 0;
+  // Diagnostics for the zero-copy release protocol: every frame we still hold.
+  struct HeldFrame {
+    uint64_t hostFrameId;
+    bool current, pinned, inUse;
+    int32_t localUseCount;
+    double ageMs;
+  };
+  __block std::vector<HeldFrame> heldFrames;
   EngineEndpoint* raw = this;
   // Short critical section; mQueue never waits on the main thread.
   dispatch_sync(mQueue, ^{
@@ -1230,6 +1324,16 @@ EngineEndpoint::GetTargetStats(uint64_t aTargetId, JSContext* aCx,
       }
       inFlight += t->mHeld ? 1 : 0;
       poolSize = uint32_t(t->mPool.size());
+      uint64_t nowTicks = mach_absolute_time();
+      for (const auto& p : t->mPresented) {
+        heldFrames.push_back(
+            {p.mHostFrameId, p.mCurrent, !!p.mUse,
+             p.mSurface && IOSurfaceIsInUse(p.mSurface.get()),
+             p.mSurface ? IOSurfaceGetUseCount(p.mSurface.get()) : -1,
+             p.mPresentedTicks
+                 ? double(raw->Nanoseconds(nowTicks - p.mPresentedTicks)) / 1e6
+                 : -1});
+      }
       paintCount = t->mContainer ? t->mContainer->GetPaintCount() : 0;
     }
   });
@@ -1246,7 +1350,15 @@ EngineEndpoint::GetTargetStats(uint64_t aTargetId, JSContext* aCx,
       !DefineNumber(aCx, obj, "presented", double(stats.mPresented)) ||
       !DefineNumber(aCx, obj, "composited", double(paintCount)) ||
       !DefineNumber(aCx, obj, "copied", double(stats.mCopied)) ||
+      !DefineNumber(aCx, obj, "zeroCopy", double(stats.mZeroCopy)) ||
+      !DefineNumber(aCx, obj, "globalLookupFailed",
+                    double(stats.mGlobalLookupFailed)) ||
+      !DefineNumber(aCx, obj, "zeroCopyAllowed", mZeroCopyAllowed ? 1 : 0) ||
       !DefineNumber(aCx, obj, "lastCopyNs", double(stats.mLastCopyNs)) ||
+      !DefineNumber(aCx, obj, "lastCopyGpuNs", double(stats.mLastCopyGpuNs)) ||
+      !DefineNumber(aCx, obj, "lastHostCopyNs", double(stats.mLastHostCopyNs)) ||
+      !DefineNumber(aCx, obj, "maxHostFramesInFlight",
+                    double(stats.mMaxHostFramesInFlight)) ||
       !DefineNumber(aCx, obj, "stale", double(stats.mStale)) ||
       !DefineNumber(aCx, obj, "held", double(stats.mHeld)) ||
       !DefineNumber(aCx, obj, "rejected", double(stats.mRejected)) ||
@@ -1261,6 +1373,57 @@ EngineEndpoint::GetTargetStats(uint64_t aTargetId, JSContext* aCx,
       !DefineNumber(aCx, obj, "poolSurfaces", double(poolSize)) ||
       !JS_DefineProperty(aCx, obj, "visible", visibleValue, JSPROP_ENUMERATE)) {
     return NS_ERROR_FAILURE;
+  }
+  JS::Rooted<JSObject*> frames(aCx, JS::NewArrayObject(aCx, heldFrames.size()));
+  if (!frames) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  for (size_t i = 0; i < heldFrames.size(); ++i) {
+    const HeldFrame& f = heldFrames[i];
+    JS::Rooted<JSObject*> item(aCx, JS_NewPlainObject(aCx));
+    if (!item || !DefineNumber(aCx, item, "hostFrameId", double(f.hostFrameId)) ||
+        !DefineNumber(aCx, item, "current", f.current ? 1 : 0) ||
+        !DefineNumber(aCx, item, "pinned", f.pinned ? 1 : 0) ||
+        !DefineNumber(aCx, item, "inUse", f.inUse ? 1 : 0) ||
+        !DefineNumber(aCx, item, "localUseCount", double(f.localUseCount)) ||
+        !DefineNumber(aCx, item, "ageMs", f.ageMs) ||
+        !JS_DefineElement(aCx, frames, uint32_t(i), item, JSPROP_ENUMERATE)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+  if (!JS_DefineProperty(aCx, obj, "heldFrames", frames, JSPROP_ENUMERATE)) {
+    return NS_ERROR_FAILURE;
+  }
+  // Distributions over the last kSampleCount frames: {count, p50, p95, p99,
+  // max} in microseconds.
+  const std::pair<const char*, const Samples*> distributions[] = {
+      {"presentIntervalUs", &stats.mPresentInterval},
+      {"hostCopyUs", &stats.mHostCopy},
+      {"copyGpuUs", &stats.mCopyGpu},
+      {"paintToPresentUs", &stats.mPaintToPresent},
+      {"releaseDelayUs", &stats.mReleaseDelay},
+  };
+  for (const auto& [name, samples] : distributions) {
+    JS::Rooted<JSObject*> dist(aCx, JS_NewPlainObject(aCx));
+    if (!dist) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+    size_t n = samples->mCount;
+    if (!DefineNumber(aCx, dist, "count", double(n)) ||
+        !DefineNumber(aCx, dist, "p50",
+                      Percentile(samples->mValues, n, 0.50) / 1000.0) ||
+        !DefineNumber(aCx, dist, "p95",
+                      Percentile(samples->mValues, n, 0.95) / 1000.0) ||
+        !DefineNumber(aCx, dist, "p99",
+                      Percentile(samples->mValues, n, 0.99) / 1000.0) ||
+        !DefineNumber(aCx, dist, "max",
+                      Percentile(samples->mValues, n, 1.0) / 1000.0)) {
+      return NS_ERROR_FAILURE;
+    }
+    JS::Rooted<JS::Value> value(aCx, JS::ObjectValue(*dist));
+    if (!JS_DefineProperty(aCx, obj, name, value, JSPROP_ENUMERATE)) {
+      return NS_ERROR_FAILURE;
+    }
   }
   aResult.setObject(*obj);
   return NS_OK;

@@ -14,7 +14,11 @@ extern "C" {
 #define AXIO_SURFACE_VERSION 1u
 #define AXIO_SURFACE_TOKEN_BYTES 32u
 #define AXIO_SURFACE_MAX_DIRTY 8u
-#define AXIO_SURFACE_MAX_IN_FLIGHT 3u   /* per target; host never exceeds */
+/* Per target; host never exceeds. 6 because Gecko keeps a zero-copy surface in
+   use until ~2 later composites (AsyncImagePipelineManager holds textures until a
+   later rendered frame completes): E2 2026-09-30 measured 1.6 fps with 3, 34 fps
+   with 4 and 61 fps with 6 slots at 2072x2048@60 Hz. Slots are allocated lazily. */
+#define AXIO_SURFACE_MAX_IN_FLIGHT 6u
 #define AXIO_SURFACE_FORMAT_BGRA8_PREMULTIPLIED_SRGB 1u
 
 /* msgh_id values. */
@@ -26,6 +30,12 @@ extern "C" {
 
 /* FRAME flags. */
 #define AXIO_SURFACE_FLAG_POPUP_COMPOSITED 1u
+/* The ring surface was created with kIOSurfaceIsGlobal: a receiver whose
+   compositor resolves IOSurfaces by ID (Gecko's GPU process) may present it
+   directly (zero-copy) and RELEASE it only when nothing uses it any more.
+   Without this bit the receiver must copy. Tradeoff: any same-user process that
+   learns surface_id can IOSurfaceLookup() it (contract "Security properties"). */
+#define AXIO_SURFACE_FLAG_GLOBAL_SURFACE 2u
 
 typedef struct {
   int32_t x, y, width, height; /* physical pixels, origin top-left */

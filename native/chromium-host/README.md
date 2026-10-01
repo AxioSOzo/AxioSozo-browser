@@ -39,8 +39,9 @@ connects to Zen's checked-in Mach port before CEF starts, creates browsers with
 `shared_texture_enabled` (and `external_begin_frame_enabled` when
 `surface_begin_frames:true`), and handles `OnAcceleratedPaint` instead of `OnPaint`.
 CEF's pooled IOSurface is copied by an awaited Metal blit into a host-owned ring of
-three IOSurfaces per target (the pool buffer returns to viz when the callback
-returns, so it is never forwarded), select popups are composited on the GPU into the
+up to six lazily allocated **global** IOSurfaces per target (the pool buffer returns to
+viz when the callback returns, so it is never forwarded; ring surfaces are global so
+Zen composites them without a second copy, flag `AXIO_SURFACE_FLAG_GLOBAL_SURFACE`), select popups are composited on the GPU into the
 same surface, and the ring surface's Mach send right plus fixed binary metadata goes
 to Zen. Zen releases frames with RELEASE; BEGIN_FRAME ticks drive
 `send_external_begin_frame`. Control and input stay on the JSON pipe; input now wakes
@@ -49,6 +50,12 @@ Without `surface_service` the AXCF BGRA pipe remains the only frame path. Option
 `frame_rate` (60 default, or 120) sets `windowless_frame_rate` for both paths; the
 per-target `frame_rate` command changes it live. Surface mode admits up to 4096 px per
 side without the pipe's 32 MiB cap (`surface_test.py` resizes to 3600×2400).
+
+Crash robustness (`crash_guard.hpp`): before CEF starts the host clears the task
+exception ports it inherited from Zen (Breakpad ignores a child's fault, which parked a
+faulting host instead of letting it die) and, once it decides to end, a watchdog bounds
+the exit (5 s; 25 s for a requested shutdown; also on parent death) by SIGKILLing its own
+direct children and `_exit`ing. `probe.py test-native` runs `tests/crash_guard_test.cc`.
 
 Files: `engine_surface_v1.h` (wire structs), `surface_transport.hpp/.mm` (Mach +
 Metal, main binary only; helpers compile inert stubs and do not link Metal or

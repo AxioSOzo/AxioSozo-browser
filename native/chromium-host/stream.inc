@@ -210,8 +210,9 @@ static bool surface(id w,id h,id scale){
 // Surface mode moves no pixels through the pipe, so the 32 MiB AXCF payload cap
 // does not apply. Each physical side stays <= 4096 px (a quarter of the 16384 px
 // Metal 2D-texture limit on Apple silicon), so one BGRA IOSurface is at most
-// 64 MiB and one target's ring (AXIO_SURFACE_MAX_IN_FLIGHT = 3 slots plus the
-// popup cache) stays below ~256 MiB of GPU-shared memory. The presenter steps
+// 64 MiB and one target's ring (AXIO_SURFACE_MAX_IN_FLIGHT = 6 lazily allocated
+// slots plus the popup cache) stays below ~512 MiB of GPU-shared memory at the
+// 4096 px bound (about 100 MiB at a typical 2072x2048 tab). The presenter steps
 // the scale down in quarters beyond 4096 px (e.g. a fullscreen 5K window).
 static constexpr double SurfaceMaxBytes=4096.0*4096.0*4.0;
 static bool fitsSurface(id w,id h,id scale){

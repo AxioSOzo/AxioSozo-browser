@@ -3,9 +3,14 @@
 // CEF 154 delivers PET_VIEW/PET_POPUP frames in IOSurfaces owned by viz's
 // FrameSinkVideoCapturer pool (11 buffers). The buffer returns to that pool when
 // OnAcceleratedPaint returns, so it is never forwarded: each frame is copied on
-// the GPU into a host-owned ring of three IOSurfaces per target, and only ring
+// the GPU into a host-owned ring of IOSurfaces per target, and only ring
 // surfaces cross to Zen. The copy is awaited before returning to CEF because
 // viz may overwrite the pooled buffer from another process immediately after.
+//
+// Ring surfaces are global (AXIO_SURFACE_FLAG_GLOBAL_SURFACE) so Gecko's GPU
+// process, which resolves IOSurfaces by ID, can composite them without a second
+// copy. A slot is reused only after Zen's RELEASE *and* once IOSurfaceIsInUse()
+// is false (compositor, CALayer or WindowServer still reading it).
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <IOSurface/IOSurface.h>
@@ -126,6 +131,15 @@ bool ensureMetal() {
   return device && queue;
 }
 
+// kIOSurfaceIsGlobal is deprecated but still honoured; Gecko's MacIOSurface
+// (gfx/2d/MacIOSurface.cpp) sets the same key for all of its surfaces.
+CFStringRef globalKey() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  return kIOSurfaceIsGlobal;
+#pragma clang diagnostic pop
+}
+
 IOSurfaceRef createSurface(int width, int height) {
   size_t row = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, size_t(width) * 4);
   NSDictionary* properties = @{
@@ -133,6 +147,9 @@ IOSurfaceRef createSurface(int width, int height) {
     (id)kIOSurfaceBytesPerElement: @4, (id)kIOSurfaceBytesPerRow: @(row),
     (id)kIOSurfaceAllocSize: @(IOSurfaceAlignProperty(kIOSurfaceAllocSize, row * size_t(height))),
     (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
+    // Gecko's GPU process looks surfaces up by ID. Any same-user process that
+    // learns the ID can too; see contracts/engine-surface-v1.md "Security".
+    (__bridge id)globalKey(): @YES,
   };
   IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
   if (!surface) return nullptr;
@@ -249,7 +266,7 @@ Result send(Target* target, Slot* slot, FrameMeta meta, uint32_t flags, uint64_t
   data.device_scale = meta.scale;
   data.format = AXIO_SURFACE_FORMAT_BGRA8_PREMULTIPLIED_SRGB;
   data.surface_id = IOSurfaceGetID(slot->surface);
-  data.flags = flags;
+  data.flags = flags | AXIO_SURFACE_FLAG_GLOBAL_SURFACE;
   if (meta.dirty && meta.dirtyCount <= AXIO_SURFACE_MAX_DIRTY) {
     data.dirty_count = uint32_t(meta.dirtyCount);
     for (size_t i = 0; i < meta.dirtyCount; ++i)

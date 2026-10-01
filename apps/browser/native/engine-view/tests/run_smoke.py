@@ -36,7 +36,19 @@ def main():
     try:
         home = scratch / 'home'
         home.mkdir(mode=0o700)
+        # A real Mach peer for the dead-name / zero-copy checks (tests/fake_host.mm).
+        fake_host = scratch / 'fake_host'
+        build = subprocess.run(['xcrun', 'clang++', '-std=c++20', '-fobjc-arc', '-Wall', '-Wextra',
+                                str(HERE / 'fake_host.mm'), '-framework', 'Foundation',
+                                '-framework', 'IOSurface', '-o', str(fake_host)],
+                               env={'PATH': '/usr/bin:/bin', 'HOME': str(home), 'TMPDIR': str(scratch) + '/',
+                                    'CLANG_MODULE_CACHE_PATH': str(scratch / 'clang-cache')},
+                               capture_output=True, text=True, timeout=300)
+        if build.returncode:
+            print(json.dumps({'status': 'FAIL', 'reason': 'FAKE_HOST_BUILD_FAILED', 'stderr': build.stderr[-4000:]}))
+            return 1
         env = {'HOME': str(home), 'TMPDIR': str(scratch) + '/', 'PATH': '/usr/bin:/bin',
+               'AXIO_FAKE_HOST': str(fake_host),
                'MOZ_HEADLESS': '1', 'MOZ_CRASHREPORTER_DISABLE': '1',
                'MOZ_DISABLE_NONLOCAL_CONNECTIONS': '1',
                'MOZ_LOG': 'AxioEngineView:5'}

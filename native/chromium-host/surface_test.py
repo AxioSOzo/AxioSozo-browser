@@ -102,13 +102,14 @@ def run_case(name, directory, origin, seconds, **options):
     result['profile_removed'] = probe.remove_created_profile(profile, process, prefix='cef-profile-surface-')
     # Known environment gate (README "Keychain gate"): Chromium's teardown reads
     # "Chromium Safe Storage" for this rebuilt ad hoc binary, macOS waits for the
-    # user, and Chromium's 10 s teardown watchdog exits 2. Classified only when
+    # user, and Chromium's 10 s teardown watchdog exits 2 (or the host's own
+    # bounded-exit watchdog, crash_guard.hpp, exits 76 first). Classified only when
     # the owned teardown sample proves the Keychain wait; never approved here.
     sample = case / 'host-teardown.sample.txt'
     exit_failures = {'host_exit_nonzero', 'bogus_release_exit_code'}
     failures = set(result.get('failures') or [])
     if (result.get('status') == 'FAIL' and failures and failures <= exit_failures
-            and result.get('host_exit_code') == 2 and sample.exists()
+            and result.get('host_exit_code') in (2, 76) and sample.exists()
             and 'SecKeychainItemCopyContent' in sample.read_text(errors='replace')):
         result['status'] = 'PASS_TEARDOWN_KEYCHAIN_BLOCKED'
         result['teardown'] = 'BLOCKED_KEYCHAIN: SecItemCopyMatching/SecKeychainItemCopyContent during cef_shutdown'
@@ -136,6 +137,10 @@ def main():
         'surface-external-60': dict(mode='surface', begin_frames='external', rate=60),
         'surface-internal-120': dict(mode='surface', begin_frames='internal', rate=120),
         'surface-external-120': dict(mode='surface', begin_frames='external', rate=120),
+        # Zero-copy stand-in: the receiver keeps each frame's IOSurface use count
+        # 40 ms (> 2 frames) past its RELEASE, like Gecko's compositor/CALayer.
+        # The host must skip those ring slots (never overwrite a surface in use).
+        'surface-zero-copy-inuse-60': dict(mode='surface', begin_frames='external', rate=60, hold_use_ms=40),
         'pipe-60-baseline': dict(mode='pipe', rate=60),
         'negative-no-connected': dict(mode='surface', negative='no_connected'),
         'negative-bogus-release': dict(mode='surface', negative='bogus_release'),

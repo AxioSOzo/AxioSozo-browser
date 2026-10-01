@@ -15,7 +15,8 @@ protocol only; it is never E1/E2 evidence inside Zen.
    right with `bootstrap_check_in(bootstrap_port, name, &port)` under a fresh random
    name (recommended `dev.axiosozo.surface.<32 hex>`; allowed characters
    `[A-Za-z0-9._-]`, 8..127 bytes), and sets its queue limit to
-   `MACH_PORT_QLIMIT_LARGE` (at least `3 × max_targets + 1`, i.e. ≥ 97 for CEF).
+   `MACH_PORT_QLIMIT_LARGE` (at least `AXIO_SURFACE_MAX_IN_FLIGHT × max_targets + 1`, i.e. ≥ 193
+   for CEF with 6 frames per target and 32 targets).
    It generates a one-time 256-bit `surface_token` distinct from the pipe token.
 2. Zen spawns the host and sends, **only** in the authenticated stdin `hello`
    (never argv, environment, files or logs), the extra keys:
@@ -64,7 +65,8 @@ was painted), `frame_id` (host-global, strictly increasing, gaps allowed),
 BEGIN_FRAME applied to the target, 0 with internal pacing), physical `width`,
 `height`, logical `logical_width`, `logical_height`, `device_scale` (double),
 `format` (1 = BGRA8, premultiplied alpha, sRGB-tagged IOSurface), `surface_id`
-(diagnostic only), `flags` (bit0 = a popup widget is composited into this frame),
+(diagnostic only), `flags` (bit0 = a popup widget is composited into this frame; bit1 =
+`AXIO_SURFACE_FLAG_GLOBAL_SURFACE`, see "Zero-copy" below),
 `dirty_count` (0..8; 0 = whole frame) and `dirty[8]` rectangles in physical pixels
 relative to the previous frame **sent for that target**.
 
@@ -82,8 +84,11 @@ discards (then releases) frames of stale generations, exactly like AXCF frames.
   next frame for that target has been committed to the screen (present-then-release),
   or immediately for discarded/stale frames. After RELEASE the host may overwrite it.
   Zen may keep its IOSurface reference longer; it must not read it after RELEASE.
-- The host owns a ring of 3 IOSurfaces per target, so at most 3 frames per target
-  are in flight. If none is free, the paint is dropped and the host requests a
+- The host owns a ring of up to `AXIO_SURFACE_MAX_IN_FLIGHT` = 6 IOSurfaces per target
+  (allocated lazily, only when no released same-size slot is free), so at most 6 frames
+  per target are in flight. Six because a zero-copy receiver keeps superseded frames
+  until its compositor stops using them: Gecko holds them ~4 frames (E2 2026-09-30:
+  3 slots ran at 1.6 fps, 4 at 34 fps, 6 at 59.9 fps). If none is free, the paint is dropped and the host requests a
   refresh as soon as a RELEASE arrives; the next frame then reports a full dirty
   area. A ring surface that `IOSurfaceIsInUse` (e.g. still on screen) is skipped even
   after RELEASE. Resize reallocates ring surfaces lazily as they become free.
@@ -95,6 +100,40 @@ discards (then releases) frames of stale generations, exactly like AXCF frames.
 - The host sends with a zero timeout. Because Zen's queue limit exceeds the maximum
   frames in flight, a full queue is a Zen protocol violation and fails the channel
   (`surface_queue_full`); the engine UI thread never blocks on Zen.
+
+## Zero-copy (`AXIO_SURFACE_FLAG_GLOBAL_SURFACE`, flags bit 1)
+
+- The host creates every ring surface with `kIOSurfaceIsGlobal` and sets bit 1 on every
+  FRAME. A receiver whose compositor resolves IOSurfaces by global ID (Gecko's GPU
+  process: `MacIOSurfaceTextureHostOGL` → `IOSurfaceLookup`) may then present the host
+  surface directly instead of copying it.
+- A zero-copy receiver keeps the frame until a later frame of the same target has been
+  composited **and** `IOSurfaceIsInUse()` is false (its compositor, CALayer and
+  WindowServer use counts), then sends RELEASE. It may force RELEASE after a bounded
+  wait (Gecko: 1 s, counted as `forcedReleases`); the host still never reuses a slot
+  that `IOSurfaceIsInUse()`, so a forced RELEASE cannot cause tearing.
+- Without bit 1 the receiver must copy (one GPU blit into its own surface) and may
+  RELEASE right after the copy. Receivers should verify the bit (Gecko checks the
+  surface's recorded creation properties) and fall back to copying when it is wrong.
+  Note that `IOSurfaceLookup` in the receiving process succeeds even for a non-global
+  surface it already holds, so it is not a valid check there.
+- Gecko exposes the kill switch `axiosozo.engine_view.zero_copy` (default `true`).
+
+## Host death and bounded exit
+
+- Zen requests `MACH_NOTIFY_DEAD_NAME` on the host's reply port when it accepts CONNECT.
+  Host death (crash, kill) therefore closes the endpoint at once with
+  `onClosed("host-died")`, independent of pipe EOF or process reaping (E2: chrome JS saw
+  the failure 0–2 ms after SIGKILL; the panel followed in 4–42 ms when Zen was idle).
+- The host clears its inherited task exception ports before the engine starts. Zen's
+  Breakpad handler ignores a child's exception, which left a faulting host parked on the
+  fault instead of dying (E1 hang). Engine helpers inherit the cleared ports.
+- Once the host decides to end (requested shutdown, pipe EOF, protocol or surface failure,
+  SIGTERM, parent death) it guarantees exit: after 25 s (requested shutdown) or 5 s
+  (anything else) a watchdog on a libdispatch thread SIGKILLs its own direct children and
+  `_exit`s (76; 77 after parent death).
+- Not covered: a host that is alive but frozen (deadlock, SIGSTOP) keeps its reply port;
+  only the JSON pipe's timed actions notice it.
 
 ## Pacing
 
@@ -126,8 +165,14 @@ discards (then releases) frames of stale generations, exactly like AXCF frames.
   construction; `lsmp` cross-task inspection needs root and was not run.
 - Engine helpers built from the same source compile inert stubs and link neither
   Metal nor IOSurface (verified with `dyld_info -dependents`).
+- **Global surfaces (zero-copy tradeoff).** A global IOSurface can be looked up by ID,
+  and its pixels read, by any process of the same user that learns or guesses the 32-bit
+  ID (`IOSurfaceLookup`). This is weaker than Mach-port-only transfer for cross-origin
+  web pixels. Firefox accepts the same exposure for its own video, canvas, WebGL and
+  compositor surfaces, and copy mode only moves it to Zen's (also global) copies. A
+  Mach-port descriptor in Gecko's IPC (`IOSurfacePort`) would remove it; see ADR 003.
 - Frames never contain page-controlled pointers; all sizes are bounded (1..4096 px
-  per dimension, so at most 64 MiB per BGRA surface and 3 in flight per target; 32
+  per dimension, so at most 64 MiB per BGRA surface and 6 in flight per target; 32
   targets, 8 dirty rects). 4096 px is a quarter of the 16384 px Metal 2D-texture
   limit on Apple silicon. The engine pipe's 32 MiB frame cap does not apply here.
 

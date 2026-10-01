@@ -168,6 +168,91 @@ check("close() reaches CLOSED and notifies listener", () => {
 });
 check("takeToken after close throws", () => expectThrow(() => ep.takeToken()));
 
+// A real Mach peer (tests/fake_host.mm, built by run_smoke.py): CONNECT, three
+// frames (global+flag -> zero-copy, plain -> copy, plain+flag -> lookup check
+// then copy), RELEASE for each, then SIGKILL: the dead-name notification on
+// the host's reply port must close the endpoint with "host-died" at once.
+check("fake host: zero-copy/copy frames and dead-name host-died", () => {
+  const path = Services.env.get("AXIO_FAKE_HOST");
+  if (!path) {
+    throw new Error("AXIO_FAKE_HOST not set");
+  }
+  const { Subprocess } = ChromeUtils.importESModule(
+    "resource://gre/modules/Subprocess.sys.mjs");
+  const now = () => ChromeUtils.now();
+  const peer = svc.createEndpoint(false);
+  let connectedPid = null;
+  let closed = null;
+  let closedAt = 0;
+  peer.listener = {
+    QueryInterface: ChromeUtils.generateQI(["nsIAxioEngineEndpointListener"]),
+    onConnected(aPid) { connectedPid = aPid; },
+    onTargetGeometry() {},
+    onClosed(aReason) { closed = aReason; closedAt = now(); },
+  };
+  const browser = Services.appShell.createWindowlessBrowser(true);
+  let proc = null;
+  try {
+    const doc = browser.document;
+    const canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+    (doc.body || doc.documentElement).appendChild(canvas);
+    peer.bindElement(canvas, 7, 1, 1);
+    let error = null;
+    Subprocess.call({ command: path, arguments: [peer.serviceName, peer.takeToken()],
+                      environment: { PATH: "/usr/bin:/bin" }, environmentAppend: false })
+      .then(p => { proc = p; }, e => { error = e; });
+    spinUntil(() => proc || error, 10000);
+    if (!proc) {
+      throw new Error("spawn failed: " + error);
+    }
+    const lines = [];
+    (async () => {
+      let text = "";
+      for (let chunk; (chunk = await proc.stdout.readString());) {
+        text += chunk;
+        const parts = text.split("\n");
+        text = parts.pop();
+        lines.push(...parts.filter(Boolean).map(l => JSON.parse(l)));
+      }
+    })().catch(() => {});
+    peer.expectHostPid(proc.pid);
+    proc.stdin.write("go\n");
+    spinUntil(() => connectedPid !== null || closed !== null, 10000);
+    if (connectedPid !== proc.pid) {
+      throw new Error("not connected: " + connectedPid + " closed " + closed);
+    }
+    const releases = () => lines.filter(l => l.event === "release").map(l => l.frame).sort();
+    spinUntil(() => releases().length >= 3, 10000);
+    const stats = peer.getTargetStats(7);
+    const released = releases();
+    if (!stats || stats.received !== 3 || stats.zeroCopy !== 1 || stats.copied !== 2 ||
+        released.join(",") !== "1,2,3") {
+      throw new Error("frames: " + JSON.stringify({ stats, released, lines }));
+    }
+    const killedAt = now();
+    Subprocess.call({ command: "/bin/kill", arguments: ["-9", String(proc.pid)] });
+    spinUntil(() => closed !== null, 5000);
+    let exited = false;
+    proc.wait().then(() => { exited = true; }, () => { exited = true; });
+    spinUntil(() => exited, 5000);
+    if (closed !== "host-died") {
+      throw new Error("closed with " + closed);
+    }
+    return { zeroCopy: stats.zeroCopy, copied: stats.copied,
+             globalLookupFailed: stats.globalLookupFailed, released,
+             hostCopyUs: stats.hostCopyUs, copyGpuUs: stats.copyGpuUs,
+             killToClosedMs: +(closedAt - killedAt).toFixed(2) };
+  } finally {
+    if (proc && closed === null) {
+      proc.kill();
+    }
+    browser.close();
+    if (closed === null) {
+      peer.close();
+    }
+  }
+});
+
 const ok = checks.every(c => c.ok);
 dump("AXIO_ENGINE_VIEW_SMOKE " + JSON.stringify({ status: ok ? "PASS" : "FAIL",
   pid: Services.appinfo.processID,

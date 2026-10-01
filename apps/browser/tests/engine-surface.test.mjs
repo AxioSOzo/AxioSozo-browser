@@ -240,6 +240,40 @@ test('a host crash or an endpoint failure tears down the endpoint and every Chro
   assert.equal(broken.host.surfaceClosedReason, 'protocol:bad-frame');
 });
 
+test('host death is immediate: dead-name or exit fails in-flight work at once, even if the process never exits', async () => {
+  // engine-view fires onClosed("host-died") from the Mach dead-name notification
+  // on the host's reply port; Subprocess reports the exit. Either must end every
+  // Chromium tab without waiting for the CEF action deadline, and must not
+  // depend on the process actually exiting (a parked, faulting host).
+  for (const trigger of ['dead-name', 'exit']) {
+    const f = surfaceHost(); await f.host.connect(); f.host.component = f.component;
+    const tab = attach(f.host, 'tab-a'); await created(f, tab);
+    let kills = 0;
+    f.process.kill = async () => { kills++; };            // hung: SIGTERM ignored, never exits
+    f.process.stdin.write = async () => {};               // the host never answers again
+    const pending = tab.adapter.navigate(tab.adapter.target, 'https://example.test/next');
+    const outcome = pending.then(() => 'resolved', error => error.message);
+    const started = performance.now();
+    if (trigger === 'dead-name') f.component.endpoint.listener.onClosed('host-died');
+    else f.finish({ exitCode: 139 });
+    await settle();
+    const elapsed = performance.now() - started;
+    const expected = trigger === 'dead-name' ? 'CEF_SURFACE_CLOSED' : 'CEF_CRASH_OUTCOME_UNCERTAIN';
+    assert.equal(f.host.status, 'failed', trigger);
+    assert.deepEqual(tab.seen.failures, [expected], trigger);
+    assert.equal(await outcome, expected, `${trigger}: the in-flight navigation rejects with the crash, not a timeout`);
+    assert.ok(elapsed < 200, `${trigger}: failure after ${elapsed.toFixed(1)} ms, well under the 1000 ms action deadline`);
+    // After dead-name the native endpoint is already CLOSED; after an exit JS closes it once.
+    assert.equal(f.component.calls.filter(call => call[0] === 'close').length, trigger === 'exit' ? 1 : 0, trigger);
+    if (trigger === 'dead-name') assert.equal(kills, 1, 'the (possibly parked) process is killed, not awaited');
+    assert.equal(f.host.surfaceStats(1), null, `${trigger}: no stats from a closed endpoint`);
+    // A late second signal (exit after dead-name, or the reverse) changes nothing.
+    if (trigger === 'dead-name') f.finish({ exitCode: -9 }); else f.component.endpoint.listener.onClosed('host-died');
+    await settle();
+    assert.deepEqual(tab.seen.failures, [expected], `${trigger}: reported once`);
+  }
+});
+
 test('frame_rate: 60 or 120 for the resolved target, sent only when the host announces frame_rate_command', async () => {
   const f = surfaceHost({ capabilities: { frame_rate_command: true } }); await f.host.connect(); f.host.component = f.component;
   const tab = attach(f.host, 'tab-a'); await created(f, tab);

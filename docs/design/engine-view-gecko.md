@@ -59,11 +59,11 @@ sha256-guarded hunks in 3 files (§9).
   constructor `MacIOSurface(CFTypeRefPtr<IOSurfaceRef>, …)` (`MacIOSurface.h:77-80`).
   That constructor takes one IOSurface use count, and the destructor drops it
   (`MacIOSurface.cpp:28-45,417-423`).
-- **The host's ring surfaces are not global.** `createSurface` in
-  `native/chromium-host/surface_transport.mm:129-147` does not set
-  `kIOSurfaceIsGlobal`. Chromium's own IOSurfaces are not global either, and the
-  CEF contract forbids keeping them past `OnAcceleratedPaint`
-  (contract "CEF 154 notes"). §4.3 covers this.
+- **The host's ring surfaces are global since E2 (2026-10-01).** `createSurface` in
+  `native/chromium-host/surface_transport.mm` sets `kIOSurfaceIsGlobal` and every FRAME
+  carries `AXIO_SURFACE_FLAG_GLOBAL_SURFACE`. Chromium's own pooled IOSurfaces are not
+  global and the CEF contract forbids keeping them past `OnAcceleratedPaint`
+  (contract "CEF 154 notes"), so the host still blits once into its ring. §4.3.
 - **`GpuFence` cannot cross IPC.** `ParamTraits<GpuFence*>` asserts on non-null
   (`gfx/layers/ipc/LayersMessageUtils.h:760-785`). The frame must be complete before
   it is sent. The host already awaits its Metal blit.
@@ -241,15 +241,20 @@ sha256-guarded hunks in 3 files (§9).
 The GPU process looks surfaces up by global ID (§2), so a non-global host surface
 fails there. The two modes:
 
-- **Zero-copy mode (proposed contract amendment).**
-  - The host creates its ring surfaces with `kIOSurfaceIsGlobal: @YES`. This is
-    one line in `createSurface`; Gecko does the same.
-  - The host sets FRAME `flags` bit 1 (`AXIO_SURFACE_FLAG_GLOBAL`, value 2).
-  - Gecko then presents the host surface directly.
+- **Zero-copy mode (contract engine-surface-v1, adopted in E2; default).**
+  - The host creates its ring surfaces with `kIOSurfaceIsGlobal: @YES`; Gecko does the same.
+  - The host sets FRAME `flags` bit 1 (`AXIO_SURFACE_FLAG_GLOBAL_SURFACE`, value 2).
+  - Gecko then presents the host surface directly, after checking the surface's
+    recorded creation properties (`IOSurfaceLookup` in the parent succeeds even for
+    a non-global surface it holds, so it cannot be the check). Pref
+    `axiosozo.engine_view.zero_copy=false` forces copy mode.
+  - Gecko keeps a superseded host surface in use ~66 ms (≈4 frames; textures are held
+    until a later rendered frame completes), so the host ring is 6 surfaces.
+    Measured: 59.9 fps, present-interval p95 19–20 ms (E2 result.json).
   - Trade-off: any local process that can call `IOSurfaceLookup` can read a
     global surface. That is the same exposure Firefox already accepts for every
     video, canvas and WebGL surface.
-- **Copy mode (default today, works with the host as shipped).**
+- **Copy mode (fallback: frames without bit 1, or the pref set to false).**
   - Gecko blits the frame with Metal (`EngineSurfaceCopier`, one
     `copyFromTexture`, awaited on the endpoint queue) into one of up to four
     **Gecko-owned global** surfaces. These come from `MacIOSurface::CreateIOSurface`:
@@ -258,12 +263,12 @@ fails there. The two modes:
   - Gecko then RELEASEs the host frame immediately.
   - Pool slots are recycled exactly like `MacIOSurfaceRecycleAllocator`, with
     `IOSurfaceIsInUse` (`MacIOSurfaceImage.cpp:244`).
-  - Cost: one GPU copy, about 0.1–0.3 ms at 4096×2304 on Apple silicon, measured
-    per frame as `lastCopyNs` in the stats.
+  - Cost: one GPU copy; E2 measured 0.44 ms GPU time (p50, `copyGpuUs`) at
+    2072×2048 on an M4, 1–3 ms wall (`lastCopyNs`), 55.6–58.5 fps presented with
+    present-interval p95 23–25 ms, and ~60 ms/s more parent CPU than zero-copy.
   - If no pool slot is free, the frame stays held and is retried on the next
     poll. The last frame of an animation is never dropped.
-- The component uses the proposed bit only as an opt-in. Until the CEF-host
-  workstream adopts it, every frame goes through copy mode.
+- The host sets the bit on every frame since E2, so copy mode is only the fallback.
 
 ### 4.4 RELEASE timing: present-then-release
 
@@ -769,11 +774,10 @@ Both options:
   `mozilla/dom/DocumentInlines.h`). The Mach frame path, the Metal copier and the
   key reply have not run yet. `[can_run_script]` static analysis on
   `finishKeyEvent` is unchecked: the dev build does not enable the clang plugin.
-- **Global IOSurfaces.** Copy mode is the default until the host sets
-  `kIOSurfaceIsGlobal` and flag bit 1. This is a proposed amendment to
-  engine-surface-v1 that needs CEF-host sign-off. Global surfaces are readable by
-  any local process that guesses the ID, the same exposure as Firefox's own video
-  and canvas.
+- **Global IOSurfaces.** Zero-copy is the default since E2 (host sets
+  `kIOSurfaceIsGlobal` and flag bit 1). Global surfaces are readable by any
+  same-user process that learns or guesses the ID, the same exposure as Firefox's
+  own video and canvas; copy mode only moves it to Zen's own global copies.
 - **Use-count semantics.** Release timing relies on `IOSurfaceIsInUse` covering
   GPU-process lookups and CALayer use. A 1 s cap (`forcedReleases`) prevents
   stalls. E1 must show `forcedReleases == 0`.

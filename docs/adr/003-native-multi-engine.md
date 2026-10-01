@@ -405,12 +405,33 @@ the planned surface kind for WebKit. **Rejected:** (b) in-process CEF.
 - **Still untested:** IME, trackpad phases, pinch, downloads, permissions and
   accessibility.
 
+**E2 perf/robustness status, 2026-10-01 [local]: EXPERIMENTAL, not READY.** See
+[e2-perf-2026-09-30/result.json](../evidence/e2-perf-2026-09-30/result.json).
+
+- **Zero-copy adopted** (contract flag `AXIO_SURFACE_FLAG_GLOBAL_SURFACE`). Same
+  animated fixture, 60 Hz, 2072×2048 surface:
+  - Chromium zero-copy: 59.9 fps presented, present interval p50 16.7 / p95 19.2–19.8 /
+    p99 20.8–23.2 ms, no Zen-side copy, key→frame p50 13–16 ms.
+  - Chromium copy mode: 55.6–58.5 fps presented, p95 23–25 / p99 33–35 ms, Zen blit
+    0.44 ms GPU time (p50), key→frame p50 18–30 ms, about 60 ms/s more Zen parent CPU.
+  - Gecko (page rAF, same method): 60 fps, p95 17.2–17.4 ms, p99 17.7 ms.
+  - Gecko keeps a directly composited host surface in use ~66 ms, so the host ring grew
+    from 3 to 6 surfaces (3 deadlocked to 1.6 fps, 4 gave 34 fps).
+- **Crash detection:** E1's "hang instead of exit" was the host inheriting Zen's
+  Breakpad exception port. The host now clears it and has a bounded-exit watchdog. Host
+  SIGKILL/SIGSEGV: the endpoint fails within ~2 ms (Mach dead-name), the panel shows in
+  4–80 ms when Zen is idle (outliers 320/718 ms under load); renderer kill 18–376 ms;
+  Reload recovers. A frozen-but-alive host is still not detected.
+- **Not measured:** Gecko's own composite GPU time, input-to-photon, 120 Hz.
+
 ## 12. Open risks
 
 1. **Global IOSurface IDs.** Gecko's current descriptor uses global IDs (F3). A
    global surface can be looked up by other local processes that learn the ID, which
    is weaker than Mach-port transfer for cross-origin web pixels. Acceptable only
-   for Phase 0/1. Phase 2 should add a Mach-port variant; Gecko already has
+   for Phase 0/1. Since E2 the host's ring surfaces themselves are global (zero-copy);
+   copy mode (`axiosozo.engine_view.zero_copy=false`) only moves the same exposure to
+   Zen's global copies. Phase 2 should add a Mach-port variant; Gecko already has
    `IOSurfacePort`.
 2. **Capture-path limits.** CEF OSR uses viz's video capturer (`video_consumer_osr.cc`),
    so pacing, damage rects (#3730) and latency may lag Chrome's native path. This is
@@ -434,6 +455,9 @@ the planned surface kind for WebKit. **Rejected:** (b) in-process CEF.
    `automate-git.py`/`gclient` run upstream hooks, which AGENTS.md forbids without
    explicit authorization. Chromium also requires a checkout path without spaces.
 8. **Keychain timing.** fa874ac depends on CEF's next branch; the date is unknown.
+9. **Frozen host.** A host that is alive but stuck (deadlock, SIGSTOP) is not detected:
+   navigation commands are untimed and there is no liveness ping. Needs a cef-v1
+   heartbeat or a host main-thread watchdog that tolerates a user-facing Keychain wait.
 
 ## 13. Decisions needed from Wout
 

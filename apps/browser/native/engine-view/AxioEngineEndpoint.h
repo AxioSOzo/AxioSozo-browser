@@ -73,6 +73,7 @@ class EngineEndpoint final : public nsIAxioEngineEndpoint {
   // binding was composited and IOSurfaceIsInUse() turned false.
   struct Presented {
     uint64_t mHostFrameId = 0;  // 0: copy mode, host frame already released
+    uint64_t mPresentedTicks = 0;  // mach_absolute_time of SetCurrentImages
     CFTypeRefPtr<IOSurfaceRef> mSurface;  // reference, no use count
     RefPtr<MacIOSurface> mUse;            // one use count while pinned
     mozilla::TimeStamp mUnpinnedAt;
@@ -87,11 +88,30 @@ class EngineEndpoint final : public nsIAxioEngineEndpoint {
     CFTypeRefPtr<IOSurfaceRef> mSurface;
   };
 
+  // Last kSampleCount values of one per-frame duration (nanoseconds), for
+  // percentiles in getTargetStats (E2 perf evidence).
+  static constexpr size_t kSampleCount = 512;
+  struct Samples {
+    uint64_t mValues[kSampleCount] = {};
+    size_t mNext = 0;
+    size_t mCount = 0;
+    void Add(uint64_t aValue) {
+      mValues[mNext] = aValue;
+      mNext = (mNext + 1) % kSampleCount;
+      mCount = std::min(mCount + 1, kSampleCount);
+    }
+  };
+
   struct Stats {
     uint64_t mReceived = 0;
     uint64_t mPresented = 0;
     uint64_t mCopied = 0;
+    uint64_t mZeroCopy = 0;           // presented the host's global surface directly
+    uint64_t mGlobalLookupFailed = 0; // flag set on a surface not created global: copied
     uint64_t mLastCopyNs = 0;
+    uint64_t mLastCopyGpuNs = 0;      // Metal GPUEndTime - GPUStartTime of our blit
+    uint64_t mLastHostCopyNs = 0;     // FRAME send_time - paint_time (host blit + send)
+    uint64_t mMaxHostFramesInFlight = 0;
     uint64_t mStale = 0;
     uint64_t mHeld = 0;
     uint64_t mRejected = 0;
@@ -100,6 +120,12 @@ class EngineEndpoint final : public nsIAxioEngineEndpoint {
     uint64_t mBeginFramesSent = 0;
     uint64_t mBeginFramesDropped = 0;
     uint64_t mLastPaintToReceiveNs = 0;
+    Samples mPresentInterval;  // successive SetCurrentImages of this target
+    Samples mHostCopy;         // send_time - paint_time
+    Samples mCopyGpu;          // copy mode only
+    Samples mPaintToPresent;   // host paint_time -> SetCurrentImages
+    Samples mReleaseDelay;     // zero-copy: SetCurrentImages -> RELEASE
+    uint64_t mLastPresentTicks = 0;
   };
 
   struct Target {
@@ -132,6 +158,7 @@ class EngineEndpoint final : public nsIAxioEngineEndpoint {
   void HandleConnectOnQueue(mach_msg_header_t* aHeader, pid_t aSenderPid);
   void HandleFrameOnQueue(mach_msg_header_t* aHeader, pid_t aSenderPid);
   // False when copy mode found no free pool surface (the frame stays held).
+  uint64_t Nanoseconds(uint64_t aTicks) const;
   bool TryPresentOnQueue(Target& aTarget,
                          const axio_surface_frame_body_t& aData,
                          const CFTypeRefPtr<IOSurfaceRef>& aSurface);
@@ -163,6 +190,9 @@ class EngineEndpoint final : public nsIAxioEngineEndpoint {
   dispatch_queue_t mQueue = nullptr;
   dispatch_source_t mSource = nullptr;  // MACH_RECV on mServicePort
   bool mExternalBeginFrames = false;
+  // Pref axiosozo.engine_view.zero_copy (default true), read once at Create.
+  // False forces copy mode even for AXIO_SURFACE_FLAG_GLOBAL_SURFACE frames.
+  bool mZeroCopyAllowed = true;
 
   // Rights owned on mQueue after Create().
   mach_port_t mServicePort = MACH_PORT_NULL;  // receive right

@@ -202,7 +202,7 @@ def fingerprint(signing=None):
     h = hashlib.sha256()
     h.update(SHA256.encode())
     for name in ['host.mm', 'stream.inc', 'input.inc', 'transport.hpp', 'engine_surface_v1.h',
-                 'surface_transport.hpp', 'surface_transport.mm']:
+                 'surface_transport.hpp', 'surface_transport.mm', 'crash_guard.hpp']:
         h.update((ROOT / 'native/chromium-host' / name).read_bytes())
     # Runner-only lifecycle changes do not change the native build recipe.
     h.update(inspect.getsource(setup).encode())
@@ -333,6 +333,14 @@ def native_test():
                  'xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra',
                  ROOT / 'native/chromium-host/test_transport.cc', '-o', binary])
     run_command([binary], timeout_seconds=15)
+    # Crash/hang robustness (crash_guard.hpp) against a Breakpad-like inherited
+    # exception port, in real child processes. No CEF, no Keychain.
+    guard = BASE / 'crash-guard-test'
+    run_command([EXTERNAL, 'env', 'TMPDIR=' + str(BASE / 'tmp'),
+                 'CLANG_MODULE_CACHE_PATH=' + str(BASE / 'clang-cache'),
+                 'xcrun', 'clang++', '-std=c++20', '-Wall', '-Wextra',
+                 ROOT / 'native/chromium-host/tests/crash_guard_test.cc', '-o', guard])
+    run_command([guard], timeout_seconds=30)
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):

@@ -12,6 +12,9 @@
 #include <vector>
 #include "transport.hpp"
 #include "surface_transport.hpp"
+#ifndef AXIO_CEF_HELPER
+#include "crash_guard.hpp"
+#endif
 #include "include/capi/cef_app_capi.h"
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_client_capi.h"
@@ -180,6 +183,13 @@ int main(int argc,char**argv){@autoreleasepool{
   evidence=[NSString stringWithUTF8String:argv[3]];if(!streaming)initialURL=utf16(u.absoluteString);
   profilePath=[NSString stringWithUTF8String:argv[2]];
   signal(SIGPIPE,SIG_IGN);
+  // Before any CEF code or helper exists: drop exception ports inherited from Zen
+  // (Breakpad ignores a foreign task's fault, which parked the faulting thread
+  // forever), so a crash ends this process and its helpers at once.
+  int inheritedPorts=axio::crash::clearInheritedExceptionPorts();
+  fprintf(stderr,"AXIO_CEF_EXCEPTION_PORTS inherited=%d cleared=%s\n",inheritedPorts,inheritedPorts>=0?"yes":"no");
+  // Zen gone (even while our main thread is stuck): bounded exit, helpers included.
+  if(streaming)axio::crash::watchParent(5,77,^{interrupted=1;});
   if(streaming&&!streamHandshake())return 64;
   loadFramework([folder stringByAppendingPathComponent:@"../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework"]);
   [AxioCEFApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
@@ -207,7 +217,13 @@ int main(int argc,char**argv){@autoreleasepool{
       if(streaming){
         pumpCommands();
         if(interrupted||transport.failed()||transport.eof()||surfaceFailed)streamClosing=true;
-        if(streamClosing&&!closing){closing=true;closeStarted=std::chrono::steady_clock::now();}
+        if(streamClosing&&!closing){
+          closing=true;closeStarted=std::chrono::steady_clock::now();
+          // Whatever teardown does (CEF shutdown, Keychain, destructors), exit is bounded:
+          // 25 s for a requested shutdown (10 s close + Chromium's own 10 s watchdog),
+          // 5 s after EOF, a protocol/surface failure or a signal.
+          axio::crash::armExitWatchdog(shutdownRequest?25:5,76,shutdownRequest?"shutdown":"failure");
+        }
         if(closing){streamCloseAll();if(streamIdle())closed=true;}
         if(closing&&std::chrono::duration<double>(std::chrono::steady_clock::now()-closeStarted).count()>10){exitStatus=75;p_cef_quit_message_loop();return;}
       }
