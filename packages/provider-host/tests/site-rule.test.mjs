@@ -26,17 +26,18 @@ function provider(respond = async () => Response.json(body()), store = keyStore)
   return { instance, calls };
 }
 const neutral = (reason, data_sent, request_id = 'req_1') => ({ version: 1, request_id, choice_set: 'site_rule_v1', context_version: 'site-rule-1',
-  outcome: 'none', reason_code: null, reason, data_sent, authority: 'suggestion_only', action_authorized: false });
+  outcome: 'none', reason_code: null, reason, data_sent, authority: 'suggestion_only', action_authorized: false, provider: 'jev', confidence: null });
 
 test('site_rule_v1 valid choices return the exact suggestion-only result shape', async () => {
   for (const outcome of EFFECTS) {
     const { instance, calls } = provider(async () => Response.json(body({ outcome })));
     assert.deepEqual(await instance.decide(request()), { version: 1, request_id: 'req_1', choice_set: 'site_rule_v1', context_version: 'site-rule-1',
-      outcome, reason_code: 'drift', reason: 'validated', data_sent: true, authority: 'suggestion_only', action_authorized: false, model: JEV_MODEL });
+      outcome, reason_code: 'drift', reason: 'validated', data_sent: true, authority: 'suggestion_only', action_authorized: false, model: JEV_MODEL,
+      provider: 'jev', confidence: 0.95 });
     assert.equal(calls.length, 1);
   }
   const { instance } = provider(async () => Response.json(body({ outcome: 'none', reason: 'on_task' })));
-  assert.deepEqual(await instance.decide(request()), { ...neutral('validated', true), model: JEV_MODEL });
+  assert.deepEqual(await instance.decide(request()), { ...neutral('validated', true), model: JEV_MODEL, confidence: 0.95 });
 });
 
 test('site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions', async () => {
@@ -64,7 +65,7 @@ test('An effect the rule does not list becomes none with malformed_output', asyn
 });
 
 test('Low confidence becomes none; the optional reason is fixed-code only', async () => {
-  assert.deepEqual(await provider(async () => Response.json(body({ confidence: 0.79 }))).instance.decide(request()), { ...neutral('validated', true), model: JEV_MODEL });
+  assert.deepEqual(await provider(async () => Response.json(body({ confidence: 0.79 }))).instance.decide(request()), { ...neutral('validated', true), model: JEV_MODEL, confidence: 0.79 });
   assert.equal((await provider(async () => Response.json(body({ reasonConfidence: 0.5 }))).instance.decide(request())).reason_code, null);
   const noReason = await provider(async () => Response.json(body({ reason: null }))).instance.decide(request());
   assert.equal(noReason.outcome, 'nudge'); assert.equal(noReason.reason_code, null);

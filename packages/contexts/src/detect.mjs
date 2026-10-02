@@ -4,8 +4,8 @@ import { ContextsError } from './errors.mjs';
 import { ENV_ORDER } from './environments.mjs';
 import { MANIFEST_PATH, parseManifest } from './manifest.mjs';
 import {
-  REFUSAL_REASONS, SURFACE_KINDS, clip, deepFreeze, environmentKey, isPlainObject, own, surfaceProminence, trimTrailing, utf8Length,
-  validateBaseUrl, validateDetectionDraft, validateHostPattern, validateWebUrl, stripQueryAndFragment,
+  AGENT_DIRS, AGENT_FILES, PLATFORM_KINDS, REFUSAL_REASONS, SURFACE_KINDS, clip, deepFreeze, environmentKey, isPlainObject, own,
+  surfaceProminence, trimTrailing, utf8Length, validateBaseUrl, validateDetectionDraft, validateHostPattern, validateWebUrl, stripQueryAndFragment,
 } from './schema.mjs';
 
 // Static project detection (handoff 3 §6.1). Works only on file contents the
@@ -19,6 +19,8 @@ export const DETECTION_FILES = Object.freeze([
   'src-tauri/tauri.conf.json', 'tauri.conf.json', 'electron-builder.json', 'electron-builder.yml',
   'Cargo.toml', 'pyproject.toml', 'go.mod', '.git/config', '.axiosozo/project.json',
   'pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json',
+  // workstation-v1 §1.1: parsed only for its `functions` string.
+  'convex.json',
 ]);
 const ALLOWED = new Set(DETECTION_FILES);
 export const isAllowedPath = rel => typeof rel === 'string' && ALLOWED.has(rel);
@@ -684,6 +686,192 @@ export function expandWorkspaceGlobs(patterns, listing = {}) {
   return Object.freeze(out);
 }
 
+// ------------------------------------------- inventory and docs (v2) ----
+//
+// workstation-v1 §1.2–§1.3. Two more phases after the workspace phase, again
+// with every decision in the core and a dumb reader:
+//   3. inventoryPlan({ packageDirs }) → { list, check }: directories whose
+//      immediate child *directory names* may be listed, and exact paths that may
+//      be lstat'ed (presence and "file"/"dir" only; nothing is opened).
+//   4. documentFiles(inventory) → the docs/**/domains.md files that may be read
+//      with the usual checks (regular file, ≤ 256 KiB, inside the root, UTF-8).
+
+export const MAX_INVENTORY_LIST = 64;
+export const MAX_INVENTORY_CHECK = 192;
+export const MAX_DOCUMENT_CHILDREN = 8;
+const INV_LIST_FIXED = Object.freeze(['docs', '.agent-worktrees', 'ios', 'macos']);
+const INV_LIST_SUFFIXES = Object.freeze(['', '/ios', '/macos']);
+const INV_CHECK_FIXED = Object.freeze([
+  'AGENTS.md', 'CLAUDE.md', '.claude', '.codex', '.agent-worktrees', 'convex', 'convex/schema.ts', 'convex/http.ts',
+  'android', 'build.gradle', 'build.gradle.kts', 'android/build.gradle', 'android/build.gradle.kts',
+]);
+const INV_CHECK_SUFFIXES = Object.freeze(['/convex', '/build.gradle', '/build.gradle.kts', '/android/build.gradle', '/android/build.gradle.kts']);
+const MAX_LISTING_NAMES = 512;
+
+const planPath = (p, fixed, suffixes) => typeof p === 'string' && (fixed.includes(p) ||
+  suffixes.some(s => p.length > s.length && p.endsWith(s) && isPackageDir(p.slice(0, p.length - s.length))));
+// True when `p` may appear in some inventory plan's `list` / `check`.
+export const isInventoryListPath = p => planPath(p, INV_LIST_FIXED, INV_LIST_SUFFIXES);
+export const isInventoryCheckPath = p => planPath(p, INV_CHECK_FIXED, INV_CHECK_SUFFIXES);
+
+export function inventoryPlan({ packageDirs } = {}) {
+  if (packageDirs !== undefined && packageDirs !== null && !Array.isArray(packageDirs)) throw new ContextsError('INVALID_INPUT', '$.packageDirs: expected an array of package dirs', '$.packageDirs');
+  const dirs = [];
+  for (const d of packageDirs ?? []) if (isPackageDir(d) && !dirs.includes(d) && dirs.length < MAX_WORKSPACE_PACKAGES) dirs.push(d);
+  const list = [...INV_LIST_FIXED], check = [...INV_CHECK_FIXED];
+  const add = (target, p, max) => { if (target.length < max && !target.includes(p)) target.push(p); };
+  for (const d of dirs) for (const s of INV_LIST_SUFFIXES) add(list, d + s, MAX_INVENTORY_LIST);
+  for (const d of dirs) for (const s of INV_CHECK_SUFFIXES) add(check, d + s, MAX_INVENTORY_CHECK);
+  return deepFreeze({ list, check });
+}
+
+const isInsideRel = p => typeof p === 'string' && p !== '' && !p.startsWith('/') && !p.includes('\\') && p.split('/').every(s => s && s !== '.' && s !== '..');
+
+// Reader policy for one inventory path (listing or lstat). `resolvedPath` is
+// the real path relative to the real root (null outside it); `kind` is what the
+// resolved path is: "file", "dir" or "other". With `plan`, the path must be in
+// that plan; without it, it must fit the plan shape. A refused path is treated
+// as absent (a symlink out of the root is never followed).
+export function inventoryRefusal({ path, resolvedPath, kind, plan } = {}) {
+  const inPlan = plan !== undefined && plan !== null
+    ? [own(plan, 'list'), own(plan, 'check')].some(l => Array.isArray(l) && l.includes(path))
+    : isInventoryListPath(path) || isInventoryCheckPath(path);
+  if (!inPlan) return 'not_allowlisted';
+  if (resolvedPath === null || resolvedPath === undefined || !isInsideRel(resolvedPath)) return 'symlink_outside_root';
+  if (kind !== 'file' && kind !== 'dir') return 'not_regular_file';
+  return null;
+}
+
+const DOC_CHILD = /^docs\/([^/]+)\/domains\.md$/;
+export const isDocumentPath = p => typeof p === 'string' && (p === 'docs/domains.md' || (DOC_CHILD.test(p) && okSegment(DOC_CHILD.exec(p)[1])));
+
+// `docs/domains.md` and `docs/<child>/domains.md` for the first 8 child
+// directories (sorted) of the `docs` listing. Nothing when docs was not listed.
+export function documentFiles(inventory) {
+  const kids = own(own(inventory, 'listing'), 'docs');
+  if (!Array.isArray(kids)) return Object.freeze([]);
+  const names = [...new Set(kids.slice(0, MAX_LISTING_NAMES).filter(n => typeof n === 'string' && okSegment(n)))].sort().slice(0, MAX_DOCUMENT_CHILDREN);
+  return Object.freeze(['docs/domains.md', ...names.map(n => `docs/${n}/domains.md`)]);
+}
+
+// detectionRefusal for a documented-domains file; the resolved path must be one too.
+export function documentRefusal({ path, resolvedPath, isFile, size } = {}) {
+  if (!isDocumentPath(path)) return 'not_allowlisted';
+  if (resolvedPath === null || resolvedPath === undefined) return 'symlink_outside_root';
+  if (!isDocumentPath(resolvedPath)) return 'not_allowlisted';
+  if (isFile !== true) return 'not_regular_file';
+  if (!Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_BYTES) return 'too_large';
+  return null;
+}
+
+// Child names from a listing, re-validated: no "..", "/", control characters,
+// and no hidden names unless the joined path is itself in the plan shape.
+const okChildName = (n, dir) => typeof n === 'string' && n.length >= 1 && n.length <= 255 && n !== '.' && n !== '..' &&
+  !/[/\\\u0000-\u001f\u007f]/.test(n) && (!n.startsWith('.') || isInventoryListPath(`${dir}/${n}`) || isInventoryCheckPath(`${dir}/${n}`));
+
+function cleanInventory(inventory, warn) {
+  const out = { listing: new Map(), present: new Map() };
+  if (inventory === undefined || inventory === null) return out;
+  if (!isPlainObject(inventory)) throw new ContextsError('INVALID_INPUT', '$.inventory: expected { listing, present }', '$.inventory');
+  for (const k of Object.keys(inventory)) if (k !== 'listing' && k !== 'present') throw new ContextsError('INVALID_INPUT', `$.inventory.${clip(k, 40)}: unknown key`, `$.inventory.${clip(k, 40)}`);
+  const listing = own(inventory, 'listing') ?? {}, present = own(inventory, 'present') ?? {};
+  if (!isPlainObject(listing)) throw new ContextsError('INVALID_INPUT', '$.inventory.listing: expected an object of dir → child names', '$.inventory.listing');
+  if (!isPlainObject(present)) throw new ContextsError('INVALID_INPUT', '$.inventory.present: expected an object of path → "file" | "dir"', '$.inventory.present');
+  let ignored = 0;
+  for (const dir of Object.keys(listing).slice(0, 1024).sort()) {
+    const names = own(listing, dir);
+    if (!isInventoryListPath(dir) || !Array.isArray(names) || out.listing.size >= MAX_INVENTORY_LIST) { ignored++; continue; }
+    out.listing.set(dir, [...new Set(names.slice(0, MAX_LISTING_NAMES).filter(n => okChildName(n, dir)))].sort());
+  }
+  for (const p of Object.keys(present).slice(0, 1024).sort()) {
+    const kind = own(present, p);
+    if (!isInventoryCheckPath(p) || (kind !== 'file' && kind !== 'dir') || out.present.size >= MAX_INVENTORY_CHECK) { ignored++; continue; }
+    out.present.set(p, kind);
+  }
+  if (ignored) warn(`inventory: ${ignored} ${ignored === 1 ? 'entry' : 'entries'} outside the plan ignored`);
+  return out;
+}
+
+// ------------------------------------------------------- integrations ----
+
+// Fixed, data-only table in display order. Evidence is dependency names
+// (exact `packages` or a `scopes` prefix) and the presence of config files or
+// directories; never keys, env names or values. Dashboard URLs are generic.
+export const INTEGRATIONS = deepFreeze([
+  { id: 'vercel', name: 'Vercel', dashboard_url: 'https://vercel.com/dashboard', packages: ['vercel'], scopes: ['@vercel/'] },
+  { id: 'convex', name: 'Convex', dashboard_url: 'https://dashboard.convex.dev/', packages: ['convex'], scopes: ['@convex-dev/'] },
+  { id: 'clerk', name: 'Clerk', dashboard_url: 'https://dashboard.clerk.com/', packages: [], scopes: ['@clerk/'] },
+  { id: 'stripe', name: 'Stripe', dashboard_url: 'https://dashboard.stripe.com/', packages: ['stripe'], scopes: ['@stripe/'] },
+  { id: 'supabase', name: 'Supabase', dashboard_url: 'https://supabase.com/dashboard', packages: ['supabase'], scopes: ['@supabase/'] },
+  { id: 'firebase', name: 'Firebase', dashboard_url: 'https://console.firebase.google.com/', packages: ['firebase', 'firebase-admin', 'firebase-functions', 'firebase-tools'], scopes: ['@firebase/', '@react-native-firebase/'] },
+  { id: 'cloudflare', name: 'Cloudflare', dashboard_url: 'https://dash.cloudflare.com/', packages: ['wrangler'], scopes: ['@cloudflare/'] },
+  { id: 'netlify', name: 'Netlify', dashboard_url: 'https://app.netlify.com/', packages: ['netlify-cli'], scopes: ['@netlify/'] },
+  { id: 'fly', name: 'Fly.io', dashboard_url: 'https://fly.io/dashboard', packages: [], scopes: [] },
+  { id: 'sentry', name: 'Sentry', dashboard_url: 'https://sentry.io/', packages: [], scopes: ['@sentry/'] },
+]);
+const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+export const integrationForPackage = name => typeof name === 'string'
+  ? INTEGRATIONS.find(i => i.packages.includes(name) || i.scopes.some(s => name.startsWith(s) && name.length > s.length))?.id ?? null : null;
+
+// --------------------------------------------------------------- domains ----
+
+// Never a product domain: IP literals, localhost, single labels, wildcards,
+// reserved names and vendor hosts (a host equal to or below a listed suffix).
+export const VENDOR_HOST_SUFFIXES = Object.freeze([
+  'vercel.app', 'convex.cloud', 'convex.site', 'clerk.accounts.dev', 'netlify.app', 'fly.dev', 'workers.dev', 'pages.dev',
+  'github.com', 'github.io', 'stripe.com', 'example.com', 'example.org', 'example.net', 'example', 'test', 'invalid', 'local', 'localhost',
+  // The integrations' own dashboards and docs (workstation-v1 §3 INTEGRATION_HOSTS and their parents).
+  'vercel.com', 'vercel.sh', 'convex.dev', 'clerk.com', 'clerk.dev', 'supabase.com', 'supabase.co', 'firebaseapp.com', 'web.app',
+  'cloudflare.com', 'netlify.com', 'fly.io', 'sentry.io', 'githubusercontent.com',
+]);
+const TLD = /^(xn--[a-z0-9-]{1,59}|[a-z]{2,63})$/;
+// Lower-cased plain host or null.
+function normalHost(raw) {
+  if (typeof raw !== 'string' || raw.length > 260) return null;
+  let h = raw.trim().replace(/[A-Z]/g, c => c.toLowerCase());
+  if (h.endsWith('.')) h = h.slice(0, -1);
+  try { return validateHostPattern(h) === h ? h : null; } catch { return null; }
+}
+export function isProductHost(host) {
+  const h = normalHost(host);
+  if (!h || h.startsWith('*')) return false;
+  const labels = h.split('.');
+  if (labels.length < 2 || !TLD.test(labels.at(-1))) return false;
+  return !VENDOR_HOST_SUFFIXES.some(s => h === s || h.endsWith(`.${s}`));
+}
+const urlHost = raw => {
+  if (typeof raw !== 'string' || raw.length > 2048 || !/^https?:\/\//i.test(raw)) return null;
+  try { return normalHost(new URL(raw).hostname); } catch { return null; }
+};
+// Backticked names that look like hosts but are file names.
+const FILE_EXTENSIONS = new Set(['json', 'jsonc', 'md', 'mdx', 'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'toml', 'yaml', 'yml', 'txt', 'lock',
+  'sh', 'py', 'rs', 'go', 'swift', 'kt', 'kts', 'gradle', 'html', 'css', 'scss', 'env', 'xml', 'plist', 'png', 'svg', 'jpg', 'jpeg', 'gif', 'webp', 'ico',
+  'conf', 'config', 'cfg', 'ini', 'log', 'sql', 'csv', 'pem', 'key', 'xcodeproj', 'xcworkspace', 'entitlements', 'pbxproj', 'storyboard', 'vue', 'svelte', 'astro']);
+const MAX_DOC_HOSTS = 256;
+// Hostnames written in backticks or as http(s) URLs in a Markdown text, in
+// order of appearance, deduplicated, product hosts only.
+export function documentedHosts(text) {
+  const out = [];
+  if (typeof text !== 'string') return Object.freeze(out);
+  const RE = /`([^`\n]{1,300})`|\bhttps?:\/\/[^\s<>()`'"[\]{}|\\^]{1,2048}/gi;
+  let seen = 0;
+  for (const m of text.slice(0, MAX_FILE_BYTES).matchAll(RE)) {
+    if (++seen > 4096 || out.length >= MAX_DOC_HOSTS) break;
+    let host = null;
+    if (m[1] !== undefined) {
+      const inner = m[1].trim();
+      if (/^https?:\/\//i.test(inner)) host = urlHost(inner.split(/\s/)[0]);
+      else if (!/\s/.test(inner)) {
+        const bare = inner.split('/')[0].replace(/:[0-9]{1,5}$/, '');
+        if (!FILE_EXTENSIONS.has(bare.split('.').at(-1).toLowerCase())) host = normalHost(bare);
+      }
+    } else host = urlHost(trimTrailingPunctuation(m[0]));
+    if (host && isProductHost(host) && !out.includes(host)) out.push(host);
+  }
+  return Object.freeze(out);
+}
+const trimTrailingPunctuation = s => { let end = s.length; while (end > 0 && '.,;:!?*'.includes(s[end - 1])) end--; return s.slice(0, end); };
+
 // --------------------------------------------------------------- detect ----
 
 const slug = s => {
@@ -692,10 +880,11 @@ const slug = s => {
   return clip(trimTrailing(out, '-'), 40);
 };
 
-export function detectProject({ rootName, files = {}, refused = [], packages } = {}) {
+export function detectProject({ rootName, files = {}, refused = [], packages, inventory, docs } = {}) {
   if (!isPlainObject(files)) throw new ContextsError('INVALID_INPUT', '$.files: expected an object of relative path → text', '$.files');
   if (!Array.isArray(refused)) throw new ContextsError('INVALID_INPUT', '$.refused: expected an array', '$.refused');
   if (packages !== undefined && packages !== null && !isPlainObject(packages)) throw new ContextsError('INVALID_INPUT', '$.packages: expected an object of package dir → { files, refused }', '$.packages');
+  if (docs !== undefined && docs !== null && !isPlainObject(docs)) throw new ContextsError('INVALID_INPUT', '$.docs: expected an object of docs path → text', '$.docs');
   const st = {
     warnings: [], refused: [], envs: [], services: [], surfaces: [], frameworks: [], kinds: [], names: [], registry: [],
   };
@@ -738,6 +927,17 @@ export function detectProject({ rootName, files = {}, refused = [], packages } =
     }
     if (skipped) warn(`${skipped} workspace package(s) beyond the limit of ${MAX_WORKSPACE_PACKAGES} were ignored`);
   }
+
+  // Phases 3 and 4 (workstation-v1 §1.2–§1.3): names/presence and documented domains.
+  const inv = cleanInventory(inventory, warn);
+  const docText = readUnit(docs ?? {}, isDocumentPath, '');
+  const docPaths = Object.keys(docText).sort();
+  if (docPaths.length > 1 + MAX_DOCUMENT_CHILDREN) {
+    for (const p of docPaths.splice(1 + MAX_DOCUMENT_CHILDREN)) delete docText[p];
+    warn(`docs: only ${1 + MAX_DOCUMENT_CHILDREN} domains.md files are read`);
+  }
+  files_read.push(...docPaths);
+  const v2 = () => collectV2({ units, inv, docText, docPaths, rootName, warn });
 
   // `unit` and `role` are internal tags; they are replaced by `app` below.
   const addEnv = (name, url, source, guess, unit = '', role = 'remote') => {
@@ -782,11 +982,11 @@ export function detectProject({ rootName, files = {}, refused = [], packages } =
       const m = parseManifest(root.text[MANIFEST_PATH]);
       const src = MANIFEST_PATH;
       return validateDetectionDraft({
-        version: 1, name: m.name, kind: m.kind, kind_source: { source: src, guess: false },
+        version: 2, name: m.name, kind: m.kind, kind_source: { source: src, guess: false },
         environments: m.environments.map(e => ({ ...e, source: src, guess: false })),
         services: m.services.map(s => ({ ...s, source: src, guess: false })),
         surfaces: m.surfaces.map(s => ({ ...s, prominence: surfaceProminence(s), source: src, guess: false })),
-        frameworks: [], files_read, refused: st.refused, warnings: st.warnings,
+        frameworks: [], files_read, refused: st.refused, warnings: st.warnings, ...v2(),
       });
     } catch (e) { warn(`${MANIFEST_PATH}: ignored (${e instanceof ContextsError ? e.code : 'unreadable'})`); }
   }
@@ -1150,10 +1350,174 @@ export function detectProject({ rootName, files = {}, refused = [], packages } =
   const cap = (list, max, label) => { if (list.length > max) warn(`${list.length - max} ${label} beyond the limit of ${max} were dropped`); return list.slice(0, max); };
   environments = cap(environments, 16, 'environments'); services = cap(services, 32, 'services'); surfaces = cap(surfaces, 64, 'surfaces');
 
+  const extra = v2();
   return validateDetectionDraft({
-    version: 1, name, kind: chosenKind.kind, kind_source: { source: chosenKind.source, guess: chosenKind.guess },
-    environments, services, surfaces, frameworks: st.frameworks.map(f => clip(f, 64)), files_read, refused: st.refused, warnings: st.warnings,
+    version: 2, name, kind: chosenKind.kind, kind_source: { source: chosenKind.source, guess: chosenKind.guess },
+    environments, services, surfaces, frameworks: st.frameworks.map(f => clip(f, 64)), files_read, refused: st.refused, warnings: st.warnings, ...extra,
   });
+}
+
+// ------------------------------------------------- detection v2 fields ----
+
+const lastSegment = p => (p ? p.split('/').at(-1) : '');
+const jsonObject = t => { if (typeof t !== 'string') return undefined; try { const v = JSON.parse(t); return isPlainObject(v) ? v : undefined; } catch { return undefined; } };
+const listOf = v => (Array.isArray(v) ? v : []);
+const XCODE = /\.(xcodeproj|xcworkspace)$/i;
+const MOBILE_NAME = /ios|mobile|phone/i;
+const ELECTRON_IDS = ['electron', 'electron-vite'];
+
+// Integrations, platforms, domains and agent presence (workstation-v1 §1.4)
+// from the supplied texts, the cleaned inventory and the docs. Never throws on
+// hostile content; parse problems were already reported by the main scan.
+function collectV2({ units, inv, docText, docPaths, rootName, warn }) {
+  const hasIn = (u, p) => Object.prototype.hasOwnProperty.call(u.text, p);
+
+  // Integrations.
+  const evidence = new Map();
+  const addEvidence = (id, source) => {
+    const list = evidence.get(id) ?? [];
+    const s = clip(source, 256);
+    if (!list.includes(s) && list.length < 8) list.push(s);
+    evidence.set(id, list);
+  };
+  for (const u of units) {
+    const pkg = jsonObject(u.text['package.json']);
+    for (const field of DEP_FIELDS) {
+      const deps = own(pkg, field);
+      if (!isPlainObject(deps)) continue;
+      for (const name of Object.keys(deps).slice(0, 4096)) { const id = integrationForPackage(name); if (id) addEvidence(id, `${u.prefix}package.json#${field}`); }
+    }
+    for (const [file, id] of [['vercel.json', 'vercel'], ['.vercel/project.json', 'vercel'], ['wrangler.toml', 'cloudflare'], ['wrangler.json', 'cloudflare'], ['netlify.toml', 'netlify']]) {
+      if (hasIn(u, file)) addEvidence(id, `${u.prefix}${file}`);
+    }
+    if (u.isRoot && hasIn(u, 'fly.toml')) addEvidence('fly', 'fly.toml');
+    if (u.isRoot && hasIn(u, 'convex.json')) {
+      // Parsed only for its `functions` string (the Convex functions directory).
+      const fn = own(jsonObject(u.text['convex.json']), 'functions');
+      addEvidence('convex', typeof fn === 'string' && resolveRel('', fn) ? 'convex.json#functions' : 'convex.json');
+    }
+  }
+  for (const [p, kind] of inv.present) if (kind === 'dir' && (p === 'convex' || p.endsWith('/convex'))) addEvidence('convex', `${p}/`);
+  const integrations = INTEGRATIONS.filter(i => evidence.has(i.id))
+    .map(i => ({ id: i.id, name: i.name, dashboard_url: i.dashboard_url, sources: evidence.get(i.id) }));
+
+  // Platforms.
+  const platforms = [];
+  const addPlatform = (kind, name, path, source) => {
+    const n = clip(safeName(name), 64);
+    if (!n || platforms.some(x => x.kind === kind && x.path === path && x.name === n)) return;
+    platforms.push({ kind, name: n, path, source: clip(source, 256) });
+  };
+  for (const u of units) {
+    for (const path of ['src-tauri/tauri.conf.json', 'tauri.conf.json']) {
+      const conf = jsonObject(u.text[path]);
+      if (!conf) continue;
+      const product = safeName(own(conf, 'productName')) || safeName(own(own(conf, 'package'), 'productName'));
+      const dir = path.includes('/') ? (u.dir ? `${u.dir}/src-tauri` : 'src-tauri') : u.dir;
+      addPlatform('tauri', product || lastSegment(u.dir) || 'Desktop', dir, `${u.prefix}${path}`);
+      break;
+    }
+    // Electron, as the main scan finds it: a dev script, an electron
+    // dependency, package.json build (root) or electron-builder.* (root).
+    const pkg = jsonObject(u.text['package.json']);
+    const deps = new Set();
+    for (const field of DEP_FIELDS) { const d = own(pkg, field); if (isPlainObject(d)) for (const n of Object.keys(d).slice(0, 4096)) deps.add(n); }
+    const scripts = isPlainObject(own(pkg, 'scripts')) ? own(pkg, 'scripts') : {};
+    const budget = { calls: 0 };
+    const viaScript = Object.keys(scripts).slice(0, 200).some(n => analyzeScript(scripts, n, deps, budget).some(f => ELECTRON_IDS.includes(f.id)));
+    const builder = u.isRoot ? ['electron-builder.json', 'electron-builder.yml'].find(f => hasIn(u, f)) : undefined;
+    const build = u.isRoot && isPlainObject(own(pkg, 'build')) && (own(pkg.build, 'appId') !== undefined || own(pkg.build, 'productName') !== undefined) ? pkg.build : undefined;
+    if (viaScript || deps.has('electron') || builder || build) {
+      let product = safeName(own(build, 'productName'));
+      if (builder === 'electron-builder.json') product ||= safeName(own(jsonObject(u.text[builder]), 'productName'));
+      if (builder === 'electron-builder.yml') { const y = parseYaml(u.text[builder]).value; product ||= safeName(own(y, 'productName')); }
+      addPlatform('electron', product || lastSegment(u.dir) || 'Desktop', u.dir, builder ?? `${u.prefix}package.json`);
+    }
+  }
+  for (const [dir, names] of inv.listing) {
+    if (dir === 'docs' || dir === '.agent-worktrees') continue;
+    const seg = lastSegment(dir);
+    for (const child of names) {
+      const ext = XCODE.exec(child);
+      if (!ext) continue;
+      const base = child.slice(0, -ext[0].length);
+      const ios = seg.toLowerCase().endsWith('ios') || MOBILE_NAME.test(seg) || MOBILE_NAME.test(base);
+      addPlatform(ios ? 'ios' : 'macos', base, dir, `${dir}/${child}`);
+    }
+  }
+  // Android: a build.gradle(.kts) in android/, in a package dir whose name
+  // contains "android", or in <package dir>/android/. A listed dir is a package
+  // dir (the plan lists every package dir), which settles apps/android/build.gradle.
+  for (const [p, kind] of inv.present) {
+    if (kind !== 'file' || !/(^|\/)build\.gradle(\.kts)?$/.test(p)) continue;
+    const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+    const parent = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : '';
+    let name = null;
+    if (dir === '') name = typeof rootName === 'string' && /android/i.test(rootName) ? rootName : null;
+    else if (dir === 'android') name = 'android';
+    else if (!inv.listing.has(dir) && lastSegment(dir) === 'android' && isPackageDir(parent)) name = lastSegment(parent);
+    else if (/android/i.test(lastSegment(dir))) name = lastSegment(dir);
+    if (name) addPlatform('android', name, dir, p);
+  }
+  const kindRank = k => PLATFORM_KINDS.indexOf(k);
+  const orderedPlatforms = platforms.map((p, i) => [p, i]).sort(([a, i], [b, j]) => kindRank(a.kind) - kindRank(b.kind) || i - j).map(([p]) => p);
+
+  // Domains: explicit configuration first, then documented (unconfirmed).
+  const domains = [];
+  let dropped = 0;
+  const addDomain = (host, origin, source) => {
+    const h = normalHost(host);
+    if (!h || !isProductHost(h) || domains.some(d => d.host === h)) return;
+    if (domains.length >= 32) { dropped++; return; }
+    domains.push({ host: h, origin, source: clip(source, 256), confirmed: false });
+  };
+  for (const u of units) {
+    const vj = jsonObject(u.text['vercel.json']);
+    if (!vj) continue;
+    for (const r of listOf(own(vj, 'redirects')).slice(0, 512)) {
+      for (const h of listOf(own(r, 'has')).slice(0, 16)) if (own(h, 'type') === 'host' && typeof own(h, 'value') === 'string') addDomain(h.value, 'vercel_json', `${u.prefix}vercel.json redirects[].has`);
+      const d = urlHost(own(r, 'destination'));
+      if (d) addDomain(d, 'vercel_json', `${u.prefix}vercel.json redirects[].destination`);
+    }
+    for (const r of listOf(own(vj, 'rewrites')).slice(0, 512)) {
+      const d = urlHost(own(r, 'destination'));
+      if (d) addDomain(d, 'vercel_json', `${u.prefix}vercel.json rewrites[].destination`);
+    }
+  }
+  const routeHost = r => {
+    const pattern = typeof r === 'string' ? r : typeof own(r, 'pattern') === 'string' ? own(r, 'pattern') : typeof own(r, 'custom_domain') === 'string' ? own(r, 'custom_domain') : null;
+    if (!pattern || pattern.length > 512) return null;
+    return pattern.replace(/^https?:\/\//i, '').split('/')[0];
+  };
+  for (const u of units) {
+    const src = hasIn(u, 'wrangler.toml') ? 'wrangler.toml' : hasIn(u, 'wrangler.json') ? 'wrangler.json' : null;
+    if (!src) continue;
+    const cfg = src === 'wrangler.toml' ? parseToml(u.text[src]).value : jsonObject(u.text[src]);
+    const envs = isPlainObject(own(cfg, 'env')) ? Object.values(own(cfg, 'env')).slice(0, 8) : [];
+    for (const c of [cfg, ...envs]) {
+      for (const r of [own(c, 'route'), ...listOf(own(c, 'routes')).slice(0, 64)]) { const h = routeHost(r); if (h) addDomain(h, 'wrangler', `${u.prefix}${src} routes`); }
+    }
+  }
+  for (const u of units) {
+    if (!hasIn(u, 'netlify.toml')) continue;
+    for (const r of listOf(own(parseToml(u.text['netlify.toml']).value, 'redirects')).slice(0, 512)) {
+      const h = urlHost(own(r, 'from'));
+      if (h) addDomain(h, 'netlify', `${u.prefix}netlify.toml redirects[].from`);
+    }
+  }
+  for (const path of docPaths) for (const h of documentedHosts(docText[path])) addDomain(h, 'docs', path);
+  if (dropped) warn(`${dropped} domain(s) beyond the limit of 32 were dropped`);
+
+  // Agents: fixed names only; worktree names are counted, never stored.
+  const agents = {
+    files: AGENT_FILES.filter(f => inv.present.get(f) === 'file'),
+    dirs: AGENT_DIRS.filter(d => inv.present.get(d) === 'dir'),
+    worktrees: 0,
+  };
+  if (agents.dirs.includes('.agent-worktrees')) agents.worktrees = Math.min((inv.listing.get('.agent-worktrees') ?? []).length, 512);
+
+  if (orderedPlatforms.length > 16) warn(`${orderedPlatforms.length - 16} platform(s) beyond the limit of 16 were dropped`);
+  return { integrations, platforms: orderedPlatforms.slice(0, 16), domains, agents };
 }
 
 function composePort(p) {

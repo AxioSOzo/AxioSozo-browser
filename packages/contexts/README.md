@@ -3,8 +3,10 @@
 Pure, DOM-free logic for contexts, projects, site rules and the usage ledger
 (handoff 3 §4, §6.1–6.3). The same `src/*.mjs` bytes run under Node tests and in
 privileged chrome as `chrome://browser/content/axiosozo/contexts/*.mjs`. The
-module seams are fixed by [contexts-api-v1](../../contracts/contexts-api-v1.md) §2;
-data shapes by [context-v1](../../contracts/context-v1.schema.json),
+module seams are fixed by [contexts-api-v1](../../contracts/contexts-api-v1.md) §2
+and [workstation-v1](../../contracts/workstation-v1.md) §1–§5; data shapes by
+[context-v1](../../contracts/context-v1.schema.json),
+[context-v2](../../contracts/context-v2.schema.json),
 [site-rule-v1](../../contracts/site-rule-v1.schema.json) and
 [decision-v1](../../contracts/decision-v1.md).
 
@@ -30,6 +32,9 @@ data shapes by [context-v1](../../contracts/context-v1.schema.json),
 | `rules.mjs` | host matching, deterministic evaluation, Jev outcome filter, sensitive-host cap, suppressions |
 | `ledger.mjs` | foreground-time ledger: record, query, prune, summarize, export |
 | `checkpoints.mjs` | Jev checkpoint pacing, rolling-hour budget, `site_rule_v1` request builder |
+| `containers.mjs` | per-project container style, shared sites, URL → container routing, integration hosts, account keys and labels |
+| `arrival.mjs` | loopback ports, fixed `lsof` argument arrays and output parsers, root candidates, arrival offers, GitHub/Vercel surface matching |
+| `agent-status.mjs` | Claude Code / Codex / manual hook payloads → status records, the status board, copyable hook snippets |
 | `index.mjs` | public re-exports |
 
 ## Detection (§6.1)
@@ -98,6 +103,43 @@ secondary). Manifest v2 and context store v2, `migrateContextStore`,
 `withProductionUrl` and `matchProjectForUrl` are described in §2.3–§2.5.
 Fixtures: `tauri-plus-web`, `pnpm-monorepo`, `npm-workspaces`
 (`tests/workspace.test.mjs`, `tests/projects.test.mjs`).
+
+### Detection v2: inventory, documented domains (workstation-v1 §1)
+
+Two more phases follow the workspace phase, again with a dumb reader:
+`inventoryPlan({ packageDirs })` names the directories whose child directory
+*names* may be listed (`docs`, `.agent-worktrees`, `ios`, `macos`, each package
+dir and its `ios`/`macos`) and the exact paths that may only be `lstat`'ed
+(`AGENTS.md`, `.claude`, `convex`, Gradle files, …); `inventoryRefusal` is the
+reader policy (in the plan, inside the root, file or dir). `documentFiles(inventory)`
+then allows `docs/domains.md` and `docs/<child>/domains.md` (≤ 8 children) under
+`documentRefusal`. `convex.json` joins the root allowlist (only `functions` is used).
+`detectProject({ …, inventory, docs })` returns a **version 2** draft that adds:
+
+- `integrations` from the fixed `INTEGRATIONS` table: dependency names (exact or
+  `@scope/`), `vercel.json`/`.vercel`, `convex.json`/`convex/`, `wrangler.*`,
+  `netlify.toml`, `fly.toml`; generic dashboard URLs, never keys or env names;
+- `platforms`: Tauri and Electron from the existing detection, macOS/iOS from
+  `.xcodeproj`/`.xcworkspace` names in listed dirs, Android from Gradle presence;
+- `domains`: `vercel.json` redirects/rewrites, Wrangler routes, Netlify redirects,
+  then hosts in backticks or URLs in `domains.md` (unconfirmed). IPs, `localhost`,
+  single labels, wildcards and vendor hosts (`VENDOR_HOST_SUFFIXES`) are excluded;
+- `agents`: which of `AGENTS.md`, `CLAUDE.md`, `.claude`, `.codex`,
+  `.agent-worktrees` exist, and how many worktrees (names are never stored).
+
+Integrations, Tauri/Electron and config domains come from the files alone, so a
+caller without the new phases still gets them; inventory and docs add the rest.
+Fixtures: `harbor-suite` and `inkline` (invented monorepos with Convex, Clerk,
+Stripe, Vercel, Tauri and native apps; `tests/workstation-detect.test.mjs`).
+
+### Project record v2 and context store v3 (workstation-v1 §2)
+
+Project records of version 2 add `detected`, `container.user_context_id`,
+`shared_sites` (`DEFAULT_SHARED_SITES`, unconfirmed by default), `accounts`
+(`{ key, label }`, the label typed by the user) and the stored `brief`
+(understand-v1 §4). Store version 3 holds only version 2 records;
+`migrateContextStore` turns v1, v2 (and v3 documents that still carry v1
+records) into v3 with `upgradeProject`. Versions 1 and 2 keep validating.
 
 ## Deterministic evaluation (§6.2 layer 1)
 
@@ -173,4 +215,7 @@ The fixture repos are in `tests/fixtures/`, and their reviewed drafts are in
 excludes `.env*`, so fixtures keep `_git/config`. `materializeFixture` copies
 each fixture into `tests/.tmp/` (gitignored and removed after each test),
 renames `_git` to `.git`, and plants `.env`, `.env.local` and a key-file trap.
-The tests then prove these are never opened.
+The tests then prove these are never opened. The inventory and docs readers also
+record every path they hand to the file system, and the tests check that each is
+in the plan; Xcode, Gradle, `AGENTS.md`, `.claude` and worktree files in the
+fixtures contain `TRAP` markers that must never reach a draft.

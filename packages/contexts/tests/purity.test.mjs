@@ -8,7 +8,7 @@ import { readdir, readFile, access } from 'node:fs/promises';
 import * as api from '../src/index.mjs';
 
 const SRC = new URL('../src/', import.meta.url);
-const EXPECTED_MODULES = ['checkpoints.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'schema.mjs'];
+const EXPECTED_MODULES = ['agent-status.mjs', 'arrival.mjs', 'checkpoints.mjs', 'containers.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'schema.mjs'];
 const FORBIDDEN = [
   [/['"]node:/, 'node: specifier'], [/\brequire\s*\(/, 'require()'], [/\bimport\s*\(/, 'dynamic import()'], [/\bimport\.meta\b/, 'import.meta'],
   [/\bprocess\s*[.[]/, 'process'], [/\bBuffer\s*[.(]/, 'Buffer'], [/\bfetch\s*\(/, 'fetch'],
@@ -70,6 +70,16 @@ test('index exports the contexts-api-v1 §2 surface', () => {
     'MAX_WORKSPACE_PACKAGES', 'PACKAGE_DETECTION_FILES', 'isPackageDir', 'isAllowedPackagePath', 'packageDetectionRefusal', 'normalizeWorkspacePattern',
     'workspaceCandidates', 'expandWorkspaceGlobs', 'detectionRefusal', 'migrateContextStore', 'projectsInContext', 'CONTEXT_STORE_VERSION',
     'surfaceProminence', 'SURFACE_PROMINENCE', 'PRIMARY_SURFACE_KINDS', 'environmentKey', 'withProductionUrl', 'mainWebApp', 'matchProjectForUrl',
+    // workstation-v1 §1 detection v2.
+    'inventoryPlan', 'inventoryRefusal', 'documentFiles', 'documentRefusal', 'INTEGRATIONS',
+    // §2 project record v2, context store v3.
+    'DEFAULT_SHARED_SITES', 'upgradeProject', 'INTEGRATION_IDS', 'PLATFORM_KINDS', 'DOMAIN_ORIGINS',
+    // §3 containers.
+    'CONTAINER_COLORS', 'projectContainerStyle', 'isSharedSite', 'routeForUrl', 'INTEGRATION_HOSTS', 'accountKeyForHost', 'validateAccountLabel',
+    // §4 arrival and §4.1 surface matching.
+    'loopbackPort', 'LSOF_LISTEN_ARGS', 'LSOF_CWD_ARGS', 'parseLsofListen', 'parseLsofCwd', 'rootCandidates', 'chooseArrivalRoot', 'arrivalOffer', 'matchSurfaceForUrl',
+    // §5 agent status.
+    'parseHookEvent', 'validateStatusRecord', 'STATUS_STATES', 'statusBoard', 'hookConfig',
   ];
   for (const name of required) assert.ok(name in api, name);
   assert.equal(api.MAX_FILE_BYTES, 262144);
@@ -79,6 +89,8 @@ test('index exports the contexts-api-v1 §2 surface', () => {
   assert.equal(api.OVERRIDE_DELAY_MS, 10000);
   assert.equal(api.DEFAULT_INTERVAL_MINUTES, 5);
   assert.equal(api.DEFAULT_HOURLY_BUDGET, 30);
+  assert.equal(api.CONTEXT_STORE_VERSION, 3);
+  assert.deepEqual(api.STATUS_STATES, ['started', 'needs_input', 'done', 'failed']);
   const e = new api.ContextsError('INVALID_RULE', 'bad', '$.id');
   assert.ok(e instanceof Error); assert.equal(e.code, 'INVALID_RULE'); assert.equal(e.path, '$.id'); assert.equal(e.name, 'ContextsError');
 });

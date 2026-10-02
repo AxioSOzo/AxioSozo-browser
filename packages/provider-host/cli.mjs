@@ -12,6 +12,7 @@ import { providerBuildRoot } from './src/storage.mjs';
 import { SANDBOX_POLICY } from './src/sandbox.mjs';
 import { createLiveAdapter, LIVE_POLICY } from './src/live.mjs';
 import { serveStdio } from './src/host.mjs';
+import { UnderstandRunner } from './src/understand.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const [command = 'discover', driver, ...flags] = process.argv.slice(2);
@@ -29,8 +30,14 @@ function sourceFiles(directory) {
 }
 function nativeRun(args) { return run('/Users/wout/.local/bin/dev-external', ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
 try {
-  // Keychain is read only when a decision/site_rule request reaches the network step.
-  if (command === 'serve') await serveStdio({ createAdapter: createLiveAdapter, createDecisionProvider: () => new DecisionProvider({ keyStore: { read: async () => new MacKeychain(helperPath()).read() } }) });
+  // Keychain is read only when a decision request reaches the network step. The OpenAI
+  // adapter is UNVERIFIED_SHAPE: without the test-only fixture flag it never reads its key or
+  // fetches. The understand runner is NOT_AUTHORIZED for live CLIs (liveAuthorized: false).
+  if (command === 'serve') await serveStdio({ createAdapter: createLiveAdapter,
+    createDecisionProvider: () => new DecisionProvider({ keyStore: { read: async () => new MacKeychain(helperPath()).read() },
+      openaiKeyStore: { read: async () => new MacKeychain(helperPath(), 'openai').read() } }),
+    createKeyStore: provider => new MacKeychain(helperPath(), provider),
+    createUnderstandRunner: () => new UnderstandRunner({ liveAuthorized: false }) });
   else if (command === 'discover') print({ version: 1, discovery: 'metadata-only; no client execution', providers: discover() });
   else if (command === 'check') {
     for (const source of sourceFiles(root)) if (!run(process.execPath, ['--check', source])) break;

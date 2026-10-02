@@ -5,11 +5,19 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Only this development service/account. Never reads provider credentials.
+/* Only these development services/account (one Keychain item per decision
+ * provider: `<operation>` alone keeps the original Jev item, `<operation> openai`
+ * selects the separate OpenAI item). Never reads provider-client credentials.
  * Secrets pass via owned pipes, never argv, logs, files, or browser storage. */
 int main(int argc, char **argv) {
   @autoreleasepool {
-  if (argc != 2) return 2;
+  if (argc != 2 && argc != 3) return 2;
+  /* Fixed provider selector; anything else exits before any SecItem call. */
+  int openai = 0;
+  if (argc == 3) {
+    if (!strcmp(argv[2], "openai")) openai = 1;
+    else if (strcmp(argv[2], "jev")) return 2;
+  }
   CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0,
       &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
@@ -17,13 +25,15 @@ int main(int argc, char **argv) {
   /* Separate test binary only: no actual keychain is in the search scope.
    * kSecMatchSearchList explicitly limits queries to the supplied array.
    * Do not enable mutation in this build or expose a runtime test toggle. */
-  CFDictionarySetValue(query, kSecAttrService, CFSTR("nl.axiosozo.browser.dev.jev.negative-fixture"));
+  CFDictionarySetValue(query, kSecAttrService, openai ? CFSTR("nl.axiosozo.browser.dev.openai.negative-fixture")
+                                                      : CFSTR("nl.axiosozo.browser.dev.jev.negative-fixture"));
   CFDictionarySetValue(query, kSecAttrAccount, CFSTR("synthetic-no-key"));
   CFArrayRef empty = CFArrayCreate(NULL, NULL, 0, &kCFTypeArrayCallBacks);
   CFDictionarySetValue(query, kSecMatchSearchList, empty);
   CFRelease(empty);
 #else
-  CFDictionarySetValue(query, kSecAttrService, CFSTR("nl.axiosozo.browser.dev.jev"));
+  CFDictionarySetValue(query, kSecAttrService, openai ? CFSTR("nl.axiosozo.browser.dev.openai")
+                                                      : CFSTR("nl.axiosozo.browser.dev.jev"));
   CFDictionarySetValue(query, kSecAttrAccount, CFSTR("user-supplied-api-key"));
 #endif
   LAContext *context = [[LAContext alloc] init];

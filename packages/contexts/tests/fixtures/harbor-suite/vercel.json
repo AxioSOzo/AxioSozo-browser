@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    { "source": "/(.*)", "has": [{ "type": "host", "value": "harborsuite.app" }], "destination": "https://www.harborsuite.app/$1", "permanent": true },
+    { "source": "/(.*)", "has": [{ "type": "host", "value": "(?<sub>.*)\\.harborsuite\\.app" }], "destination": "/$1", "permanent": false },
+    { "source": "/help/:path*", "destination": "https://docs.harborsuite.app/:path*", "permanent": false },
+    { "source": "/status", "destination": "https://harbor-suite.vercel.app/status", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://api.harborsuite.app/:path*" },
+    { "source": "/sync/:path*", "destination": "https://quiet-otter-123.convex.site/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

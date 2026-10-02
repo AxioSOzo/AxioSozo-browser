@@ -19,8 +19,9 @@ const context = (uuid, over = {}) => ({ version: 1, workspace_uuid: uuid, type: 
 const project = (id, over = {}) => ({ version: 1, id, root: `/Volumes/Work/${id}`, manifest: manifest(), manifest_state: 'none', context_uuid: null, trusted: false, created_at: 1, updated_at: 2, ...over });
 
 test('store v2: several projects in one space of any type; v1 stores still load', () => {
-  assert.equal(CONTEXT_STORE_VERSION, 2);
-  assert.equal(DEFAULT_CONTEXT_STORE.version, 2);
+  // Store v3 (workstation-v1 §2) is the current version; v2 stores keep validating.
+  assert.equal(CONTEXT_STORE_VERSION, 3);
+  assert.equal(DEFAULT_CONTEXT_STORE.version, 3);
   const v2 = validateContextStore({ version: 2, contexts: [context(UUID_A), context(UUID_B, { type: 'organization' })],
     projects: [project('p_one1', { context_uuid: UUID_A }), project('p_two2', { context_uuid: UUID_A }), project('p_org3', { context_uuid: UUID_B })] });
   assert.deepEqual(projectsInContext(v2, UUID_A).map(p => p.id), ['p_one1', 'p_two2'], 'a personal space holds two projects');
@@ -30,7 +31,8 @@ test('store v2: several projects in one space of any type; v1 stores still load'
   assert.equal(validateContextStore({ ...v2, contexts: [context(UUID_A, { project_id: 'p_one1' })] }).contexts[0].project_id, 'p_one1');
   throwsCode(() => validateContextStore({ ...v2, contexts: [context(UUID_A, { project_id: 'p_org3' })] }), 'INVALID_CONTEXT_STORE', '$.contexts[0].project_id');
   throwsCode(() => validateContextStore({ ...v2, contexts: [context(UUID_A, { project_id: 'p_gone' })] }), 'INVALID_CONTEXT_STORE', '$.contexts[0].project_id');
-  throwsCode(() => validateContextStore({ ...v2, version: 3 }), 'INVALID_CONTEXT_STORE', '$.version');
+  throwsCode(() => validateContextStore({ ...v2, version: 4 }), 'INVALID_CONTEXT_STORE', '$.version');
+  throwsCode(() => validateContextStore({ ...v2, version: 3 }), 'INVALID_CONTEXT_STORE', '$.projects[0].version');
   // v1 (as written by existing profiles) keeps loading unchanged, including inconsistent links.
   const v1 = { version: 1, contexts: [context(UUID_A, { type: 'project', project_id: 'p_one1' })], projects: [project('p_one1')] };
   assert.equal(validateContextStore(v1).version, 1);
@@ -51,7 +53,8 @@ test('migrateContextStore: v1 contexts[].project_id → projects[].context_uuid,
   const out = migrateContextStore(v1);
   assert.equal(JSON.stringify(v1), before, 'input untouched');
   assert.ok(Object.isFrozen(out) && Object.isFrozen(out.projects[0]));
-  assert.equal(out.version, 2);
+  assert.equal(out.version, 3, 'v1 → v3 in one step');
+  assert.ok(out.projects.every(p => p.version === 2 && p.brief === null));
   assert.deepEqual(out.contexts.map(c => [c.workspace_uuid, c.type, c.project_id, c.organization_uuid]),
     [[UUID_A, 'project', null, UUID_C], [UUID_B, 'personal', null, null], [UUID_C, 'organization', null, null]]);
   assert.deepEqual(out.projects.map(p => [p.id, p.context_uuid, p.updated_at]), [['p_one1', UUID_A, 2], ['p_two2', UUID_B, 2], ['p_free', null, 9]]);

@@ -1,5 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+// Reference readers for the four detection phases (contexts-api-v1 §2.1–§2.2,
+// workstation-v1 §1.2–§1.3); detectFixture runs them in order.
+//
 // Test-only emulation of the chrome detection reader (contexts-api-v1 §2.1):
 // reads exactly DETECTION_FILES, lstat + realpath first, applies the shared
 // detectionRefusal policy (root containment, allowlisted symlink targets,
@@ -8,7 +11,8 @@ import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeF
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  DETECTION_FILES, PACKAGE_DETECTION_FILES, detectionRefusal, expandWorkspaceGlobs, packageDetectionRefusal, workspaceCandidates,
+  DETECTION_FILES, PACKAGE_DETECTION_FILES, detectProject, detectionRefusal, documentFiles, documentRefusal, expandWorkspaceGlobs, inventoryPlan,
+  inventoryRefusal, packageDetectionRefusal, workspaceCandidates,
 } from '../src/detect.mjs';
 
 export const TESTS_DIR = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +70,73 @@ export async function readFixtureWorkspace(root, rootFiles) {
     if (Object.keys(files).length || refused.length) packages[dir] = { files, refused };
   }
   return { plan, listing, listed, dirs, packages, opened };
+}
+
+// Test-only emulation of the chrome inventory reader (workstation-v1 §1.2):
+// only the plan's paths are touched. For `list` paths it lists the names of the
+// immediate child directories (and symlinks), for `check` paths it reports
+// "file" or "dir" after lstat + realpath; nothing is opened or read. Paths
+// refused by inventoryRefusal (outside the root, other kinds) count as absent.
+// `touched` records every relative path handed to the file system.
+export async function readFixtureInventory(root, packageDirs) {
+  const plan = inventoryPlan({ packageDirs });
+  const realRoot = await realpath(root);
+  const listing = {}, present = {}, touched = [];
+  const resolve = async rel => {
+    touched.push(rel);
+    const full = join(root, ...rel.split('/'));
+    try { await lstat(full); } catch { return null; }
+    let real, info;
+    try { real = await realpath(full); info = await stat(real); } catch { return null; }
+    const inside = real.startsWith(realRoot + sep);
+    const kind = info.isFile() ? 'file' : info.isDirectory() ? 'dir' : 'other';
+    const reason = inventoryRefusal({ path: rel, resolvedPath: inside ? relative(realRoot, real).split(sep).join('/') : null, kind, plan });
+    return reason ? null : { real, kind };
+  };
+  for (const dir of plan.list) {
+    const r = await resolve(dir);
+    if (!r || r.kind !== 'dir') continue;
+    const entries = await readdir(r.real, { withFileTypes: true });
+    // exFAT volumes add AppleDouble `._*` entries; they are never project content.
+    listing[dir] = entries.filter(e => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('._')).map(e => e.name);
+  }
+  for (const path of plan.check) {
+    const r = await resolve(path);
+    if (r) present[path] = r.kind;
+  }
+  return { plan, inventory: { listing, present }, touched };
+}
+
+// Test-only emulation of the chrome docs reader (workstation-v1 §1.3): reads
+// exactly documentFiles(inventory) with documentRefusal and strict UTF-8.
+export async function readFixtureDocs(root, inventory) {
+  const paths = documentFiles(inventory);
+  const realRoot = await realpath(root);
+  const docs = {}, refused = [], opened = [], touched = [];
+  for (const rel of paths) {
+    touched.push(rel);
+    const full = join(root, ...rel.split('/'));
+    try { await lstat(full); } catch { continue; }
+    let real, info;
+    try { real = await realpath(full); info = await stat(real); } catch { refused.push({ path: rel, reason: 'unreadable' }); continue; }
+    const inside = real.startsWith(realRoot + sep);
+    const reason = documentRefusal({ path: rel, resolvedPath: inside ? relative(realRoot, real).split(sep).join('/') : null, isFile: info.isFile(), size: info.size });
+    if (reason) { refused.push({ path: rel, reason }); continue; }
+    opened.push(relative(realRoot, real).split(sep).join('/'));
+    const bytes = await readFile(real);
+    try { docs[rel] = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { refused.push({ path: rel, reason: 'invalid_utf8' }); }
+  }
+  return { paths, docs, refused, opened, touched };
+}
+
+// All four phases, as chrome runs them, then detectProject.
+export async function detectFixture(root, rootName) {
+  const repo = await readFixtureRepo(root);
+  const ws = await readFixtureWorkspace(root, repo.files);
+  const inv = await readFixtureInventory(root, ws.dirs);
+  const doc = await readFixtureDocs(root, inv.inventory);
+  const draft = detectProject({ rootName, files: repo.files, refused: [...repo.refused, ...doc.refused], packages: ws.packages, inventory: inv.inventory, docs: doc.docs });
+  return { draft, repo, ws, inv, doc, opened: [...repo.opened, ...ws.opened, ...doc.opened] };
 }
 
 // Copies a committed fixture into tests/.tmp/<unique>/<name>, restoring the

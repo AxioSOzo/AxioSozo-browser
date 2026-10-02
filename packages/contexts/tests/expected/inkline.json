@@ -1,0 +1,217 @@
+{
+  "version": 2,
+  "name": "inkline",
+  "kind": "web",
+  "kind_source": {
+    "source": ".vercel/project.json",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:5181/",
+      "app": "admin",
+      "source": "apps/admin/package.json scripts.dev (vite port 5181)",
+      "guess": false
+    },
+    {
+      "name": "local",
+      "base_url": "http://localhost:5180/",
+      "app": "web",
+      "source": "apps/web/package.json scripts.dev (vite port 5180)",
+      "guess": false
+    }
+  ],
+  "services": [
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5181/",
+      "port": 5181,
+      "app": "admin",
+      "source": "apps/admin/package.json scripts.dev (vite port 5181)",
+      "guess": false
+    },
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5180/",
+      "port": 5180,
+      "app": "web",
+      "source": "apps/web/package.json scripts.dev (vite port 5180)",
+      "guess": false
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/inkline-studio/inkline",
+      "kind": "repository",
+      "prominence": "primary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/inkline-studio/inkline/issues",
+      "kind": "issues",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/inkline-studio/inkline/actions",
+      "kind": "ci",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/inkline-studio/inkline/releases",
+      "kind": "releases",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Vercel (inkline-web)",
+      "url": "https://vercel.com/dashboard",
+      "kind": "hosting",
+      "prominence": "secondary",
+      "source": ".vercel/project.json",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "vite"
+  ],
+  "files_read": [
+    "package.json",
+    ".vercel/project.json",
+    "vercel.json",
+    ".git/config",
+    "convex.json",
+    "apps/admin/package.json",
+    "apps/web/package.json",
+    "packages/cli/package.json",
+    "packages/client/package.json",
+    "packages/protocol/package.json",
+    "docs/development/domains.md",
+    "docs/production/domains.md"
+  ],
+  "refused": [],
+  "warnings": [],
+  "integrations": [
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "dashboard_url": "https://vercel.com/dashboard",
+      "sources": [
+        "package.json#dependencies",
+        "vercel.json",
+        ".vercel/project.json"
+      ]
+    },
+    {
+      "id": "convex",
+      "name": "Convex",
+      "dashboard_url": "https://dashboard.convex.dev/",
+      "sources": [
+        "package.json#dependencies",
+        "convex.json#functions",
+        "apps/admin/package.json#dependencies",
+        "apps/web/package.json#dependencies"
+      ]
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "dashboard_url": "https://dashboard.stripe.com/",
+      "sources": [
+        "package.json#dependencies",
+        "apps/web/package.json#dependencies"
+      ]
+    }
+  ],
+  "platforms": [
+    {
+      "kind": "macos",
+      "name": "InklineDesktop",
+      "path": "apps/macos",
+      "source": "apps/macos/InklineDesktop.xcodeproj"
+    },
+    {
+      "kind": "ios",
+      "name": "InklineIOS",
+      "path": "apps/ios",
+      "source": "apps/ios/InklineIOS.xcodeproj"
+    },
+    {
+      "kind": "android",
+      "name": "android",
+      "path": "apps/android",
+      "source": "apps/android/build.gradle.kts"
+    }
+  ],
+  "domains": [
+    {
+      "host": "www.inkline.studio",
+      "origin": "vercel_json",
+      "source": "vercel.json redirects[].has",
+      "confirmed": false
+    },
+    {
+      "host": "inkline.studio",
+      "origin": "vercel_json",
+      "source": "vercel.json redirects[].destination",
+      "confirmed": false
+    },
+    {
+      "host": "api.inkline.studio",
+      "origin": "vercel_json",
+      "source": "vercel.json rewrites[].destination",
+      "confirmed": false
+    },
+    {
+      "host": "preview.inkline.studio",
+      "origin": "docs",
+      "source": "docs/development/domains.md",
+      "confirmed": false
+    },
+    {
+      "host": "app.inkline.studio",
+      "origin": "docs",
+      "source": "docs/production/domains.md",
+      "confirmed": false
+    },
+    {
+      "host": "docs.inkline.studio",
+      "origin": "docs",
+      "source": "docs/production/domains.md",
+      "confirmed": false
+    },
+    {
+      "host": "dashboard.inkline.studio",
+      "origin": "docs",
+      "source": "docs/production/domains.md",
+      "confirmed": false
+    },
+    {
+      "host": "realtime.inkline.studio",
+      "origin": "docs",
+      "source": "docs/production/domains.md",
+      "confirmed": false
+    }
+  ],
+  "agents": {
+    "files": [
+      "AGENTS.md"
+    ],
+    "dirs": [
+      ".claude",
+      ".codex",
+      ".agent-worktrees"
+    ],
+    "worktrees": 1
+  }
+}

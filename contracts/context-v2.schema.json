@@ -1,0 +1,779 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axiosozo.invalid/contracts/context-v2.schema.json",
+  "title": "AxioSozo detection draft v2, project record v2 and context store v3",
+  "description": "workstation-v1 §1–§2 (Plan 4). Extends context-v1.schema.json, which still defines every unchanged record (context metadata, manifests, detection draft v1 fields, project record v1 fields). Every object rejects unknown properties. Checks delegated to code (packages/contexts/src/schema.mjs): uniqueness of integration ids, domain hosts, account keys and shared-site hosts; host label rules and the 253-byte limit; at most 16 path segments; worktrees > 0 only with .agent-worktrees present; strings are stored trimmed. Version 1 drafts, version 1 project records and store versions 1 and 2 keep validating unchanged.",
+  "$defs": {
+    "integrationId": {
+      "description": "workstation-v1 §1.4 INTEGRATIONS, in display order.",
+      "enum": [
+        "vercel",
+        "convex",
+        "clerk",
+        "stripe",
+        "supabase",
+        "firebase",
+        "cloudflare",
+        "netlify",
+        "fly",
+        "sentry"
+      ]
+    },
+    "hostPattern": {
+      "description": "Lower-case ASCII host, or \"*.\" plus a suffix of at least two labels (validateHostPattern).",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(\\*\\.[a-z0-9-]{1,63}(\\.[a-z0-9-]{1,63})+|[a-z0-9-]{1,63}(\\.[a-z0-9-]{1,63})*)$"
+    },
+    "plainHost": {
+      "description": "A host without wildcard.",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9-]{1,63}(\\.[a-z0-9-]{1,63})*$"
+    },
+    "relativeDir": {
+      "description": "Relative directory inside the project: \"\" is the root; no leading \"/\", no \".\", \"..\" or empty segments, no backslash or control characters.",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^(?!(.*/)?\\.\\.?(/|$))(|[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+(/[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+)*)$"
+    },
+    "integration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "dashboard_url",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/integrationId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+        },
+        "dashboard_url": {
+          "$ref": "context-v1.schema.json#/$defs/manifestUrl",
+          "description": "Generic dashboard URL; never a project id."
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Evidence: \"package.json#dependencies\", \"apps/web/package.json#devDependencies\", \"vercel.json\", \"convex.json#functions\", \"convex/\", … Never keys, env names or values."
+        }
+      }
+    },
+    "platformKind": {
+      "enum": [
+        "tauri",
+        "macos",
+        "ios",
+        "android",
+        "electron"
+      ]
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "path",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/platformKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$",
+          "description": "Display name: Xcode project base name, package dir last segment, Tauri/Electron product name."
+        },
+        "path": {
+          "$ref": "#/$defs/relativeDir"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+        }
+      }
+    },
+    "domainOrigin": {
+      "enum": [
+        "vercel_json",
+        "wrangler",
+        "netlify",
+        "fly",
+        "docs"
+      ]
+    },
+    "draftDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "origin",
+        "source",
+        "confirmed"
+      ],
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/plainHost"
+        },
+        "origin": {
+          "$ref": "#/$defs/domainOrigin"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+        },
+        "confirmed": {
+          "const": false,
+          "description": "Never true in a draft; docs-only hosts are shown as \"found in docs, unconfirmed\"."
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "origin",
+        "source",
+        "confirmed"
+      ],
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/plainHost"
+        },
+        "origin": {
+          "$ref": "#/$defs/domainOrigin"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "agentPresence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "files",
+        "dirs",
+        "worktrees"
+      ],
+      "properties": {
+        "files": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "AGENTS.md",
+              "CLAUDE.md"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "dirs": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "enum": [
+              ".claude",
+              ".codex",
+              ".agent-worktrees"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "worktrees": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 512,
+          "description": "Number of child directories of .agent-worktrees; their names are never stored."
+        }
+      }
+    },
+    "detectionDraftV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "kind_source",
+        "environments",
+        "services",
+        "surfaces",
+        "frameworks",
+        "files_read",
+        "refused",
+        "warnings",
+        "integrations",
+        "platforms",
+        "domains",
+        "agents"
+      ],
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "name": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/name"
+        },
+        "kind": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/kind"
+        },
+        "kind_source": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/kind_source"
+        },
+        "environments": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/environments"
+        },
+        "services": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/services"
+        },
+        "surfaces": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/surfaces"
+        },
+        "frameworks": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/frameworks"
+        },
+        "files_read": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/files_read"
+        },
+        "refused": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/refused"
+        },
+        "warnings": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/warnings"
+        },
+        "integrations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/integration"
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/platform"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/draftDomain"
+          },
+          "description": "Hosts deduplicated, explicit configuration before docs."
+        },
+        "agents": {
+          "$ref": "#/$defs/agentPresence"
+        }
+      },
+      "description": "workstation-v1 §1.4: detection draft version 1 plus integrations, platforms, domains and agents."
+    },
+    "detectionDraft": {
+      "oneOf": [
+        {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft"
+        },
+        {
+          "$ref": "#/$defs/detectionDraftV2"
+        }
+      ]
+    },
+    "detected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "integrations",
+        "platforms",
+        "domains",
+        "agents"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "context-v1.schema.json#/$defs/timestamp"
+        },
+        "integrations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/integration"
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/platform"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/domain"
+          }
+        },
+        "agents": {
+          "$ref": "#/$defs/agentPresence"
+        }
+      },
+      "description": "What detection found when the project was last detected; domains may be confirmed by the user."
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_context_id"
+      ],
+      "properties": {
+        "user_context_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            }
+          ],
+          "description": "Gecko contextual identity (userContextId) of this project, or null before it exists."
+        }
+      }
+    },
+    "sharedSites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hosts",
+        "confirmed"
+      ],
+      "properties": {
+        "hosts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/hostPattern"
+          },
+          "uniqueItems": true,
+          "description": "Sites that keep the space default container. Default: DEFAULT_SHARED_SITES."
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "accountLabel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$",
+      "description": "Free text typed by the user, stored trimmed, no control characters. Never filled from cookies, tokens or page content."
+    },
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "label"
+      ],
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/integrationId"
+            },
+            {
+              "$ref": "#/$defs/hostPattern"
+            }
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/accountLabel"
+        }
+      }
+    },
+    "briefApp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "path",
+        "summary"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+        },
+        "kind": {
+          "enum": [
+            "web",
+            "desktop",
+            "mobile",
+            "api",
+            "docs",
+            "cli",
+            "library",
+            "other"
+          ]
+        },
+        "path": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/relativeDir"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "pattern": "^([^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]([^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f])?)?$"
+        }
+      }
+    },
+    "briefDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "product",
+        "apps",
+        "domains",
+        "services",
+        "start",
+        "risks"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "^([^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]([^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f])?)?$"
+        },
+        "apps": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/briefApp"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "host",
+              "purpose"
+            ],
+            "properties": {
+              "host": {
+                "$ref": "#/$defs/plainHost"
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 120,
+                "pattern": "^([^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]([^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f])?)?$"
+              }
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "purpose"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 120,
+                "pattern": "^([^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]([^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f])?)?$"
+              }
+            }
+          }
+        },
+        "start": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "command",
+              "cwd"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+              },
+              "cwd": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/relativeDir"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "risks": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^([^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]([^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f])?)?$"
+          }
+        }
+      },
+      "description": "understand-v1 §3.1."
+    },
+    "briefRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "cli",
+        "generated_at",
+        "accepted",
+        "document"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "cli": {
+          "enum": [
+            "claude-code",
+            "codex"
+          ]
+        },
+        "generated_at": {
+          "$ref": "context-v1.schema.json#/$defs/timestamp"
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "document": {
+          "$ref": "#/$defs/briefDocument"
+        }
+      },
+      "description": "understand-v1 §4. Stored in the profile only; never written to .axiosozo/project.json."
+    },
+    "projectV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "root",
+        "manifest",
+        "manifest_state",
+        "context_uuid",
+        "trusted",
+        "created_at",
+        "updated_at",
+        "detected",
+        "container",
+        "shared_sites",
+        "accounts",
+        "brief"
+      ],
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "id": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/id"
+        },
+        "root": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/root"
+        },
+        "manifest": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/manifest"
+        },
+        "manifest_state": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/manifest_state"
+        },
+        "context_uuid": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/context_uuid"
+        },
+        "trusted": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/trusted"
+        },
+        "created_at": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/created_at"
+        },
+        "updated_at": {
+          "$ref": "context-v1.schema.json#/$defs/project/properties/updated_at"
+        },
+        "detected": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/detected"
+            }
+          ]
+        },
+        "container": {
+          "$ref": "#/$defs/container"
+        },
+        "shared_sites": {
+          "$ref": "#/$defs/sharedSites"
+        },
+        "accounts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/account"
+          }
+        },
+        "brief": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/briefRecord"
+            }
+          ]
+        }
+      },
+      "description": "workstation-v1 §2: profile-local project record version 2 (never written to the manifest)."
+    },
+    "project": {
+      "oneOf": [
+        {
+          "$ref": "context-v1.schema.json#/$defs/project"
+        },
+        {
+          "$ref": "#/$defs/projectV2"
+        }
+      ]
+    },
+    "contextStoreV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "contexts",
+        "projects"
+      ],
+      "properties": {
+        "version": {
+          "const": 3
+        },
+        "contexts": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "context-v1.schema.json#/$defs/contextMetadata"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/projectV2"
+          }
+        }
+      },
+      "description": "Profile file axiosozo/contexts.json, version 3 = version 2 whose projects are records of version 2. contexts[].project_id must be null or mirror a project whose context_uuid is that workspace (enforced in code). migrateContextStore() converts v1/v2 to v3."
+    },
+    "contextStore": {
+      "oneOf": [
+        {
+          "$ref": "context-v1.schema.json#/$defs/contextStore"
+        },
+        {
+          "$ref": "#/$defs/contextStoreV3"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/contextStore"
+    },
+    {
+      "$ref": "context-v1.schema.json#/$defs/manifest"
+    },
+    {
+      "$ref": "#/$defs/detectionDraft"
+    }
+  ]
+}

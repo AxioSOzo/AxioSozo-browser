@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "compose-fly",
   "kind": "web",
   "kind_source": {
@@ -63,5 +63,22 @@
   "warnings": [
     "docker-compose.yml: services.dns port udp, ignored",
     "docker-compose.yml: services.lan port bound to a non-loopback address, ignored"
-  ]
+  ],
+  "integrations": [
+    {
+      "id": "fly",
+      "name": "Fly.io",
+      "dashboard_url": "https://fly.io/dashboard",
+      "sources": [
+        "fly.toml"
+      ]
+    }
+  ],
+  "platforms": [],
+  "domains": [],
+  "agents": {
+    "files": [],
+    "dirs": [],
+    "worktrees": 0
+  }
 }

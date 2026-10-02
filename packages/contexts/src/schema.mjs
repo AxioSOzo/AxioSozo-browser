@@ -24,7 +24,24 @@ export const SURFACE_PROMINENCE = Object.freeze(['primary', 'secondary']);
 // behind the "…" menu unless a surface says otherwise.
 export const PRIMARY_SURFACE_KINDS = Object.freeze(['repository', 'package', 'store']);
 export const MANIFEST_VERSIONS = Object.freeze([1, 2]);
-export const CONTEXT_STORE_VERSION = 2;
+export const CONTEXT_STORE_VERSION = 3;
+export const CONTEXT_STORE_VERSIONS = Object.freeze([1, 2, 3]);
+export const PROJECT_RECORD_VERSIONS = Object.freeze([1, 2]);
+// Detection v2 and project record v2 (workstation-v1 §1–§2).
+export const INTEGRATION_IDS = Object.freeze(['vercel', 'convex', 'clerk', 'stripe', 'supabase', 'firebase', 'cloudflare', 'netlify', 'fly', 'sentry']);
+export const PLATFORM_KINDS = Object.freeze(['tauri', 'macos', 'ios', 'android', 'electron']);
+export const DOMAIN_ORIGINS = Object.freeze(['vercel_json', 'wrangler', 'netlify', 'fly', 'docs']);
+export const AGENT_FILES = Object.freeze(['AGENTS.md', 'CLAUDE.md']);
+export const AGENT_DIRS = Object.freeze(['.claude', '.codex', '.agent-worktrees']);
+// Sites that keep the space's default container in every project (one GitHub
+// account everywhere, …). Offered as a default; the user confirms.
+export const DEFAULT_SHARED_SITES = Object.freeze([
+  'github.com', '*.github.com', 'gitlab.com', 'bitbucket.org', 'npmjs.com', '*.npmjs.com', 'stackoverflow.com', 'developer.mozilla.org',
+]);
+export const BRIEF_APP_KINDS = Object.freeze(['web', 'desktop', 'mobile', 'api', 'docs', 'cli', 'library', 'other']);
+export const UNDERSTAND_CLIS = Object.freeze(['claude-code', 'codex']);
+// Gecko userContextId is an unsigned 32-bit integer; 0 is the default (no container).
+export const MAX_USER_CONTEXT_ID = 4294967295;
 
 const UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
 const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
@@ -251,14 +268,154 @@ function contextMetadata(v, code, path) {
   if (out.organization_uuid !== null && out.organization_uuid === out.workspace_uuid) fail(code, `${path}.organization_uuid`, 'a context cannot belong to itself');
   return out;
 }
-function project(v, code, path) {
-  keys(v, code, path, ['version', 'id', 'root', 'manifest', 'manifest_state', 'context_uuid', 'trusted', 'created_at', 'updated_at']);
+// ---- workstation-v1 §1–§2: detection v2 fields, project record v2 ----
+
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/u;
+const CONTROL_MULTILINE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u;
+// One line of display text: trimmed, min–max code points, no control characters.
+function line(v, code, path, min, max) {
+  if (typeof v !== 'string') fail(code, path, 'expected a string');
+  const s = v.trim();
+  if (CONTROL.test(s)) fail(code, path, 'control characters are not allowed');
+  return str(s, code, path, { min, max });
+}
+// Multi-line text (newlines and tabs allowed), trimmed.
+function text(v, code, path, min, max) {
+  if (typeof v !== 'string') fail(code, path, 'expected a string');
+  const s = v.trim();
+  if (CONTROL_MULTILINE.test(s)) fail(code, path, 'control characters are not allowed');
+  return str(s, code, path, { min, max });
+}
+// A relative directory inside a project: "" (the root, when allowed) or plain
+// segments without ".", "..", empty segments, backslashes or a leading "/".
+function relDir(v, code, path, { allowEmpty = true, max = 200 } = {}) {
+  str(v, code, path, { max });
+  if (v === '') { if (!allowEmpty) fail(code, path, 'expected a non-empty relative path'); return v; }
+  if (v.startsWith('/') || v.includes('\\') || CONTROL.test(v)) fail(code, path, 'expected a relative path');
+  const segs = v.split('/');
+  if (segs.length > 16 || segs.some(s => !s || s === '.' || s === '..')) fail(code, path, 'expected a relative path without ".", ".." or empty segments');
+  return v;
+}
+function plainHost(v, code, path) {
+  const h = hostPattern(v, code, path);
+  if (h.startsWith('*.')) fail(code, path, 'wildcards are not allowed here');
+  return h;
+}
+function integration(v, code, path) {
+  keys(v, code, path, ['id', 'name', 'dashboard_url', 'sources']);
+  return {
+    id: oneOf(v.id, INTEGRATION_IDS, code, `${path}.id`),
+    name: line(v.name, code, `${path}.name`, 1, 64),
+    dashboard_url: webUrl(v.dashboard_url, code, `${path}.dashboard_url`),
+    sources: unique(arr(v.sources, code, `${path}.sources`, { min: 1, max: 8 }).map((s, i) => line(s, code, `${path}.sources[${i}]`, 1, 256)), s => s, code, `${path}.sources`),
+  };
+}
+function platform(v, code, path) {
+  keys(v, code, path, ['kind', 'name', 'path', 'source']);
+  return {
+    kind: oneOf(v.kind, PLATFORM_KINDS, code, `${path}.kind`),
+    name: line(v.name, code, `${path}.name`, 1, 64),
+    path: relDir(v.path, code, `${path}.path`),
+    source: line(v.source, code, `${path}.source`, 1, 256),
+  };
+}
+// `confirmed` is never true in a detection draft; a project record may hold
+// domains the user confirmed.
+function domain(v, code, path, draft) {
+  keys(v, code, path, ['host', 'origin', 'source', 'confirmed']);
+  const out = {
+    host: plainHost(v.host, code, `${path}.host`),
+    origin: oneOf(v.origin, DOMAIN_ORIGINS, code, `${path}.origin`),
+    source: line(v.source, code, `${path}.source`, 1, 256),
+    confirmed: bool(v.confirmed, code, `${path}.confirmed`),
+  };
+  if (draft && out.confirmed) fail(code, `${path}.confirmed`, 'is never true in a detection draft');
+  return out;
+}
+function agentPresence(v, code, path) {
+  keys(v, code, path, ['files', 'dirs', 'worktrees']);
+  const out = {
+    files: unique(arr(v.files, code, `${path}.files`, { max: AGENT_FILES.length }).map((f, i) => oneOf(f, AGENT_FILES, code, `${path}.files[${i}]`)), f => f, code, `${path}.files`),
+    dirs: unique(arr(v.dirs, code, `${path}.dirs`, { max: AGENT_DIRS.length }).map((d, i) => oneOf(d, AGENT_DIRS, code, `${path}.dirs[${i}]`)), d => d, code, `${path}.dirs`),
+    worktrees: int(v.worktrees, code, `${path}.worktrees`, 0, 512),
+  };
+  if (out.worktrees > 0 && !out.dirs.includes('.agent-worktrees')) fail(code, `${path}.worktrees`, 'worktrees require .agent-worktrees in dirs');
+  return out;
+}
+export const EMPTY_AGENT_PRESENCE = deepFreeze({ files: [], dirs: [], worktrees: 0 });
+function v2Fields(v, code, path, draft) {
+  return {
+    integrations: unique(arr(v.integrations, code, `${path}.integrations`, { max: 16 }).map((x, i) => integration(x, code, `${path}.integrations[${i}]`)), x => x.id, code, `${path}.integrations`),
+    platforms: arr(v.platforms, code, `${path}.platforms`, { max: 16 }).map((x, i) => platform(x, code, `${path}.platforms[${i}]`)),
+    domains: unique(arr(v.domains, code, `${path}.domains`, { max: 32 }).map((x, i) => domain(x, code, `${path}.domains[${i}]`, draft)), x => x.host, code, `${path}.domains`),
+    agents: agentPresence(v.agents, code, `${path}.agents`),
+  };
+}
+const V2_DRAFT_KEYS = ['integrations', 'platforms', 'domains', 'agents'];
+function detected(v, code, path) {
+  keys(v, code, path, ['at', ...V2_DRAFT_KEYS]);
+  return { at: timestamp(v.at, code, `${path}.at`), ...v2Fields(v, code, path, false) };
+}
+function accountLabel(v, code, path) { return line(v, code, path, 1, 80); }
+export const validateAccountLabel = s => accountLabel(s, 'INVALID_INPUT', '$');
+function accountKey(v, code, path) {
+  if (typeof v === 'string' && INTEGRATION_IDS.includes(v)) return v;
+  return hostPattern(v, code, path);
+}
+// understand-v1 §3.1 brief document and §4 stored brief record.
+function briefDocument(v, code, path) {
+  keys(v, code, path, ['version', 'product', 'apps', 'domains', 'services', 'start', 'risks']);
   if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  return {
+    version: 1,
+    product: text(v.product, code, `${path}.product`, 1, 600),
+    apps: arr(v.apps, code, `${path}.apps`, { max: 16 }).map((a, i) => {
+      const p = `${path}.apps[${i}]`; keys(a, code, p, ['name', 'kind', 'path', 'summary']);
+      return { name: line(a.name, code, `${p}.name`, 1, 64), kind: oneOf(a.kind, BRIEF_APP_KINDS, code, `${p}.kind`),
+        path: nullable(a.path, x => relDir(x, code, `${p}.path`)), summary: text(a.summary, code, `${p}.summary`, 0, 200) };
+    }),
+    domains: unique(arr(v.domains, code, `${path}.domains`, { max: 32 }).map((d, i) => {
+      const p = `${path}.domains[${i}]`; keys(d, code, p, ['host', 'purpose']);
+      return { host: plainHost(d.host, code, `${p}.host`), purpose: text(d.purpose, code, `${p}.purpose`, 0, 120) };
+    }), d => d.host, code, `${path}.domains`),
+    services: arr(v.services, code, `${path}.services`, { max: 16 }).map((s, i) => {
+      const p = `${path}.services[${i}]`; keys(s, code, p, ['name', 'purpose']);
+      return { name: line(s.name, code, `${p}.name`, 1, 64), purpose: text(s.purpose, code, `${p}.purpose`, 0, 120) };
+    }),
+    start: arr(v.start, code, `${path}.start`, { max: 8 }).map((s, i) => {
+      const p = `${path}.start[${i}]`; keys(s, code, p, ['label', 'command', 'cwd']);
+      return { label: line(s.label, code, `${p}.label`, 1, 64), command: line(s.command, code, `${p}.command`, 1, 200), cwd: nullable(s.cwd, x => relDir(x, code, `${p}.cwd`)) };
+    }),
+    risks: arr(v.risks, code, `${path}.risks`, { max: 8 }).map((r, i) => text(r, code, `${path}.risks[${i}]`, 1, 200)),
+  };
+}
+function briefRecord(v, code, path) {
+  keys(v, code, path, ['version', 'cli', 'generated_at', 'accepted', 'document']);
+  if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  return {
+    version: 1,
+    cli: oneOf(v.cli, UNDERSTAND_CLIS, code, `${path}.cli`),
+    generated_at: timestamp(v.generated_at, code, `${path}.generated_at`),
+    accepted: bool(v.accepted, code, `${path}.accepted`),
+    document: briefDocument(v.document, code, `${path}.document`),
+  };
+}
+export const validateBriefRecord = v => deepFreeze(briefRecord(v, 'INVALID_BRIEF', '$'));
+
+const PROJECT_V1_KEYS = ['version', 'id', 'root', 'manifest', 'manifest_state', 'context_uuid', 'trusted', 'created_at', 'updated_at'];
+const PROJECT_V2_KEYS = ['detected', 'container', 'shared_sites', 'accounts', 'brief'];
+// Project record version 1 is the HANDOFF_3 shape; version 2 (profile-local
+// only, never written to the manifest) adds what detection, containers,
+// accounts and the brief learned about the project.
+function project(v, code, path) {
+  const v2 = isPlainObject(v) && v.version === 2;
+  keys(v, code, path, v2 ? [...PROJECT_V1_KEYS, ...PROJECT_V2_KEYS] : PROJECT_V1_KEYS);
+  if (!PROJECT_RECORD_VERSIONS.includes(v.version)) fail(code, `${path}.version`, 'expected 1 or 2');
   const root = str(v.root, code, `${path}.root`, { min: 2, max: 4096, pattern: /^\// });
   if (root.includes('\u0000')) fail(code, `${path}.root`, 'NUL in path');
   if (v.trusted !== false) fail(code, `${path}.trusted`, 'must be false in M1');
-  return {
-    version: 1,
+  const out = {
+    version: v.version,
     id: str(v.id, code, `${path}.id`, { pattern: PROJECT_ID }),
     root,
     manifest: manifest(v.manifest, code, `${path}.manifest`),
@@ -268,19 +425,43 @@ function project(v, code, path) {
     created_at: timestamp(v.created_at, code, `${path}.created_at`),
     updated_at: timestamp(v.updated_at, code, `${path}.updated_at`),
   };
+  if (!v2) return out;
+  keys(v.container, code, `${path}.container`, ['user_context_id']);
+  keys(v.shared_sites, code, `${path}.shared_sites`, ['hosts', 'confirmed']);
+  return {
+    ...out,
+    detected: nullable(v.detected, x => detected(x, code, `${path}.detected`)),
+    container: { user_context_id: nullable(v.container.user_context_id, x => int(x, code, `${path}.container.user_context_id`, 1, MAX_USER_CONTEXT_ID)) },
+    shared_sites: {
+      hosts: unique(arr(v.shared_sites.hosts, code, `${path}.shared_sites.hosts`, { max: 32 }).map((h, i) => hostPattern(h, code, `${path}.shared_sites.hosts[${i}]`)), h => h, code, `${path}.shared_sites.hosts`),
+      confirmed: bool(v.shared_sites.confirmed, code, `${path}.shared_sites.confirmed`),
+    },
+    accounts: unique(arr(v.accounts, code, `${path}.accounts`, { max: 32 }).map((a, i) => {
+      const p = `${path}.accounts[${i}]`; keys(a, code, p, ['key', 'label']);
+      return { key: accountKey(a.key, code, `${p}.key`), label: accountLabel(a.label, code, `${p}.label`) };
+    }), a => a.key, code, `${path}.accounts`),
+    brief: nullable(v.brief, x => briefRecord(x, code, `${path}.brief`)),
+  };
 }
 // Store version 1: a context links at most one project via contexts[].project_id.
 // Store version 2: projects[].context_uuid is authoritative and a space may hold
 // several projects; contexts[].project_id is a deprecated mirror that must be
 // null or point at a project whose context_uuid is that same space.
+// Store version 3 (workstation-v1 §2) = version 2 with project records of
+// version 2; versions 1 and 2 hold project records of version 1.
 function contextStore(v, code, path) {
   keys(v, code, path, ['version', 'contexts', 'projects']);
-  if (v.version !== 1 && v.version !== 2) fail(code, `${path}.version`, 'expected 1 or 2');
+  if (!CONTEXT_STORE_VERSIONS.includes(v.version)) fail(code, `${path}.version`, 'expected 1, 2 or 3');
   const contexts = arr(v.contexts, code, `${path}.contexts`, { max: 512 }).map((c, i) => contextMetadata(c, code, `${path}.contexts[${i}]`));
-  const projects = arr(v.projects, code, `${path}.projects`, { max: 512 }).map((p, i) => project(p, code, `${path}.projects[${i}]`));
+  const recordVersion = v.version === 3 ? 2 : 1;
+  const projects = arr(v.projects, code, `${path}.projects`, { max: 512 }).map((p, i) => {
+    const out = project(p, code, `${path}.projects[${i}]`);
+    if (out.version !== recordVersion) fail(code, `${path}.projects[${i}].version`, `store version ${v.version} holds project records of version ${recordVersion}`);
+    return out;
+  });
   unique(contexts, c => c.workspace_uuid, code, `${path}.contexts`);
   unique(projects, p => p.id, code, `${path}.projects`);
-  if (v.version === 2) {
+  if (v.version >= 2) {
     contexts.forEach((c, i) => {
       if (c.project_id === null) return;
       const p = projects.find(x => x.id === c.project_id);
@@ -289,10 +470,18 @@ function contextStore(v, code, path) {
   }
   return { version: v.version, contexts, projects };
 }
+// Detection draft version 1 (HANDOFF_3) and version 2 (workstation-v1 §1.4:
+// version 1 plus integrations, platforms, domains and agents).
+const DRAFT_V1_KEYS = ['version', 'name', 'kind', 'kind_source', 'environments', 'services', 'surfaces', 'frameworks', 'files_read', 'refused', 'warnings'];
 function detectionDraft(v, code, path) {
-  keys(v, code, path, ['version', 'name', 'kind', 'kind_source', 'environments', 'services', 'surfaces', 'frameworks', 'files_read', 'refused', 'warnings']);
-  if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  const v2 = isPlainObject(v) && v.version === 2;
+  keys(v, code, path, v2 ? [...DRAFT_V1_KEYS, ...V2_DRAFT_KEYS] : DRAFT_V1_KEYS);
+  if (v.version !== 1 && v.version !== 2) fail(code, `${path}.version`, 'expected 1 or 2');
   keys(v.kind_source, code, `${path}.kind_source`, ['source', 'guess']);
+  const out = draftV1(v, code, path);
+  return v2 ? { ...out, version: 2, ...v2Fields(v, code, path, true) } : out;
+}
+function draftV1(v, code, path) {
   return {
     version: 1,
     name: name(v.name, code, `${path}.name`),
@@ -322,22 +511,44 @@ export const validateContextStore = v => deepFreeze(contextStore(v, 'INVALID_CON
 export const validateDetectionDraft = v => deepFreeze(detectionDraft(v, 'INVALID_DRAFT', '$'));
 export const DEFAULT_CONTEXT_STORE = deepFreeze({ version: CONTEXT_STORE_VERSION, contexts: [], projects: [] });
 
-// Pure, idempotent migration of a stored contexts.json value to version 2.
-// A v1 link contexts[].project_id moves to projects[].context_uuid when the
-// project has no space yet; a project that already names a space keeps it
+export const isProjectId = v => typeof v === 'string' && PROJECT_ID.test(v);
+
+// A project record of version 2. Version 1 records gain the workstation-v1 §2
+// defaults: nothing detected yet, no container yet, the default shared sites
+// (unconfirmed), no account labels and no brief. updated_at is untouched.
+export function upgradeProject(record) {
+  const p = validateProject(record);
+  if (p.version === 2) return p;
+  return validateProject({
+    ...p, version: 2, detected: null, container: { user_context_id: null },
+    shared_sites: { hosts: [...DEFAULT_SHARED_SITES], confirmed: false }, accounts: [], brief: null,
+  });
+}
+
+// Pure, idempotent migration of a stored contexts.json value to version 3.
+// v1 → v2: a link contexts[].project_id moves to projects[].context_uuid when
+// the project has no space yet; a project that already names a space keeps it
 // (projects[].context_uuid was always written together with the link). Links
 // to unknown projects are dropped. Every contexts[].project_id becomes null.
-// No record is otherwise changed (updated_at stays as it was).
+// v2 → v3: every project record is upgraded to version 2 (upgradeProject).
+// A v3 document that still carries version 1 records (written by an older
+// writer) has them upgraded too. No record is otherwise changed (updated_at
+// stays as it was).
 export function migrateContextStore(store) {
-  const s = validateContextStore(store);
-  if (s.version === 2) return s;
-  const target = new Map();
-  for (const c of s.contexts) if (c.project_id !== null && !target.has(c.project_id)) target.set(c.project_id, c.workspace_uuid);
-  return validateContextStore({
-    version: 2,
-    contexts: s.contexts.map(c => (c.project_id === null ? c : { ...c, project_id: null })),
-    projects: s.projects.map(p => (p.context_uuid === null && target.has(p.id) ? { ...p, context_uuid: target.get(p.id) } : p)),
-  });
+  let input = store;
+  if (isPlainObject(store) && store.version === 3 && Array.isArray(store.projects)) {
+    input = { ...store, projects: store.projects.map(p => { if (!isPlainObject(p) || p.version !== 1) return p; try { return upgradeProject(p); } catch { return p; } }) };
+  }
+  const s = validateContextStore(input);
+  if (s.version === 3) return s;
+  let { contexts, projects } = s;
+  if (s.version === 1) {
+    const target = new Map();
+    for (const c of contexts) if (c.project_id !== null && !target.has(c.project_id)) target.set(c.project_id, c.workspace_uuid);
+    contexts = contexts.map(c => (c.project_id === null ? c : { ...c, project_id: null }));
+    projects = projects.map(p => (p.context_uuid === null && target.has(p.id) ? { ...p, context_uuid: target.get(p.id) } : p));
+  }
+  return validateContextStore({ version: 3, contexts, projects: projects.map(upgradeProject) });
 }
 
 // Projects that live in a space, in stored order (v1 or v2 store).

@@ -18,8 +18,8 @@ function artifact(name) {
   if (name === 'keychain-negative') assert.equal(manifest.artifacts[name].define, 'AXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1');
   return binary;
 }
-function run(name, operation, input = '') {
-  const result = spawnSync(artifact(name), [operation], { shell: false, input, timeout: 5000,
+function run(name, operation, input = '', extra = []) {
+  const result = spawnSync(artifact(name), [operation, ...extra], { shell: false, input, timeout: 5000,
     env: { PATH: '/usr/bin:/bin', LANG: 'C' }, encoding: 'utf8', maxBuffer: 8192 });
   assert.equal(result.error, undefined); assert.equal(result.signal, null); assert.equal(result.stdout, '');
   assert.throws(() => process.kill(result.pid, 0), { code: 'ESRCH' });
@@ -59,6 +59,27 @@ test('Negative Keychain build cannot store or delete any item', () => {
 
 test('Production JS adapter handles native missing/error results without a plaintext fallback', async () => {
   const keychain = new MacKeychain(artifact('keychain-negative'));
+  assert.equal(await keychain.read(), null);
+  assert.equal(await keychain.exists(), false);
+  await assert.rejects(keychain.store('synthetic-nonsecret-input'), { code: 'KEYCHAIN_ERROR' });
+  await assert.rejects(keychain.remove(), { code: 'KEYCHAIN_ERROR' });
+});
+
+test('Provider selector: only jev/openai are accepted, before any SecItem call; OpenAI presence is its own item', t => {
+  for (const extra of [['anthropic'], ['openai', 'extra'], ['']]) {
+    const result = run('keychain', 'exists', '', extra); assert.equal(result.status, 2); assert.equal(result.stderr, '');
+  }
+  for (const provider of ['jev', 'openai']) {
+    const invalid = run('keychain', 'store', 'short', [provider]); assert.equal(invalid.status, 2); assert.equal(invalid.stderr, '');
+  }
+  const openai = run('keychain-negative', 'exists', '', ['openai']); assert.equal(openai.status, 44, openai.stderr);
+  assert.match(openai.stderr, /TEST_FIXTURE keychain_status=-25300 search_list=empty/);
+  const read = run('keychain-negative', 'read', '', ['openai']); assert.equal(read.status, 44, read.stderr);
+  t.diagnostic('TEST_FIXTURE: selector rejected without SecItem; OpenAI item missing in an empty search list');
+});
+
+test('Production JS adapter for the OpenAI item handles missing/error results without a plaintext fallback', async () => {
+  const keychain = new MacKeychain(artifact('keychain-negative'), 'openai');
   assert.equal(await keychain.read(), null);
   assert.equal(await keychain.exists(), false);
   await assert.rejects(keychain.store('synthetic-nonsecret-input'), { code: 'KEYCHAIN_ERROR' });

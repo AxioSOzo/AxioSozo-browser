@@ -1,0 +1,172 @@
+#!/bin/sh
+# axiosozo-notify: report a coding agent's status to the running AxioSozo
+# browser over its local agent channel (contracts/agent-channel-v1.md §3).
+#
+#   axiosozo-notify claude-code <Event>     hook JSON on stdin (Claude Code hooks)
+#   axiosozo-notify codex [...] '<json>'    notify JSON as the last argument (Codex notify)
+#   axiosozo-notify status <started|needs_input|done|failed> [title]
+#
+# Socket: $AXIOSOZO_AGENT_SOCKET, else ~/.axiosozo/run/agent.sock.
+#
+# A hook must never block or fail the agent: this script always exits 0,
+# writes nothing to stdout/stderr and gives up after about 1.5 s. It never
+# parses the payload (the browser does), never uses eval, and depends only on
+# /bin/sh, awk, head, tr, sed and /usr/bin/nc (macOS: -U Unix socket, -w idle
+# timeout in seconds).
+
+LC_ALL=C
+export LC_ALL
+# Silent: Claude Code adds UserPromptSubmit stdout to the model's context.
+exec >/dev/null 2>&1
+
+NC=/usr/bin/nc
+MAX_PAYLOAD=65536
+MAX_TEXT=4096
+
+if [ -n "${AXIOSOZO_AGENT_SOCKET:-}" ]; then
+  sock=$AXIOSOZO_AGENT_SOCKET
+elif [ -n "${HOME:-}" ]; then
+  sock=$HOME/.axiosozo/run/agent.sock
+else
+  exit 0
+fi
+case $sock in
+  /*) ;;
+  *) exit 0 ;;
+esac
+[ "${#sock}" -le 100 ] || exit 0
+[ -S "$sock" ] || exit 0
+[ -x "$NC" ] || exit 0
+
+# json_string VALUE: print VALUE as a JSON string literal. Bytes >= 0x80 pass
+# through unchanged; quotes, backslashes and control characters are escaped.
+json_string() {
+  printf '%s\n' "$1" | awk '
+    BEGIN {
+      for (i = 1; i < 32; i++) esc[sprintf("%c", i)] = sprintf("\\u%04x", i)
+      esc["\t"] = "\\t"; esc["\r"] = "\\r"
+      esc["\\"] = "\\\\"; esc["\""] = "\\\""
+      out = ""
+    }
+    {
+      s = $0; r = ""; n = length(s)
+      for (i = 1; i <= n; i++) { c = substr(s, i, 1); r = r ((c in esc) ? esc[c] : c) }
+      out = (NR > 1) ? out "\\n" r : r
+    }
+    END { printf "\"%s\"", out }'
+}
+
+# json_object RAW: print RAW without raw newlines if it looks like one JSON
+# object of at most MAX_PAYLOAD bytes, else {}. Validation is the browser's job.
+json_object() {
+  if [ "${#1}" -gt "$MAX_PAYLOAD" ]; then
+    printf '{}'
+    return
+  fi
+  obj=$(printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  case $obj in
+    '{'*'}') printf '%s' "$obj" ;;
+    *) printf '{}' ;;
+  esac
+}
+
+mode=${1:-}
+case $mode in
+  claude-code)
+    source=claude-code
+    agent=claude-code
+    event=${2:-}
+    case $event in
+      '' | *[!A-Za-z]*) exit 0 ;;
+    esac
+    [ "${#event}" -le 64 ] || exit 0
+    ;;
+  codex)
+    source=codex
+    agent=codex
+    event=notify
+    [ "$#" -ge 2 ] || exit 0
+    for arg in "$@"; do last=$arg; done
+    ;;
+  status)
+    source=manual
+    agent=${AXIOSOZO_AGENT:-other}
+    case $agent in
+      claude-code | codex | other) ;;
+      *) agent=other ;;
+    esac
+    event=${2:-}
+    case $event in
+      started | needs_input | done | failed) ;;
+      *) exit 0 ;;
+    esac
+    title=${3:-}
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+cwd=$PWD
+case $cwd in
+  /*) ;;
+  *) cwd=$(pwd -P) ;;
+esac
+case $cwd in
+  /*) ;;
+  *) exit 0 ;;
+esac
+[ "${#cwd}" -le "$MAX_TEXT" ] || exit 0
+
+# Keep the agent's stdin reachable from the background worker (an
+# asynchronous list otherwise gets /dev/null as stdin).
+exec 3<&0
+
+work() {
+  case $mode in
+    claude-code)
+      if [ -t 3 ]; then
+        raw='{}'
+      else
+        raw=$(head -c "$((MAX_PAYLOAD + 1))" <&3; printf x)
+        raw=${raw%x}
+      fi
+      payload=$(json_object "$raw")
+      ;;
+    codex)
+      payload=$(json_object "$last")
+      ;;
+    status)
+      if [ -n "$title" ] && [ "${#title}" -le "$MAX_TEXT" ]; then
+        payload="{\"title\":$(json_string "$title")}"
+      else
+        payload='{}'
+      fi
+      ;;
+  esac
+  exec 3<&-
+  cwd_json=$(json_string "$cwd")
+  hello="{\"v\":1,\"type\":\"hello\",\"client\":{\"name\":\"axiosozo-notify\",\"agent\":\"$agent\",\"version\":\"1\"},\"cwd\":$cwd_json,\"pid\":$$}"
+  hook="{\"v\":1,\"type\":\"hook\",\"source\":\"$source\",\"event\":\"$event\",\"cwd\":$cwd_json,\"payload\":$payload}"
+  # macOS nc closes the connection as soon as its stdin ends, and does not
+  # exit when the peer closes while its stdin is still open. So a background
+  # sleep keeps nc's stdin open, nc itself runs in the background, and only
+  # head, which ends at the browser's second line (welcome, then ack), is
+  # waited for. The leftover sleep and nc end on their own within 2 s and
+  # hold none of the agent's file descriptors.
+  { printf '%s\n%s\n' "$hello" "$hook"; sleep 2 & } |
+    { exec 4<&0; "$NC" -U -w 1 "$sock" <&4 4<&- & } |
+    head -n 2
+}
+
+work &
+worker=$!
+(
+  exec 3<&-
+  sleep 1.5
+  kill "$worker"
+) &
+watchdog=$!
+wait "$worker"
+kill "$watchdog"
+exit 0

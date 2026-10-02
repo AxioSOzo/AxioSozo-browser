@@ -3,9 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { exactKeys, id, object, prompt, ProviderError, requireValue } from './validation.mjs';
 import { DRIVERS } from './discovery.mjs';
+import { DECISION_PROVIDERS } from './decision.mjs';
+import { KEYCHAIN_PROVIDERS, validKey } from './keychain.mjs';
 
-// lineBytes fits a 64 KiB decision-v1 state plus its envelope.
-export const HOST_LIMITS = Object.freeze({ lineBytes: 73728, outputBytes: 4 * 1024 * 1024,
+// lineBytes fits a 64 KiB decision-v1 state plus its envelope. screenLineBytes (1.6 MiB) is
+// admitted only for decision requests whose observation level is `screen` (1.5 MiB state cap).
+export const HOST_LIMITS = Object.freeze({ lineBytes: 73728, screenLineBytes: 1677721, outputBytes: 4 * 1024 * 1024,
   requests: 1024, concurrentRequests: 8, turnMs: 120000, idleMs: 120000, decisionsPerHour: 30 });
 const HOUR_MS = 3600000;
 
@@ -15,8 +18,15 @@ export class ProviderHost extends EventEmitter {
   #factory; #session = null; #opening = false; #closed = false; #seen = new Set();
   #pending = new Set(); #turnTimer; #idleTimer; #outputBytes = 0; #closePromise; #openingPromise; #closing;
   #createDecider; #decider = null; #decisions = new Map(); #deciding = 0; #sent = []; #now;
-  constructor({ createAdapter, createDecisionProvider = null, limits = HOST_LIMITS, now = Date.now }) {
+  #createKeyStore; #createUnderstand; #understand = null; #understanding = 0;
+  /**
+   * `createKeyStore(provider)` returns a Keychain item ({ exists, store, remove }) for `jev` or
+   * `openai` (keys/* methods). `createUnderstandRunner()` returns an UnderstandRunner
+   * (understand/* methods). Either may be null: those methods then reply UNSUPPORTED.
+   */
+  constructor({ createAdapter, createDecisionProvider = null, createKeyStore = null, createUnderstandRunner = null, limits = HOST_LIMITS, now = Date.now }) {
     super(); this.#factory = createAdapter; this.#createDecider = createDecisionProvider; this.#now = now;
+    this.#createKeyStore = createKeyStore; this.#createUnderstand = createUnderstandRunner;
     this.limits = { ...HOST_LIMITS, ...limits };
     this.#armIdle();
   }
@@ -27,7 +37,7 @@ export class ProviderHost extends EventEmitter {
     clearTimeout(this.#idleTimer);
     if (this.#closed) return;
     this.#idleTimer = setTimeout(() => {
-      if (this.#deciding) { this.#armIdle(); return; }
+      if (this.#deciding || this.#understanding) { this.#armIdle(); return; }
       this.#send({ event: { version: 1, type: 'host_idle', session_id: this.#session?.binding.session_id ?? null } });
       void this.close();
     }, this.limits.idleMs);
@@ -89,22 +99,68 @@ export class ProviderHost extends EventEmitter {
     if (this.#sent.length >= this.limits.decisionsPerHour) return false;
     this.#sent.push(now); return true;
   }
-  async #decide(params) {
+  async #decide(params, kind = 'site_rule') {
     requireValue(this.#createDecider, 'UNSUPPORTED', 'Decisions are unavailable in this host');
     this.#decider ??= this.#createDecider();
     const controller = new AbortController(); const requestId = typeof params.request_id === 'string' ? params.request_id : null;
     const tracked = requestId !== null && !this.#decisions.has(requestId);
     if (tracked) this.#decisions.set(requestId, controller);
     this.#deciding++; clearTimeout(this.#idleTimer);
-    try { return await this.#decider.decideSiteRule(params, { signal: controller.signal, allowSend: () => !this.#closed && this.#takeBudget() }); }
+    const options = { signal: controller.signal, allowSend: () => !this.#closed && this.#takeBudget() };
+    try { return await (kind === 'watch' ? this.#decider.decideWatch(params, options) : this.#decider.decideSiteRule(params, options)); }
     finally {
       if (tracked) this.#decisions.delete(requestId);
       if (--this.#deciding === 0 && !this.#session?.active && !this.#opening) this.#armIdle();
     }
   }
+  // Keychain items per decision provider. Presence only ever leaves the host; the key itself
+  // goes from this request straight to the helper's stdin and is never logged, echoed or stored.
+  // No method here makes a network call.
+  #keyStore(provider) {
+    requireValue(this.#createKeyStore, 'UNSUPPORTED', 'Key entry is unavailable in this host');
+    requireValue(typeof provider === 'string' && KEYCHAIN_PROVIDERS.includes(provider), 'INVALID_INPUT', 'Unknown decision provider');
+    return this.#createKeyStore(provider);
+  }
+  async #keys(method, params) {
+    if (method === 'keys/status') {
+      exactKeys(params, []); requireValue(this.#createKeyStore, 'UNSUPPORTED', 'Key entry is unavailable in this host');
+      const providers = [];
+      for (const provider of KEYCHAIN_PROVIDERS) {
+        let key = 'unknown';
+        try { key = await this.#keyStore(provider).exists() ? 'stored' : 'missing'; } catch { /* Fixed state; never the helper's output. */ }
+        const { capabilities, shape_status } = DECISION_PROVIDERS[provider];
+        providers.push({ provider, key, capabilities: { ...capabilities }, shape_status });
+      }
+      return { version: 1, providers };
+    }
+    if (method === 'keys/store') {
+      exactKeys(params, ['provider', 'key']);
+      const store = this.#keyStore(params.provider);
+      requireValue(validKey(params.key), 'INVALID_KEY', 'Key must be 8–4096 bytes without control characters');
+      try { await store.store(params.key); } catch { throw new ProviderError('KEYCHAIN_REFUSED', 'The macOS Keychain refused or could not store the key'); }
+      finally { params.key = undefined; }
+      return { provider: params.provider, key: 'stored' };
+    }
+    exactKeys(params, ['provider']);
+    const store = this.#keyStore(params.provider);
+    try { await store.remove(); } catch { throw new ProviderError('KEYCHAIN_REFUSED', 'The macOS Keychain refused or could not remove the key'); }
+    return { provider: params.provider, key: 'missing' };
+  }
+  async #runUnderstand(method, params) {
+    requireValue(this.#createUnderstand, 'UNSUPPORTED', 'The understand tier is unavailable in this host');
+    this.#understand ??= this.#createUnderstand();
+    if (method === 'understand/available') { exactKeys(params, []); return this.#understand.available(); }
+    if (method === 'understand/cancel') return this.#understand.cancel(params);
+    this.#understanding++; clearTimeout(this.#idleTimer);
+    try { return await this.#understand.run(params); }
+    finally { if (--this.#understanding === 0 && !this.#deciding && !this.#session?.active && !this.#opening) this.#armIdle(); }
+  }
   async #dispatch(method, params, requestId) {
     // Decisions need no provider session and never start a provider client.
     if (method === 'decision/site_rule') return this.#decide(params);
+    if (method === 'decision/watch') return this.#decide(params, 'watch');
+    if (method === 'keys/status' || method === 'keys/store' || method === 'keys/remove') return this.#keys(method, params);
+    if (method === 'understand/run' || method === 'understand/cancel' || method === 'understand/available') return this.#runUnderstand(method, params);
     if (method === 'decision/cancel') {
       exactKeys(params, ['request_id']); id(params.request_id, 'request_id');
       const controller = this.#decisions.get(params.request_id); controller?.abort();
@@ -157,6 +213,7 @@ export class ProviderHost extends EventEmitter {
     if (this.#closePromise) return this.#closePromise;
     this.#closed = true; clearTimeout(this.#turnTimer); clearTimeout(this.#idleTimer);
     for (const controller of this.#decisions.values()) controller.abort();
+    this.#understand?.close();
     this.#closePromise = (async () => {
       if (this.#openingPromise) {
         try { const adapter = await this.#openingPromise; await adapter.close(); } catch { /* Failed startup already reaps its child. */ }
@@ -168,8 +225,15 @@ export class ProviderHost extends EventEmitter {
   }
 }
 
-export async function serveStdio({ createAdapter, createDecisionProvider, input = process.stdin, output = process.stdout, limits }) {
-  const host = new ProviderHost({ createAdapter, createDecisionProvider, limits });
+// Only a decision request at observation level `screen` may use the raised line limit.
+function screenRequest(request) {
+  return object(request) && (request.method === 'decision/site_rule' || request.method === 'decision/watch')
+    && object(request.params) && object(request.params.state) && object(request.params.state.observation)
+    && request.params.state.observation.level === 'screen';
+}
+
+export async function serveStdio({ createAdapter, createDecisionProvider, createKeyStore, createUnderstandRunner, input = process.stdin, output = process.stdout, limits }) {
+  const host = new ProviderHost({ createAdapter, createDecisionProvider, createKeyStore, createUnderstandRunner, limits });
   const decoder = new StringDecoder('utf8'); let buffer = '';
   let resolveDone;
   const done = new Promise(resolve => { resolveDone = resolve; });
@@ -185,12 +249,14 @@ export async function serveStdio({ createAdapter, createDecisionProvider, input 
       const newline = buffer.indexOf('\n');
       if (newline === -1) break;
       const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
-      if (Buffer.byteLength(line) > HOST_LIMITS.lineBytes) { void host.close(); return; }
+      const bytes = Buffer.byteLength(line);
+      if (bytes > HOST_LIMITS.screenLineBytes) { void host.close(); return; }
       let request;
       try { request = JSON.parse(line); } catch { void host.close(); return; }
+      if (bytes > HOST_LIMITS.lineBytes && !screenRequest(request)) { void host.close(); return; }
       void host.handle(request);
     }
-    if (Buffer.byteLength(buffer) > HOST_LIMITS.lineBytes) void host.close();
+    if (Buffer.byteLength(buffer) > HOST_LIMITS.screenLineBytes) void host.close();
   }
   input.on('data', read); input.once('end', () => { void host.close(); });
   input.once('error', () => { void host.close(); }); output.once('error', () => { void host.close(); });

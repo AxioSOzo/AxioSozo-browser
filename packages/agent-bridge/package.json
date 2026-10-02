@@ -1,0 +1,18 @@
+{
+  "name": "@axiosozo/agent-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MPL-2.0",
+  "description": "Stdio MCP server that gives coding agents user-approved access to the running AxioSozo browser.",
+  "engines": { "node": ">=22" },
+  "bin": { "axiosozo-agent-bridge": "./bin/axiosozo-agent-bridge.mjs" },
+  "exports": {
+    "./channel": "./src/channel.mjs",
+    "./server": "./src/server.mjs",
+    "./tools": "./src/tools.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}

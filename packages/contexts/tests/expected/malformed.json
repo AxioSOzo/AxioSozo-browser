@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "malformed",
   "kind": "web",
   "kind_source": {
@@ -52,5 +52,30 @@
     "netlify.toml: 3 unparsable statement(s) ignored (line 1: unterminated table header)",
     "wrangler.toml: 1 unparsable statement(s) ignored (line 7: expected '=')",
     "docker-compose.yml: 2 unparsable line(s) ignored (line 3: tab indentation)"
-  ]
+  ],
+  "integrations": [
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "dashboard_url": "https://dash.cloudflare.com/",
+      "sources": [
+        "wrangler.toml"
+      ]
+    },
+    {
+      "id": "netlify",
+      "name": "Netlify",
+      "dashboard_url": "https://app.netlify.com/",
+      "sources": [
+        "netlify.toml"
+      ]
+    }
+  ],
+  "platforms": [],
+  "domains": [],
+  "agents": {
+    "files": [],
+    "dirs": [],
+    "worktrees": 0
+  }
 }

@@ -1,0 +1,224 @@
+{
+  "version": 2,
+  "name": "Harbor Suite",
+  "kind": "desktop",
+  "kind_source": {
+    "source": "package.json scripts.dev:desktop (tauri)",
+    "guess": false
+  },
+  "environments": [
+    {
+      "name": "local",
+      "base_url": "http://localhost:1420/",
+      "app": "desktop",
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    },
+    {
+      "name": "local",
+      "base_url": "http://localhost:3001/",
+      "app": "admin-web",
+      "source": "apps/admin-web/package.json scripts.dev (next port 3001)",
+      "guess": false
+    },
+    {
+      "name": "local",
+      "base_url": "http://localhost:5175/",
+      "app": "api-portal-web",
+      "source": "apps/api-portal-web/package.json scripts.dev (vite port 5175)",
+      "guess": false
+    }
+  ],
+  "services": [
+    {
+      "name": "Tauri dev server",
+      "url": "http://localhost:1420/",
+      "port": 1420,
+      "app": "desktop",
+      "source": "src-tauri/tauri.conf.json build.devUrl",
+      "guess": false
+    },
+    {
+      "name": "Next.js dev server",
+      "url": "http://localhost:3001/",
+      "port": 3001,
+      "app": "admin-web",
+      "source": "apps/admin-web/package.json scripts.dev (next port 3001)",
+      "guess": false
+    },
+    {
+      "name": "Vite dev server",
+      "url": "http://localhost:5175/",
+      "port": 5175,
+      "app": "api-portal-web",
+      "source": "apps/api-portal-web/package.json scripts.dev (vite port 5175)",
+      "guess": false
+    }
+  ],
+  "surfaces": [
+    {
+      "name": "Repository",
+      "url": "https://github.com/harbor-labs/harbor-suite",
+      "kind": "repository",
+      "prominence": "primary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Issues",
+      "url": "https://github.com/harbor-labs/harbor-suite/issues",
+      "kind": "issues",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "CI",
+      "url": "https://github.com/harbor-labs/harbor-suite/actions",
+      "kind": "ci",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Releases",
+      "url": "https://github.com/harbor-labs/harbor-suite/releases",
+      "kind": "releases",
+      "prominence": "secondary",
+      "source": ".git/config remote origin",
+      "guess": false
+    },
+    {
+      "name": "Vercel (harbor-customer-web)",
+      "url": "https://vercel.com/dashboard",
+      "kind": "hosting",
+      "prominence": "secondary",
+      "source": ".vercel/project.json",
+      "guess": false
+    }
+  ],
+  "frameworks": [
+    "tauri",
+    "next",
+    "vite"
+  ],
+  "files_read": [
+    "package.json",
+    ".vercel/project.json",
+    "vercel.json",
+    "src-tauri/tauri.conf.json",
+    ".git/config",
+    "apps/admin-web/package.json",
+    "apps/api-portal-web/package.json",
+    "apps/customer-web/package.json",
+    "packages/shared-convex/package.json"
+  ],
+  "refused": [],
+  "warnings": [],
+  "integrations": [
+    {
+      "id": "vercel",
+      "name": "Vercel",
+      "dashboard_url": "https://vercel.com/dashboard",
+      "sources": [
+        "vercel.json",
+        ".vercel/project.json",
+        "apps/api-portal-web/package.json#devDependencies"
+      ]
+    },
+    {
+      "id": "convex",
+      "name": "Convex",
+      "dashboard_url": "https://dashboard.convex.dev/",
+      "sources": [
+        "package.json#dependencies",
+        "apps/admin-web/package.json#dependencies",
+        "apps/customer-web/package.json#dependencies",
+        "packages/shared-convex/package.json#dependencies",
+        "convex/",
+        "packages/shared-convex/convex/"
+      ]
+    },
+    {
+      "id": "clerk",
+      "name": "Clerk",
+      "dashboard_url": "https://dashboard.clerk.com/",
+      "sources": [
+        "package.json#dependencies",
+        "apps/admin-web/package.json#dependencies",
+        "apps/customer-web/package.json#dependencies"
+      ]
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "dashboard_url": "https://sentry.io/",
+      "sources": [
+        "apps/customer-web/package.json#dependencies"
+      ]
+    }
+  ],
+  "platforms": [
+    {
+      "kind": "tauri",
+      "name": "Harbor Suite",
+      "path": "src-tauri",
+      "source": "src-tauri/tauri.conf.json"
+    },
+    {
+      "kind": "macos",
+      "name": "HarborMac",
+      "path": "apps/macos-app",
+      "source": "apps/macos-app/HarborMac.xcodeproj"
+    },
+    {
+      "kind": "ios",
+      "name": "HarborMobile",
+      "path": "apps/mobile-app/ios",
+      "source": "apps/mobile-app/ios/HarborMobile.xcodeproj"
+    },
+    {
+      "kind": "android",
+      "name": "mobile-app",
+      "path": "apps/mobile-app/android",
+      "source": "apps/mobile-app/android/build.gradle.kts"
+    }
+  ],
+  "domains": [
+    {
+      "host": "harborsuite.app",
+      "origin": "vercel_json",
+      "source": "vercel.json redirects[].has",
+      "confirmed": false
+    },
+    {
+      "host": "www.harborsuite.app",
+      "origin": "vercel_json",
+      "source": "vercel.json redirects[].destination",
+      "confirmed": false
+    },
+    {
+      "host": "docs.harborsuite.app",
+      "origin": "vercel_json",
+      "source": "vercel.json redirects[].destination",
+      "confirmed": false
+    },
+    {
+      "host": "api.harborsuite.app",
+      "origin": "vercel_json",
+      "source": "vercel.json rewrites[].destination",
+      "confirmed": false
+    }
+  ],
+  "agents": {
+    "files": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "dirs": [
+      ".claude",
+      ".agent-worktrees"
+    ],
+    "worktrees": 2
+  }
+}

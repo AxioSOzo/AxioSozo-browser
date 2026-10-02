@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bun run --cwd apps/web build",
+  "redirects": [
+    { "source": "/:path*", "has": [{ "type": "host", "value": "www.inkline.studio" }], "destination": "https://inkline.studio/:path*", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://api.inkline.studio/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
