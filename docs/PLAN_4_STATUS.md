@@ -96,9 +96,10 @@ Claude Opus 5.5 CLI developer readiness: **PASS**, session
 no changes. No frontend code was created or edited by Codex; actual frontend
 integration remains delegated to Claude in later steps.
 
-Steps 1 and 2 have integrated source and verified builds below. Interactive
-arrival and cookie gates remain BLOCKED_HUMAN. Steps 3–9 remain unintegrated;
-ignored pure-logic preparation and fake tests do not establish GUI gate passes. E1/E2 remain
+Steps 1–3 have integrated source and verified builds below. Interactive arrival,
+cookie isolation and reference-home admission remain unverified behind the
+recorded human gates. Step 3 synthetic light/dark rendering is verified. Steps
+4–9 remain unintegrated; ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
 ## Step 1 — integrated source; interactive GUI BLOCKED_HUMAN
@@ -322,6 +323,80 @@ Evidence (ignored): `docs/evidence/plan4-2/raw-cookie-20261002-a/`, including
 `plan4-step2-arrival-utf8-test.log` and `plan4-step2-raw-cookie-gui.log`.
 Independent closure proof: `.local/plan4-prepared/contexts/step2-final-closure.md`.
 
-Step 2 local commit is recorded by the lead after this status update. The plan's
+Step 2 local commit: `b7d5baf`. The plan's
 human gate permits proceeding to Step 3. E1/E2 are NOT_VERIFIED, product AI calls
 are NOT_AUTHORIZED, and the app is not READY.
+
+## Step 3 — project home integrated; synthetic light/dark GUI verified
+
+Claude Opus 5.5, session `c270941e-860a-48ba-afb9-099231bf7daa`, made every
+frontend and mixed service/actor change across six review rounds. Codex owns
+contracts, independent review, process-fixture and cleanup repairs, tests,
+builds, owned GUI runs, status and commits. Codex created or edited no frontend.
+
+The project list leads to a dedicated home with app/environment links, manual
+service account labels, a brief document, activity and console sections. Later
+step capabilities are shown as unavailable. Editing, Spaces, site rules, ledger
+and arrival remain reachable. Native Zen token imports, type and spacing support
+light and dark. The previous fading/clipped layout is gone; ordinary scrolling
+reaches the full About section.
+
+The actor accepts only a known project ID in a registered normal window. Its
+closed home projection excludes native container IDs and performs no creation,
+detection, probe or AI call. Current records and routing generations are checked
+after awaits. Independent actual-page fake probes found and Claude fixed stale
+route/status results, late initial loads after pagehide, timer/subscription
+cleanup and persisted-page restoration. Late initialization now makes zero
+container/home/probe calls after pagehide; a fresh restoration does load again.
+
+Actual verification on 2 October 2026:
+
+- Final `./dev test` and `./dev check`: exit 0, browser 790/790. Other root
+  suites pass, including contexts 143, provider-host 122, bootstrap Python 33,
+  reader Python 22, arrival Python 18 and root Python 72. CEF native/check/stream
+  gates remain `SKIPPED_ENGINE_WORKSTREAM`.
+- Final warm `./dev setup`: exit 0, 65 chrome files and 9 sandbox-readable Zen
+  content resources. Built app fingerprint
+  `976a119439cfa68138062302c5d285177fbb91e878e8eba491c989a43db0816f`.
+- Native startup exposed an incorrect contextual-identity module URL. Claude
+  switched to the URL actually packaged by the pinned Gecko build. The first
+  actual Harbor home also exposed native `replaceChildren` converting an absent
+  brief into visible `null`; Claude fixed optional-child filtering. The valid
+  brief and absent brief actual-page regressions pass. Final PNG inspection and
+  direct-root text guards pass for all four homes.
+- Six final owned synthetic captures pass: Projects light/dark, Harbor home
+  light/dark and Inkline home light/dark. Source pins, exact loaded route/native
+  document binding, known-normal window and both chrome/content themes are
+  verified. Each app exits 0, its direct child and fixture child are reaped,
+  its owned Marionette listener closes, and all 31 fixture metadata files and
+  the seeded store retain their hashes. Process-group inactivity is not inferred.
+- Actual CUA sees the native app and clicks the project links. The heading
+  receives focus; Tab reaches Edit and More; Return opens the menu. Page Down
+  reveals the full About section without fading or clipping, and Page Up returns
+  to the header. The mouse-scroll API returned an error while the app remained
+  live. Escape dismissal was not verified before bounded sessions ended.
+  VoiceOver is `NOT_RUN`; this is a limited keyboard/accessibility smoke check.
+- Arrival test receipts now publish atomically. Teardown signals retained Popen
+  handles only; receipt PIDs are observation-only. Exact created file identity
+  gates cleanup and preserves uncertainty. The product arrival helper is unchanged.
+- Root dev/session cleanup no longer signals process groups after reaping their
+  original leader. Session TERM and shared non-reaping grace precede all KILLs,
+  then waits. Already-reaped leaders receive no sweep. Unreaped leaders retain
+  their lease, streams and handles; uncertainty blocks reuse even after direct
+  reaping. Every CEF profile is preserved. The 32
+  injected active cleanup regressions pass. The actual owned TERM-ignoring
+  descendant test confirms EOF after KILL, without claiming universal group proof.
+
+Evidence (ignored): `docs/evidence/plan4-3/*-20261002-final/` contains all six
+native PNGs and full receipts; `lead-observations.json` records the lead's pixel
+and actual CUA checks. The observer's fixed `CUA=BLOCKED_HUMAN` template field is
+stale; the lead's actual checks override it. Earlier refused startup runs A/B
+and the rejected Harbor-null capture remain preserved. Final logs are
+`.local/logs/plan4-step3-lead-{test,check,build}-complete.log` and
+`plan4-step3-*-final.log`.
+
+These are `SEEDED_RENDER_ONLY / ADMISSION_NOT_RUN` runs using invented metadata.
+Actual reference-home admission/screenshots and cookie isolation remain
+unverified behind the earlier unresolved native-picker/human gates; current Mac
+accessibility alone does not prove admission. Product AI is `NOT_AUTHORIZED`,
+E1/E2 remain `NOT_VERIFIED`, and the app is not READY. No push, tag or release.

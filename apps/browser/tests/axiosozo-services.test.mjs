@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { contextsCoreAvailable } from "./support/chrome-modules.mjs";
 import { fakeZenWindow } from "./support/fake-zen.mjs";
 
@@ -7,7 +8,7 @@ import { fakeZenWindow } from "./support/fake-zen.mjs";
 // profile, no files outside memory. Not evidence of a running browser.
 const skip = contextsCoreAvailable ? false : "packages/contexts/src/index.mjs is absent (contexts core not written yet)";
 const { AxioSozoServices, processSingleton, PROBE_MIN_INTERVAL_MS, LEDGER_FLUSH_MS, MAX_PENDING_LEDGER, loopbackAddresses,
-  arrivalRootsFromEnvironment, DEFAULT_ARRIVAL_ROOTS, lazyArrivalSubprocess } = skip ? {} : await import("../chrome/AxioSozoServices.sys.mjs");
+  arrivalRootsFromEnvironment, DEFAULT_ARRIVAL_ROOTS, lazyArrivalSubprocess, CONTEXTUAL_IDENTITY_MODULE } = skip ? {} : await import("../chrome/AxioSozoServices.sys.mjs");
 const { createNativeProjectArrivalSubprocess, arrivalSubprocessPaths, ARRIVAL_LSOF_SHA256, ARRIVAL_LSOF_PYTHON } = skip ? {}
   : await import("../chrome/ProjectArrivalSubprocess.sys.mjs");
 const { ZenWorkspaceAdapter } = await import("../chrome/ZenWorkspaceAdapter.sys.mjs");
@@ -1854,6 +1855,170 @@ test("P2: the Overview reads each project's container without IDs; nothing is cr
   assert.ok(GECKO_COLORS.includes(own.color));
   assert.equal(pending.state, "pending");
   assert.doesNotMatch(JSON.stringify(await h.services.listProjectContainers()), /user_?context|:40\b/iu);
+});
+
+test("project home: the current stored record for a registered normal window; no container ID, nothing probed or created", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  await h.services.setAccountLabel(shop.id, { key: "vercel", label: "work Google" });
+  await h.services.setSharedSites(shop.id, { hosts: ["github.com"], confirmed: true });
+  const probes = h.probes.length;
+  const home = await h.services.projectHome({ window: h.zen.window, id: shop.id });
+  assert.deepEqual(Object.keys(home), ["version", "project", "space", "container", "agent_activity", "console_errors"]);
+  assert.deepEqual([home.version, home.space, home.container, home.agent_activity, home.console_errors],
+    [1, { uuid: APP, name: "Shop app" }, { state: "off" }, null, null], "activity and console errors are not collected in this build");
+  assert.equal(home.project.version, 2);
+  assert.ok(!Object.hasOwn(home.project, "container"), "the container mapping never reaches the page");
+  assert.deepEqual([home.project.accounts, home.project.shared_sites], [[{ key: "vercel", label: "work Google" }], { hosts: ["github.com"], confirmed: true }]);
+  h.state.enabled = true;
+  await h.open(shop, SHARED_ORIGIN);
+  const own = await h.services.projectHome({ window: h.zen.window, id: shop.id });
+  assert.deepEqual([own.container.state, own.container.name, Object.keys(own.container)], ["own", "Shop", ["state", "name", "color"]]);
+  assert.doesNotMatch(JSON.stringify(own), /user_?context|:40\b/iu);
+  assert.equal(h.probes.length, probes, "reading the home never probes a server");
+  assert.equal(h.gecko.creates(), 1, "reading the home creates no container");
+  // The stored record, read again each time: a label changed elsewhere shows at once.
+  await h.services.setAccountLabel(shop.id, { key: "vercel", label: "personal Google" });
+  assert.equal((await h.services.projectHome({ window: h.zen.window, id: shop.id })).project.accounts[0].label, "personal Google");
+  // Unknown, malformed and removed ids; foreign and private windows.
+  for (const id of ["p_unknown1", "../p_x", "/work/shop", 40, undefined]) {
+    await assert.rejects(h.services.projectHome({ window: h.zen.window, id }), { code: "UNKNOWN_PROJECT" }, String(id));
+  }
+  await assert.rejects(h.services.projectHome({ window: { foreign: true }, id: shop.id }), { code: "NO_WINDOW" });
+  await assert.rejects(h.services.projectHome({ id: shop.id }), { code: "NO_WINDOW" });
+  const priv = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }], isPrivate: true });
+  h.services.registerWindow(priv.window, new ZenWorkspaceAdapter(priv.window));
+  await assert.rejects(h.services.projectHome({ window: priv.window, id: shop.id }), { code: "PRIVATE_WINDOW" });
+  const unknown = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }] });
+  delete unknown.window.PrivateBrowsingUtils;
+  h.services.registerWindow(unknown.window, new ZenWorkspaceAdapter(unknown.window));
+  await assert.rejects(h.services.projectHome({ window: unknown.window, id: shop.id }), { code: "PRIVATE_WINDOW" }, "unknown privacy counts as private");
+  await h.services.removeProject(shop.id);
+  await assert.rejects(h.services.projectHome({ window: h.zen.window, id: shop.id }), { code: "UNKNOWN_PROJECT" });
+});
+
+// An identity service whose next get() can be held, as an asynchronous
+// dependency may be; nothing may be created or updated by reading a home.
+function heldHomeHarness() {
+  let gate = null;
+  let entered = null;
+  const observed = {};
+  const identities = {
+    async get(id) {
+      if (gate) { const wait = gate; gate = null; entered(); await wait; }
+      return { userContextId: id, public: true, name: "Shop", icon: "briefcase", color: "blue" };
+    },
+    create: () => assert.fail("reading a home never creates an identity"),
+    update: () => assert.fail("reading a home never updates an identity"),
+  };
+  const h = harness({ deps: { containerIdentities: identities, containersEnabled: () => true,
+    observeContainers: callbacks => { Object.assign(observed, callbacks); return () => {}; } } });
+  const record = { version: 2, id: "p_seeded1", root: "/work/shop", manifest: MANIFEST, manifest_state: "none", context_uuid: APP,
+    trusted: false, created_at: 5, updated_at: 6, detected: null, container: { user_context_id: 40 },
+    shared_sites: { hosts: [], confirmed: false }, accounts: [], brief: null };
+  h.storage.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [], projects: [record] }));
+  const services = h.make();
+  const unregister = services.registerWindow(h.zen.window, h.adapter);
+  const home = () => services.projectHome({ window: h.zen.window, id: "p_seeded1" });
+  // Holds the next identity lookup: { started, release }.
+  const hold = () => {
+    let release;
+    const started = new Promise(resolve => { entered = resolve; });
+    gate = new Promise(resolve => { release = resolve; });
+    return { started, release };
+  };
+  return { ...h, services, unregister, observed, home, hold };
+}
+
+test("project home: an older request held across the container lookup never returns a removed or superseded record", { skip }, async () => {
+  // Removed meanwhile: the newer request and the released older one both say UNKNOWN_PROJECT.
+  const removed = heldHomeHarness();
+  const held = removed.hold();
+  const older = removed.home();
+  await held.started;
+  await quietly(() => removed.services.removeProject("p_seeded1"));
+  await assert.rejects(removed.home(), { code: "UNKNOWN_PROJECT" });
+  held.release();
+  await assert.rejects(older, { code: "UNKNOWN_PROJECT" }, "the removed record is never returned");
+
+  // Changed meanwhile: the older request refuses; the newer one has the new label.
+  const changed = heldHomeHarness();
+  const hold2 = changed.hold();
+  const stale = changed.home();
+  await hold2.started;
+  await changed.services.setAccountLabel("p_seeded1", { key: "vercel", label: "work Google" });
+  const fresh = await changed.home();
+  assert.deepEqual(fresh.project.accounts, [{ key: "vercel", label: "work Google" }]);
+  hold2.release();
+  await assert.rejects(stale, { code: "PROJECT_CHANGED" });
+
+  // Firefox deleted the container meanwhile: the presentation read before is void.
+  const deleted = heldHomeHarness();
+  const hold3 = deleted.hold();
+  const before = deleted.home();
+  await hold3.started;
+  await quietly(async () => { deleted.observed.identityDeleted(40); await settle(); });
+  hold3.release();
+  await assert.rejects(before, { code: "PROJECT_CHANGED" });
+
+  // The window went away meanwhile.
+  const closed = heldHomeHarness();
+  const hold4 = closed.hold();
+  const orphan = closed.home();
+  await hold4.started;
+  closed.unregister();
+  hold4.release();
+  await assert.rejects(orphan, { code: "NO_WINDOW" });
+});
+
+test("project home: a mutation of the project in flight refuses at once; afterwards the current record is returned", { skip }, async () => {
+  const h = heldHomeHarness();
+  const pending = h.services.setAccountLabel("p_seeded1", { key: "vercel", label: "work Google" });
+  await assert.rejects(h.home(), { code: "PROJECT_CHANGED" }, "fails closed while authority is pending");
+  await pending;
+  const home = await h.home();
+  assert.deepEqual(home.project.accounts, [{ key: "vercel", label: "work Google" }]);
+  assert.deepEqual(home.container, { state: "own", name: "Shop", color: "blue" });
+  assert.ok(!Object.hasOwn(home.project, "container"));
+  assert.doesNotMatch(JSON.stringify(home), /user_?context|\b40\b/iu, "no native container ID");
+});
+
+test("project home: a project in no live space has no space; a re-read folder keeps labels, sharing, brief and manifest", { skip }, async () => {
+  const h = harness({ tree: RICH_TREE });
+  const brief = { version: 1, cli: "codex", generated_at: 5, accepted: false, document: { version: 1, product: "A synthetic shop.",
+    apps: [], domains: [], services: [], start: [], risks: [] } };
+  const record = { version: 2, id: "p_seeded1", root: "/work/shop", manifest: MANIFEST, manifest_state: "written", context_uuid: GONE,
+    trusted: false, created_at: 5, updated_at: 6, detected: null, container: { user_context_id: 7 },
+    shared_sites: { hosts: ["github.com"], confirmed: true }, accounts: [{ key: "vercel", label: "Work Google" }], brief };
+  h.storage.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [], projects: [record] }));
+  const services = h.make();
+  services.registerWindow(h.zen.window, h.adapter);
+  const before = await services.projectHome({ window: h.zen.window, id: "p_seeded1" });
+  assert.equal(before.space, null, "a deleted space is not shown as the project's space");
+  assert.equal(before.container.state, "off", "containers not configured in this harness");
+  await services.refreshProjectDetection("p_seeded1");
+  const after = await services.projectHome({ window: h.zen.window, id: "p_seeded1" });
+  assert.ok(after.project.detected, "the folder was read");
+  for (const key of ["manifest", "manifest_state", "accounts", "shared_sites", "brief", "root"]) {
+    assert.deepEqual(after.project[key], before.project[key], key);
+  }
+});
+
+test("native project containers import the pinned ContextualIdentityService by its packaged moz-src URL", { skip }, t => {
+  // The actual app logged "Missing chrome or resource URL" for the old resource://gre/modules/ URL.
+  assert.equal(CONTEXTUAL_IDENTITY_MODULE, "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs");
+  const services = readFileSync(new URL("../chrome/AxioSozoServices.sys.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(services, /resource:\/\/gre\/modules\/ContextualIdentityService/u, "no unpackaged URL");
+  assert.equal([...services.matchAll(/ChromeUtils\.importESModule\(CONTEXTUAL_IDENTITY_MODULE\)/gu)].length, 1, "one import, no fallback");
+  const browserExperience = readFileSync(new URL("../chrome/BrowserExperience.sys.mjs", import.meta.url), "utf8");
+  assert.ok(browserExperience.includes(`"${CONTEXTUAL_IDENTITY_MODULE}"`), "the same URL the browser experience module already uses");
+  const engine = "/Volumes/AxioSozoBuild/workstation/zen/source/engine/toolkit/components/contextualidentity";
+  if (!existsSync(`${engine}/moz.build`)) { t.skip("pinned Gecko source is not mounted; packaging not compared"); return; }
+  assert.match(readFileSync(`${engine}/moz.build`, "utf8"), /MOZ_SRC_FILES \+= \[\s*"ContextualIdentityService\.sys\.mjs"/u,
+    "the engine packages it as moz-src, not under resource://gre/modules/");
+  const source = readFileSync(`${engine}/ContextualIdentityService.sys.mjs`, "utf8");
+  assert.match(source, /^export const CONTAINER_COLORS = \[/mu);
+  assert.match(source, /^export var ContextualIdentityService = /mu);
 });
 
 test("P2: a configured but broken identity service fails closed instead of opening in a shared jar", { skip }, async () => {

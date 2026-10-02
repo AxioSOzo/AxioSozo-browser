@@ -109,14 +109,21 @@ const HOME = "{11111111-1111-4111-8111-111111111111}";
 let serial = 0;
 const flush = async (rounds = 6) => { for (let i = 0; i < rounds; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 
-async function loadPage({ projects = [], handlers = {} } = {}) {
+async function loadPage({ projects = [], handlers = {}, hash = "" } = {}) {
   const document = parseHtml(HTML);
   const calls = [];
   const defaults = {
     getOverviewFlags: () => ({ contexts: true, enginePreferences: false, jevKeyEntry: true }),
     activeContext: () => ({ uuid: HOME }),
     listContexts: () => [{ uuid: HOME, name: "Home", icon: "", type: "personal", organization_uuid: null, project_id: null, container: 0 }],
-    listProjects: () => projects, listRules: () => [], getJevSettings: () => ({ consent: false, interval_minutes: 5, hourly_budget: 30 }),
+    listProjects: () => projects,
+    getProjectHome: ({ id }) => {
+      const stored = projects.find(project => project.id === id);
+      if (!stored) throw { code: "UNKNOWN_PROJECT", message: "UNKNOWN_PROJECT" };
+      const { container: _mapping, ...project } = structuredClone(stored);
+      return { version: 1, project, space: { uuid: HOME, name: "Home" }, container: { state: "pending" }, agent_activity: null, console_errors: null };
+    },
+    listRules: () => [], getJevSettings: () => ({ consent: false, interval_minutes: 5, hourly_budget: 30 }),
     usageSummary: () => [], listOrphans: () => [], needsAttention: () => [], serviceStatus: () => [],
     getJevKeyStatus: () => ({ id: "jev", label: "Jev", state: "needs-key", state_label: "No key stored", detail: "No Jev key is stored.", key: "missing", key_entry_enabled: true }),
     pickFolder: () => "/Volumes/Synthetic/harbor-suite",
@@ -131,16 +138,18 @@ async function loadPage({ projects = [], handlers = {} } = {}) {
     },
     subscribe() { return () => {}; },
   };
-  const location = { hash: "" };
+  const location = { hash };
+  const listeners = new Map();
   Object.assign(globalThis, { document, Node, location,
-    window: { AxioSozoOverview: api, addEventListener() {} },
+    window: { AxioSozoOverview: api, addEventListener: (type, fn) => listeners.set(type, fn) },
     history: { replaceState: (_state, _title, url) => { location.hash = url; } },
     CSS: { escape: value => String(value).replace(/["\\]/g, "\\$&") } });
   await import(`../chrome/overview/about-axiosozo.mjs?actor-page=${++serial}`);
   await flush();
-  return { document, calls };
+  const navigate = async next => { location.hash = next; listeners.get("hashchange")?.(); await flush(); };
+  return { document, calls, navigate };
 }
-const factsOf = root => Object.fromEntries(root.querySelectorAll("dl.facts dt").map(dt => {
+const factsOf = root => Object.fromEntries(root.querySelectorAll("dl dt").map(dt => {
   const dd = dt.parentNode.children[dt.parentNode.children.indexOf(dt) + 1];
   return [dt.textContent, dd];
 }));
@@ -186,7 +195,7 @@ test("detected strings are inserted as text, never as markup", async () => {
   assert.match(findings.textContent, /<img src=x onerror=alert\(1\)>/u);
 });
 
-test("project cards show the detected snapshot; services open their dashboards; Read folder again sends the id only", async () => {
+test("project cards and homes show the detected snapshot; services open their dashboards; Read folder again sends the id only", async () => {
   const detected = { at: 5, integrations: HARBOR.integrations, platforms: HARBOR.platforms,
     domains: [...HARBOR.domains.slice(0, 1), { host: "status.harborsuite.app", origin: "docs", source: "docs/ops/domains.md", confirmed: false }],
     agents: HARBOR.agents };
@@ -200,21 +209,34 @@ test("project cards show the detected snapshot; services open their dashboards; 
     refreshProjectDetection: params => { refreshed = params; return project; },
     openProjectUrl: () => ({ opened: true, container: "project", selected: true }) } });
   const card = page.document.getElementById("project-p_harbor1");
-  const facts = factsOf(card);
-  // Step 2: every project has sign-ins (its own container) and shared sites.
-  assert.deepEqual(Object.keys(facts), ["Space", "Sign-ins", "Shared sites", "Services", "Apps", "Domains", "From docs", "Agents"]);
-  const convex = facts.Services.querySelectorAll("button.chip").find(chip => chip.textContent.startsWith("Convex"));
-  assert.equal(convex.getAttribute("aria-label"), "Open the Convex dashboard");
+  // The card: labelled phrases, not chips; its title is the link to the home.
+  assert.deepEqual(card.querySelectorAll(".project-facts .fact").map(fact => fact.textContent), [
+    "Apps: Desktop (Tauri), macOS, iOS and 1 more",
+    `Services: ${HARBOR.integrations.slice(0, 3).map(item => item.name).join(", ")} and ${HARBOR.integrations.length - 3} more`]);
+  assert.equal(card.querySelector("a.project-link").getAttribute("href"), "#project=p_harbor1");
+  assert.equal(card.querySelectorAll("button.chip").length, 0);
+  const legacyCard = page.document.getElementById("project-p_legacy1");
+  assert.equal(legacyCard.querySelector(".project-facts"), null, "no snapshot, no detection facts");
+  assert.ok(legacyCard.querySelectorAll(".menu-items button").some(button => button.textContent === "Read folder"));
+
+  await page.navigate("#project=p_harbor1");
+  const home = page.document.getElementById("project-home");
+  const about = factsOf(home.querySelector('[data-section="about"]'));
+  assert.deepEqual(Object.keys(about), ["Folder", "Project file", "Apps found", "Domains", "From docs", "Last read"]);
+  assert.equal(about.Folder.textContent, "/Volumes/Synthetic/harbor-suite");
+  assert.equal(about["Project file"].textContent, "Kept in this browser only");
+  assert.match(about.Domains.textContent, new RegExp(`^${HARBOR.domains[0].host.replaceAll(".", "\\.")} · from the project's config files$`, "u"));
+  assert.equal(about["From docs"].textContent, "status.harborsuite.appunconfirmed", "documented domains stay unconfirmed and are not links");
+  assert.equal(about["From docs"].querySelectorAll("button, a").length, 0);
+  const activity = home.querySelector('[data-section="activity"]');
+  assert.match(activity.textContent, /In the folder: AGENTS\.md, CLAUDE\.md, \.claude, 2 agent worktrees\. These show the folder is set up for agents, not that one is running\./u);
+  const convex = home.querySelectorAll("button").find(button => button.getAttribute("aria-label") === "Open the Convex dashboard");
   convex.click();
   await flush();
   // A project's dashboard link goes through the container router, never a plain openUrl.
   assert.deepEqual(page.calls.filter(([name]) => name === "openProjectUrl" || name === "openUrl"),
     [["openProjectUrl", { projectId: "p_harbor1", url: "https://dashboard.convex.dev/" }]]);
-  assert.match(facts["From docs"].textContent, /^status\.harborsuite\.appunconfirmed$/u);
-
-  const legacyCard = page.document.getElementById("project-p_legacy1");
-  assert.deepEqual(Object.keys(factsOf(legacyCard)), ["Space", "Sign-ins", "Shared sites"], "no snapshot, no detection rows");
-  assert.ok(legacyCard.querySelectorAll(".menu-items button").some(button => button.textContent === "Read folder"));
+  await page.navigate("#projects");
 
   const menu = card.querySelectorAll(".menu-items button").find(button => button.textContent === "Read folder again");
   assert.equal(menu.getAttribute("role"), "menuitem");

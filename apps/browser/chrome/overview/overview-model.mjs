@@ -731,18 +731,294 @@ const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
 const RULE_ID = /^r_[a-z0-9]{4,32}$/;
 
 /** "#projects", "#rules", "#ai"; old "#home", "#time", "#settings" redirect;
- * "#project=<id>", "#edit-project=<id>", "#add-project=<space uuid>", "#rule=<id>". */
+ * "#project=<id>" (the project's home, see homeIdFromRoute), "#edit-project=<id>",
+ * "#add-project=<space uuid>", "#rule=<id>". */
 export function routeFromHash(hash) {
   let text = String(hash ?? "").replace(/^#/, "");
   try { text = decodeURIComponent(text); } catch { return { view: "projects" }; }
   const [name, value] = text.split("=", 2);
   if (VIEWS.includes(text)) return { view: text };
   if (Object.hasOwn(LEGACY_VIEWS, text)) return { view: LEGACY_VIEWS[text], legacy: true };
-  if (name === "project" && PROJECT_ID.test(value ?? "")) return { view: "projects", project: value };
+  // A project home: everything after "project=" (decoded) must be one valid id;
+  // a tail such as "=x", "%3Dx" or "=/" is not a home, only the list.
+  if (name === "project") {
+    const whole = text.slice("project=".length);
+    return PROJECT_ID.test(whole) ? { view: "projects", project: whole } : { view: "projects" };
+  }
   if (name === "edit-project" && PROJECT_ID.test(value ?? "")) return { view: "projects", project: value, edit: true };
   if (name === "add-project" && isWorkspaceUuid(value ?? "")) return { view: "projects", addTo: value };
   if (name === "rule" && RULE_ID.test(value ?? "")) return { view: "rules", rule: value };
   return { view: "projects" };
+}
+
+// ---------------------------------------------------------------- project list and home (Plan 4 step 3)
+
+// The home of one project is about:axiosozo#project=<id>. The id is the only
+// route key: never a folder, a container or anything else the page could name.
+export const KIND_LABELS = Object.freeze({ web: "Web project", desktop: "Desktop app", library: "Library",
+  cli: "Command-line tool", mobile: "Mobile app" });
+
+export function homeHash(id) {
+  return typeof id === "string" && PROJECT_ID.test(id) ? `#project=${id}` : "#projects";
+}
+
+/** The project a route shows as its home, or null (the list, an editor, another view). */
+export function homeIdFromRoute(route) {
+  return route?.view === "projects" && !route.edit && typeof route.project === "string" && PROJECT_ID.test(route.project)
+    ? route.project : null;
+}
+
+export function projectName(project) {
+  return textOr(project?.manifest?.name) || textOr(project?.id) || "Project";
+}
+
+/** One capital letter for the project's tile; "?" when the name has none. */
+export function monogram(name) {
+  const first = [...String(name ?? "").trim()].find(char => /[\p{L}\p{N}]/u.test(char));
+  return first ? first.toUpperCase() : "?";
+}
+
+const listText = (items, shown = 3) => (items.length <= shown ? items.join(", ")
+  : `${items.slice(0, shown).join(", ")} and ${items.length - shown} more`);
+const capitalize = text => (text ? text[0].toUpperCase() + text.slice(1) : "");
+
+/** Host plus a path other than "/", for showing an address; "" for anything that is not http(s). */
+export function displayAddress(url) {
+  if (!isHttpUrl(url)) return "";
+  const parsed = new URL(url);
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return parsed.host + path;
+}
+
+export const STATUS_TEXT = Object.freeze({ up: "Running", down: "Not running", checking: "Checking…",
+  unchecked: "Not checked yet", unknown: "Could not check", remote: "Not checked" });
+export const STATUS_NOTE = "Only servers on this Mac are checked, with one connection to the declared port. Preview and production addresses are never contacted.";
+
+// The declared local service an environment's address points at (same port; its app first).
+function serviceForEnvironment(project, env) {
+  if (!isLoopback(env?.base_url)) return null;
+  const port = portOf(env.base_url);
+  const services = listOf(project?.manifest?.services).filter(service => isLoopback(service?.url) && service.port === port);
+  const app = appOrNull(env.app);
+  return services.find(service => appOrNull(service.app) === app) ?? services.find(service => !service.app) ?? services[0] ?? null;
+}
+
+// The last result of serviceStatus() for a declared service: "up", "down", "unknown" or null (not checked).
+function statusOf(service, statuses) {
+  const entry = listOf(statuses).find(item => item?.url === service.url && item?.port === service.port)
+    ?? listOf(statuses).find(item => item?.name === service.name && item?.port === service.port);
+  return entry?.status === "up" || entry?.status === "down" || entry?.status === "unknown" ? entry.status : null;
+}
+
+/** "up" | "down" | "unknown" | "checking" | "unchecked" for a local address; "remote" otherwise. */
+export function environmentStatus(project, env, statuses = [], { checking = false } = {}) {
+  if (!isLoopback(env?.base_url)) return "remote";
+  const service = serviceForEnvironment(project, env);
+  const status = service ? statusOf(service, statuses) : null;
+  if (status) return status;
+  return service && checking ? "checking" : "unchecked";
+}
+
+const ENV_RANK = Object.freeze({ local: 0, dev: 1, development: 1, preview: 2, staging: 2, production: 4, prod: 4 });
+const envRank = name => (Object.hasOwn(ENV_RANK, name) ? ENV_RANK[name] : 3);
+
+/** A project's environments per app for the home: local first, production last,
+ * each with its address and the status the page may honestly show. */
+export function homeEnvironments(project, statuses = [], { checking = false } = {}) {
+  const envs = listOf(project?.manifest?.environments).filter(env => typeof env?.name === "string" && env.name && isHttpUrl(env.base_url));
+  const apps = [...new Set(envs.map(env => appOrNull(env.app)))];
+  const multi = apps.filter(Boolean).length > 1;
+  return apps.map(app => ({
+    app,
+    label: multi ? (app ?? "Whole project") : null,
+    rows: envs.map((env, index) => ({ env, index })).filter(({ env }) => appOrNull(env.app) === app)
+      .sort((a, b) => envRank(a.env.name) - envRank(b.env.name) || a.index - b.index)
+      .map(({ env }) => {
+        const status = environmentStatus(project, env, statuses, { checking });
+        const label = capitalize(env.name);
+        const address = displayAddress(env.base_url);
+        return { app, name: env.name, label, url: env.base_url, address, local: isLoopback(env.base_url),
+          status, statusText: STATUS_TEXT[status], openLabel: `Open ${multi && app ? `${app} ` : ""}${label} at ${address}` };
+      }),
+  }));
+}
+
+/** The local-server line of a project card, or null when it declares none. A
+ * check that was made but could not tell (status "unknown") is said so; it is
+ * never shown as running, down or not yet checked. */
+export function localSummary(project, statuses = []) {
+  const services = listOf(project?.manifest?.services).filter(service => isLoopback(service?.url));
+  if (!services.length) return null;
+  const states = services.map(service => statusOf(service, statuses));
+  const count = value => states.filter(state => state === value).length;
+  const up = count("up");
+  const down = count("down");
+  const failed = count("unknown");
+  const unchecked = count(null);
+  if (services.length === 1) {
+    if (up) return { tone: "up", text: "Local server running" };
+    if (down) return { tone: "down", text: "Local server not running" };
+    if (failed) return { tone: "unknown", text: "Local server could not be checked" };
+    return { tone: "unknown", text: "Local server not checked yet" };
+  }
+  if (unchecked === services.length) return { tone: "unknown", text: "Local servers not checked yet" };
+  if (failed === services.length) return { tone: "unknown", text: "Local servers could not be checked" };
+  const tone = down ? (up ? "warn" : "down") : failed || unchecked ? "unknown" : "up";
+  if (!failed && !unchecked) return { tone, text: `${up} of ${services.length} local servers running` };
+  return { tone, text: [up ? `${up} running` : null, down ? `${down} not running` : null,
+    failed ? `${failed} could not be checked` : null, unchecked ? `${unchecked} not checked yet` : null].filter(Boolean).join(", ") };
+}
+
+/** App names of the manifest (first seen), else the native and mobile apps detection found. */
+export function projectApps(project) {
+  const manifest = project?.manifest;
+  const apps = [...new Set([...listOf(manifest?.environments), ...listOf(manifest?.services)]
+    .map(item => appOrNull(item?.app)).filter(Boolean))];
+  if (apps.length) return apps;
+  return [...new Set(detectionSummary(project?.detected).platforms.map(item => PLATFORM_LABELS[item.kind]))];
+}
+
+/** What a project card in the list says: labelled phrases, never bare chips. */
+export function projectCard(project, { statuses = [], container = null } = {}) {
+  const name = projectName(project);
+  const summary = containerSummary(container);
+  const apps = projectApps(project);
+  const services = detectionSummary(project?.detected).integrations.map(item => item.name);
+  return {
+    id: project?.id ?? null, name, monogram: monogram(name), href: homeHash(project?.id),
+    color: summary?.state === "own" ? summary.color : null,
+    kind: KIND_LABELS[project?.manifest?.kind] ?? "Project",
+    folder: textOr(project?.root),
+    inRepo: project?.manifest_state === "written" || project?.manifest_state === "external",
+    local: localSummary(project, statuses),
+    facts: [apps.length ? { label: "Apps", text: listText(apps) } : null,
+      services.length ? { label: "Services", text: listText(services) } : null].filter(Boolean),
+  };
+}
+
+/** Services found in the folder or given an account label, then the labelled
+ * sites. Only the fixed integration names are shown for found services. */
+export function homeServices(project) {
+  const found = new Map(detectionSummary(project?.detected).integrations.map(item => [item.id, item]));
+  const accounts = listOf(project?.accounts).filter(item => typeof item?.key === "string" && typeof item?.label === "string");
+  const labelOf = key => accounts.find(item => item.key === key)?.label ?? null;
+  const services = Object.keys(INTEGRATION_NAMES).filter(id => found.has(id) || labelOf(id) !== null).map(id => ({
+    key: id, name: INTEGRATION_NAMES[id], account: labelOf(id), url: found.get(id)?.url ?? null, found: found.has(id),
+    sources: found.get(id)?.sources ?? [] }));
+  const sites = accounts.filter(item => !Object.hasOwn(INTEGRATION_NAMES, item.key))
+    .map(item => ({ key: item.key, name: item.key, account: item.label, url: null, found: false, sources: [] }));
+  return [...services, ...sites];
+}
+
+export const AGENT_LABELS = Object.freeze({ "claude-code": "Claude Code", codex: "Codex", other: "Agent" });
+export const AGENT_STATE_TEXT = Object.freeze({ started: "Working", needs_input: "Needs you", done: "Done", failed: "Failed" });
+export const AGENTS_UNAVAILABLE = "Agents cannot report to AxioSozo yet; status reporting is not part of this build.";
+export const AGENTS_EMPTY = "No agent reported on this project in the last day.";
+export const PRESENCE_TEXT = "These show the folder is set up for agents, not that one is running.";
+const STATUS_RECORD_ID = /^as_[0-9a-f]{16}$/u;
+const ONE_LINE = /^[^\u0000-\u001f\u007f-\u009f]+$/u;
+
+const within = (path, root) => typeof path === "string" && typeof root === "string" && root.startsWith("/")
+  && (path === root || path.startsWith(`${root}/`));
+
+// workstation-v1 §5 status records; anything else is not shown.
+function validStatusRecord(record, root) {
+  return record?.version === 1 && STATUS_RECORD_ID.test(record.id ?? "") && Object.hasOwn(AGENT_LABELS, record.agent)
+    && Object.hasOwn(AGENT_STATE_TEXT, record.state) && typeof record.title === "string" && record.title.length <= 120
+    && ONE_LINE.test(record.title) && Number.isSafeInteger(record.at) && record.at > 0
+    && (root === null || within(record.project_path, root));
+}
+
+export function timeAgo(ms) {
+  if (!Number.isFinite(ms) || ms < 60_000) return "just now";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** Recent agent activity on the home (P3, step 4). `activity` is null while this
+ * build has no status reporting; otherwise `{ records }` from the browser. Only
+ * valid records of this project's folder are shown, newest first. */
+export function homeAgentActivity(activity, { root = null, now = null } = {}) {
+  if (!activity || !Array.isArray(activity.records)) return { state: "unavailable", text: AGENTS_UNAVAILABLE, items: [] };
+  const items = activity.records.filter(record => validStatusRecord(record, root)).sort((a, b) => b.at - a.at).slice(0, 5)
+    .map(record => ({ agent: AGENT_LABELS[record.agent], state: record.state, stateText: AGENT_STATE_TEXT[record.state],
+      title: record.title, at: record.at, ago: Number.isSafeInteger(now) ? timeAgo(now - record.at) : null }));
+  return items.length ? { state: "list", text: null, items } : { state: "empty", text: AGENTS_EMPTY, items: [] };
+}
+
+export const ERRORS_UNAVAILABLE = "Console errors are not collected in this build.";
+const clipText = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/** Console errors on the home (P5, step 7). `errors` is null while this build
+ * does not collect them; otherwise `{ count, recent: [{ level, text }] }`. */
+export function homeConsoleErrors(errors) {
+  if (!errors || !Number.isSafeInteger(errors.count) || errors.count < 0) {
+    return { state: "unavailable", text: ERRORS_UNAVAILABLE, count: null, items: [] };
+  }
+  const items = listOf(errors.recent).filter(item => typeof item?.text === "string" && item.text.trim()).slice(0, 5)
+    .map(item => ({ level: item.level === "warning" ? "warning" : "error",
+      text: clipText(item.text.replace(/[\u0000-\u001f\u007f-\u009f\s]+/gu, " ").trim(), 300) }));
+  if (!errors.count) return { state: "empty", text: "No console errors in this project's tabs.", count: 0, items: [] };
+  return { state: "list", text: `${errors.count} console error${errors.count === 1 ? "" : "s"} in this project's tabs`, count: errors.count, items };
+}
+
+export const BRIEF_UNAVAILABLE = "A brief is a short document your own Claude Code or Codex can write about this folder. Writing one is not available in this build.";
+export const BRIEF_CLIS = Object.freeze({ "claude-code": "Claude Code", codex: "Codex" });
+
+/** A stored brief (understand-v1 §4) as a document, or null. Text only; its
+ * domains are what the assistant wrote, so they stay unconfirmed. */
+export function briefView(brief) {
+  const doc = brief?.document;
+  if (brief?.version !== 1 || doc?.version !== 1 || !textOr(doc.product)) return null;
+  const rows = (list, keys) => listOf(list).filter(item => keys.every(key => item?.[key] === null || typeof item?.[key] === "string"))
+    .filter(item => textOr(item[keys[0]]));
+  return {
+    product: doc.product,
+    apps: rows(doc.apps, ["name", "kind", "summary"]).map(item => ({ name: item.name, kind: textOr(item.kind), summary: textOr(item.summary) })),
+    domains: rows(doc.domains, ["host", "purpose"]).map(item => ({ host: item.host, purpose: textOr(item.purpose) })),
+    services: rows(doc.services, ["name", "purpose"]).map(item => ({ name: item.name, purpose: textOr(item.purpose) })),
+    start: rows(doc.start, ["label", "command"]).map(item => ({ label: item.label, command: textOr(item.command), cwd: textOr(item.cwd) || null })),
+    risks: listOf(doc.risks).filter(item => typeof item === "string" && item),
+    by: BRIEF_CLIS[brief.cli] ?? "an assistant",
+    accepted: brief.accepted === true,
+    generatedAt: Number.isSafeInteger(brief.generated_at) ? brief.generated_at : null,
+  };
+}
+
+/** Folder, project file and last read, for the About part of the home. */
+export function folderFacts(project) {
+  const state = project?.manifest_state;
+  return {
+    root: textOr(project?.root),
+    projectFile: state === "written" ? "Saved in .axiosozo/project.json"
+      : state === "external" ? "Read from .axiosozo/project.json" : "Kept in this browser only",
+    inRepo: state === "written" || state === "external",
+    lastRead: Number.isSafeInteger(project?.detected?.at) ? project.detected.at : null,
+  };
+}
+
+/** Section order of the home: activity moves up only when it has something to show. */
+export function homeSections({ agents, errors } = {}) {
+  const busy = agents?.state === "list" || errors?.state === "list";
+  return busy ? ["open", "activity", "accounts", "about"] : ["open", "accounts", "activity", "about"];
+}
+
+/** A calm explanation when a project home cannot be shown. */
+export function homeProblem(code) {
+  switch (code) {
+    case "UNKNOWN_PROJECT": return { title: "This project is not here anymore",
+      text: "It may have been removed from AxioSozo. Its folder is not touched. Your other projects are under Projects." };
+    case "PRIVATE_WINDOW": return { title: "Project homes open in normal windows",
+      text: "A private window does not show project homes or open project containers." };
+    case "NO_WINDOW": return { title: "Open this page in a browser window", text: "A project home needs a normal browser window." };
+    case "PROJECT_CHANGED": return { title: "This project is changing",
+      text: "It changed while this page was reading it. Open it again in a moment, or go back to all projects." };
+    default: return { title: "This project could not be shown", text: errorMessage(code) ?? "Try again, or go back to all projects." };
+  }
 }
 
 // ---------------------------------------------------------------- AI & keys

@@ -128,6 +128,191 @@ test("a project link that did not get its own container says so", () => {
   for (const container of ["project", "shared_site", undefined]) assert.equal(M.openedNote({ opened: true, container, selected: true }), null);
 });
 
+// ---------------------------------------------------------------- project home (Plan 4 step 3)
+
+const SHOP = { version: 2, id: "p_shop1", root: "/Volumes/Synthetic/shop", manifest_state: "none", context_uuid: null,
+  manifest: { version: 2, name: "Shop", kind: "web", surfaces: [],
+    environments: [
+      { app: "web", name: "production", base_url: "https://shop.example.dev" },
+      { app: "web", name: "local", base_url: "http://localhost:5173" },
+      { app: "web", name: "preview", base_url: "https://preview.shop.example.dev/app" },
+      { app: "admin", name: "local", base_url: "http://127.0.0.1:5174" },
+      { app: "desktop", name: "local", base_url: "http://localhost:1420" }],
+    services: [
+      { app: "web", name: "web dev server", url: "http://localhost:5173/", port: 5173 },
+      { app: "admin", name: "admin dev server", url: "http://127.0.0.1:5174/", port: 5174 },
+      { app: "desktop", name: "Tauri", url: "http://localhost:1420/", port: 1420 }] },
+  detected: null, shared_sites: { hosts: [], confirmed: false }, accounts: [], brief: null };
+
+test("home route: only a valid project id makes a home; anything else is the list", () => {
+  assert.equal(M.homeHash("p_shop1"), "#project=p_shop1");
+  for (const bad of ["../p_x", "/Volumes/Synthetic/shop", "P_SHOP1", "p_x", 40, null, undefined, "p_shop1#x"]) {
+    assert.equal(M.homeHash(bad), "#projects", String(bad));
+  }
+  assert.equal(M.homeIdFromRoute(M.routeFromHash("#project=p_shop1")), "p_shop1");
+  for (const hash of ["#projects", "#edit-project=p_shop1", "#rule=r_abcd", "#project=../x", "#project=%2FVolumes%2Fx", "#project=12", "#ai"]) {
+    assert.equal(M.homeIdFromRoute(M.routeFromHash(hash)), null, hash);
+  }
+  assert.equal(M.homeIdFromRoute({ view: "rules", project: "p_shop1" }), null);
+  assert.equal(M.homeIdFromRoute({ view: "projects", project: "/etc" }), null);
+});
+
+test("home environments: per app, local first and production last, with only honest statuses", () => {
+  const statuses = [{ name: "web dev server", url: "http://localhost:5173/", port: 5173, status: "up" },
+    { name: "admin dev server", url: "http://127.0.0.1:5174/", port: 5174, status: "down" }];
+  const groups = M.homeEnvironments(SHOP, statuses);
+  assert.deepEqual(groups.map(group => group.label), ["web", "admin", "desktop"]);
+  assert.deepEqual(groups[0].rows.map(row => [row.label, row.address, row.status, row.statusText]), [
+    ["Local", "localhost:5173", "up", "Running"],
+    ["Preview", "preview.shop.example.dev/app", "remote", "Not checked"],
+    ["Production", "shop.example.dev", "remote", "Not checked"]]);
+  assert.deepEqual(groups[1].rows.map(row => [row.status, row.statusText]), [["down", "Not running"]]);
+  assert.deepEqual(groups[2].rows.map(row => [row.status, row.statusText]), [["unchecked", "Not checked yet"]]);
+  assert.equal(M.homeEnvironments(SHOP, [], { checking: true })[2].rows[0].statusText, "Checking…");
+  assert.equal(groups[0].rows[0].openLabel, "Open web Local at localhost:5173");
+  assert.match(M.STATUS_NOTE, /never contacted/u, "remote addresses are never claimed as checked");
+  // A single-app project needs no app labels; a hostile or non-web address is left out.
+  const single = M.homeEnvironments({ manifest: { environments: [{ name: "local", base_url: "http://localhost:3000" },
+    { name: "evil", base_url: "javascript:alert(1)" }, { name: "creds", base_url: "https://u:p@x.example" }], services: [] } });
+  assert.deepEqual(single.map(group => [group.label, group.rows.map(row => row.openLabel)]), [[null, ["Open Local at localhost:3000"]]]);
+});
+
+test("project card and local summary: labelled phrases from what is stored and checked", () => {
+  const statuses = [{ name: "web dev server", url: "http://localhost:5173/", port: 5173, status: "up" },
+    { name: "admin dev server", url: "http://127.0.0.1:5174/", port: 5174, status: "down" },
+    { name: "Tauri", url: "http://localhost:1420/", port: 1420, status: "up" }];
+  const card = M.projectCard(SHOP, { statuses, container: { project_id: "p_shop1", state: "own", name: "Shop", color: "purple" } });
+  assert.deepEqual([card.name, card.monogram, card.href, card.color, card.kind, card.folder, card.inRepo],
+    ["Shop", "S", "#project=p_shop1", "purple", "Web project", "/Volumes/Synthetic/shop", false]);
+  assert.deepEqual(card.local, { tone: "warn", text: "2 of 3 local servers running" });
+  assert.deepEqual(card.facts, [{ label: "Apps", text: "web, admin, desktop" }]);
+  assert.deepEqual(M.localSummary(SHOP, []), { tone: "unknown", text: "Local servers not checked yet" });
+  assert.deepEqual(M.localSummary(SHOP, statuses.slice(0, 1)), { tone: "unknown", text: "1 running, 2 not checked yet" });
+  assert.deepEqual(M.localSummary(SHOP, statuses.slice(1, 2)), { tone: "down", text: "1 not running, 2 not checked yet" });
+  assert.equal(M.localSummary({ manifest: { services: [{ url: "https://shop.example.dev/", port: 443 }] } }), null, "remote services are never summarized");
+  assert.equal(M.projectCard(SHOP, { container: { state: "pending" } }).color, null);
+  assert.equal(M.projectCard(SHOP, { container: { state: "own", color: "url(x)" } }).color, null);
+  assert.deepEqual([M.monogram("  émile"), M.monogram("<img>"), M.monogram("—"), M.monogram("")], ["É", "I", "?", "?"]);
+  assert.equal(M.displayAddress("https://user:pw@example.com/"), "", "never an address with credentials");
+});
+
+test("a check that could not tell is not 'not checked yet', not running and not down; per service and in summary", () => {
+  const status = (name, url, port, value) => ({ name, url, port, status: value, checked_at: 1 });
+  const web = status("web dev server", "http://localhost:5173/", 5173, "unknown");
+  const admin = status("admin dev server", "http://127.0.0.1:5174/", 5174, "unknown");
+  const desktop = status("Tauri", "http://localhost:1420/", 1420, "unknown");
+  const single = { manifest: { environments: [{ name: "local", base_url: "http://localhost:5173" }], services: [{ name: "web dev server", url: "http://localhost:5173/", port: 5173 }] } };
+  // One service: failed, never attempted, and the actual probe answers.
+  assert.deepEqual(M.localSummary(single, [web]), { tone: "unknown", text: "Local server could not be checked" });
+  assert.deepEqual(M.localSummary(single, []), { tone: "unknown", text: "Local server not checked yet" });
+  assert.deepEqual(M.localSummary(single, [{ ...web, status: "up" }]), { tone: "up", text: "Local server running" });
+  assert.deepEqual(M.localSummary(single, [{ ...web, status: "down" }]), { tone: "down", text: "Local server not running" });
+  assert.deepEqual(M.localSummary(single, [{ ...web, status: "bogus" }]), { tone: "unknown", text: "Local server not checked yet" }, "an unknown value is no answer");
+  assert.equal(M.environmentStatus(single, single.manifest.environments[0], [web]), "unknown");
+  assert.equal(M.homeEnvironments(single, [web])[0].rows[0].statusText, "Could not check");
+  // Several services: every mix keeps the four answers apart.
+  assert.deepEqual(M.localSummary(SHOP, [web, admin, desktop]), { tone: "unknown", text: "Local servers could not be checked" });
+  assert.deepEqual(M.localSummary(SHOP, [web]), { tone: "unknown", text: "1 could not be checked, 2 not checked yet" });
+  assert.deepEqual(M.localSummary(SHOP, [{ ...web, status: "up" }, admin]), { tone: "unknown", text: "1 running, 1 could not be checked, 1 not checked yet" });
+  assert.deepEqual(M.localSummary(SHOP, [{ ...web, status: "up" }, { ...admin, status: "down" }, desktop]),
+    { tone: "warn", text: "1 running, 1 not running, 1 could not be checked" });
+  assert.deepEqual(M.localSummary(SHOP, [{ ...web, status: "down" }, admin, desktop]), { tone: "down", text: "1 not running, 2 could not be checked" });
+  for (const summary of [M.localSummary(SHOP, [web, admin, desktop]), M.localSummary(single, [web])]) {
+    assert.doesNotMatch(summary.text, /running|not checked yet/u, "a failed check is never claimed as running, down or unattempted");
+  }
+});
+
+test("the home route is exact: one valid id after decoding, nothing more; other hashes keep their parsing", () => {
+  for (const hash of ["#project=p_synthetic1", "#project%3Dp_synthetic1", "project=p_synthetic1"]) {
+    assert.deepEqual(M.routeFromHash(hash), { view: "projects", project: "p_synthetic1" }, hash);
+    assert.equal(M.homeIdFromRoute(M.routeFromHash(hash)), "p_synthetic1", hash);
+  }
+  for (const hash of ["#project=p_synthetic1=extra", "#project=p_synthetic1%3Dextra", "#project=p_synthetic1=/", "#project=p_synthetic1/",
+    "#project=p_synthetic1&x=1", "#project=p_synthetic1%0A", "#project=p_synthetic1 ", "#project=", "#project", "#project=p_x",
+    "#project=P_SYNTHETIC1", "#project=%2FVolumes%2FT9%2FCode%2Fshop", "#project=40", "#project==p_synthetic1"]) {
+    assert.deepEqual(M.routeFromHash(hash), { view: "projects" }, hash);
+    assert.equal(M.homeIdFromRoute(M.routeFromHash(hash)), null, hash);
+  }
+  // Unrelated deep links keep their behaviour.
+  assert.deepEqual(M.routeFromHash("#edit-project=p_synthetic1"), { view: "projects", project: "p_synthetic1", edit: true });
+  assert.deepEqual(M.routeFromHash("#rule=r_abcd"), { view: "rules", rule: "r_abcd" });
+  assert.deepEqual(M.routeFromHash("#add-project={11111111-1111-4111-8111-111111111111}"),
+    { view: "projects", addTo: "{11111111-1111-4111-8111-111111111111}" });
+  assert.deepEqual([M.routeFromHash("#rules"), M.routeFromHash("#settings")], [{ view: "rules" }, { view: "ai", legacy: true }]);
+});
+
+test("home services: fixed integration names with the user's own labels, then labelled sites; dashboards only from detection", () => {
+  const project = { detected: { integrations: [
+    { id: "convex", name: "Convex", dashboard_url: "https://dashboard.convex.dev", sources: ["convex/"] },
+    { id: "unknown", name: "<img src=x onerror=alert(1)>", dashboard_url: "https://evil.example", sources: [] },
+    { id: "vercel", name: "Vercel", dashboard_url: "javascript:alert(1)", sources: [] }] },
+  accounts: [{ key: "stripe", label: "billing <b>bold</b>" }, { key: "*.atlassian.net", label: "Work Microsoft" }] };
+  assert.deepEqual(M.homeServices(project).map(row => [row.name, row.account, row.url, row.found]), [
+    ["Vercel", null, null, true], ["Convex", null, "https://dashboard.convex.dev", true],
+    ["Stripe", "billing <b>bold</b>", null, false], ["*.atlassian.net", "Work Microsoft", null, false]]);
+  assert.deepEqual(M.homeServices({}), []);
+});
+
+test("agent activity (step 4 seam): unavailable until reported; only valid records of this folder, newest first", () => {
+  assert.deepEqual(M.homeAgentActivity(null), { state: "unavailable", text: M.AGENTS_UNAVAILABLE, items: [] });
+  assert.deepEqual(M.homeAgentActivity({ records: "x" }).state, "unavailable");
+  assert.deepEqual(M.homeAgentActivity({ records: [] }, { root: "/w/shop" }), { state: "empty", text: M.AGENTS_EMPTY, items: [] });
+  const record = (over = {}) => ({ version: 1, id: "as_0123456789abcdef", project_path: "/w/shop/apps/web", agent: "codex",
+    state: "done", title: "Agent finished", at: 1_000_000, session: null, ...over });
+  const records = [record(), record({ id: "as_1111111111111111", agent: "claude-code", state: "needs_input", title: "Approve the migration?", at: 1_060_000 }),
+    record({ id: "as_2222222222222222", project_path: "/w/shopping" }), record({ id: "as_3333333333333333", project_path: "/w/other" }),
+    record({ id: "nope" }), record({ id: "as_4444444444444444", state: "hacked" }), record({ id: "as_5555555555555555", title: "two\nlines" }),
+    record({ id: "as_6666666666666666", agent: "gpt" }), record({ id: "as_7777777777777777", title: "x".repeat(121) })];
+  const activity = M.homeAgentActivity({ records }, { root: "/w/shop", now: 1_000_000 + 3_600_000 });
+  assert.equal(activity.state, "list");
+  assert.deepEqual(activity.items.map(item => [item.agent, item.stateText, item.title, item.ago]), [
+    ["Claude Code", "Needs you", "Approve the migration?", "59 min ago"], ["Codex", "Done", "Agent finished", "1 h ago"]]);
+  assert.match(M.AGENTS_UNAVAILABLE, /not part of this build/u);
+  assert.match(M.PRESENCE_TEXT, /not that one is running/u, "agent files never read as a running agent");
+});
+
+test("console errors (step 7 seam) and the brief (step 6 seam): unavailable, empty or validated text", () => {
+  assert.deepEqual(M.homeConsoleErrors(null), { state: "unavailable", text: M.ERRORS_UNAVAILABLE, count: null, items: [] });
+  assert.equal(M.homeConsoleErrors({ count: -1 }).state, "unavailable");
+  assert.equal(M.homeConsoleErrors({ count: 0, recent: [] }).state, "empty");
+  const errors = M.homeConsoleErrors({ count: 7, recent: [{ level: "error", text: "TypeError: x\u0000 is undefined" }, { level: "warning", text: "Deprecated" },
+    { level: "info", text: "y" }, { text: "" }, null, ...Array.from({ length: 4 }, (_, i) => ({ level: "error", text: `e${i}` }))] });
+  assert.deepEqual([errors.state, errors.count, errors.text], ["list", 7, "7 console errors in this project's tabs"]);
+  assert.deepEqual(errors.items.map(item => [item.level, item.text]), [["error", "TypeError: x is undefined"], ["warning", "Deprecated"],
+    ["error", "y"], ["error", "e0"], ["error", "e1"]]);
+  assert.equal(M.briefView(null), null);
+  assert.equal(M.briefView({ version: 1, document: { version: 1, product: "" } }), null);
+  const brief = M.briefView({ version: 1, cli: "codex", generated_at: 5, accepted: false, document: { version: 1, product: "A <b>shop</b>.",
+    apps: [{ name: "web", kind: "web", path: "apps/web", summary: "Storefront" }, { name: 5 }],
+    domains: [{ host: "shop.example.dev", purpose: "production" }], services: [{ name: "Stripe", purpose: "billing" }],
+    start: [{ label: "Web", command: "bun run dev", cwd: "apps/web" }], risks: ["Payments untested"] } });
+  assert.deepEqual([brief.product, brief.by, brief.accepted, brief.generatedAt], ["A <b>shop</b>.", "Codex", false, 5]);
+  assert.deepEqual(brief.apps, [{ name: "web", kind: "web", summary: "Storefront" }]);
+  assert.deepEqual(brief.start, [{ label: "Web", command: "bun run dev", cwd: "apps/web" }]);
+  assert.deepEqual(brief.domains, [{ host: "shop.example.dev", purpose: "production" }]);
+  assert.match(M.BRIEF_UNAVAILABLE, /not available in this build/u);
+});
+
+test("home facts, section order and problems", () => {
+  assert.deepEqual(M.folderFacts({ root: "/w/shop", manifest_state: "written", detected: { at: 9 } }),
+    { root: "/w/shop", projectFile: "Saved in .axiosozo/project.json", inRepo: true, lastRead: 9 });
+  assert.deepEqual(M.folderFacts({ root: "/w/shop", manifest_state: "none", detected: null }).lastRead, null);
+  assert.equal(M.folderFacts({ manifest_state: "external" }).projectFile, "Read from .axiosozo/project.json");
+  const quiet = { agents: { state: "unavailable" }, errors: { state: "unavailable" } };
+  assert.deepEqual(M.homeSections(quiet), ["open", "accounts", "activity", "about"], "nothing to show stays low on the page");
+  assert.deepEqual(M.homeSections({ ...quiet, agents: { state: "list" } }), ["open", "activity", "accounts", "about"]);
+  assert.match(M.homeProblem("UNKNOWN_PROJECT").title, /not here anymore/u);
+  assert.match(M.homeProblem("PRIVATE_WINDOW").title, /normal windows/u);
+  assert.equal(M.homeProblem("NO_WINDOW").title, "Open this page in a browser window");
+  assert.equal(M.homeProblem("PROJECT_CHANGED").title, "This project is changing");
+  assert.doesNotMatch(M.homeProblem("PROJECT_CHANGED").text, /opened/u, "not the link-opening sentence");
+  assert.equal(M.homeProblem("CONTAINERS_UNAVAILABLE").text, M.errorMessage("CONTAINERS_UNAVAILABLE"));
+  assert.match(M.homeProblem("WHATEVER").text, /Try again/u);
+  for (const code of ["UNKNOWN_PROJECT", "PRIVATE_WINDOW", "NO_WINDOW", "x"]) {
+    assert.doesNotMatch(JSON.stringify(M.homeProblem(code)), /\/Volumes|user_context|\bnull\b|undefined/u);
+  }
+});
+
 test("error codes from detection, refresh and the actor read as sentences; unknown codes fall through", () => {
   for (const code of ["READ_CONTAINMENT_UNAVAILABLE", "ROOT_DENIED", "ROOT_CHANGED", "ROOT_NOT_FOUND", "PROJECT_EXISTS", "UNKNOWN_PROJECT",
     "PROJECT_CHANGED", "IDENTITY_UNAVAILABLE", "IDENTITY_RESET_PENDING", "CONTAINERS_UNAVAILABLE", "INVALID_HOST_PATTERN", "INVALID_INPUT", "INVALID_PROJECT"]) {

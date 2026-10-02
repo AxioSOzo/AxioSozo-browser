@@ -169,7 +169,8 @@ function requirePickedRoot(ctx, name, root) {
 // with the requesting tab's window), refreshProjectDetection (workstation-v1
 // §1, by project id), the P2 account methods (workstation-v1 §3: read-only
 // container presentation, the user's own account labels and shared sites,
-// and project links opened through the container router) plus openContext,
+// and project links opened through the container router), the read-only
+// project home (Plan 4 step 3) plus openContext,
 // openUrl, the read-only getOverviewFlags and the provider status / Jev key
 // methods (contracts/provider-v1.md). Nothing else is callable. Arrival offers
 // are accepted in the native notification only; no page method takes a token.
@@ -196,6 +197,16 @@ export const METHODS = Object.freeze({
   // projects
   listProjects: { params: {}, run: ({ services }) => services.listProjects() },
   getProject: { params: { id: T.projectId }, run: ({ services }, p) => services.getProject(p.id) },
+  // The project home (#project=<id>): the current stored project for the
+  // requesting tab's normal window only. The page names a project id, never a
+  // folder, a window or a container.
+  getProjectHome: { params: { id: T.projectId }, run: (ctx, p) => {
+    if (ctx.isPrivate?.()) fail("PRIVATE_WINDOW", "getProjectHome: project homes are not shown in private windows");
+    const window = ctx.window();
+    if (!window) fail("NO_WINDOW", "getProjectHome: the requesting tab has no browser window");
+    if (typeof ctx.services.projectHome !== "function") fail("UNSUPPORTED", "getProjectHome is not available yet");
+    return ctx.services.projectHome({ window, id: p.id });
+  } },
   pickFolder: { params: {}, run: async ctx => {
     const window = ctx.window();
     if (!window) fail("NO_WINDOW", "pickFolder: the requesting tab has no browser window");

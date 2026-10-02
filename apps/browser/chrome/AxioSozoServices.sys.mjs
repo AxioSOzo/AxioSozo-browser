@@ -56,6 +56,11 @@ const MAX_DENIED_ROOTS = 32;
 // tabs, clears their data and restarts identity numbering without one
 // deletion notification per identity.
 export const CONTAINERS_PREF = "privacy.userContext.enabled";
+// The pinned engine packages ContextualIdentityService as a moz-src module
+// (toolkit/components/contextualidentity/moz.build: MOZ_SRC_FILES); there is
+// no resource://gre/modules/ copy. Same URL as BrowserExperience.sys.mjs and
+// the engine's own tabbrowser/content/tab-hover-preview.mjs.
+export const CONTEXTUAL_IDENTITY_MODULE = "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs";
 
 export class ServicesError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "ServicesError"; this.code = code; }
@@ -848,16 +853,65 @@ export class AxioSozoServices {
     const out = [];
     for (const stored of projects) {
       const project = core.upgradeProject(stored);
-      if (availability !== "on") { out.push({ project_id: project.id, state: availability }); continue; }
-      const id = project.container.user_context_id;
-      const shared = id !== null && projects.some(other => other.id !== project.id && other.container?.user_context_id === id);
-      let identity = null;
-      if (id !== null && !shared) { try { identity = await this.#identities.get(id); } catch { identity = null; } }
-      out.push(identity?.userContextId === id
-        ? { project_id: project.id, state: "own", name: typeof identity.name === "string" ? identity.name : "", color: canonicalContainerColor(identity.color) }
-        : { project_id: project.id, state: "pending" });
+      out.push({ project_id: project.id, ...(await this.#containerPresentation(project, projects, availability)) });
     }
     return out;
+  }
+
+  /** { state, name?, color? } of one (upgraded) project's own container; never its ID. */
+  async #containerPresentation(project, projects, availability) {
+    if (availability !== "on") return { state: availability };
+    const id = project.container.user_context_id;
+    const shared = id !== null && projects.some(other => other.id !== project.id && other.container?.user_context_id === id);
+    let identity = null;
+    if (id !== null && !shared) { try { identity = await this.#identities.get(id); } catch { identity = null; } }
+    return identity?.userContextId === id
+      ? { state: "own", name: typeof identity.name === "string" ? identity.name : "", color: canonicalContainerColor(identity.color) }
+      : { state: "pending" };
+  }
+
+  /**
+   * The project home (about:axiosozo#project=<id>), for a registered normal
+   * window only: private or unknown-privacy windows get PRIVATE_WINDOW, an
+   * unknown or removed id UNKNOWN_PROJECT. The record is the current stored
+   * one (upgraded to version 2) without its container mapping; the container
+   * is presented as listProjectContainers does, never by ID. Nothing is
+   * probed, detected or created here. `agent_activity` and `console_errors`
+   * are null until this build collects them (Plan 4 steps 4 and 7).
+   *
+   * The answer is current when it is returned: the project's routing mark,
+   * the container deletion/reset generation and availability are taken before
+   * the first read; after the awaited container lookup the store is read
+   * again, and the record must still exist (else UNKNOWN_PROJECT) and be
+   * unchanged with the same mark, generation and availability (else
+   * PROJECT_CHANGED). A mutation of the project still in flight refuses at
+   * once. A removed or superseded record is never returned.
+   */
+  async projectHome({ window, id } = {}) {
+    if (!core.isProjectId(id)) fail("UNKNOWN_PROJECT");
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (!adapter) fail("NO_WINDOW");
+    if (!this.#normalWindow(window, adapter)) fail("PRIVATE_WINDOW");
+    const mark = this.#routingMark(id);
+    if (mark === null) fail("PROJECT_CHANGED");
+    const generation = this.#containerGeneration;
+    const availability = this.#containerAvailability();
+    const first = await this.#loadContexts();
+    const stored = first.projects.find(item => item.id === id);
+    if (!stored) fail("UNKNOWN_PROJECT");
+    const project = core.upgradeProject(stored);
+    const container = await this.#containerPresentation(project, first.projects, availability);
+    const { projects } = await this.#loadContexts();
+    const current = projects.find(item => item.id === id);
+    if (!current) fail("UNKNOWN_PROJECT");
+    if (this.#routingMark(id) !== mark || this.#containerGeneration !== generation || this.#containerAvailability() !== availability
+      || JSON.stringify(current) !== JSON.stringify(stored)) fail("PROJECT_CHANGED");
+    // The window may have closed or been unregistered meanwhile.
+    if (!this.#normalWindow(window, adapter)) fail("NO_WINDOW");
+    const space = project.context_uuid ? this.#liveWorkspaces().get(project.context_uuid) : null;
+    const { container: _mapping, ...record } = clone(project);
+    return { version: 1, project: record, space: space ? { uuid: space.uuid, name: space.name } : null, container,
+      agent_activity: null, console_errors: null };
   }
 
   /** The space a project link opens in: the caller's (live) space, else the
@@ -1472,9 +1526,10 @@ function chromeDependencies() {
     // direct-lsof fallback.
     arrivalRuntime: lazyArrivalSubprocess(() => createNativeProjectArrivalSubprocess()),
     // Project containers through the pinned ContextualIdentityService: its
-    // canonical colours, the briefcase icon, no data-clearing removal.
+    // canonical colours, the briefcase icon, no data-clearing removal. A failed
+    // import leaves containers unavailable (fail closed); there is no fallback.
     containerIdentities: () => {
-      const { ContextualIdentityService, CONTAINER_COLORS } = ChromeUtils.importESModule("resource://gre/modules/ContextualIdentityService.sys.mjs");
+      const { ContextualIdentityService, CONTAINER_COLORS } = ChromeUtils.importESModule(CONTEXTUAL_IDENTITY_MODULE);
       const colors = Array.isArray(CONTAINER_COLORS) ? CONTAINER_COLORS.map(entry => entry.name) : ContextualIdentityService.containerColors;
       return createGeckoIdentityAdapter({ service: ContextualIdentityService, allowedColors: colors, allowedIcons: [PROJECT_CONTAINER_ICON] });
     },

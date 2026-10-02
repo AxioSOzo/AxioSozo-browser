@@ -44,7 +44,7 @@ def ready_coordinator(session):
 
 
 class CefProfileCleanup(unittest.TestCase):
-    def test_only_new_owned_session_profiles_are_removed(self):
+    def test_profile_inventory_does_not_authorize_deletion(self):
         with tempfile.TemporaryDirectory(prefix="axiosozo-cef-cleanup-") as root:
             path = Path(root).resolve() / "session"
             path.mkdir()
@@ -60,7 +60,8 @@ class CefProfileCleanup(unittest.TestCase):
                 (path / "cef-33333333-3333-3333-3333-333333333333").symlink_to(
                     external, target_is_directory=True)
                 (path / "gecko").mkdir()
-            self.assertFalse(fresh.exists())
+            self.assertTrue(fresh.is_dir())
+            self.assertEqual((fresh / "cache").read_text(), "session-owned")
             self.assertTrue(historical.is_dir())
             self.assertTrue((path / "gecko").is_dir())
             self.assertEqual((external / "keep").read_text(), "untouched")

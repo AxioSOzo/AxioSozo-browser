@@ -20,11 +20,11 @@ let serial = 0;
 
 const flush = async (rounds = 6) => { for (let i = 0; i < rounds; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 
-async function loadPage({ hash = "", projects = [], handlers = {} } = {}) {
+async function loadPage({ hash = "", projects = [], handlers = {}, containers = {} } = {}) {
   const document = parseHtml(HTML);
   const calls = [];
   const subscribers = [];
-  const state = { projects: [...projects] };
+  const state = { projects: [...projects], containers };
   const contexts = [
     { uuid: HOME, name: "Home", icon: "", type: "personal", organization_uuid: null, project_id: null, container: 0 },
     { uuid: BV, name: "Acme BV", icon: "", type: "organization", organization_uuid: null, project_id: null, container: 1, container_label: "Work" }];
@@ -43,6 +43,15 @@ async function loadPage({ hash = "", projects = [], handlers = {} } = {}) {
       { id: "claude-code", label: "Claude Code", state: "not-installed", state_label: "Not installed", detail: "The official Claude Code client was not found." },
       { id: "antigravity", label: "Antigravity", state: "unknown", state_label: "Status unknown", detail: "Could not read installation metadata." },
       { id: "jev", label: "Jev", state: "needs-key", state_label: "No key stored", detail: "No Jev key is stored.", key: "missing", key_entry_enabled: true }] }),
+    // Like AxioSozoServices.projectHome: the stored record without its container mapping.
+    getProjectHome: ({ id }) => {
+      const stored = state.projects.find(project => project.id === id);
+      if (!stored) throw { code: "UNKNOWN_PROJECT", message: "UNKNOWN_PROJECT" };
+      const { container: _mapping, ...project } = structuredClone(stored);
+      const space = contexts.find(context => context.uuid === project.context_uuid);
+      return { version: 1, project, space: space ? { uuid: space.uuid, name: space.name } : null,
+        container: state.containers?.[id] ?? { state: "pending" }, agent_activity: null, console_errors: null };
+    },
     pickFolder: () => "/synthetic/domo-cortex",
     detect: () => DRAFT,
     confirmProject: ({ root, manifest, contextUuid }) => {
@@ -85,7 +94,16 @@ test("three sections only; the first run guide is the Projects empty state; ever
     [["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"]]);
   assert.deepEqual(visibleView(document), ["projects"]);
   assert.ok(document.getElementById("guide-heading"), "first-run guidance folds into Projects");
-  assert.deepEqual(document.querySelectorAll(".space-group .space-name").map(h => h.textContent), ["Homethis window", "Acme BV"]);
+  // Spaces without projects are one quiet row each, never an empty group box.
+  const spaces = document.querySelector(".other-spaces");
+  assert.equal(spaces.querySelector("h3").textContent, "Your spaces");
+  assert.deepEqual(spaces.querySelectorAll(".row-title").map(node => node.textContent), ["Homethis window", "Acme BV"]);
+  assert.equal(document.querySelectorAll(".space-group").length, 0);
+  assert.deepEqual(spaces.querySelectorAll("button.ghost").map(button => button.getAttribute("aria-label")),
+    ["Add a project to Home", "Add a project to Acme BV"]);
+  assert.deepEqual(spaces.querySelectorAll(".menu-items button").map(button => button.textContent),
+    ["Switch to Home", "Space type…", "Switch to Acme BV", "Space type…"], "switching and the space type stay reachable, behind …");
+  assert.equal(document.getElementById("projects-body").hasAttribute("aria-busy"), false);
   assert.equal(page.calls.some(([name]) => name === "getProviderStatus"), false, "no provider discovery until AI & keys is opened");
   assert.ok(page.calls.some(([name]) => name === "getJevKeyStatus"));
   for (const view of ["#rules", "#ai", "#projects"]) {
@@ -222,10 +240,10 @@ const HARBOR = { version: 2, id: "p_harbor1", root: "/synthetic/harbor", manifes
   container: { user_context_id: 40 }, shared_sites: { hosts: ["github.com", "*.github.com"], confirmed: false },
   accounts: [{ key: "vercel", label: "work Google" }], brief: null };
 
-function harborPage(extra = {}) {
+function harborPage(extra = {}, { hash = "#project=p_harbor1" } = {}) {
   let state;
   const update = (id, change) => { state.projects = state.projects.map(project => (project.id === id ? change(project) : project)); return state.projects.find(p => p.id === id); };
-  const pagePromise = loadPage({ projects: [structuredClone(HARBOR)], handlers: {
+  const pagePromise = loadPage({ hash, projects: [structuredClone(HARBOR)], containers: { p_harbor1: { state: "own", name: "Harbor", color: "cyan" } }, handlers: {
     listProjectContainers: () => [{ project_id: "p_harbor1", state: "own", name: "Harbor", color: "cyan" }],
     openProjectUrl: () => ({ opened: true, container: "project" }),
     setAccountLabel: ({ projectId, key, label }) => update(projectId, project => ({ ...project,
@@ -234,32 +252,37 @@ function harborPage(extra = {}) {
     ...extra } });
   return pagePromise.then(page => { state = page.state; return page; });
 }
+const homeSectionOf = (document, key) => document.getElementById("project-home").querySelector(`[data-section="${key}"]`);
 
-test("P2: the card shows the own container in Firefox's colour, typed account labels and unconfirmed shared sites", async () => {
+test("P2: the home shows the own container in Firefox's colour, typed account labels and unconfirmed shared sites", async () => {
   const page = await harborPage();
-  const card = page.document.getElementById("project-p_harbor1");
-  const facts = Object.fromEntries(card.querySelectorAll("dt").map(dt => [dt.textContent, dt]));
-  assert.ok(facts["Sign-ins"] && facts["Shared sites"]);
-  const line = card.querySelector(".container-line");
+  const accounts = homeSectionOf(page.document, "accounts");
+  assert.equal(accounts.querySelector("h3").textContent, "Services and sign-ins");
+  const line = accounts.querySelector(".container-line");
   assert.equal(line.textContent, "Own container");
   assert.equal(line.getAttribute("data-state"), "own");
-  assert.match(line.getAttribute("title"), /Chromium tabs do not have per-project sign-ins yet/u);
+  assert.match(accounts.textContent, /Links on this page open in it, so Harbor keeps its own sign-ins\. Firefox tabs only\. Chromium tabs do not have per-project sign-ins yet\./u);
   assert.deepEqual(line.querySelector(".container-mark").className.split(" "), ["container-mark", "identity-color-cyan"]);
   assert.equal(line.querySelector(".container-mark").getAttribute("aria-hidden"), "true");
-  assert.deepEqual(card.querySelectorAll(".tag.account").map(tag => tag.textContent), ["Vercel · work Google"]);
-  assert.equal(card.querySelector(".fact-text").textContent, "Not shared yet. Suggested: github.com, *.github.com");
-  assert.equal(card.querySelector('[data-focus-key="project:p_harbor1:accounts"]').getAttribute("aria-label"), "Accounts for Harbor");
-  assert.doesNotMatch(card.textContent, /\b40\b|user_context/u, "no container ID is shown");
+  assert.deepEqual(accounts.querySelectorAll(".service-rows .row").map(row => [row.querySelector(".row-title").textContent, row.querySelector(".row-detail").textContent]),
+    [["Vercel", "Account: work Google"]]);
+  assert.equal(accounts.querySelector(".fact-text").textContent, "Not shared yet. Suggested: github.com, *.github.com");
+  assert.equal(accounts.querySelector('[data-focus-key="project:p_harbor1:accounts"]').getAttribute("aria-label"), "Accounts for Harbor");
+  assert.doesNotMatch(page.document.getElementById("project-home").textContent, /\b40\b|user_context/u, "no container ID is shown");
   assert.ok(page.document.querySelector('link[href="chrome://browser/content/usercontext/usercontext.css"]'), "Firefox's own colours");
+  // The list card carries the same colour on its tile.
+  await page.navigate("#projects");
+  const tile = page.document.getElementById("project-p_harbor1").querySelector(".project-tile");
+  assert.deepEqual([tile.className, tile.textContent, tile.getAttribute("aria-hidden")], ["project-tile identity-color-cyan", "H", "true"]);
 });
 
-test("P2: every project link on the card goes through the container router, never a plain openUrl", async () => {
+test("P2: every project link on the home goes through the container router, never a plain openUrl", async () => {
   const page = await harborPage({ openProjectUrl: ({ url }) => ({ opened: true, container: url.includes("vercel") ? "off" : "project" }) });
-  const card = page.document.getElementById("project-p_harbor1");
-  const chip = label => card.querySelectorAll(".chip").find(node => node.getAttribute("aria-label") === label);
-  chip("Open local environment http://localhost:5101").click();
+  const home = page.document.getElementById("project-home");
+  const button = label => home.querySelectorAll("button").find(node => node.getAttribute("aria-label") === label);
+  button("Open Local at localhost:5101").click();
   await flush();
-  chip("Open the Vercel dashboard").click();
+  button("Open the Vercel dashboard").click();
   await flush();
   assert.deepEqual(page.calls.filter(([name]) => name === "openProjectUrl" || name === "openUrl"), [
     ["openProjectUrl", { projectId: "p_harbor1", url: "http://localhost:5101" }],
@@ -270,7 +293,7 @@ test("P2: every project link on the card goes through the container router, neve
 test("P2: account editor: labels the user types per service or site, sent one by one; bad sites are refused locally", async () => {
   const page = await harborPage();
   const { document } = page;
-  byText(document.getElementById("project-p_harbor1"), "button", "Edit accounts…").click();
+  byText(homeSectionOf(document, "accounts"), "button", "Edit accounts…").click();
   await flush();
   const sheet = document.getElementById("sheet-body");
   assert.equal(sheet.querySelector("h2").textContent, "Accounts for Harbor");
@@ -295,14 +318,14 @@ test("P2: account editor: labels the user types per service or site, sent one by
     ["setAccountLabel", { projectId: "p_harbor1", key: "vercel", label: "personal Google" }],
     ["setAccountLabel", { projectId: "p_harbor1", key: "linear.app", label: "Work Microsoft" }]]);
   assert.equal(document.getElementById("sheet").open, false);
-  assert.deepEqual(document.getElementById("project-p_harbor1").querySelectorAll(".tag.account").map(tag => tag.textContent),
-    ["Vercel · personal Google", "linear.app · Work Microsoft"]);
+  assert.deepEqual(homeSectionOf(document, "accounts").querySelectorAll(".service-rows .row").map(row => row.textContent),
+    ["VercelAccount: personal GoogleDashboard", "linear.appAccount: Work Microsoft"], "the home reads the saved labels back");
 });
 
 test("P2: shared-sites editor offers the suggestions and shares only after the user turns sharing on", async () => {
   const page = await harborPage();
   const { document } = page;
-  byText(document.getElementById("project-p_harbor1"), "button", "Review…").click();
+  byText(homeSectionOf(document, "accounts"), "button", "Review…").click();
   await flush();
   const sheet = document.getElementById("sheet-body");
   assert.equal(sheet.querySelector("h2").textContent, "Shared sites for Harbor");
@@ -315,7 +338,8 @@ test("P2: shared-sites editor offers the suggestions and shares only after the u
   byText(document.getElementById("sheet"), "button", "Save").click();
   await flush();
   assert.deepEqual(page.calls.filter(([name]) => name === "setSharedSites").at(-1)[1].confirmed, false, "saving the list alone shares nothing");
-  byText(document.getElementById("project-p_harbor1"), "button", "Review…").click();
+  assert.match(homeSectionOf(document, "accounts").querySelector(".fact-text").textContent, /^Not shared yet\. Suggested: github\.com/u);
+  byText(homeSectionOf(document, "accounts"), "button", "Review…").click();
   await flush();
   document.getElementById("sheet-body").querySelector('input[name="share-sites"]').click();
   byText(document.getElementById("sheet"), "button", "Save").click();
@@ -323,8 +347,25 @@ test("P2: shared-sites editor offers the suggestions and shares only after the u
   const [, params] = page.calls.filter(([name]) => name === "setSharedSites").at(-1);
   assert.equal(params.confirmed, true);
   assert.equal(params.hosts.length, 8);
-  assert.match(document.getElementById("project-p_harbor1").querySelector(".fact-text").textContent, /^Shared with the space: github\.com/u);
-  assert.equal(byText(document.getElementById("project-p_harbor1"), "button", "Edit…").getAttribute("aria-label"), "Shared sites of Harbor");
+  const accounts = homeSectionOf(document, "accounts");
+  assert.match(accounts.querySelector(".fact-text").textContent, /^Shared with the space: github\.com/u);
+  assert.match(accounts.querySelector(".shared-line").textContent, /These use the sign-ins of Home\./u);
+  assert.equal(byText(accounts, "button", "Edit…").getAttribute("aria-label"), "Shared sites of Harbor");
+});
+
+test("P2: the list card keeps editing secondary but reachable: its menu opens the same editors", async () => {
+  const page = await harborPage({}, { hash: "#projects" });
+  const card = page.document.getElementById("project-p_harbor1");
+  assert.deepEqual(card.querySelectorAll(".menu-items button").map(button => button.textContent),
+    ["Edit project…", "Accounts…", "Shared sites…", "Read folder again", "Save as .axiosozo/project.json…", "Remove project…"]);
+  assert.equal(card.querySelector("summary").getAttribute("aria-label"), "More for Harbor");
+  byText(card, "button", "Accounts…").click();
+  await flush();
+  assert.equal(page.document.getElementById("sheet-body").querySelector("h2").textContent, "Accounts for Harbor");
+  byText(page.document.getElementById("sheet"), "button", "Cancel").click();
+  byText(card, "button", "Shared sites…").click();
+  await flush();
+  assert.equal(page.document.getElementById("sheet-body").querySelector("h2").textContent, "Shared sites for Harbor");
 });
 
 test("#add-project=<space> from the space menu preselects that space; #edit-project opens the editor", async () => {
@@ -341,4 +382,7 @@ test("#add-project=<space> from the space menu preselects that space; #edit-proj
       services: [{ name: "Dev server", url: "http://localhost:4321/", port: 4321 }], surfaces: [] } };
   const edit = await loadPage({ hash: "#edit-project=p_blog1", projects: [project] });
   assert.equal(edit.document.getElementById("sheet-body").querySelector("h2").textContent, "Edit Blog");
+  assert.equal(edit.location.hash, "#project=p_blog1", "the editor opens over the project's home");
+  assert.equal(edit.document.getElementById("project-home").hidden, false);
+  assert.equal(edit.document.activeElement?.id, "sheet-title", "the home does not take focus from the open editor");
 });

@@ -77,6 +77,8 @@ def core_ready():
 
 
 def run(argv, build=False, env=None):
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise RuntimeError("DEFAULT_SIGCHLD_REQUIRED")
     if build:
         mounted = subprocess.run([MOUNT], cwd=ROOT)
         if mounted.returncode:
@@ -93,22 +95,27 @@ def run(argv, build=False, env=None):
     try:
         return process.wait()
     finally:
-        if process.poll() is None:
+        # This function is the sole waiter. Default SIGCHLD and an unreaped
+        # original leader reserve its PID and prevent reuse of its group ID.
+        # A successful wait sets returncode; no group signal follows a reap.
+        if process.returncode is None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            try:
-                # Nested native probe owns its own children and has an eight-second
-                # graceful shutdown window. Let it finish before killing its group.
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait(timeout=5)
+            finally:
+                try:
+                    # Nested native components own their descendants and have
+                    # time to complete their own cleanup before escalation.
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    if process.returncode is None:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        finally:
+                            process.wait(timeout=5)
 
 
 def component(script, *args):

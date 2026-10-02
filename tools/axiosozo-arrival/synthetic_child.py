@@ -4,7 +4,35 @@ import os
 from pathlib import Path
 import signal
 import sys
+import secrets
+import stat
 import time
+
+
+def publish_ready(path, document):
+    """Publish a complete invented marker in this test's private directory."""
+    path = Path(path).absolute()
+    parent = path.parent
+    info = parent.lstat()
+    if (parent.resolve() != parent or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700
+            or not parent.name.startswith("arrival-supervisor-")
+            or path.name not in {"deadline.json", "sentinel.json", "abrupt.json",
+                                 "orphan-child.json", "orphan-helper.json"}
+            or path.exists() or path.is_symlink()):
+        raise RuntimeError("SYNTHETIC_MARKER_ADMISSION_REFUSED")
+    temporary = parent / (path.name + ".pending-" + secrets.token_hex(8))
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write((json.dumps(document) + "\n").encode("ascii"))
+        stream.flush()
+        os.fsync(stream.fileno())
+    if path.exists() or path.is_symlink():
+        raise RuntimeError("SYNTHETIC_MARKER_ALREADY_PRESENT")
+    # The final path becomes visible only after the complete file is closed.
+    # An interrupted publisher leaves its unique pending file as evidence.
+    os.replace(temporary, path)
+
 
 mode = sys.argv[1]
 # Mirror lsof's closefrom(3), without calling lsof or reading any project.
@@ -34,7 +62,7 @@ elif mode in ("hang", "descendant"):
             os.close(2)
             while True:
                 time.sleep(1)
-    marker.write_text(json.dumps({"child": os.getpid(), "supervisor": os.getppid(), "descendant": descendant}))
+    publish_ready(marker, {"child": os.getpid(), "supervisor": os.getppid(), "descendant": descendant})
     while True:
         time.sleep(1)
 elif mode == "env":

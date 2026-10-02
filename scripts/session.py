@@ -67,6 +67,9 @@ class OwnedSession:
         self.token = secrets.token_hex(32)
         self.cef_profiles_before = set()
         self._path_identity = None
+        self._cleanup_uncertain = False
+        self.cleanup_report = {"state": "NOT_CLOSED", "direct_children_reaped": False,
+                               "groups": "NOT_VERIFIED"}
 
     def __enter__(self):
         fd = os.open(self.path / "owner.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -91,6 +94,12 @@ class OwnedSession:
         return self
 
     def spawn(self, argv, **kwargs):
+        # SIGCHLD must remain default and each Popen must have a sole waiter
+        # throughout its lifetime; an unreaped leader reserves its group ID.
+        if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+            raise RuntimeError("DEFAULT_SIGCHLD_REQUIRED")
+        if self._cleanup_uncertain:
+            raise RuntimeError("SESSION_CLEANUP_UNCERTAIN")
         if self.lock is None:
             raise RuntimeError("session ownership required")
         process = subprocess.Popen(argv, start_new_session=True, **kwargs)
@@ -119,53 +128,92 @@ class OwnedSession:
                 "token": self.token, "body": {"method": method, **body}}
 
     def close(self):
-        for process in reversed(self.processes):
-            # Groups were created by this object. Terminate descendants too if their
-            # direct parent exited; never discover/kill processes by executable name.
+        uncertain = self._cleanup_uncertain
+        pending = [process for process in reversed(self.processes)
+                   if process.returncode is None]
+
+        def signal_unreaped(process, sig):
+            nonlocal uncertain
+            if (process.returncode is not None
+                    or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL):
+                uncertain = True
+                return
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(process.pid, sig)
             except ProcessLookupError:
                 pass
-        for process in reversed(self.processes):
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+            except (Exception, KeyboardInterrupt):
+                # EPERM can occur for a zombie-only group. It does not prove
+                # that unknown descendants or profiles are inactive.
+                uncertain = True
+
+        if pending:
+            if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+                uncertain = True
+            else:
+                for process in pending:
+                    signal_unreaped(process, signal.SIGTERM)
+                # Do not poll or wait during grace. Even an exited original
+                # leader must remain unreaped until every group signal ends.
+                deadline = time.monotonic() + 5
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait(timeout=5)
-            # A child can outlive a direct parent which already exited on SIGTERM.
-            # Escalation therefore also covers that session-owned process group.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            for stream in (process.stdin, process.stdout, process.stderr):
-                if stream:
-                    with contextlib.suppress(OSError):
-                        stream.close()
-        self.processes.clear()
-        if self.lock is not None:
-            try:
-                # Remove only CEF profiles created in this owned session.
-                info = self.path.lstat()
-                if (stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
-                        and (info.st_dev, info.st_ino) == self._path_identity):
-                    for name in cef_profile_names(self.path) - self.cef_profiles_before:
-                        child = self.path / name
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        time.sleep(remaining)
+                except (Exception, KeyboardInterrupt):
+                    uncertain = True
+                for process in pending:
+                    signal_unreaped(process, signal.SIGKILL)
+                # All group signals precede the first reap. Callers that already
+                # reaped a leader grant no authority to sweep its descendants.
+                for process in pending:
+                    if process.returncode is None:
+                        if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+                            uncertain = True
+                            continue
                         try:
-                            child_info = child.lstat()
-                            if stat.S_ISDIR(child_info.st_mode) and child_info.st_uid == os.getuid():
-                                shutil.rmtree(child)
-                        except FileNotFoundError:
-                            # Gecko also removes this exact session-owned profile
-                            # after its native child exits; concurrent removal wins.
-                            pass
-            finally:
-                fcntl.flock(self.lock, fcntl.LOCK_UN)
-                self.lock.close()
-                self.lock = None
+                            process.wait(timeout=5)
+                        except (Exception, KeyboardInterrupt):
+                            uncertain = True
+
+        direct_children_reaped = all(process.returncode is not None
+                                     for process in self.processes)
+        if not direct_children_reaped:
+            # Retain the lease and streams while any direct leader is unreaped.
+            uncertain = True
+        else:
+            for process in reversed(self.processes):
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream:
+                        try:
+                            stream.close()
+                        except (Exception, KeyboardInterrupt):
+                            uncertain = True
+            self.processes.clear()
+            # CEF UUID names and a before/after inventory cannot prove inactive
+            # ownership. Preserve all profile directories; never infer deletion.
+            if self.lock is not None:
+                try:
+                    fcntl.flock(self.lock, fcntl.LOCK_UN)
+                except (Exception, KeyboardInterrupt):
+                    uncertain = True
+                try:
+                    self.lock.close()
+                except (Exception, KeyboardInterrupt):
+                    uncertain = True
+                else:
+                    self.lock = None
+        self._cleanup_uncertain = uncertain
+        self.cleanup_report = {
+            "state": "UNCERTAIN" if uncertain else "DIRECT_CHILDREN_REAPED",
+            "direct_children_reaped": direct_children_reaped,
+            "groups": "NOT_VERIFIED",
+        }
+        if not direct_children_reaped:
+            raise RuntimeError("SESSION_CLEANUP_UNCERTAIN")
+        return self.cleanup_report
 
     def __exit__(self, *_):
         self.close()

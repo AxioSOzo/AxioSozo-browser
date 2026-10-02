@@ -27,7 +27,27 @@ const state = {
   containers: new Map(),
   serviceStatus: new Map(), ledgerSummary: [], usageToday: [], usageWeek: [],
   activeSpace: null, providers: null, providersLoading: false, jevKey: null, placement: null,
+  // Project home (#project=<id>): the id from the route, the actor's answer for
+  // it ({ id, data } or { id, problem }), projects whose local servers are being
+  // checked, and whether the first load finished (nothing renders half-loaded).
+  // homeProbe: this visit of a home still owes its one local-server check.
+  homeId: null, home: null, checking: new Set(), loaded: false, focusHome: false, returnTo: null, homeProbe: false,
+  // Page lifetime: false from pagehide until a persisted pageshow; started
+  // once the first full load (and its one-time work) completed.
+  active: true, started: false,
 };
+
+// ---------------------------------------------------------------- request lifetimes
+
+// Every answer that can publish state carries a ticket; only the answer to
+// the latest ticket of its kind may publish. Tickets never repeat (one
+// counter for all), so clearing them cannot let an old answer match a new one.
+let ticketSerial = 0;
+const nextTicket = () => ++ticketSerial;
+const latest = { home: 0, projects: 0, contexts: 0 };
+const statusTickets = new Map(); // project id → its latest local-server check
+/** Voids any home answer still on its way (and a retry it would schedule). */
+const invalidateHome = () => { latest.home = nextTicket(); };
 
 // ---------------------------------------------------------------- DOM helpers
 
@@ -41,10 +61,21 @@ function h(tag, props = {}, ...children) {
     else if (["checked", "disabled", "hidden", "value", "selected", "required", "readOnly", "open"].includes(key)) element[key] = value;
     else element.setAttribute(key, value === true ? "" : String(value));
   }
-  for (const child of children.flat(Infinity)) {
-    if (child === null || child === undefined || child === false) continue;
-    element.append(child instanceof Node ? child : document.createTextNode(String(child)));
-  }
+  element.append(...nodes(children));
+  return element;
+}
+
+/** Children as h() takes them: arrays flattened; null, undefined and false
+ * (an absent optional part) left out; any other value as text. The native
+ * append/replaceChildren would show null as the text "null". */
+function nodes(children) {
+  return children.flat(Infinity).filter(child => child !== null && child !== undefined && child !== false)
+    .map(child => (child instanceof Node ? child : document.createTextNode(String(child))));
+}
+
+/** replaceChildren with h()'s rules: absent optional parts are left out. */
+function fill(element, ...children) {
+  element.replaceChildren(...nodes(children));
   return element;
 }
 
@@ -114,17 +145,27 @@ function iconButton(name, label, onclick, extra = {}) {
   return h("button", { type: "button", class: "icon", "aria-label": label, title: label, onclick, ...extra }, icon(name));
 }
 
-/** A small overflow menu: <details> with a list of buttons. Closes on choice, Escape or outside click. */
-function overflowMenu(label, items) {
+/** A small overflow menu: <details> with a list of buttons. Closes on choice,
+ * Escape or outside click; arrow keys, Home and End move between its items. */
+function overflowMenu(label, items, { focusKey } = {}) {
   const menu = h("details", { class: "menu" });
   const close = () => { menu.open = false; };
   menu.append(
-    h("summary", { class: "icon-summary", "aria-label": label, title: label },
+    h("summary", { class: "icon-summary", "aria-label": label, title: label, "data-focus-key": focusKey },
       h("span", { class: "button-like icon" }, icon("more"))),
-    h("div", { class: "menu-items", role: "menu" }, items.filter(Boolean).map(item =>
+    h("div", { class: "menu-items", role: "menu", "aria-label": label }, items.filter(Boolean).map(item =>
       h("button", { type: "button", role: "menuitem", class: item.destructive ? "destructive" : null,
         "data-focus-key": item.focusKey, onclick: () => { close(); item.run(); } }, item.label))));
-  menu.addEventListener("keydown", event => { if (event.key === "Escape" && menu.open) { close(); menu.querySelector("summary").focus(); } });
+  menu.addEventListener("keydown", event => {
+    if (event.key === "Escape" && menu.open) { close(); menu.querySelector("summary").focus(); return; }
+    if (!menu.open || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const buttons = [...menu.querySelectorAll("button")];
+    const at = buttons.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : event.key === "ArrowDown" ? (at + 1) % buttons.length : (at <= 0 ? buttons.length : at) - 1;
+    event.preventDefault();
+    buttons[next]?.focus();
+  });
   return menu;
 }
 document.addEventListener("click", event => {
@@ -164,11 +205,16 @@ async function act(name, params, done) {
   }
 }
 
-// Keeps keyboard focus on the "same" control across list re-renders.
+// Keeps keyboard focus on the "same" control across list re-renders, without
+// scrolling: the control is where it was.
+// A render that moves focus on purpose (a home's title) counts it here, and
+// keepFocus then leaves focus where that render put it.
+let deliberateFocus = 0;
 async function keepFocus(render) {
   const key = document.activeElement?.dataset?.focusKey;
+  const moves = deliberateFocus;
   await render();
-  if (key) document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`)?.focus();
+  if (key && moves === deliberateFocus) document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
 }
 
 let dialogResolve = null;
@@ -225,8 +271,12 @@ function setupSheet() {
 }
 
 const contextName = uuid => state.contexts.find(context => context.uuid === uuid)?.name ?? null;
-const projectName = project => project.manifest?.name ?? project.id;
+const projectName = M.projectName;
 const hostOf = url => { try { return new URL(url).host; } catch { return url; } };
+const DOT_STATUS = { up: "up", down: "down", warn: "warn" };
+const dotStatus = tone => DOT_STATUS[tone] ?? "unknown";
+const dateText = ms => (Number.isSafeInteger(ms) && ms > 0
+  ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null);
 
 // ---------------------------------------------------------------- views
 
@@ -271,7 +321,7 @@ function renderAttention() {
     const action = M.attentionAction(item);
     let button = null;
     if (action?.kind === "rule") button = h("button", { type: "button", onclick: () => { location.hash = `rule=${action.id}`; } }, "Edit rule");
-    else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => { location.hash = `project=${action.id}`; } }, "Show project");
+    else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => { location.hash = M.homeHash(action.id); } }, "Show project");
     else if (action?.kind === "url") button = h("button", { type: "button", onclick: () => act("openUrl", { url: action.url }) }, "Open");
     const status = item.kind === "service_down" ? "down" : "warn";
     items.push(h("li", { class: "row" },
@@ -289,13 +339,15 @@ function renderAttention() {
 // ---------------------------------------------------------------- spaces
 
 async function loadContexts() {
-  try {
-    state.contexts = await call("listContexts");
-  } catch (error) {
-    state.contexts = [];
-    setStatus("Could not load spaces. " + errorText(error), "error");
-  }
-  await keepFocus(renderProjects);
+  if (!state.active) return;
+  const ticket = latest.contexts = nextTicket();
+  let contexts = [];
+  let failure = null;
+  try { contexts = await call("listContexts"); } catch (error) { failure = error; }
+  if (ticket !== latest.contexts) return; // a newer read (or pagehide) superseded this one
+  state.contexts = contexts;
+  if (failure) setStatus("Could not load spaces. " + errorText(failure), "error");
+  await keepFocus(renderProjectsView);
   renderEngineSettings();
 }
 
@@ -313,31 +365,48 @@ function spaceIcon(space) {
 }
 
 const spaceLabel = context => `${context.name} (${TYPE_LABELS[context.type]?.toLowerCase() ?? context.type})`;
+const thisWindowTag = context => (context.uuid === state.activeSpace ? h("span", { class: "tag" }, "this window") : null);
 
-function spaceHeader(context, count) {
+/** Add a project to a space, or switch to it; its type lives behind "…". */
+function spaceActions(context) {
   const key = suffix => `space:${context.uuid}:${suffix}`;
-  const typeSelect = h("select", { class: "compact", "aria-label": `Type of space ${context.name}`, "data-focus-key": key("type"),
-    title: "What this space is for. Any space can hold projects.",
-    onchange: event => act("setContextType", { uuid: context.uuid, type: event.target.value },
-      `${context.name} is now a ${TYPE_LABELS[event.target.value].toLowerCase()} space.`).then(loadContexts) },
-  M.CONTEXT_TYPES.map(type => option(type, TYPE_LABELS[type], context.type)));
+  return h("div", { class: "group-actions" },
+    h("button", { type: "button", class: "ghost small", "data-focus-key": key("add"), "aria-label": `Add a project to ${context.name}`,
+      onclick: () => addProjectFlow({ contextUuid: context.uuid }) }, icon("plus", 14), "Add project"),
+    overflowMenu(`More for space ${context.name}`, [
+      { label: `Switch to ${context.name}`, focusKey: key("open"), run: () => act("openContext", { uuid: context.uuid }) },
+      { label: "Space type…", focusKey: key("type"), run: () => openSpaceSettings(context) },
+    ], { focusKey: key("menu") }));
+}
+
+/** A space's type (and, for project spaces, its organization) in the sheet. */
+function openSpaceSettings(context) {
   const organizations = state.contexts.filter(item => item.type === "organization" && item.uuid !== context.uuid);
-  const orgSelect = context.type === "project" && organizations.length
-    ? h("select", { class: "compact", "aria-label": `Organization of ${context.name}`, "data-focus-key": key("org"),
-      onchange: event => act("linkOrganization", { uuid: context.uuid, organizationUuid: event.target.value || null }, "Organization saved.").then(loadContexts) },
-    option("", "No organization", context.organization_uuid ?? ""),
-    organizations.map(org => option(org.uuid, org.name, context.organization_uuid))) : null;
-  const signIns = context.container_label ? `Sign-ins: ${context.container_label}` : "Shared sign-ins";
-  return h("div", { class: "space-group-head" },
-    spaceIcon(context),
-    h("div", { class: "row-main" },
-      h("h3", { class: "space-name" }, context.name,
-        context.uuid === state.activeSpace ? h("span", { class: "tag" }, "this window") : null),
-      h("span", { class: "space-meta" }, `${count} ${count === 1 ? "project" : "projects"} · ${signIns}`)),
-    typeSelect, orgSelect,
-    h("button", { type: "button", class: "ghost", "data-focus-key": key("add"), "aria-label": `Add project to ${context.name}`,
-      onclick: () => addProjectFlow({ contextUuid: context.uuid }) }, icon("plus", 14), "Add"),
-    iconButton("open", `Switch to ${context.name}`, () => act("openContext", { uuid: context.uuid }), { "data-focus-key": key("open") }));
+  const typeSelect = h("select", {}, M.CONTEXT_TYPES.map(type => option(type, TYPE_LABELS[type], context.type)));
+  const orgSelect = h("select", {}, option("", "No organization", context.organization_uuid ?? ""),
+    organizations.map(org => option(org.uuid, org.name, context.organization_uuid)));
+  const orgField = field({ label: "Organization", control: orgSelect, help: "Only project spaces belong to an organization." });
+  const showOrg = () => { orgField.hidden = typeSelect.value !== "project" || !organizations.length; };
+  typeSelect.addEventListener("change", showOrg);
+  showOrg();
+  let close = () => {};
+  const save = async () => {
+    const type = typeSelect.value;
+    if (type !== context.type && !(await act("setContextType", { uuid: context.uuid, type })).ok) return;
+    const org = type === "project" && organizations.length ? orgSelect.value || null : null;
+    if (type === "project" && organizations.length && org !== (context.organization_uuid ?? null)
+      && !(await act("linkOrganization", { uuid: context.uuid, organizationUuid: org })).ok) return;
+    close();
+    setStatus(`${context.name} is a ${TYPE_LABELS[type].toLowerCase()} space.`);
+    await loadContexts();
+  };
+  close = openSheet({
+    title: `Space ${context.name}`,
+    body: [h("p", { class: "help" }, "What this space is for. Any space can hold projects; a site rule can apply to every space of one type."),
+      field({ label: "Type", control: typeSelect }), orgField],
+    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: save }, "Save")],
+  });
 }
 
 async function loadOrphans() {
@@ -371,21 +440,35 @@ function renderOrphans() {
 
 // ---------------------------------------------------------------- projects
 
+/** The project list and its containers; then the shown home is asked for again.
+ * Only the latest read publishes: an older list answering late changes nothing. */
 async function loadProjects() {
+  if (!state.active) return;
+  const ticket = latest.projects = nextTicket();
+  // Checked after every await, before anything follows: a superseded read or
+  // a hidden page asks for nothing more (no containers, no home).
+  const current = () => ticket === latest.projects && state.active;
   try {
-    state.projects = await call("listProjects");
-    await loadContainers();
+    const projects = await call("listProjects");
+    if (!current()) return;
+    const containers = await loadContainers();
+    if (!current()) return;
+    state.projects = projects;
+    state.containers = containers;
     await keepFocus(renderProjects);
   } catch (error) {
+    if (!current()) return;
+    $("projects-body").removeAttribute("aria-busy");
     $("projects-body").replaceChildren(h("p", { class: "empty" }, "Could not load projects. " + errorText(error)));
   }
+  if (state.homeId && state.loaded && current()) await loadHome();
 }
 
 async function loadContainers() {
   try {
     const list = await call("listProjectContainers");
-    state.containers = new Map((Array.isArray(list) ? list : []).map(info => [info.project_id, info]));
-  } catch { state.containers = new Map(); }
+    return new Map((Array.isArray(list) ? list : []).map(info => [info.project_id, info]));
+  } catch { return new Map(); }
 }
 
 /** A link of one project: the browser picks the project's own container (or
@@ -396,37 +479,62 @@ async function openProjectLink(project, url) {
   if (note) setStatus(note);
 }
 
-async function refreshServiceStatus(project, { quiet = false } = {}) {
+// The latest status check per project (statusTickets): an older answer that
+// arrives later never replaces a newer one, nor ends the newer one's
+// "Checking…". Nothing is checked, and no answer is shown, while the page is hidden.
+/** Asks serviceStatus once; true when this answer is the project's latest. */
+async function checkServiceStatus(projectId) {
+  if (!state.active) return false;
+  const ticket = nextTicket();
+  statusTickets.set(projectId, ticket);
+  state.checking.add(projectId);
   try {
-    state.serviceStatus.set(project.id, await call("serviceStatus", { projectId: project.id }));
-  } catch (error) {
-    if (!quiet) setStatus(errorText(error), "error");
+    const result = await call("serviceStatus", { projectId });
+    if (statusTickets.get(projectId) !== ticket) return false;
+    state.serviceStatus.set(projectId, result);
+    return true;
+  } finally {
+    if (statusTickets.get(projectId) === ticket) state.checking.delete(projectId);
   }
-  await keepFocus(renderProjects);
-  if (quiet) return;
+}
+
+/** One loopback check of the project's declared local servers (serviceStatus:
+ * a TCP connect to this Mac only, rate-limited by the service). */
+async function refreshServiceStatus(project, { quiet = false } = {}) {
+  if (!state.active) return;
+  const pending = checkServiceStatus(project.id);
+  if (!quiet) await keepFocus(renderProjectsView);
+  let current = false;
+  try {
+    current = await pending;
+  } catch (error) {
+    if (!quiet && state.active) setStatus(errorText(error), "error");
+  }
+  if (!state.active) return;
+  await keepFocus(renderProjectsView);
+  if (quiet || !current) return;
   const down = (state.serviceStatus.get(project.id) ?? []).filter(service => service.status === "down").length;
   setStatus(down ? `${down} local server${down === 1 ? " is" : "s are"} not running in ${projectName(project)}.` : `Local servers checked for ${projectName(project)}.`);
 }
 
-function urlChip(project, label, url, description, glyph = "globe") {
-  return h("button", { type: "button", class: "chip", "aria-label": description ?? `Open ${label}`, title: url,
-    onclick: () => openProjectLink(project, url) },
-  icon(glyph, 14), h("span", {}, label), h("span", { class: "chip-detail" }, hostOf(url)));
+/** Every project's local servers, checked together and shown in one render. */
+async function refreshAllServiceStatus() {
+  const projects = state.projects.filter(project => project.manifest.services.length);
+  if (!projects.length || !state.active) return;
+  const checks = projects.map(project => checkServiceStatus(project.id));
+  await keepFocus(renderProjectsView);
+  await Promise.allSettled(checks);
+  if (state.active) await keepFocus(renderProjectsView);
 }
 
-/** Rows for what static detection found (M.detectionSummary): services, apps,
- * domains (documented ones apart, marked unconfirmed) and agent presence.
- * `project` turns services into dashboard links in the project's space; the
- * add-project preview shows plain labels. Every value is text, never markup. */
-function findingFacts(summary, { project = null } = {}) {
+/** Rows for what static detection found (M.detectionSummary) in the
+ * add-project preview: services, apps, domains (documented ones apart, marked
+ * unconfirmed) and agent presence. Every value is text, never markup. */
+function findingFacts(summary) {
   const sources = list => (list.length ? `Found in ${list.join(", ")}` : null);
-  // A vendor's general dashboard (no project ids); the name says enough.
-  const dashboardChip = item => h("button", { type: "button", class: "chip", "aria-label": `Open the ${item.name} dashboard`,
-    title: item.url, onclick: () => openProjectLink(project, item.url) },
-  icon("open", 14), h("span", {}, item.name));
   return [
-    summary.integrations.length ? ["Services", summary.integrations.map(item => (project && item.url
-      ? dashboardChip(item) : h("span", { class: "tag", title: sources(item.sources) }, item.name)))] : null,
+    summary.integrations.length ? ["Services", summary.integrations.map(item =>
+      h("span", { class: "tag", title: sources(item.sources) }, item.name))] : null,
     summary.platforms.length ? ["Apps", summary.platforms.map(item =>
       h("span", { class: "tag", title: item.source || item.path || null }, item.label))] : null,
     summary.configuredDomains.length ? ["Domains", summary.configuredDomains.map(item =>
@@ -464,85 +572,91 @@ function firstRunGuide() {
     h("div", {}, h("button", { type: "button", class: "primary", onclick: () => addProjectFlow({}) }, "Add project…")));
 }
 
-function projectCard(project) {
-  const manifest = project.manifest;
-  const key = suffix => `project:${project.id}:${suffix}`;
-  const headingId = newId("project");
-  const statuses = new Map((state.serviceStatus.get(project.id) ?? []).map(service => [service.name, service]));
-  const down = [...statuses.values()].filter(service => service.status === "down").length;
-  const inRepo = project.manifest_state === "written" || project.manifest_state === "external";
-  const apps = [...new Set(manifest.environments.map(env => env.app ?? null))];
-  const multiApp = apps.filter(Boolean).length > 1;
-  const envLabel = env => (multiApp && env.app ? `${env.app} · ${env.name}` : env.name);
-  const spaceSelect = h("select", { class: "compact", "aria-label": `Space of ${projectName(project)}`, "data-focus-key": key("space"),
-    onchange: event => act("updateProject", { id: project.id, patch: { context_uuid: event.target.value || null } },
-      event.target.value ? `${projectName(project)} now lives in ${contextName(event.target.value)}.` : `${projectName(project)} is no longer in a space.`)
-      .then(() => Promise.all([loadProjects(), loadContexts()])) },
-  option("", "No space", project.context_uuid ?? ""),
-  state.contexts.map(context => option(context.uuid, spaceLabel(context), project.context_uuid)));
-  const primary = manifest.surfaces.filter(surface => M.surfaceProminence(surface) === "primary");
-  const secondary = manifest.surfaces.filter(surface => M.surfaceProminence(surface) !== "primary");
-  const facts = [
-    ["Space", [spaceSelect]],
-    ...signInFacts(project),
-    manifest.environments.length ? ["Environments", manifest.environments.map(env =>
-      urlChip(project, envLabel(env), env.base_url, `Open ${envLabel(env)} environment ${env.base_url}`, env.name === "local" ? "laptop" : "globe"))] : null,
-    manifest.services.length ? ["Local servers", [
-      ...manifest.services.map(service => {
-        const status = statuses.get(service.name)?.status ?? "unknown";
-        return h("span", { class: "tag", title: M.SERVICES_HELP },
-          h("span", { class: "dot", "data-status": status, "aria-hidden": "true" }), " ",
-          `${service.app ? `${service.app} · ` : ""}${service.name} :${service.port} · ${M.serviceStatusText(service, status)}`);
-      }),
-      iconButton("refresh", `Check local servers of ${projectName(project)}`, () => refreshServiceStatus(project), { "data-focus-key": key("status") })]] : null,
-    primary.length ? ["Links", primary.map(surface =>
-      urlChip(project, surface.name, surface.url, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
-    secondary.length ? ["More links", secondary.map(surface =>
-      urlChip(project, surface.name, surface.url, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
-    ...findingFacts(M.detectionSummary(project.detected), { project }),
-  ].filter(Boolean);
-  return h("li", { class: "card", id: `project-${project.id}`, "aria-labelledby": headingId, tabindex: "-1" },
-    h("div", { class: "card-head" },
-      h("div", { class: "card-titles" },
-        h("h4", { id: headingId, class: "card-title" }, projectName(project),
-          h("span", { class: "tag" }, manifest.kind),
-          inRepo ? h("span", { class: "tag accent", title: "Stored in .axiosozo/project.json" }, "In repository") : null,
-          down ? h("span", { class: "tag bad" }, `${down} down`) : null),
-        h("span", { class: "card-sub path", title: project.root }, project.root)),
-      h("div", { class: "card-actions" },
-        h("button", { type: "button", class: "ghost", "data-focus-key": key("edit"), "aria-label": `Edit ${projectName(project)}`,
-          onclick: () => openProjectReview({ mode: "edit", project }) }, "Edit"),
-        overflowMenu(`More for ${projectName(project)}`, [
-          { label: project.detected ? "Read folder again" : "Read folder", focusKey: key("refresh"), run: () => refreshDetectionFlow(project) },
-          { label: inRepo ? "Update .axiosozo/project.json…" : "Save as .axiosozo/project.json…", focusKey: key("write"), run: () => writeManifestFlow(project) },
-          { label: "Remove project…", destructive: true, focusKey: key("remove"), run: () => removeProjectFlow(project) },
-        ]))),
-    h("dl", { class: "facts" }, facts.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)])));
+/** The project's tile: its first letter, tinted with its own container's
+ * Firefox colour (the same colour its tabs carry), neutral without one. */
+function projectTile(card, extra = "") {
+  return h("span", { class: `project-tile${extra}${card.color ? ` identity-color-${card.color}` : ""}`,
+    "data-colored": card.color ? "" : null, "aria-hidden": "true" }, card.monogram);
 }
 
-/** Sign-ins (the project's own container in Firefox's colour, and the account
- * labels the user typed) and shared sites, each with a small editor. */
-function signInFacts(project) {
-  const name = projectName(project);
+/** Edit, accounts, shared sites, folder and removal: secondary, behind "…". */
+function projectMenu(project, { home = false, space = null } = {}) {
+  const key = suffix => `project:${project.id}:${home ? "home-" : ""}${suffix}`;
+  const inRepo = project.manifest_state === "written" || project.manifest_state === "external";
+  return overflowMenu(`More for ${projectName(project)}`, [
+    home ? null : { label: "Edit project…", focusKey: key("edit"), run: () => openProjectReview({ mode: "edit", project }) },
+    home ? null : { label: "Accounts…", focusKey: key("accounts"), run: () => openAccountsEditor(project) },
+    home ? null : { label: "Shared sites…", focusKey: key("shared"), run: () => openSharedSitesEditor(project) },
+    { label: project.detected ? "Read folder again" : "Read folder", focusKey: key("refresh"), run: () => refreshDetectionFlow(project) },
+    { label: inRepo ? "Update .axiosozo/project.json…" : "Save as .axiosozo/project.json…", focusKey: key("write"), run: () => writeManifestFlow(project) },
+    space ? { label: `Switch to ${space.name}`, focusKey: key("space"), run: () => act("openContext", { uuid: space.uuid }) } : null,
+    { label: "Remove project…", destructive: true, focusKey: key("remove"), run: () => removeProjectFlow(project) },
+  ], { focusKey: key("menu") });
+}
+
+/** A project in the list: a named card whose title opens the project home;
+ * the whole card is the same link for the pointer. */
+function projectCard(project, { loose = false } = {}) {
+  const card = M.projectCard(project, { statuses: state.serviceStatus.get(project.id) ?? [], container: state.containers.get(project.id) });
+  const titleId = `project-title-${project.id}`;
   const key = suffix => `project:${project.id}:${suffix}`;
-  const container = M.containerSummary(state.containers.get(project.id));
-  const accounts = M.accountRows(project).filter(row => row.label);
-  const shared = M.sharedSites(project);
-  const signIns = [
-    container ? h("span", { class: "container-line", "data-state": container.state, title: M.CHROMIUM_SIGN_INS_NOTE },
-      h("span", { class: `container-mark${container.color ? ` identity-color-${container.color}` : ""}`, "aria-hidden": "true" }),
-      container.name && container.name !== name ? `${container.text}: ${container.name}` : container.text) : null,
-    accounts.map(row => h("span", { class: "tag account", title: M.ACCOUNTS_NOTE }, `${row.name} · ${row.label}`)),
-    h("button", { type: "button", class: "ghost small", "data-focus-key": key("accounts"), "aria-label": `Accounts for ${name}`,
-      onclick: () => openAccountsEditor(project) }, accounts.length ? "Edit accounts…" : "Note accounts…"),
-  ];
-  return [
-    ["Sign-ins", signIns],
-    ["Shared sites", [
-      h("span", { class: "fact-text", "data-confirmed": shared.confirmed }, shared.text),
-      h("button", { type: "button", class: "ghost small", "data-focus-key": key("shared"), "aria-label": `Shared sites of ${name}`,
-        onclick: () => openSharedSitesEditor(project) }, shared.confirmed ? "Edit…" : "Review…")]],
-  ];
+  const local = card.local && state.checking.has(project.id) && card.local.tone === "unknown"
+    ? { tone: "unknown", text: "Checking local servers…" } : card.local;
+  return h("li", { class: "project-card", id: `project-${project.id}`, "aria-labelledby": titleId },
+    projectTile(card),
+    h("div", { class: "project-main" },
+      h("h4", { class: "project-title", id: titleId },
+        h("a", { href: card.href, class: "project-link", "data-focus-key": key("open") }, card.name)),
+      h("p", { class: "project-sub" }, h("span", {}, card.kind),
+        card.folder ? h("span", { class: "path", title: card.folder }, card.folder) : null),
+      local || card.facts.length ? h("p", { class: "project-facts" },
+        local ? h("span", { class: "fact", "data-tone": local.tone },
+          h("span", { class: "dot", "data-status": dotStatus(local.tone), "aria-hidden": "true" }), local.text) : null,
+        card.facts.map(fact => h("span", { class: "fact" }, h("span", { class: "fact-label" }, `${fact.label}:`), " ", fact.text))) : null,
+      loose ? h("div", { class: "card-control" }, spaceSelect(project)) : null),
+    h("div", { class: "project-actions" }, projectMenu(project)));
+}
+
+/** Moves a project to a space (used where it is in none). */
+function spaceSelect(project) {
+  const name = projectName(project);
+  return h("select", { class: "compact", "aria-label": `Space of ${name}`, "data-focus-key": `project:${project.id}:space`,
+    onchange: event => act("updateProject", { id: project.id, patch: { context_uuid: event.target.value || null } },
+      event.target.value ? `${name} now lives in ${contextName(event.target.value)}.` : `${name} is no longer in a space.`)
+      .then(() => Promise.all([loadProjects(), loadContexts()])) },
+  option("", "Choose a space…", project.context_uuid ?? ""),
+  state.contexts.map(context => option(context.uuid, spaceLabel(context), project.context_uuid)));
+}
+
+/** Projects of one space, like that space's sidebar; or the ones in no space. */
+function spaceGroup(group) {
+  const headingId = newId("space");
+  const count = group.projects.length;
+  const context = group.context;
+  const head = context
+    ? h("div", { class: "group-head" }, spaceIcon(context),
+      h("div", { class: "group-titles" },
+        h("h3", { id: headingId, class: "group-name" }, h("span", {}, context.name), thisWindowTag(context)),
+        h("span", { class: "group-meta" }, `${count} ${count === 1 ? "project" : "projects"} in this space's sidebar`)),
+      spaceActions(context))
+    : h("div", { class: "group-head" }, h("span", { class: "space-icon", "aria-hidden": "true" }, icon("space")),
+      h("div", { class: "group-titles" },
+        h("h3", { id: headingId, class: "group-name" }, h("span", {}, "Not in a space")),
+        h("span", { class: "group-meta" }, "Choose a space so these show in a sidebar.")));
+  return h("section", { class: "space-group", "aria-labelledby": headingId }, head,
+    h("ul", { class: "project-list", "aria-labelledby": headingId }, group.projects.map(project => projectCard(project, { loose: !context }))));
+}
+
+/** Spaces that hold no project yet: one quiet row each, never an empty box. */
+function otherSpaces(groups, { only }) {
+  const headingId = newId("spaces");
+  return h("section", { class: "other-spaces", "aria-labelledby": headingId },
+    h("h3", { id: headingId, class: "subhead" }, only ? "Your spaces" : "Spaces without projects"),
+    h("ul", { class: "rows" }, groups.map(({ context }) => h("li", { class: "row" }, spaceIcon(context),
+      h("div", { class: "row-main" },
+        h("span", { class: "row-title" }, h("span", {}, context.name), thisWindowTag(context)),
+        h("span", { class: "row-detail" }, `${TYPE_LABELS[context.type] ?? "Personal"} space · no projects yet`)),
+      spaceActions(context)))));
 }
 
 /** Account labels: free text the user types per service or site. */
@@ -631,29 +745,31 @@ function openSharedSitesEditor(project) {
   });
 }
 
+/** The list: projects per space in Zen's order, then spaces without projects.
+ * Nothing is drawn until the first load finished, so it never shows half. */
 function renderProjects() {
   const body = $("projects-body");
+  if (state.connected && !state.loaded) return;
+  body.removeAttribute("aria-busy");
   const groups = M.projectGroups(state.contexts, state.projects);
+  const filled = groups.filter(group => group.projects.length);
+  const empty = groups.filter(group => group.context && !group.projects.length);
   const parts = [];
-  if (!state.projects.length) parts.push(state.connected ? firstRunGuide()
-    : h("p", { class: "empty" }, "Projects appear here once AxioSozo is connected."));
+  if (!state.connected) parts.push(h("p", { class: "empty" }, "Projects appear here once AxioSozo is connected."));
+  else if (!state.projects.length) parts.push(firstRunGuide());
   if (state.connected && !state.contexts.length) {
     parts.push(h("p", { class: "empty" }, "Waiting for Zen's spaces… If this stays empty, open a normal browser window."));
   }
-  for (const group of groups) {
-    const headingId = newId("space");
-    const header = group.context ? spaceHeader(group.context, group.projects.length)
-      : h("div", { class: "space-group-head" }, h("div", { class: "row-main" },
-        h("h3", { class: "space-name" }, "Not in a space"),
-        h("span", { class: "space-meta" }, "Choose a space to show these in the sidebar.")));
-    header.querySelector("h3").id = headingId;
-    parts.push(h("section", { class: "space-group", "aria-labelledby": headingId, "data-empty": !group.projects.length },
-      header,
-      group.projects.length ? h("ul", { class: "cards" }, group.projects.map(projectCard)) : null));
-  }
+  parts.push(...filled.map(spaceGroup));
+  if (empty.length) parts.push(otherSpaces(empty, { only: !filled.length }));
   body.replaceChildren(...parts);
   renderPlacement();
-  focusFromHash();
+}
+
+/** Whichever pane of Projects is showing: the list or one project's home. */
+function renderProjectsView() {
+  renderProjects();
+  if (state.homeId) renderHome();
 }
 
 function renderPlacement() {
@@ -661,19 +777,19 @@ function renderPlacement() {
   const project = state.placement ? state.projects.find(item => item.id === state.placement) : null;
   if (!project) { box.hidden = true; box.replaceChildren(); return; }
   const space = state.contexts.find(context => context.uuid === project.context_uuid);
-  box.replaceChildren(...[
+  fill(box,
     h("span", { class: "dot", "data-status": "up", "aria-hidden": "true" }),
     h("p", {}, M.placementMessage(project, state.contexts)),
     space ? h("button", { type: "button", class: "primary", onclick: () => act("openContext", { uuid: space.uuid }) }, `Switch to ${space.name}`) : null,
-    iconButton("close", "Dismiss", () => { state.placement = null; renderPlacement(); })].filter(Boolean));
+    iconButton("close", "Dismiss", () => { state.placement = null; renderPlacement(); }));
   box.hidden = false;
 }
 
 function focusProject(id) {
   const node = document.getElementById(`project-${id}`);
   if (!node) return false;
-  node.scrollIntoView({ block: "start", behavior: "smooth" });
-  node.focus({ preventScroll: true });
+  node.scrollIntoView({ block: "nearest" });
+  node.querySelector(".project-link")?.focus({ preventScroll: true });
   node.removeAttribute("data-highlight");
   void node.offsetWidth;
   node.setAttribute("data-highlight", "");
@@ -695,7 +811,11 @@ async function removeProjectFlow(project) {
     message: "AxioSozo forgets this project. The folder and any .axiosozo/project.json in it are not touched.",
     accept: "Remove project", destructive: true,
   });
-  if (ok) await act("removeProject", { id: project.id }, `${projectName(project)} removed.`).then(loadProjects);
+  if (!ok) return;
+  const removed = await act("removeProject", { id: project.id }, `${projectName(project)} removed.`);
+  // Its home is gone: back to the list rather than a "not here" page.
+  if (removed.ok && state.homeId === project.id) location.hash = "#projects";
+  await loadProjects();
 }
 
 /** Folder picker → static detection → review sheet. The space defaults to the
@@ -876,6 +996,263 @@ function openProjectEditorById(id) {
   else setStatus("That project no longer exists.", "error");
 }
 
+// ---------------------------------------------------------------- project home (#project=<id>)
+
+// Every home request takes a ticket (latest.home). A route change (also away
+// and back to the same project), a projects or contexts event, and pagehide
+// take one too. Only the answer to the latest ticket may publish anything:
+// state, a render, focus or a check. A visit's one local-server check
+// (state.homeProbe) belongs to the visit, so a request reissued after an
+// event still makes it, once.
+const HOME_RETRY_MS = 150;
+let homeRetry = null;
+
+/** Asks the actor for the current stored project (normal window only). A
+ * project that changed while it was read is asked for once more. */
+async function loadHome({ retry = true } = {}) {
+  const id = state.homeId;
+  if (!id || !state.connected || !state.active) return;
+  clearTimeout(homeRetry);
+  homeRetry = null;
+  invalidateHome();
+  const ticket = latest.home;
+  let next;
+  let code = null;
+  try {
+    next = { id, data: await call("getProjectHome", { id }), problem: null };
+  } catch (error) {
+    code = error?.code ?? null;
+    next = { id, data: null, problem: M.homeProblem(code) };
+  }
+  const current = () => ticket === latest.home && state.homeId === id && state.active;
+  if (!current()) return; // superseded or hidden: publish nothing
+  if (code === "SENDER_REJECTED" || code === "ACTOR_ERROR") state.connected = false;
+  if (code === "PROJECT_CHANGED" && retry) {
+    homeRetry = setTimeout(() => { homeRetry = null; if (current()) loadHome({ retry: false }); }, HOME_RETRY_MS);
+    return;
+  }
+  state.home = next;
+  await keepFocus(renderHome);
+  if (!current() || !state.homeProbe || !next.data) return;
+  state.homeProbe = false;
+  if (next.data.project.manifest.services.length) refreshServiceStatus(next.data.project, { quiet: true });
+}
+
+const homeSection = (key, title, body, { action = null, quiet = false } = {}) => {
+  const headingId = `home-${key}-heading`;
+  return h("section", { class: `home-section${quiet ? " quiet" : ""}`, "data-section": key, "aria-labelledby": headingId },
+    h("div", { class: "section-head" }, h("h3", { id: headingId }, title), action),
+    body);
+};
+
+/** Environments per app with their honest status, then the project's links. */
+function homeOpen(project) {
+  const key = suffix => `project:${project.id}:${suffix}`;
+  const groups = M.homeEnvironments(project, state.serviceStatus.get(project.id) ?? [], { checking: state.checking.has(project.id) });
+  const surfaces = project.manifest.surfaces.filter(surface => M.isHttpUrl(surface.url));
+  const primary = surfaces.filter(surface => M.surfaceProminence(surface) === "primary");
+  const secondary = surfaces.filter(surface => M.surfaceProminence(surface) !== "primary");
+  const linkItem = surface => {
+    const kind = surface.kind.replaceAll("_", " ");
+    return h("li", {}, h("button", { type: "button", class: "link-open", title: surface.url,
+      "aria-label": `Open ${surface.name} (${kind}) at ${M.displayAddress(surface.url)}`, onclick: () => openProjectLink(project, surface.url) },
+    h("span", { class: "link-name" }, surface.name), h("span", { class: "link-address" }, hostOf(surface.url)), icon("open", 14)));
+  };
+  // Stays enabled while checking so keyboard focus survives the re-render; the service rate-limits checks.
+  const check = project.manifest.services.some(service => M.isCheckedService(service.url))
+    ? iconButton("refresh", `Check the local servers of ${projectName(project)} again`, () => refreshServiceStatus(project),
+      { "data-focus-key": key("status") }) : null;
+  const body = [];
+  for (const group of groups) {
+    body.push(h("div", { class: "env-block", role: group.label ? "group" : null, "aria-label": group.label ? `App ${group.label}` : null },
+      group.label ? h("h4", { class: "env-app" }, group.label) : null,
+      h("ul", { class: "env-list" }, group.rows.map(row => {
+        const statusId = newId("status");
+        return h("li", { class: "env-row" },
+          h("button", { type: "button", class: "env-open", title: row.url, "aria-label": row.openLabel, "aria-describedby": statusId,
+            "data-focus-key": key(`env:${row.app ?? ""}:${row.name}`), onclick: () => openProjectLink(project, row.url) },
+          icon(row.local ? "laptop" : "globe"), h("span", { class: "env-name" }, row.label),
+          h("span", { class: "env-address" }, row.address), icon("open", 14)),
+          h("span", { class: "env-status", id: statusId, "data-status": row.status },
+            h("span", { class: "dot", "data-status": dotStatus(row.status), "aria-hidden": "true" }), row.statusText));
+      }))));
+  }
+  if (groups.length) body.push(h("p", { class: "footnote" }, M.STATUS_NOTE));
+  if (primary.length || secondary.length) {
+    body.push(h("div", { class: "links" },
+      h("h4", { class: "env-app" }, "Links"),
+      primary.length ? h("ul", { class: "link-list" }, primary.map(linkItem)) : null,
+      secondary.length ? h("details", { class: "more-links", open: !primary.length },
+        h("summary", {}, `More links (${secondary.length})`), h("ul", { class: "link-list" }, secondary.map(linkItem))) : null));
+  }
+  if (!body.length) {
+    body.push(h("p", { class: "quiet-text" }, "No addresses yet. Add the address you open during development with Edit."));
+  }
+  return homeSection("open", "Environments and links", body, { action: check });
+}
+
+/** The project's own container, the accounts the user noted and shared sites. */
+function homeAccounts(project, container, space) {
+  const name = projectName(project);
+  const key = suffix => `project:${project.id}:${suffix}`;
+  const summary = M.containerSummary(container);
+  const rows = M.homeServices(project);
+  const shared = M.sharedSites(project);
+  const labelled = rows.some(row => row.account);
+  const containerLine = summary ? h("p", { class: "container-line", "data-state": summary.state },
+    h("span", { class: `container-mark${summary.color ? ` identity-color-${summary.color}` : ""}`, "aria-hidden": "true" }),
+    h("span", {}, summary.name && summary.name !== name ? `${summary.text}: ${summary.name}` : summary.text)) : null;
+  return homeSection("accounts", "Services and sign-ins", [
+    containerLine,
+    h("p", { class: "footnote" }, summary?.state === "own" || summary?.state === "pending"
+      ? `Links on this page open in it, so ${name} keeps its own sign-ins. ${M.CHROMIUM_SIGN_INS_NOTE}` : M.CHROMIUM_SIGN_INS_NOTE),
+    rows.length ? h("ul", { class: "rows service-rows" }, rows.map(row => h("li", { class: "row" },
+      h("div", { class: "row-main" },
+        h("span", { class: "row-title" }, row.name),
+        h("span", { class: `row-detail${row.account ? " account" : ""}` }, row.account ? `Account: ${row.account}` : "No account noted")),
+      row.url ? h("button", { type: "button", class: "ghost small", title: row.url, "aria-label": `Open the ${row.name} dashboard`,
+        "data-focus-key": key(`dashboard:${row.key}`), onclick: () => openProjectLink(project, row.url) }, "Dashboard", icon("open", 14)) : null)))
+      : h("p", { class: "quiet-text" }, "No services were found in the folder. Note the sites you sign in to for this project."),
+    h("div", { class: "section-actions" },
+      h("button", { type: "button", class: "ghost small", "aria-label": `Accounts for ${name}`, "data-focus-key": key("accounts"),
+        onclick: () => openAccountsEditor(project) }, labelled ? "Edit accounts…" : "Note accounts…"),
+      h("span", { class: "help" }, M.ACCOUNTS_NOTE)),
+    h("div", { class: "shared-line" },
+      h("div", { class: "row-main" },
+        h("span", { class: "row-title" }, "Shared sites"),
+        h("span", { class: "fact-text", "data-confirmed": shared.confirmed }, shared.text),
+        shared.confirmed && space ? h("span", { class: "help" }, `These use the sign-ins of ${space.name}.`) : null),
+      h("button", { type: "button", class: "ghost small", "aria-label": `Shared sites of ${name}`, "data-focus-key": key("shared"),
+        onclick: () => openSharedSitesEditor(project) }, shared.confirmed ? "Edit…" : "Review…")),
+  ]);
+}
+
+/** Agents and console errors: what this build actually reports, nothing more. */
+function homeActivity(project, agents, errors) {
+  const presence = M.detectionSummary(project.detected).agents;
+  const quiet = agents.state !== "list" && errors.state !== "list";
+  return homeSection("activity", "Activity", h("dl", { class: "home-facts" },
+    h("dt", {}, "Agents"),
+    h("dd", {},
+      agents.state === "list" ? h("ul", { class: "activity-list" }, agents.items.map(item => h("li", {},
+        h("span", { class: "tag state", "data-tone": item.state === "failed" ? "warn" : item.state === "needs_input" ? "info" : "ok" }, item.stateText),
+        h("span", { class: "activity-title" }, `${item.agent}: ${item.title}`),
+        item.ago ? h("span", { class: "help" }, item.ago) : null)))
+        : h("p", { class: "quiet-text" }, agents.text),
+      presence.length ? h("p", { class: "footnote" }, `In the folder: ${presence.join(", ")}. ${M.PRESENCE_TEXT}`) : null),
+    h("dt", {}, "Console errors"),
+    h("dd", {},
+      errors.state === "list" ? [h("p", {}, errors.text), h("ul", { class: "activity-list" }, errors.items.map(item =>
+        h("li", {}, h("span", { class: "tag state", "data-tone": item.level === "warning" ? "warn" : "bad" }, item.level), h("span", { class: "activity-title" }, item.text))))]
+        : h("p", { class: "quiet-text" }, errors.text))), { quiet });
+}
+
+/** The brief (a document, never a chat), then folder, apps and domains found. */
+function homeAbout(project) {
+  const key = suffix => `project:${project.id}:${suffix}`;
+  const brief = M.briefView(project.brief);
+  const found = M.detectionSummary(project.detected);
+  const folder = M.folderFacts(project);
+  const read = dateText(folder.lastRead);
+  const facts = [
+    ["Folder", h("span", { class: "path" }, folder.root)],
+    ["Project file", folder.projectFile],
+    found.platforms.length ? ["Apps found", found.platforms.map(item => item.label).join(", ")] : null,
+    found.configuredDomains.length ? ["Domains", h("span", {}, found.configuredDomains.map(item => item.host).join(", "),
+      h("span", { class: "help" }, " · from the project's config files"))] : null,
+    found.documentedDomains.length ? ["From docs", h("span", {}, found.documentedDomains.map(item => item.host).join(", "),
+      h("span", { class: "tag unconfirmed", title: M.DOCUMENTED_DOMAIN_NOTE }, "unconfirmed"))] : null,
+    ["Last read", h("span", { class: "inline-action" }, read ? `Folder read on ${read}` : "Not read yet",
+      h("button", { type: "button", class: "ghost small", "data-focus-key": key("home-read"), onclick: () => refreshDetectionFlow(project) },
+        read ? "Read folder again" : "Read folder"))],
+  ].filter(Boolean);
+  const briefBlock = brief ? h("div", { class: "brief", role: "group", "aria-label": "Brief" },
+    h("h4", {}, "Brief"),
+    brief.apps.length ? [h("h5", {}, "Apps"), h("ul", { class: "brief-list" }, brief.apps.map(app =>
+      h("li", {}, h("strong", {}, app.name), app.kind ? ` (${app.kind})` : "", app.summary ? ` — ${app.summary}` : "")))] : null,
+    brief.start.length ? [h("h5", {}, "How to start"), h("ul", { class: "brief-list" }, brief.start.map(step =>
+      h("li", {}, `${step.label}: `, h("code", {}, step.command), step.cwd ? ` in ${step.cwd}` : ""))),
+    h("p", { class: "footnote" }, "AxioSozo shows these commands; it never runs them.")] : null,
+    brief.services.length ? [h("h5", {}, "Services"), h("ul", { class: "brief-list" }, brief.services.map(item =>
+      h("li", {}, h("strong", {}, item.name), item.purpose ? ` — ${item.purpose}` : "")))] : null,
+    brief.domains.length ? [h("h5", {}, "Domains it mentions"), h("ul", { class: "brief-list" }, brief.domains.map(item =>
+      h("li", {}, item.host, item.purpose ? ` — ${item.purpose}` : "", " ", h("span", { class: "tag unconfirmed" }, "unconfirmed"))))] : null,
+    brief.risks.length ? [h("h5", {}, "Known risks"), h("ul", { class: "brief-list" }, brief.risks.map(text => h("li", {}, text)))] : null,
+    h("p", { class: "footnote" }, `Written by ${brief.by}${dateText(brief.generatedAt) ? ` on ${dateText(brief.generatedAt)}` : ""}. `,
+      brief.accepted ? "Accepted." : "Not accepted into the project file."))
+    : h("div", { class: "brief absent" }, h("h4", {}, "Brief"), h("p", { class: "quiet-text" }, `No brief yet. ${M.BRIEF_UNAVAILABLE}`));
+  return homeSection("about", "About this project", [briefBlock,
+    h("dl", { class: "home-facts" }, facts.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))]);
+}
+
+/** One project's home: who it is, how to open it, its sign-ins, what is going on, and what it is. */
+function renderHome() {
+  const root = $("project-home");
+  const id = state.homeId;
+  if (!id) { root.replaceChildren(); return; }
+  const crumbs = h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
+    h("a", { href: "#projects", "data-focus-key": "home:back" }, "Projects"), h("span", { "aria-hidden": "true" }, "/"),
+    h("span", { "aria-current": "page" }, state.home?.data ? projectName(state.home.data.project) : "Project"));
+  if (!state.connected) {
+    root.removeAttribute("aria-busy");
+    root.replaceChildren(crumbs, h("p", { class: "empty" }, "Project homes appear here once AxioSozo is connected."));
+    return;
+  }
+  if (!state.loaded || state.home?.id !== id) {
+    root.setAttribute("aria-busy", "true");
+    root.replaceChildren(crumbs, h("p", { class: "loading" }, "Loading project…"));
+    return;
+  }
+  root.removeAttribute("aria-busy");
+  if (state.home.problem) {
+    root.replaceChildren(crumbs, h("div", { class: "home-problem" },
+      h("h2", { id: "home-title", tabindex: "-1", "data-focus-key": "home:title" }, state.home.problem.title),
+      h("p", {}, state.home.problem.text),
+      h("p", {}, h("a", { href: "#projects", class: "button-link" }, "Show all projects"))));
+    focusHomeTitle();
+    return;
+  }
+  const { project, space, container } = state.home.data;
+  const name = projectName(project);
+  const card = M.projectCard(project, { container });
+  const brief = M.briefView(project.brief);
+  const agents = M.homeAgentActivity(state.home.data.agent_activity, { root: project.root, now: Date.now() });
+  const errors = M.homeConsoleErrors(state.home.data.console_errors);
+  const sections = {
+    open: () => homeOpen(project),
+    accounts: () => homeAccounts(project, container, space),
+    activity: () => homeActivity(project, agents, errors),
+    about: () => homeAbout(project),
+  };
+  fill(root, crumbs,
+    h("header", { class: "home-head" },
+      projectTile(card, " large"),
+      h("div", { class: "home-titles" },
+        h("h2", { id: "home-title", tabindex: "-1", "data-focus-key": "home:title" }, name),
+        h("p", { class: "home-sub" }, h("span", {}, card.kind),
+          h("span", {}, space ? `Space: ${space.name}` : "Not in a space"),
+          card.inRepo ? h("span", { title: "Stored in .axiosozo/project.json" }, "In the repository") : null),
+        h("p", { class: "path home-folder", title: project.root }, project.root)),
+      h("div", { class: "home-actions" },
+        h("button", { type: "button", class: "ghost", "aria-label": `Edit ${name}`, "data-focus-key": `project:${project.id}:home-edit`,
+          onclick: () => openProjectReview({ mode: "edit", project }) }, "Edit"),
+        projectMenu(project, { home: true, space }))),
+    brief ? h("p", { class: "home-lede" }, brief.product) : null,
+    ...M.homeSections({ agents, errors }).map(section => sections[section]()));
+  focusHomeTitle();
+}
+
+/** After navigating to a home, focus (and screen readers) land on its title;
+ * never while a dialog over it has focus, nor while the page is hidden. */
+function focusHomeTitle() {
+  if (!state.focusHome || !state.active) return;
+  state.focusHome = false;
+  if ($("sheet").open || $("confirm-dialog").open) return;
+  window.scrollTo?.({ top: 0 });
+  deliberateFocus++;
+  $("home-title")?.focus({ preventScroll: true });
+}
+
 // ---------------------------------------------------------------- site rules
 
 async function loadRules() {
@@ -947,7 +1324,7 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
   const contextsDetail = h("div", {});
   const renderContextsDetail = () => {
     contextsDetail.hidden = form.contextsMode !== "selected";
-    contextsDetail.replaceChildren(...[
+    fill(contextsDetail,
       h("div", { class: "inline-choices", role: "group", "aria-label": "Space types" },
         M.CONTEXT_TYPES.map(type => choice({ type: "checkbox", name: "context-type", value: type,
           checked: form.contextTypes.includes(type), label: `All ${type} spaces`,
@@ -955,7 +1332,7 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
       state.contexts.length ? h("div", { class: "inline-choices", role: "group", "aria-label": "Specific spaces" },
         state.contexts.map(context => choice({ type: "checkbox", name: "context-workspace", value: context.uuid,
           checked: form.contextWorkspaces.includes(context.uuid), label: context.name,
-          onchange: event => { toggle(form.contextWorkspaces, context.uuid, event.target.checked); } }))) : null].filter(Boolean));
+          onchange: event => { toggle(form.contextWorkspaces, context.uuid, event.target.checked); } }))) : null);
   };
   const contextsField = h("fieldset", {}, h("legend", {}, "Where it applies"),
     h("div", { class: "inline-choices" },
@@ -995,11 +1372,11 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
     raisedBox.hidden = form.observation !== "outline";
     if (raisedBox.hidden) { raisedBox.replaceChildren(); return; }
     const { hosts } = M.parseHosts(form.hostsText);
-    raisedBox.replaceChildren(...[h("p", { class: "help" }, M.SENSITIVE_CAP_TEXT),
+    fill(raisedBox, h("p", { class: "help" }, M.SENSITIVE_CAP_TEXT),
       hosts.length ? h("div", { role: "group", "aria-label": "Raise the level for sensitive sites" },
         hosts.map(host => choice({ type: "checkbox", name: "raised-host", value: host, checked: form.raisedHosts.includes(host),
           label: `Allow Outline on ${host} even if it is a sensitive site`,
-          onchange: event => toggle(form.raisedHosts, host, event.target.checked) }))) : null].filter(Boolean));
+          onchange: event => toggle(form.raisedHosts, host, event.target.checked) }))) : null);
   }
   const observationField = h("fieldset", {}, h("legend", {}, "What may leave this Mac (for optional Jev judgement)"),
     M.OBSERVATIONS.map(level => choice({ type: "radio", name: "observation", value: level, checked: form.observation === level,
@@ -1287,28 +1664,98 @@ async function clearLedgerFlow() {
 // ---------------------------------------------------------------- wiring
 
 const loaders = {
-  contexts: () => Promise.all([loadContexts(), loadOrphans()]),
+  contexts: () => Promise.all([loadContexts(), loadOrphans(), state.homeId ? loadHome() : null]),
   projects: () => loadProjects(),
   rules: loadRules,
   ledger: loadLedger,
   services: loadAttention,
   attention: loadAttention,
 };
+// Events that can change what a project home shows.
+const HOME_EVENTS = new Set(["projects", "contexts"]);
 const pending = new Map();
 function onServicesEvent(event) {
   const name = event?.name;
-  if (!Object.hasOwn(loaders, name) || pending.has(name)) return;
-  pending.set(name, setTimeout(() => { pending.delete(name); loaders[name]().catch(console.error); }, 100));
+  if (!state.active || !Object.hasOwn(loaders, name)) return;
+  // From this moment the home being fetched may be out of date: void its
+  // answer now, also when this event joins a reload that is already queued.
+  if (HOME_EVENTS.has(name)) invalidateHome();
+  if (pending.has(name)) return;
+  pending.set(name, setTimeout(() => {
+    pending.delete(name);
+    if (state.active) loaders[name]().catch(console.error);
+  }, 100));
+}
+
+// ---------------------------------------------------------------- page lifetime
+
+let unsubscribe = null;
+/** pagehide: nothing queued runs, no late answer publishes and no new request
+ * starts until the page is shown again; events stop arriving. */
+function deactivate() {
+  if (!state.active) return;
+  state.active = false;
+  for (const timer of pending.values()) clearTimeout(timer);
+  pending.clear();
+  clearTimeout(homeRetry);
+  homeRetry = null;
+  invalidateHome();
+  latest.projects = nextTicket();
+  latest.contexts = nextTicket();
+  statusTickets.clear();
+  state.checking.clear();
+  try { unsubscribe?.(); } catch (error) { console.error(error); }
+  unsubscribe = null;
+}
+
+/** A persisted pageshow (back/forward cache): listen again and read everything
+ * afresh, finishing a first load that the hide interrupted. */
+function reactivate(event) {
+  if (!event?.persisted || state.active) return;
+  state.active = true;
+  if (api && state.connected) boot().catch(error => { console.error(error); setStatus("AxioSozo could not start this page.", "error"); });
+}
+
+/** Subscribes and loads the page; run at start and again after a restore. A
+ * hide while it runs stops it at the next step; the restore picks it up. */
+async function boot() {
+  try { state.flags = await call("getOverviewFlags"); } catch (error) { if (error?.code === "SENDER_REJECTED") state.connected = false; }
+  if (!state.active) return;
+  unsubscribe ??= api.subscribe(onServicesEvent);
+  await loadActiveSpace();
+  if (!state.active) return;
+  // Everything the first view needs is loaded before Projects is drawn once
+  // (renderProjects waits for state.loaded), so the page never shows half.
+  await Promise.allSettled([loadContexts(), loadProjects(), loadRules(), loadJev(), loadLedger(), loadOrphans(), loadAttention()]);
+  if (!state.active) return;
+  // The check below covers every project, the shown home included.
+  state.homeProbe = false;
+  if (!state.started) {
+    state.loaded = true;
+    renderProjects();
+    if (state.homeId) await loadHome();
+    else renderHome();
+    if (!state.active) return;
+    renderJevCard();
+    if (state.view === "ai") { if (!state.providers) await loadProviders(); }
+    else loadJevKey(); // Keychain presence only (no discovery until AI & keys is opened)
+    if (!state.active) return;
+    state.started = true;
+  }
+  routeActions();
+  // Local servers are checked when the page opens (declared loopback ports only).
+  await refreshAllServiceStatus();
 }
 
 // Deep links (M.routeFromHash): #projects, #rules, #ai (old #home, #time and
-// #settings redirect), #project=<id> highlights a project, #edit-project=<id>
-// opens its editor (sidebar "Edit project…"), #add-project=<space> starts
-// adding a project to that space (the space menu), #rule=<id> opens a rule.
+// #settings redirect), #project=<id> is that project's home (the sidebar's and
+// the arrival notification's "Show project"), #edit-project=<id> opens its home
+// with the editor (sidebar "Edit project…"), #add-project=<space> starts adding
+// a project to that space (the space menu), #rule=<id> opens a rule.
 let handledHash = null;
-function focusFromHash() {
+function routeActions() {
   const hash = location.hash;
-  if (hash === handledHash || !state.connected) return;
+  if (hash === handledHash || !state.connected || !state.loaded) return;
   const route = M.routeFromHash(hash);
   if (route.addTo) {
     handledHash = hash;
@@ -1316,33 +1763,70 @@ function focusFromHash() {
     addProjectFlow({ contextUuid: route.addTo });
     return;
   }
-  if (route.edit && state.projects.length) {
-    // Back to the plain view so the next "Edit project…" for the same project is a new hash.
-    handledHash = hash;
-    history.replaceState(null, "", "#projects");
+  if (route.edit) {
+    // The editor opens over the project's home; the next "Edit project…" is a new hash again.
+    const home = M.homeHash(route.project);
+    handledHash = home;
+    history.replaceState(null, "", home);
+    applyRoute();
     openProjectEditorById(route.project);
     return;
   }
-  if (route.project && !route.edit && focusProject(route.project)) { handledHash = hash; return; }
   if (route.rule && state.rules.length) { handledHash = hash; openRuleEditorById(route.rule); }
 }
 
 function applyRoute() {
-  if (location.hash === "#main") return; // the skip link
   const route = M.routeFromHash(location.hash);
   if (route.legacy) history.replaceState(null, "", `#${route.view}`);
+  const previous = state.homeId;
+  const homeId = M.homeIdFromRoute(route);
+  state.homeId = homeId;
   showView(route.view);
+  if (homeId !== previous) {
+    // Answers for the route left behind (even the same project, away and back) are void.
+    invalidateHome();
+    clearTimeout(homeRetry);
+    homeRetry = null;
+    state.home = null;
+    state.focusHome = !!homeId;
+    state.homeProbe = !!homeId;
+    state.returnTo = homeId ? null : previous;
+  }
+  const list = $("projects-list");
+  const home = $("project-home");
+  list.hidden = !!homeId;
+  home.hidden = !homeId;
+  if (!homeId) {
+    home.replaceChildren();
+    // Back from a home: keyboard focus returns to that project's card.
+    if (state.returnTo) {
+      document.querySelector(`[data-focus-key="${CSS.escape(`project:${state.returnTo}:open`)}"]`)?.focus();
+      state.returnTo = null;
+    }
+    return;
+  }
+  renderHome();
+  if (homeId !== previous && state.loaded) loadHome();
 }
 
 function onHashChange() {
   handledHash = null;
   applyRoute();
-  focusFromHash();
+  routeActions();
+}
+
+// The skip link moves focus without changing the address (a project home stays put).
+function setupSkipLink() {
+  document.querySelector(".skip-link")?.addEventListener("click", event => {
+    event.preventDefault();
+    $("main").focus();
+  });
 }
 
 async function init() {
   setupDialog();
   setupSheet();
+  setupSkipLink();
   applyRoute();
   $("add-project").addEventListener("click", () => addProjectFlow({}));
   $("add-rule").addEventListener("click", () => openRuleEditor(null));
@@ -1351,6 +1835,9 @@ async function init() {
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
   $("providers-refresh").addEventListener("click", () => loadProviders());
   window.addEventListener("hashchange", onHashChange);
+  // Hidden (also into the back/forward cache): inactive until shown again from it.
+  window.addEventListener("pagehide", deactivate);
+  window.addEventListener("pageshow", reactivate);
   if (!api) {
     state.connected = false;
     renderAttention();
@@ -1360,18 +1847,7 @@ async function init() {
     for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
     return;
   }
-  try { state.flags = await call("getOverviewFlags"); } catch (error) { if (error?.code === "SENDER_REJECTED") state.connected = false; }
-  api.subscribe(onServicesEvent);
-  await loadActiveSpace();
-  await loadContexts();
-  await Promise.allSettled([loadProjects(), loadRules(), loadJev(), loadLedger(), loadOrphans(), loadAttention()]);
-  renderProjects();
-  renderJevCard();
-  if (state.view === "ai") { if (!state.providers) await loadProviders(); }
-  else loadJevKey(); // Keychain presence only (no discovery until AI & keys is opened)
-  focusFromHash();
-  // Local servers are checked when the page opens (declared loopback ports only).
-  for (const project of state.projects) if (project.manifest.services.length) refreshServiceStatus(project, { quiet: true });
+  await boot();
 }
 
 init().catch(error => { console.error(error); setStatus("AxioSozo could not start this page.", "error"); });

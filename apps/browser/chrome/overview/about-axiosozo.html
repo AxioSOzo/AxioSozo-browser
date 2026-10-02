@@ -35,28 +35,34 @@
     <div id="status" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <main id="main" tabindex="-1">
-      <!-- Projects: every space (any type) with the projects that live in it. First-run guidance is the empty state. -->
+      <!-- Projects: the list (projects per Zen space, first-run guidance as the empty
+           state) and, at #project=<id>, the home of one project. -->
       <section id="view-projects" class="view" data-view="projects" aria-labelledby="projects-heading">
-        <div class="view-head">
-          <div>
-            <h2 id="projects-heading">Projects</h2>
-            <p id="projects-help" class="block-help">A project is a folder on this Mac with its local servers and web links. It lives in a space and shows in that space's sidebar, under the space name. Its links open in its own container, so each project keeps its own sign-ins.</p>
+        <div id="projects-list" class="pane">
+          <div class="view-head">
+            <div>
+              <h2 id="projects-heading">Projects</h2>
+              <p id="projects-help" class="block-help">Each project is a folder on this Mac. It belongs to one of your Zen spaces and shows in that space's sidebar. Its links open in its own container, so every project keeps its own sign-ins.</p>
+            </div>
+            <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
           </div>
-          <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
-        </div>
-        <div id="placement" class="notice-row" role="status" hidden></div>
-        <div id="attention" class="block" aria-labelledby="attention-heading" hidden>
-          <div class="block-head"><h3 id="attention-heading">Needs attention</h3></div>
-          <ul id="attention-list" class="rows"></ul>
-        </div>
-        <div id="projects-body" class="block"></div>
-        <div id="orphans" class="block" aria-labelledby="orphans-heading" hidden>
-          <div class="block-head">
-            <h3 id="orphans-heading">Settings of deleted spaces</h3>
-            <p id="orphans-help" class="block-help">These spaces no longer exist in Zen. Their AxioSozo settings are kept but never reused.</p>
+          <div id="placement" class="notice-row" role="status" hidden></div>
+          <div id="attention" class="block" aria-labelledby="attention-heading" hidden>
+            <div class="block-head"><h3 id="attention-heading">Needs attention</h3></div>
+            <ul id="attention-list" class="rows"></ul>
           </div>
-          <div id="orphans-body"></div>
+          <div id="projects-body" class="block" aria-busy="true">
+            <p class="loading">Loading projects…</p>
+          </div>
+          <div id="orphans" class="block" aria-labelledby="orphans-heading" hidden>
+            <div class="block-head">
+              <h3 id="orphans-heading">Settings of deleted spaces</h3>
+              <p id="orphans-help" class="block-help">These spaces no longer exist in Zen. Their AxioSozo settings are kept but never reused.</p>
+            </div>
+            <div id="orphans-body"></div>
+          </div>
         </div>
+        <article id="project-home" class="pane home" aria-labelledby="home-title" hidden></article>
       </section>
 
       <!-- Site rules, each with its own screen time; the most-used sites below. -->

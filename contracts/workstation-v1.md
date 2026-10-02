@@ -148,6 +148,34 @@ manifest):
   `bitbucket.org`, `npmjs.com`, `*.npmjs.com`, `stackoverflow.com`,
   `developer.mozilla.org`.
 
+### 2.1 Privileged project-home projection (P1)
+
+The Overview actor adds `getProjectHome({ id })`; its closed request accepts
+only a contexts-validated project ID. The actor supplies the requesting normal
+window, never a page-named window, filesystem root or container identity.
+`AxioSozoServices.projectHome({ window, id })` requires that same registered
+normal window and a current stored record. Its version-1 projection is
+`{ version, project, space, container, agent_activity, console_errors }`:
+
+- `project` is the validated current record with the numeric container mapping
+  omitted. `space` is the live `{ uuid, name }` association or `null`.
+- `container` contains presentation only (`state`, optionally `name` and
+  Firefox's allowlisted `color`); no native identity number crosses this API.
+- `agent_activity` and `console_errors` are `null` until their corresponding
+  collectors are integrated; unavailable is distinct from an observed empty set.
+- Reading this projection creates no container, probes no server, reads no
+  repository, writes no manifest and invokes no provider.
+- Mutation and container authority must stay current across every asynchronous
+  presentation read. Pending or changed authority refuses the projection;
+  a removed record cannot be returned by an older in-flight request. A final
+  registered-normal-window and current-record check precedes publication.
+
+The exact home route carries one complete validated ID after decoding;
+additional suffixes, paths and native container numbers are refused. Page request
+lifetimes are monotonic across refresh, navigation, disposal and a route leaving
+and returning to the same ID, so stale replies cannot publish state or start
+follow-on work. Existing project-link dispatch still uses the P2 service gate.
+
 ## 3. Containers and routing (P2, new `packages/contexts/src/containers.mjs`)
 
 - `CONTAINER_COLORS` = Firefox's `blue turquoise green yellow orange red pink purple`.

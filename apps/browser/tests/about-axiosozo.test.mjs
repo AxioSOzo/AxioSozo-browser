@@ -121,10 +121,10 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, openContext, openUrl and flags", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl and flags", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
-    "getOverviewFlags", "getProject", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
+    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
     "listOrphans", "listProjectContainers", "listProjects", "listRules", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
     "projectForUrl", "refreshProjectDetection", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus",
     "setAccountLabel", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeJevKey", "updateProject",
@@ -344,6 +344,33 @@ test("P2 account methods: closed shapes, no container IDs, project links in the 
     assert.equal((await request(fakeActor({ window: null }), "openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/" })).error.code, "NO_WINDOW");
     assert.deepEqual(calls, [], "nothing reached the services");
   } finally { restore(); }
+});
+
+test("project home: an id only, for the requesting tab's window; never a root, container, window or private tab", async () => {
+  const { services, calls } = fakeServices();
+  const restore = withProviders(services);
+  try {
+    const window = { name: "owner-window" };
+    const actor = fakeActor({ window });
+    assert.equal((await request(actor, "getProjectHome", { id: "p_abcd" })).ok, true);
+    assert.deepEqual(calls, [["projectHome", { window, id: "p_abcd" }]], "the service gets the requesting window, never a page-named one");
+    calls.length = 0;
+    for (const params of [{}, { id: "../p_abcd" }, { id: "P_ABCD" }, { id: "/Users/test/fixture-app" }, { id: 40 },
+      { id: "p_abcd", root: "/Users/test/fixture-app" }, { id: "p_abcd", window: "other" }, { id: "p_abcd", userContextId: 40 },
+      { id: "p_abcd", container: { user_context_id: 40 } }, { projectId: "p_abcd" }]) {
+      assert.equal((await request(actor, "getProjectHome", params)).error.code, "INVALID_PARAMS", JSON.stringify(params));
+    }
+    assert.equal((await request(fakeActor({ window: null }), "getProjectHome", { id: "p_abcd" })).error.code, "NO_WINDOW");
+    // A private about:axiosozo tab passes the sender check (matching principal) but gets no project home.
+    const priv = fakeActor({ window, sender: goodSender({ usePrivateBrowsing: true,
+      principal: { ...goodSender().principal, privateBrowsingId: 1 } }) });
+    assert.equal((await request(priv, "getProjectHome", { id: "p_abcd" })).error.code, "PRIVATE_WINDOW");
+    assert.deepEqual(calls, [], "nothing reached the services");
+  } finally { restore(); }
+  const restore2 = withProviders({});
+  try {
+    assert.equal((await request(fakeActor(), "getProjectHome", { id: "p_abcd" })).error.code, "UNSUPPORTED");
+  } finally { restore2(); }
 });
 
 test("openContext goes through services with the requesting window and reports when unsupported", async () => {
@@ -708,6 +735,46 @@ test("overview scripts and styles have no network, markup injection or remote re
   const page = read("overview/about-axiosozo.mjs");
   assert.match(page, /window\.AxioSozoOverview/);
   assert.doesNotMatch(page, /ChromeUtils|Services\.|Components|\bCu\./, "page stays unprivileged");
+});
+
+// Native tokens the overview stylesheet consumes, by where the pinned engine
+// defines them for this page (in-content/common.css → tokens-brand.css →
+// tokens-shared.css → zen-styles/zen-theme.css; usercontext.css). A name used
+// in the stylesheet that is neither defined there nor here is invented.
+const NATIVE_TOKENS = Object.freeze({
+  firefox: ["--background-color-box", "--background-color-canvas", "--background-color-overlay", "--border-radius-circle",
+    "--border-radius-medium", "--border-radius-small", "--box-shadow-level-1", "--box-shadow-level-4", "--button-background-color",
+    "--button-background-color-active", "--button-background-color-hover", "--button-background-color-primary", "--button-font-weight",
+    "--button-min-height-small", "--button-text-color", "--button-text-color-primary", "--card-border-color", "--card-box-shadow",
+    "--card-box-shadow-hover", "--color-accent-primary", "--color-accent-primary-active", "--color-accent-primary-hover",
+    "--color-green-20", "--color-green-70", "--color-white", "--color-yellow-20", "--color-yellow-70", "--focus-outline",
+    "--focus-outline-offset", "--font-size-heading-large", "--font-size-large", "--font-size-root", "--font-size-small",
+    "--font-size-xlarge", "--font-size-xxlarge", "--font-weight-bold", "--font-weight-heading", "--font-weight-semibold",
+    "--icon-color-critical", "--icon-color-success", "--icon-color-warning", "--page-main-content-width", "--page-space-block-start",
+    "--space-large", "--space-medium", "--space-small", "--space-xlarge", "--space-xsmall", "--space-xxlarge", "--text-color",
+    "--text-color-error"],
+  zen: ["--arrowpanel-background", "--button-border-radius", "--in-content-page-background", "--input-border-color",
+    "--zen-branding-bg", "--zen-branding-bg-reverse", "--zen-colors-border", "--zen-colors-input-bg", "--zen-dialog-background"],
+  usercontext: ["--identity-icon-color"],
+});
+
+test("the overview's palette, shape, type and spacing come from native Firefox and Zen tokens, with no colour literals", () => {
+  const css = stripComments(readFileSync(new URL("../chrome/overview/about-axiosozo.css", import.meta.url), "utf8"));
+  const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gu)].map(match => match[1]));
+  const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/gu)].map(match => match[1]));
+  const native = new Set(Object.values(NATIVE_TOKENS).flat());
+  assert.deepEqual([...used].filter(name => !defined.has(name) && !native.has(name)), [], "no invented tokens");
+  assert.doesNotMatch(css, /\brgba?\(|\bhsla?\(|\boklch\(/u, "no colour literals: surfaces, text, accent and status are tokens");
+  const root = /:root\s*\{([\s\S]*?)\n\}/u.exec(css)?.[1] ?? "";
+  const alias = name => new RegExp(`${name}:\\s*([^;]+);`, "u").exec(root)?.[1].trim();
+  assert.deepEqual({ page: alias("--page"), surface: alias("--surface"), ink: alias("--ink"), accent: alias("--accent"),
+    radius: alias("--radius"), width: alias("--width") }, {
+    page: "var(--in-content-page-background)", surface: "var(--background-color-box)", ink: "var(--text-color)",
+    accent: "var(--color-accent-primary)", radius: "var(--border-radius-medium)", width: "var(--page-main-content-width)" });
+  assert.match(css, /body\s*\{[^}]*font-size:\s*var\(--font-size-small\)/u, "the in-content 13px base");
+  assert.doesNotMatch(css, /font:\s*menu/u, "the font family is Zen's, not a page override");
+  assert.match(css, /:focus-visible\s*\{\s*outline:\s*var\(--focus-outline\)/u, "Firefox's focus outline");
+  assert.doesNotMatch(css, /font-size:\s*\d/u, "every font size is a token or derived from one");
 });
 
 test("destructive buttons use a readable text colour, not the on-red destructive token", () => {
