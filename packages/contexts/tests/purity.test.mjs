@@ -8,7 +8,7 @@ import { readdir, readFile, access } from 'node:fs/promises';
 import * as api from '../src/index.mjs';
 
 const SRC = new URL('../src/', import.meta.url);
-const EXPECTED_MODULES = ['agent-status.mjs', 'arrival.mjs', 'checkpoints.mjs', 'containers.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'schema.mjs'];
+const EXPECTED_MODULES = ['agent-config.mjs', 'agent-status.mjs', 'arrival.mjs', 'checkpoints.mjs', 'containers.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'schema.mjs'];
 const FORBIDDEN = [
   [/['"]node:/, 'node: specifier'], [/\brequire\s*\(/, 'require()'], [/\bimport\s*\(/, 'dynamic import()'], [/\bimport\.meta\b/, 'import.meta'],
   [/\bprocess\s*[.[]/, 'process'], [/\bBuffer\s*[.(]/, 'Buffer'], [/\bfetch\s*\(/, 'fetch'],
@@ -79,7 +79,7 @@ test('index exports the contexts-api-v1 §2 surface', () => {
     // §4 arrival and §4.1 surface matching.
     'loopbackPort', 'LSOF_LISTEN_ARGS', 'LSOF_CWD_ARGS', 'parseLsofListen', 'parseLsofCwd', 'rootCandidates', 'chooseArrivalRoot', 'arrivalOffer', 'matchSurfaceForUrl',
     // §5 agent status.
-    'parseHookEvent', 'validateStatusRecord', 'STATUS_STATES', 'statusBoard', 'hookConfig',
+    'parseHookEvent', 'validateStatusRecord', 'STATUS_STATES', 'statusBoard', 'hookConfig', 'bridgeConfig',
   ];
   for (const name of required) assert.ok(name in api, name);
   assert.equal(api.MAX_FILE_BYTES, 262144);

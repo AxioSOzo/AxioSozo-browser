@@ -418,3 +418,77 @@ sections above where they differ.
   `migrateContextStore` on load and write v2, move `linkProject`/`listContexts`
   and DevLoop from `contexts[].project_id` to `projects[].context_uuid`, use
   `matchProjectForUrl` for `projectForUrl`, offer the production URL field.
+
+
+## 8. Plan 4 agent integration (Step 4)
+
+The process-wide `AxioSozoServices` owns one lazy DOM-free
+`AgentChannelService`. Constructing it only loads validated project metadata;
+the endpoint starts disabled in every process. A saved preference never starts
+it. The native current-profile configuration and verified notifier builder are
+privileged dependencies, never actor parameters. Every P4 tool remains unavailable
+until Step 8 supplies its native adapter. See [agent-channel-v1](agent-channel-v1.md)
+for bounds, local ownership and session semantics.
+
+The closed Overview actor adds these methods. Each requires the current
+`about:axiosozo` document in a registered normal window before dispatch and after
+an awaited result; unknown privacy refuses.
+
+| Actor method | Closed parameters | Native Services call |
+| --- | --- | --- |
+| `getAgentEndpointState` | `{}` | `getAgentEndpointState()` |
+| `setAgentEndpointEnabled` | `{ enabled: boolean }` | `setAgentEndpointEnabled({ window, enabled })` |
+| `getAgentHookConfig` | `{ agent: "claude-code" \| "codex" }` | `getAgentHookConfig({ window, agent })` |
+| `listAgentActivity` | `{ projectId }` | `listAgentActivity(projectId)` |
+| `listAgentSessions` | `{ projectId }` | `listAgentSessions({ window, projectId })` |
+| `revokeAgentSession` | `{ projectId, sessionId }` | `revokeAgentSession({ window, projectId, sessionId })` |
+
+The actor derives `window` itself. Project IDs use the existing project grammar;
+session IDs are opaque `s_<16 lowercase hex>` values. The endpoint state contains
+`enabled`, `state`, `reason`, `cleanup_pending`, `cleanup_blocked`, project-cache
+state/count/generation and tool availability; `socketPath` appears only while
+listening. Hook configuration returns `{ agent, text }` after bounded native
+verification against the same endpoint generation. Copying a snippet does not
+install or execute it.
+
+The existing `getProjectHome({ id })` actor method still calls
+`projectHome({ window, id })`. Its `agent_activity` is null while authority is
+unavailable; otherwise it contains validated `records`, reporting state and
+bounded session summaries for the exact current project/root. The DOM-free
+channel's activity API returns groups `{ project_id, project_path, latest,
+history }`; the service maps the matching history to the home records. These
+are distinct shapes. Empty ready history is not unavailable history. Raw hook
+payloads are never returned. The `agents` event invalidates these views; agent
+attention also contributes to the existing attention surface.
+
+Every routing-affecting mutation marks its scope and synchronously invalidates
+existing channel authority before its first await. Only global quiescence can
+reload the cache. The channel loader checks routing sequence, pending scopes,
+container generation and cleanup quarantine before and after its validated read.
+Overlapping container deletion/reset attempts retain separate completion authority;
+a late earlier failure cannot overwrite a newer successful cleanup. Cache refresh
+failure cannot replace the original mutation result.
+
+Trusted chrome registers and activates normal-window presenters through
+`registerAgentPresenter(window, presenter)` and `activateAgentPresenter(window)`.
+Unregistering cancels that window's pending approval UI. Status return targets
+contain only native project/tab/navigation/container identity. A target is used
+only while its current normal window, visible engine, document and project remain
+proven; otherwise the known project home is the fallback.
+
+`captureHandoffAuthority({ window, tab, url, userContextId })` is privileged and
+not exposed through the actor. It returns a current project binding plus a
+synchronous `check()` closure over actual routing/container authority. The native
+handoff combines it with current selected-tab/document identity immediately before
+clipboard dispatch. The one-shot trusted gesture belongs to the exact request
+object; no actor boolean or request ID supplies it. Terminal product launches
+remain NOT_AUTHORIZED; desktop launch is UNVERIFIED_CAPABILITY. Screenshot and
+console collection remain unavailable until their native admission is integrated.
+
+`getAgentDiagnostics()` is privileged evidence only: counts, booleans and nulls
+from a read-only ownership snapshot. It exposes no paths, output, argv, tokens or
+native handles and performs no native operation. Initial null means unobserved.
+After successful disablement the retained snapshot describes actual persistent
+lock-helper wait and lease receipts for the latest configuration, not cumulative
+process-wide or universal descendant cleanup. Process shutdown calls
+`closeAgentChannel()` through the existing AsyncShutdown seam.

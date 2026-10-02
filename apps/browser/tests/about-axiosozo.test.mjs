@@ -121,19 +121,23 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl and flags", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags and P3 agents", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
-    "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
-    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
+    "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
+    "getAgentEndpointState", "getAgentHookConfig", "getJevKeyStatus", "getJevSettings",
+    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "linkOrganization", "linkProject",
+    "listAgentActivity", "listAgentSessions", "listContexts",
     "listOrphans", "listProjectContainers", "listProjects", "listRules", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
-    "projectForUrl", "refreshProjectDetection", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus",
-    "setAccountLabel", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeJevKey", "updateProject",
+    "projectForUrl", "refreshProjectDetection", "removeJevKey", "removeOrphans", "removeProject", "revokeAgentSession", "saveRule", "serviceStatus",
+    "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeJevKey", "updateProject",
     "usageSummary", "writeManifest",
   ]);
   // Arrival is accepted in the native notification only (ProjectArrivalRuntime).
   assert.ok(!Object.keys(METHODS).some(name => /arrival/iu.test(name)));
   // Containers are assigned, cleared and observed by the browser only.
   assert.ok(!Object.keys(METHODS).some(name => /assign|ensure|identit|reset|forget|route|userContext/iu.test(name)));
+  // Handoff, clipboard, presenters, return targets and diagnostics never cross to the page.
+  assert.ok(!Object.keys(METHODS).some(name => /handoff|clipboard|presenter|return|diagnostic|authority|install|tool/iu.test(name)));
 });
 
 test("unknown methods, prototype names and malformed params are rejected at the parent boundary", async () => {

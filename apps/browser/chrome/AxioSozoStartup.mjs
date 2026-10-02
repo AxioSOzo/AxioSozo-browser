@@ -121,10 +121,16 @@ async function installContexts({ engineProbe, aboutRegistered }) {
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],
   ];
   // P1 arrival: one native "keep as project?" notification for a localhost
-  // page served from a new folder. Normal windows only; unknown privacy counts
-  // as private and installs nothing.
+  // page served from a new folder. P3 agents: this window presents agent
+  // requests and status (the endpoint itself stays off until Settings turns it
+  // on), and offers Send to agent on its own tabs. Normal windows only;
+  // unknown privacy counts as private and installs nothing.
   if (guarded("arrival privacy check", () => zen.isPrivateWindow() === false)) {
     installers.push(["ProjectArrivalRuntime.sys.mjs", "installProjectArrival", { services, adapter: zen, openOverview }]);
+    // The engine a tab shows, read only (no engine file is involved here).
+    const engineOf = tab => engineProbe?.engineOf(tab) ?? "gecko";
+    installers.push(["AgentStatusRuntime.sys.mjs", "installAgentStatus", { services, adapter: zen, openOverview, engineOf }]);
+    installers.push(["AgentHandoffRuntime.sys.mjs", "installAgentHandoff", { services, adapter: zen, engineOf }]);
   }
   for (const [file, name, options] of installers) {
     const module = optionalModule(file);

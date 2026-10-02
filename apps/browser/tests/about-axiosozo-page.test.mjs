@@ -20,7 +20,7 @@ let serial = 0;
 
 const flush = async (rounds = 6) => { for (let i = 0; i < rounds; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 
-async function loadPage({ hash = "", projects = [], handlers = {}, containers = {} } = {}) {
+async function loadPage({ hash = "", projects = [], handlers = {}, containers = {}, navigator = undefined } = {}) {
   const document = parseHtml(HTML);
   const calls = [];
   const subscribers = [];
@@ -74,14 +74,17 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
   const location = { hash };
   Object.assign(globalThis, {
     document, Node, location,
-    window: { AxioSozoOverview: api, addEventListener: (type, fn) => windowListeners.set(type, fn) },
+    window: { AxioSozoOverview: api, addEventListener: (type, fn) => windowListeners.set(type, fn), navigator },
     history: { replaceState: (_state, _title, url) => { location.hash = url; } },
     CSS: { escape: value => String(value).replace(/["\\]/g, "\\$&") },
   });
   await import(`../chrome/overview/about-axiosozo.mjs?page=${++serial}`);
   await flush();
   const navigate = async next => { location.hash = next; windowListeners.get("hashchange")?.(); await flush(); };
-  return { document, calls, state, location, navigate, text: () => document.body.textContent };
+  // A services event as the actor delivers it (debounced by the page), and window events such as pagehide.
+  const emit = async name => { for (const callback of subscribers) callback({ name }); await new Promise(resolve => setTimeout(resolve, 130)); await flush(); };
+  const fire = async (type, event = {}) => { windowListeners.get(type)?.(event); await flush(); };
+  return { document, calls, state, location, navigate, emit, fire, text: () => document.body.textContent };
 }
 
 const visibleView = document => document.querySelectorAll("section.view").filter(section => !section.hidden).map(section => section.dataset.view);
@@ -385,4 +388,134 @@ test("#add-project=<space> from the space menu preselects that space; #edit-proj
   assert.equal(edit.location.hash, "#project=p_blog1", "the editor opens over the project's home");
   assert.equal(edit.document.getElementById("project-home").hidden, false);
   assert.equal(edit.document.activeElement?.id, "sheet-title", "the home does not take focus from the open editor");
+});
+
+// ---------------------------------------------------------------- agent status (P3)
+
+const ENDPOINT = { enabled: false, state: "disabled", reason: null, cleanup_pending: false, cleanup_blocked: false,
+  projects: { state: "ready", reason: null, generation: 1, count: 2 }, methods: [{ method: "tabs.list", available: false }] };
+function agentHandlers(overrides = {}) {
+  const box = { endpoint: { ...ENDPOINT }, copied: [] };
+  const handlers = {
+    getAgentEndpointState: () => box.endpoint,
+    setAgentEndpointEnabled: ({ enabled }) => {
+      box.endpoint = enabled ? { ...ENDPOINT, enabled: true, state: "listening", socketPath: "/synthetic/profile/.a/s" } : { ...ENDPOINT };
+      return box.endpoint;
+    },
+    getAgentHookConfig: ({ agent }) => ({ agent, text: `{"hooks":"<b>${agent}</b>"}\n` }),
+    ...overrides,
+  };
+  const navigator = { clipboard: { writeText: async text => { box.copied.push(text); } } };
+  return { box, handlers, navigator };
+}
+const agentBody = page => page.document.getElementById("agent-settings-body");
+const agentButton = (page, label) => agentBody(page).querySelectorAll("button").find(button => button.textContent === label);
+
+test("agent status: off in every new page; Turn on asks the browser and shows what it reports; hook settings only while listening", async () => {
+  const { box, handlers, navigator } = agentHandlers();
+  const page = await loadPage({ hash: "#ai", handlers, navigator });
+  assert.match(agentBody(page).querySelector(".row-title").textContent, /^Agent status Off$/u);
+  assert.equal(agentBody(page).hasAttribute("aria-busy"), false);
+  const on = agentButton(page, "Turn on");
+  assert.equal(on.className, "primary");
+  assert.equal(on.getAttribute("aria-describedby"), "agent-status-text");
+  assert.equal(agentBody(page).querySelectorAll(".hook-row").length, 0, "no hook settings while off");
+  assert.match(agentBody(page).textContent, /Browser tools for agents .* are not available in this build\./u);
+  assert.equal(page.calls.some(([name]) => name === "getAgentHookConfig" || name === "setAgentEndpointEnabled"), false, "reading starts nothing");
+  on.focus();
+  on.click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "setAgentEndpointEnabled"), [["setAgentEndpointEnabled", { enabled: true }]]);
+  assert.match(agentBody(page).querySelector(".row-title").textContent, /On$/u);
+  assert.equal(page.document.activeElement?.textContent, "Turn off", "focus stays on the switch across the re-render");
+  assert.deepEqual(page.calls.filter(([name]) => name === "getAgentHookConfig").map(([, params]) => params),
+    [{ agent: "claude-code" }, { agent: "codex" }], "the page names an agent only: never a socket, script or executable path");
+  const rows = agentBody(page).querySelectorAll(".hook-row");
+  assert.deepEqual(rows.map(row => row.querySelector(".row-title").textContent), ["Claude Code", "Codex"]);
+  assert.equal(rows[0].querySelector("pre code").textContent, '{"hooks":"<b>claude-code</b>"}\n', "shown as text, never markup");
+  assert.equal(rows[0].querySelectorAll("b").length, 0);
+  assert.equal(page.document.getElementById("status").textContent, "Agent status is on until you turn it off or quit AxioSozo.");
+  agentButton(page, "Copy for Codex").click();
+  await flush();
+  assert.deepEqual(box.copied, ['{"hooks":"<b>codex</b>"}\n']);
+  assert.match(page.document.getElementById("status").textContent, /^Codex settings copied\./u);
+  agentButton(page, "Turn off").click();
+  await flush();
+  assert.match(agentBody(page).querySelector(".row-title").textContent, /Off$/u);
+  assert.equal(agentBody(page).querySelectorAll(".hook-row").length, 0);
+});
+
+test("agent status: while the switch is on its way it keeps focus and ignores a second press", async () => {
+  let finish;
+  const { handlers } = agentHandlers();
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers,
+    setAgentEndpointEnabled: params => new Promise(resolve => { finish = () => resolve(handlers.setAgentEndpointEnabled(params)); }) } });
+  const on = agentButton(page, "Turn on");
+  on.focus();
+  on.click();
+  await flush();
+  const busy = page.document.activeElement;
+  assert.equal(busy.getAttribute("aria-disabled"), "true");
+  assert.equal(busy.hasAttribute("disabled"), false, "never disabled, so keyboard focus stays");
+  assert.match(agentBody(page).querySelector(".tag").textContent, /Working…/u);
+  busy.click();
+  await flush();
+  assert.equal(page.calls.filter(([name]) => name === "setAgentEndpointEnabled").length, 1);
+  finish();
+  await flush();
+  assert.equal(page.document.activeElement.textContent, "Turn off");
+  assert.equal(page.document.activeElement.hasAttribute("aria-disabled"), false);
+});
+
+test("agent status: a failed start is one calm sentence with the code only in a detail; Try again asks again", async () => {
+  const failed = { ...ENDPOINT, enabled: true, state: "unavailable", reason: "EXACT_SOCKET_METADATA_UNAVAILABLE" };
+  let asked = false;
+  const { handlers } = agentHandlers({ setAgentEndpointEnabled: () => { asked = true; return failed; } });
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers, getAgentEndpointState: () => (asked ? failed : ENDPOINT) } });
+  agentButton(page, "Turn on").click();
+  await flush();
+  const text = page.document.getElementById("agent-status-text").textContent;
+  assert.equal(text, "This build cannot open a private connection point for this profile, so nothing was started.");
+  assert.equal(agentBody(page).querySelector(".fact-note").textContent, "Detail: EXACT_SOCKET_METADATA_UNAVAILABLE");
+  assert.ok(agentButton(page, "Try again") && agentButton(page, "Turn off"));
+  assert.equal(page.document.getElementById("status").dataset.kind, "error");
+  agentButton(page, "Try again").click();
+  await flush();
+  assert.equal(page.calls.filter(([name]) => name === "setAgentEndpointEnabled").length, 2);
+});
+
+test("agent status: without a verified notify script the hook rows say so and offer no copy; private windows see a calm line", async () => {
+  const { handlers } = agentHandlers({ getAgentEndpointState: () => ({ ...ENDPOINT, enabled: true, state: "listening", socketPath: "/synthetic/profile/.a/s" }),
+    getAgentHookConfig: () => { throw { code: "AGENT_HOOK_CONFIG_UNAVAILABLE", message: "AGENT_HOOK_CONFIG_UNAVAILABLE" }; } });
+  const page = await loadPage({ hash: "#ai", handlers });
+  const rows = agentBody(page).querySelectorAll(".hook-row");
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => /no verified copy of its notify script/u.test(row.textContent)));
+  assert.equal(agentBody(page).querySelectorAll("button").filter(button => /^Copy/u.test(button.textContent)).length, 0);
+  const hidden = await loadPage({ hash: "#ai", handlers: { getAgentEndpointState: () => { throw { code: "PRIVATE_WINDOW", message: "x" }; } } });
+  assert.equal(hidden.document.getElementById("agent-status-text").textContent, "Agent status is managed from a normal window.");
+  assert.equal(agentBody(hidden).querySelectorAll("button").length, 0);
+});
+
+test("agent status lifecycle: a hidden page publishes nothing; an agents event re-reads only while AI & keys shows; a restore reads afresh", async () => {
+  let release = null;
+  const { handlers } = agentHandlers();
+  const page = await loadPage({ hash: "#projects", handlers: { ...handlers,
+    getAgentEndpointState: () => (release ? new Promise(resolve => { const go = release; release = () => { go(); resolve({ ...ENDPOINT, enabled: true, state: "listening", socketPath: "/s/.a/s" }); }; }) : ENDPOINT) } });
+  const reads = () => page.calls.filter(([name]) => name === "getAgentEndpointState").length;
+  assert.equal(reads(), 0, "not read until AI & keys is opened");
+  await page.emit("agents");
+  assert.equal(reads(), 0, "an agents event on another view reads nothing");
+  await page.navigate("#ai");
+  assert.equal(reads(), 1);
+  release = () => {};
+  await page.emit("agents");
+  assert.equal(reads(), 2);
+  await page.fire("pagehide");
+  release();
+  await flush();
+  assert.match(agentBody(page).querySelector(".row-title").textContent, /Off$/u, "the late answer is not shown on a hidden page");
+  await page.fire("pageshow", { persisted: true });
+  await flush(); await flush();
+  assert.equal(reads(), 3, "a restored page reads afresh");
 });

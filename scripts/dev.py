@@ -32,6 +32,9 @@ os.environ["AXIOSOZO_BUILD_ROOT"] = str(storage.BUILD_ROOT)
 ZEN = ROOT / "scripts" / "zen.py"
 PROJECT_READER = ROOT / "scripts" / "project_reader.py"
 ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
+AGENT_SOCKET_INSTALL = ROOT / "scripts" / "agent_socket_install.py"
+AGENT_NOTIFY_INSTALL = ROOT / "scripts" / "agent_notify_install.py"
+AGENT_SOCKET_PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
 RELEASE = ROOT / "scripts" / "release" / "preview.py"
@@ -168,6 +171,8 @@ def setup_components():
     results.append(component(ZEN, "setup"))
     results.append(component(PROJECT_READER, "setup"))
     results.append(component(ARRIVAL_SUBPROCESS, "setup"))
+    results.append(component(AGENT_SOCKET_INSTALL, "setup"))
+    results.append(component(AGENT_NOTIFY_INSTALL, "setup"))
     print("SETUP: " + ("completed" if not any(results) else "incomplete; see component results"), flush=True)
     return 2 if any(results) else 0
 
@@ -188,7 +193,8 @@ def check():
     results = [run(["cargo", "fmt", "--all", "--", "--check"]),
                run(["cargo", "clippy", "--locked", "--offline", "--workspace", "--all-targets", "--jobs", "2", "--", "-D", "warnings"], build=True),
                component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check"),
-               component(PROJECT_READER, "check"), component(ARRIVAL_SUBPROCESS, "check")]
+               component(PROJECT_READER, "check"), component(ARRIVAL_SUBPROCESS, "check"),
+               component(AGENT_SOCKET_INSTALL, "check"), component(AGENT_NOTIFY_INSTALL, "check")]
     for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("scripts/release/*.py"), *ROOT.glob("tests/test_*.py")]:
         if path.name.startswith("._"):
             continue
@@ -213,6 +219,11 @@ def test():
                run(["node", "--test", *sorted(path for path in (ROOT / "packages/contexts/tests").glob("*.test.mjs")
                                              if not path.name.startswith("._"))]),
                component(CEF, "test-native")]
+    if storage.BUILD_ROOT == Path("/Volumes/AxioSozoBuild/workstation"):
+        results.append(run([AGENT_SOCKET_PYTHON, "-I", "-S", "-B",
+                            ROOT / "tools/axiosozo-agent/tests/socket-posix.test.py"], build=True))
+    else:
+        print("SKIPPED_WORKSTATION_FIXTURE: agent socket POSIX tests require the workstation root", flush=True)
     env = {**os.environ, "AXIOSOZO_CORE_BINARY": str(CORE), "PYTHONDONTWRITEBYTECODE": "1"}
     if build_result == 0 and core_ready():
         results.append(run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"], build=True, env=env))

@@ -35,6 +35,10 @@ const state = {
   // Page lifetime: false from pagehide until a persisted pageshow; started
   // once the first full load (and its one-time work) completed.
   active: true, started: false,
+  // Agent status (AI & keys): the browser's endpoint state or the code it
+  // refused with, hook settings per agent for the listening socket, and
+  // whether a switch request is on its way.
+  agents: { endpoint: null, error: null, hooks: new Map(), socket: null, busy: false },
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -44,7 +48,7 @@ const state = {
 // counter for all), so clearing them cannot let an old answer match a new one.
 let ticketSerial = 0;
 const nextTicket = () => ++ticketSerial;
-const latest = { home: 0, projects: 0, contexts: 0 };
+const latest = { home: 0, projects: 0, contexts: 0, agents: 0 };
 const statusTickets = new Map(); // project id → its latest local-server check
 /** Voids any home answer still on its way (and a retry it would schedule). */
 const invalidateHome = () => { latest.home = nextTicket(); };
@@ -289,6 +293,8 @@ function showView(view) {
   }
   // Provider discovery reads installation metadata only, and only when this view is opened.
   if (view === "ai" && !state.providers && !state.providersLoading && state.connected) loadProviders();
+  // Reading the agent status starts nothing; it is read whenever the view shows.
+  if (view === "ai" && state.connected && state.loaded) loadAgentSettings();
 }
 
 function renderViewCounts() {
@@ -1131,6 +1137,7 @@ function homeAccounts(project, container, space) {
 function homeActivity(project, agents, errors) {
   const presence = M.detectionSummary(project.detected).agents;
   const quiet = agents.state !== "list" && errors.state !== "list";
+  const key = suffix => `project:${project.id}:${suffix}`;
   return homeSection("activity", "Activity", h("dl", { class: "home-facts" },
     h("dt", {}, "Agents"),
     h("dd", {},
@@ -1139,12 +1146,26 @@ function homeActivity(project, agents, errors) {
         h("span", { class: "activity-title" }, `${item.agent}: ${item.title}`),
         item.ago ? h("span", { class: "help" }, item.ago) : null)))
         : h("p", { class: "quiet-text" }, agents.text),
+      agents.state === "off" ? h("p", {}, h("a", { href: "#ai", class: "button-link small", "data-focus-key": key("agent-settings") }, "Agent status settings")) : null,
+      agents.sessions.length ? h("ul", { class: "activity-list sessions", "aria-label": "Browser sessions" }, agents.sessions.map(item => h("li", {},
+        h("span", { class: "tag state", "data-tone": item.state === "approved" ? "ok" : "info" }, item.stateText),
+        h("span", { class: "activity-title" }, `${item.agent}: browser session`),
+        h("button", { type: "button", class: "ghost small", "aria-label": `End the browser session of ${item.agent}`,
+          "data-focus-key": key(`session:${item.session}`), onclick: () => revokeAgentSession(project, item) }, "End")))) : null,
       presence.length ? h("p", { class: "footnote" }, `In the folder: ${presence.join(", ")}. ${M.PRESENCE_TEXT}`) : null),
     h("dt", {}, "Console errors"),
     h("dd", {},
       errors.state === "list" ? [h("p", {}, errors.text), h("ul", { class: "activity-list" }, errors.items.map(item =>
         h("li", {}, h("span", { class: "tag state", "data-tone": item.level === "warning" ? "warn" : "bad" }, item.level), h("span", { class: "activity-title" }, item.text))))]
         : h("p", { class: "quiet-text" }, errors.text))), { quiet });
+}
+
+/** Ends one browser-bridge session of this project (it closes its connection). */
+async function revokeAgentSession(project, item) {
+  const ended = await act("revokeAgentSession", { projectId: project.id, sessionId: item.session });
+  if (!state.active) return;
+  if (ended.ok) setStatus(ended.result?.revoked ? `${item.agent}'s browser session ended.` : "That browser session had already ended.");
+  if (state.homeId === project.id) await loadHome();
 }
 
 /** The brief (a document, never a chat), then folder, apps and domains found. */
@@ -1602,6 +1623,109 @@ function renderEngineSettings() {
     ...(on && rows.length ? [h("ul", { class: "rows" }, rows)] : []));
 }
 
+// ---------------------------------------------------------------- agent status (inside AI & keys)
+
+/** Reads the endpoint's own state (and, while it listens, both hook settings).
+ * Reading starts nothing. Only the latest read publishes, never while hidden. */
+async function loadAgentSettings() {
+  if (!state.active || !state.connected) return;
+  const ticket = latest.agents = nextTicket();
+  const current = () => ticket === latest.agents && state.active;
+  let endpoint = null, error = null;
+  try { endpoint = await call("getAgentEndpointState"); } catch (failure) { error = failure?.code ?? "ERROR"; }
+  if (!current()) return;
+  state.agents.endpoint = endpoint;
+  state.agents.error = error;
+  const socket = endpoint?.state === "listening" && typeof endpoint.socketPath === "string" ? endpoint.socketPath : null;
+  if (socket !== state.agents.socket) { state.agents.hooks = new Map(); state.agents.socket = socket; }
+  await keepFocus(renderAgentSettings);
+  if (!socket || M.AGENT_HOOKS.every(({ agent }) => state.agents.hooks.has(agent))) return;
+  const hooks = new Map();
+  for (const { agent } of M.AGENT_HOOKS) {
+    try { hooks.set(agent, { text: (await call("getAgentHookConfig", { agent }))?.text ?? null, error: null }); }
+    catch (failure) { hooks.set(agent, { text: null, error: failure?.code ?? "ERROR" }); }
+    if (!current()) return;
+  }
+  if (state.agents.socket !== socket) return;
+  state.agents.hooks = hooks;
+  await keepFocus(renderAgentSettings);
+}
+
+/** The explicit switch: on for this browser session, or off. The page shows
+ * what the browser then reports, never what it asked for. */
+async function setAgentStatus(enabled) {
+  if (state.agents.busy || !state.active) return;
+  state.agents.busy = true;
+  await keepFocus(renderAgentSettings);
+  let reply = null;
+  try { reply = await call("setAgentEndpointEnabled", { enabled }); }
+  catch (error) { if (state.active) setStatus(errorText(error), "error"); }
+  state.agents.busy = false;
+  if (!state.active) return;
+  await loadAgentSettings();
+  if (!reply) return;
+  if (reply.state === "listening") setStatus("Agent status is on until you turn it off or quit AxioSozo.");
+  else if (!enabled && reply.enabled === false && reply.state === "disabled") setStatus("Agent status is off.");
+  else if (enabled) setStatus("Agent status did not start. Nothing is listening.", "error");
+}
+
+async function copyHook(entry, hook) {
+  const clipboard = window.navigator?.clipboard;
+  try {
+    if (typeof clipboard?.writeText !== "function") throw new Error("NO_CLIPBOARD");
+    await clipboard.writeText(entry.text);
+    setStatus(`${hook.name} settings copied. Paste them into your ${hook.name} settings yourself.`);
+  } catch {
+    setStatus("Copying did not work. Open Show settings and copy the text yourself.", "error");
+  }
+}
+
+function hookRow(hook) {
+  const entry = state.agents.hooks.get(hook.agent);
+  const key = `agents:hook:${hook.agent}`;
+  const helpId = `agent-hook-${hook.agent}-help`;
+  return h("li", { class: "row hook-row" },
+    h("div", { class: "row-main" },
+      h("span", { class: "row-title" }, hook.name),
+      h("span", { class: "help", id: helpId }, entry?.error ? M.agentHookErrorText(entry.error) : hook.where),
+      entry?.text ? h("details", { class: "snippet" },
+        h("summary", { "data-focus-key": `${key}:show` }, "Show settings"),
+        h("pre", { tabindex: "0", "aria-label": `${hook.name} settings` }, h("code", {}, entry.text))) : null),
+    entry?.text ? h("button", { type: "button", class: "ghost small", "aria-describedby": helpId, "data-focus-key": `${key}:copy`,
+      onclick: () => copyHook(entry, hook) }, `Copy for ${hook.name}`)
+      : h("span", { class: "help" }, entry ? "" : "Preparing…"));
+}
+
+function renderAgentSettings() {
+  const body = $("agent-settings-body");
+  if (!body) return;
+  if (!state.connected) {
+    body.removeAttribute("aria-busy");
+    fill(body, h("p", { class: "quiet-text" }, "Agent status appears here once AxioSozo is connected."));
+    return;
+  }
+  const { endpoint, error, busy } = state.agents;
+  const view = M.agentEndpointView(endpoint, { error });
+  if (endpoint || error) body.removeAttribute("aria-busy"); else body.setAttribute("aria-busy", "true");
+  // While a request is on its way the buttons stay focusable (aria-disabled, not
+  // disabled), so keyboard focus is not dropped; a second press is ignored.
+  const button = (action, primary) => action ? h("button", { type: "button", class: primary && action.kind === "enable" ? "primary" : "ghost",
+    "aria-disabled": busy ? "true" : null, "aria-describedby": "agent-status-text", "data-focus-key": primary ? "agents:switch" : "agents:off",
+    onclick: () => setAgentStatus(action.kind === "enable") }, action.label) : null;
+  fill(body,
+    h("div", { class: "setting agent-setting" },
+      h("div", { class: "row-main" },
+        h("span", { class: "row-title" }, "Agent status ", h("span", { class: "tag state", "data-tone": view.tone }, busy ? "Working…" : view.label)),
+        h("span", { class: "help", id: "agent-status-text" }, view.text),
+        view.detail ? h("span", { class: "fact-note" }, `Detail: ${view.detail}`) : null),
+      h("div", { class: "card-actions" }, button(view.secondary, false), button(view.action, true))),
+    view.listening ? h("div", { class: "agent-hooks" },
+      h("h4", {}, "Hook settings"),
+      h("p", { class: "help" }, M.AGENT_HOOKS_NOTE),
+      h("ul", { class: "rows" }, M.AGENT_HOOKS.map(hookRow))) : null,
+    h("p", { class: "footnote" }, M.AGENT_TOOLS_NOTE));
+}
+
 // ---------------------------------------------------------------- screen time (inside Site rules)
 
 async function loadLedger() {
@@ -1670,9 +1794,11 @@ const loaders = {
   ledger: loadLedger,
   services: loadAttention,
   attention: loadAttention,
+  // Agent status, activity or a browser session changed.
+  agents: () => Promise.all([state.view === "ai" ? loadAgentSettings() : null, state.homeId ? loadHome() : null]),
 };
 // Events that can change what a project home shows.
-const HOME_EVENTS = new Set(["projects", "contexts"]);
+const HOME_EVENTS = new Set(["projects", "contexts", "agents"]);
 const pending = new Map();
 function onServicesEvent(event) {
   const name = event?.name;
@@ -1702,6 +1828,8 @@ function deactivate() {
   invalidateHome();
   latest.projects = nextTicket();
   latest.contexts = nextTicket();
+  latest.agents = nextTicket();
+  state.agents.busy = false;
   statusTickets.clear();
   state.checking.clear();
   try { unsubscribe?.(); } catch (error) { console.error(error); }
@@ -1742,6 +1870,9 @@ async function boot() {
     if (!state.active) return;
     state.started = true;
   }
+  if (state.view === "ai") await loadAgentSettings();
+  else renderAgentSettings();
+  if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
   await refreshAllServiceStatus();
@@ -1844,6 +1975,7 @@ async function init() {
     renderProjects();
     renderProviders();
     renderJevCard();
+    renderAgentSettings();
     for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
     return;
   }

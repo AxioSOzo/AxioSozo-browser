@@ -414,6 +414,10 @@ export const ERROR_TEXT = Object.freeze({
   INVALID_INPUT: "Check the account label: 1 to 80 characters on one line.",
   INVALID_HOST_PATTERN: "That is not a site such as example.com or *.example.com.",
   INVALID_PROJECT: "That would not fit the project: at most 32 sites and 32 account labels, each listed once.",
+  // P3: agents.
+  PRIVATE_WINDOW: "Agents are managed from a normal window, never a private one.",
+  DOCUMENT_GONE: "This page changed while AxioSozo answered. Nothing was shown; try again.",
+  AGENT_CHANNEL_UNAVAILABLE: "Agent status is not available in this build.",
 });
 export function errorMessage(code) {
   return typeof code === "string" && Object.hasOwn(ERROR_TEXT, code) ? ERROR_TEXT[code] : null;
@@ -912,7 +916,8 @@ export function homeServices(project) {
 
 export const AGENT_LABELS = Object.freeze({ "claude-code": "Claude Code", codex: "Codex", other: "Agent" });
 export const AGENT_STATE_TEXT = Object.freeze({ started: "Working", needs_input: "Needs you", done: "Done", failed: "Failed" });
-export const AGENTS_UNAVAILABLE = "Agents cannot report to AxioSozo yet; status reporting is not part of this build.";
+export const AGENTS_UNAVAILABLE = "Agent activity cannot be shown right now. It comes back once your projects have finished saving.";
+export const AGENTS_OFF = "Your agents can report here when they need you or are done. Agent status is off; turn it on under AI & keys.";
 export const AGENTS_EMPTY = "No agent reported on this project in the last day.";
 export const PRESENCE_TEXT = "These show the folder is set up for agents, not that one is running.";
 const STATUS_RECORD_ID = /^as_[0-9a-f]{16}$/u;
@@ -939,15 +944,97 @@ export function timeAgo(ms) {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
-/** Recent agent activity on the home (P3, step 4). `activity` is null while this
- * build has no status reporting; otherwise `{ records }` from the browser. Only
- * valid records of this project's folder are shown, newest first. */
+const SESSION_ID = /^s_[0-9a-f]{16}$/u;
+
+/** Recent agent activity on the home (P3, step 4). `activity` is null while the
+ * browser cannot read it; otherwise `{ records, reporting, sessions }`. Only
+ * valid records of this project's folder are shown, newest first; with none,
+ * the line says whether agent status is off or nothing was reported. Browser
+ * sessions of the agent bridge are listed by agent and state only. */
 export function homeAgentActivity(activity, { root = null, now = null } = {}) {
-  if (!activity || !Array.isArray(activity.records)) return { state: "unavailable", text: AGENTS_UNAVAILABLE, items: [] };
+  if (!activity || !Array.isArray(activity.records)) return { state: "unavailable", text: AGENTS_UNAVAILABLE, items: [], sessions: [] };
   const items = activity.records.filter(record => validStatusRecord(record, root)).sort((a, b) => b.at - a.at).slice(0, 5)
     .map(record => ({ agent: AGENT_LABELS[record.agent], state: record.state, stateText: AGENT_STATE_TEXT[record.state],
       title: record.title, at: record.at, ago: Number.isSafeInteger(now) ? timeAgo(now - record.at) : null }));
-  return items.length ? { state: "list", text: null, items } : { state: "empty", text: AGENTS_EMPTY, items: [] };
+  const sessions = listOf(activity.sessions).filter(item => SESSION_ID.test(item?.session ?? "") && (item.state === "approved" || item.state === "pending"))
+    .slice(0, 8).map(item => ({ session: item.session, agent: AGENT_LABELS[item.agent] ?? AGENT_LABELS.other,
+      state: item.state, stateText: item.state === "approved" ? "Allowed" : "Waiting for you" }));
+  if (items.length) return { state: "list", text: null, items, sessions };
+  return activity.reporting === false ? { state: "off", text: AGENTS_OFF, items: [], sessions }
+    : { state: "empty", text: AGENTS_EMPTY, items: [], sessions };
+}
+
+// ---------------------------------------------------------------- agent status (AI & keys)
+
+export const AGENT_HOOKS = Object.freeze([
+  Object.freeze({ agent: "claude-code", name: "Claude Code",
+    where: "Merge it into ~/.claude/settings.json, or into a project's .claude/settings.json. It adds the Stop, Notification and UserPromptSubmit hooks." }),
+  Object.freeze({ agent: "codex", name: "Codex",
+    where: "Add it to ~/.codex/config.toml. Codex reads notify only from your own settings, and only one notify line counts." }),
+]);
+export const AGENT_HOOKS_NOTE = "AxioSozo never installs, edits or runs these. Each one calls the small notify script that ships with AxioSozo, through this profile's private connection point.";
+export const AGENT_TOOLS_NOTE = "Browser tools for agents (reading tabs, clicking, typing) are not available in this build.";
+
+const ENDPOINT_PROBLEMS = Object.freeze({
+  in_use: { label: "In use", text: "Something is already listening at this profile's connection point, so AxioSozo did not replace it." },
+  blocked: { label: "Blocked", text: "Something that is not AxioSozo's is in the way of the connection point. Nothing was replaced or removed." },
+});
+function unavailableText(reason) {
+  switch (reason) {
+    case "PROJECT_CACHE_UNAVAILABLE": case "PROJECT_CACHE_BUSY":
+      return "Your projects were changing, so agent status did not start. Try again.";
+    case "LISTENER_STOPPED": case "SOCKET_LOCK_LOST": return "Agent status stopped unexpectedly. Nothing is listening now.";
+    case "TIMEOUT": return "Agent status did not start in time. Nothing is listening.";
+    default: return "This build cannot open a private connection point for this profile, so nothing was started.";
+  }
+}
+
+/**
+ * What the agent status setting shows, from getAgentEndpointState (or the
+ * code it refused with). The switch follows the browser's own state, never a
+ * preference. Reason codes stay out of the sentences; `detail` keeps one.
+ * `action`/`secondary`: { kind: "enable" | "disable", label } or null.
+ */
+export function agentEndpointView(endpoint, { error = null } = {}) {
+  const view = (tone, label, text, extra = {}) => ({ tone, label, text, detail: null, action: null, secondary: null,
+    listening: false, busy: false, ...extra });
+  if (error === "PRIVATE_WINDOW") return view("off", "Not in private windows", "Agent status is managed from a normal window.");
+  if (error) return view("unknown", "Unknown", "AxioSozo could not read the agent status. Reload this page to try again.");
+  if (!endpoint || typeof endpoint !== "object") return view("unknown", "Checking…", "");
+  const enable = label => ({ kind: "enable", label });
+  const disable = { kind: "disable", label: "Turn off" };
+  const reason = typeof endpoint.reason === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(endpoint.reason) ? endpoint.reason : null;
+  if (endpoint.state === "listening") {
+    return view("ok", "On", "Agents on this Mac can report to AxioSozo until you turn this off or quit AxioSozo.",
+      { action: disable, listening: true });
+  }
+  // Asked to start but not begun yet (projects are read first): starting too.
+  if (endpoint.state === "starting" || (endpoint.enabled === true && endpoint.state === "disabled" && endpoint.cleanup_blocked !== true)) {
+    return view("info", "Starting…", "Opening this profile's private connection point.", { action: disable, busy: true });
+  }
+  if (endpoint.cleanup_pending === true && endpoint.enabled !== true) return view("info", "Closing…", "Closing the connection point.", { busy: true });
+  if (endpoint.cleanup_blocked === true || reason === "CLEANUP_INCOMPLETE") {
+    return view("warn", "Not closed", "AxioSozo could not finish closing its previous connection point. Nothing new starts until that succeeds; trying again finishes it first.",
+      { detail: reason ?? "CLEANUP_INCOMPLETE", action: enable("Try again"), secondary: endpoint.enabled === true ? disable : null });
+  }
+  if (endpoint.enabled !== true) {
+    return view("off", "Off", "Turn this on to let Claude Code or Codex tell AxioSozo when they start, need you, finish or fail. It stays on until you turn it off or quit AxioSozo.",
+      { action: enable("Turn on") });
+  }
+  const problem = ENDPOINT_PROBLEMS[endpoint.state];
+  return view("warn", problem?.label ?? "Not started", problem?.text ?? unavailableText(reason),
+    { detail: reason, action: enable("Try again"), secondary: disable });
+}
+
+/** Why hook settings cannot be shown; a fixed sentence per refusal. */
+export function agentHookErrorText(code) {
+  switch (code) {
+    case "AGENT_HOOK_CONFIG_UNAVAILABLE": case "CONFIG_UNAVAILABLE":
+      return "Not available in this build: AxioSozo found no verified copy of its notify script.";
+    case "ENDPOINT_UNAVAILABLE": return "Shown while agent status is on.";
+    case "PRIVATE_WINDOW": return "Managed from a normal window.";
+    default: return "These settings could not be prepared. Try again in a moment.";
+  }
 }
 
 export const ERRORS_UNAVAILABLE = "Console errors are not collected in this build.";

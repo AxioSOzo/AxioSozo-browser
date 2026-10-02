@@ -100,6 +100,103 @@ test("native picker provenance: detect and confirm only for the picked folder; d
   } finally { restore(); }
 });
 
+// ---------------------------------------------------------------- agents (P3)
+
+function agentServices({ normal = true, hold = null } = {}) {
+  const calls = [];
+  const answer = async (name, value) => { calls.push(name); if (hold) await hold.promise; return value; };
+  const services = {
+    isNormalWindow: window => { calls.push(["isNormalWindow", window.name]); return normal; },
+    getAgentEndpointState: () => answer("getAgentEndpointState", { enabled: false, state: "disabled", reason: null }),
+    setAgentEndpointEnabled: args => answer("setAgentEndpointEnabled", { enabled: args.enabled, window: args.window.name }),
+    getAgentHookConfig: args => answer("getAgentHookConfig", { agent: args.agent, text: "x" }),
+    listAgentActivity: projectId => answer("listAgentActivity", [{ project_id: projectId }]),
+    listAgentSessions: args => answer("listAgentSessions", [{ project: args.projectId }]),
+    revokeAgentSession: args => answer("revokeAgentSession", { revoked: args.sessionId === "s_0123456789abcdef" }),
+    on: () => () => {},
+  };
+  return { services, calls };
+}
+const serviceCalls = calls => calls.filter(call => typeof call === "string");
+
+test("agent methods: the page names closed arguments only; the actor supplies its own normal window", async () => {
+  const { services, calls } = agentServices();
+  const restore = setProvidersForTesting({ services: () => services });
+  try {
+    const actor = fakeActor({ name: "normal-window" });
+    assert.deepEqual(await request(actor, "setAgentEndpointEnabled", { enabled: true }), { ok: true, value: { enabled: true, window: "normal-window" } });
+    assert.deepEqual((await request(actor, "listAgentActivity", { projectId: "p_harbor1" })).value, [{ project_id: "p_harbor1" }]);
+    assert.deepEqual((await request(actor, "getAgentHookConfig", { agent: "codex" })).value, { agent: "codex", text: "x" });
+    assert.deepEqual((await request(actor, "revokeAgentSession", { projectId: "p_harbor1", sessionId: "s_0123456789abcdef" })).value, { revoked: true });
+    for (const [name, params] of [["setAgentEndpointEnabled", { enabled: "true" }], ["setAgentEndpointEnabled", { enabled: true, socketPath: "/tmp/s" }],
+      ["setAgentEndpointEnabled", { enabled: true, window: "x" }], ["getAgentHookConfig", { agent: "bash" }],
+      ["getAgentHookConfig", { agent: "codex", notifyPath: "/bin/sh" }], ["listAgentActivity", { projectId: "../p_x" }],
+      ["revokeAgentSession", { projectId: "p_harbor1", sessionId: "s_1" }], ["getAgentEndpointState", { presenter: {} }]]) {
+      assert.equal((await request(actor, name, params)).error.code, "INVALID_PARAMS", `${name} ${JSON.stringify(params)}`);
+    }
+    assert.deepEqual(serviceCalls(calls), ["setAgentEndpointEnabled", "listAgentActivity", "getAgentHookConfig", "revokeAgentSession"]);
+    for (const name of ["handoff", "copyToClipboard", "registerAgentPresenter", "getAgentDiagnostics", "captureHandoffAuthority", "rememberAgentReturnTarget"]) {
+      assert.equal((await request(actor, name, {})).error.code, "UNKNOWN_METHOD", name);
+    }
+  } finally { restore(); }
+});
+
+test("agent methods refuse private, unknown and unregistered windows before asking the service anything", async () => {
+  for (const [setup, code] of [[actor => { actor.browsingContext.usePrivateBrowsing = true; actor.manager.documentPrincipal = { ...actor.manager.documentPrincipal, privateBrowsingId: 1 }; }, "PRIVATE_WINDOW"],
+    [actor => { actor.browsingContext.topChromeWindow = null; }, "NO_WINDOW"]]) {
+    const { services, calls } = agentServices();
+    const restore = setProvidersForTesting({ services: () => services });
+    try {
+      const actor = fakeActor();
+      setup(actor);
+      for (const [name, params] of [["getAgentEndpointState", {}], ["setAgentEndpointEnabled", { enabled: true }], ["listAgentActivity", { projectId: "p_harbor1" }]]) {
+        assert.equal((await request(actor, name, params)).error.code, code, name);
+      }
+      assert.deepEqual(serviceCalls(calls), []);
+    } finally { restore(); }
+  }
+  const { services, calls } = agentServices({ normal: false });
+  const restore = setProvidersForTesting({ services: () => services });
+  try {
+    assert.equal((await request(fakeActor(), "setAgentEndpointEnabled", { enabled: true })).error.code, "PRIVATE_WINDOW");
+    assert.deepEqual(serviceCalls(calls), [], "a window the services do not know as normal never reaches the switch");
+  } finally { restore(); }
+});
+
+test("an answer for a document that went away or changed window while the service worked is refused, not shown", async () => {
+  let release;
+  const hold = { promise: new Promise(resolve => { release = resolve; }) };
+  const { services } = agentServices({ hold });
+  const restore = setProvidersForTesting({ services: () => services });
+  try {
+    const actor = fakeActor({ name: "first" });
+    const pending = request(actor, "getAgentEndpointState", {});
+    await flush();
+    actor.manager.isCurrentGlobal = false;
+    release();
+    assert.equal((await pending).error.code, "DOCUMENT_GONE");
+    const moved = fakeActor({ name: "first" });
+    let releaseMoved;
+    const second = agentServices({ hold: { promise: new Promise(resolve => { releaseMoved = resolve; }) } });
+    setProvidersForTesting({ services: () => second.services });
+    const answer = request(moved, "listAgentActivity", { projectId: "p_harbor1" });
+    await flush();
+    moved.browsingContext.topChromeWindow = { name: "another-window" };
+    releaseMoved();
+    assert.equal((await answer).error.code, "NO_WINDOW");
+    // Every method, not only the agent ones: a destroyed actor hands nothing over.
+    const gone = fakeActor();
+    let releaseGone;
+    const held = new Promise(resolve => { releaseGone = resolve; });
+    setProvidersForTesting({ services: () => ({ on: () => () => {}, listProjects: async () => { await held; return [{ id: "p_harbor1" }]; } }) });
+    const late = request(gone, "listProjects", {});
+    await flush();
+    gone.didDestroy();
+    releaseGone();
+    assert.equal((await late).error.code, "DOCUMENT_GONE");
+  } finally { restore(); }
+});
+
 // ---------------------------------------------------------------- page
 
 const HTML = readFileSync(new URL("../chrome/overview/about-axiosozo.html", import.meta.url), "utf8");

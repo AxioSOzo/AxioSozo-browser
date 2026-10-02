@@ -742,10 +742,96 @@ def describe():
             'fingerprint': saved['fingerprint']}
 
 
+def _legacy_run_profile(profile):
+    # Preserve the existing runtime namespace and admission checks.
+    if not profile or not profile.is_absolute() or not profile.is_dir():
+        raise RuntimeError('EXPLICIT_EXISTING_DEVELOPMENT_PROFILE_REQUIRED')
+    profile = profile.resolve()
+    namespace = BUILD_ROOT / 'runtime' / hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
+    if profile.parent.parent != namespace or profile.name != 'gecko' or not re.fullmatch(r'[A-Za-z0-9-]+', profile.parent.name):
+        raise RuntimeError('DEVELOPMENT_PROFILE_NAMESPACE_MISMATCH')
+    if not (profile / '.axiosozo-dev-profile').is_file():
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    return profile
+
+
+def _synthetic_directory_identity(path, uid):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or stat.S_IMODE(info.st_mode) != 0o700:
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    return (info.st_dev, info.st_ino)
+
+
+def _read_synthetic_profile_marker(marker, run_id, uid):
+    def admitted(info):
+        return (stat.S_ISREG(info.st_mode) and info.st_uid == uid and info.st_nlink == 1
+                and stat.S_IMODE(info.st_mode) == 0o600 and 0 <= info.st_size <= 512)
+    before = marker.lstat()
+    if not admitted(before):
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if not admitted(opened) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+        payload = os.read(fd, 512)
+        after = os.fstat(fd)
+        if (not admitted(after) or len(payload) != opened.st_size
+                or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns)):
+            raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    finally:
+        os.close(fd)
+    final = marker.lstat()
+    if (not admitted(final) or (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate marker key')
+            result[key] = value
+        return result
+    try:
+        record = json.loads(payload.decode('utf-8'), object_pairs_hook=unique_pairs)
+    except (ValueError, UnicodeError):
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO') from None
+    expected = {'version': 1, 'kind': 'plan4-agent-gui', 'run_id': run_id,
+                'worktree_sha256': hashlib.sha256(str(ROOT).encode()).hexdigest()}
+    if not isinstance(record, dict) or type(record.get('version')) is not int or record != expected:
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+
+
+def validate_run_profile(profile):
+    raw = os.fspath(profile) if profile is not None else None
+    path = Path(raw) if raw else None
+    workstation = Path('/Volumes/AxioSozoBuild/workstation')
+    # This sole short namespace is for an explicitly isolated Step 4 GUI run.
+    # Retain the raw argparse spelling so dots, aliases and extra separators fail.
+    if path is None or path.parent.parent != workstation:
+        return _legacy_run_profile(path)
+    run_id = os.environ.get('AXIOSOZO_AGENT_GUI_RUN', '')
+    if (BUILD_ROOT != workstation or os.environ.get('AXIOSOZO_SYNTHETIC_TEST') != '1'
+            or os.environ.get('AXIOSOZO_AGENT_GUI') != '1'
+            or not re.fullmatch(r'[0-9a-f]{16}', run_id)):
+        raise RuntimeError('DEVELOPMENT_PROFILE_NAMESPACE_MISMATCH')
+    expected = workstation / ('p4c-' + run_id) / 'gecko'
+    if raw != str(expected) or path != expected or path.resolve(strict=True) != expected:
+        raise RuntimeError('DEVELOPMENT_PROFILE_NAMESPACE_MISMATCH')
+    uid = os.getuid()
+    before = [_synthetic_directory_identity(directory, uid) for directory in (path.parent, path)]
+    _read_synthetic_profile_marker(path / '.axiosozo-dev-profile', run_id, uid)
+    if (path.resolve(strict=True) != expected
+            or [_synthetic_directory_identity(directory, uid) for directory in (path.parent, path)] != before):
+        raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['doctor', 'setup', 'setup-source', 'native-build', 'prepare', 'check', 'describe', 'ready', 'run', 'smoke'])
-    parser.add_argument('--profile', type=Path)
+    parser.add_argument('--profile')
     parser.add_argument('--url', default='about:blank')
     args = parser.parse_args()
     if args.command == 'setup':
@@ -785,14 +871,7 @@ def main():
             print(json.dumps(result, indent=2))
             return 20
         # Root dev owns profile locking and child process groups. No fallback to personal profiles.
-        if not args.profile or not args.profile.is_absolute() or not args.profile.is_dir():
-            raise RuntimeError('EXPLICIT_EXISTING_DEVELOPMENT_PROFILE_REQUIRED')
-        profile = args.profile.resolve()
-        namespace = BUILD_ROOT / 'runtime' / hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
-        if profile.parent.parent != namespace or profile.name != 'gecko' or not re.fullmatch(r'[A-Za-z0-9-]+', profile.parent.name):
-            raise RuntimeError('DEVELOPMENT_PROFILE_NAMESPACE_MISMATCH')
-        if not (profile / '.axiosozo-dev-profile').is_file():
-            raise RuntimeError('PROFILE_NOT_OWNED_BY_AXIOSOZO')
+        profile = validate_run_profile(args.profile)
         os.execv(result['executable'], [result['executable'], '-no-remote', '-profile', str(profile), args.url])
     result = doctor() if args.command == 'doctor' else describe()
     print(json.dumps(result, indent=2))

@@ -99,7 +99,8 @@ integration remains delegated to Claude in later steps.
 Steps 1–3 have integrated source and verified builds below. Interactive arrival,
 cookie isolation and reference-home admission remain unverified behind the
 recorded human gates. Step 3 synthetic light/dark rendering is verified. Steps
-4–9 remain unintegrated; ignored preparation does not establish GUI passes. E1/E2 remain
+5–9 remain unintegrated; Step 4 source/build and status GUI are verified below.
+Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
 ## Step 1 — integrated source; interactive GUI BLOCKED_HUMAN
@@ -400,3 +401,107 @@ Actual reference-home admission/screenshots and cookie isolation remain
 unverified behind the earlier unresolved native-picker/human gates; current Mac
 accessibility alone does not prove admission. Product AI is `NOT_AUTHORIZED`,
 E1/E2 remain `NOT_VERIFIED`, and the app is not READY. No push, tag or release.
+
+
+Step 3 local commit: `47c7d0932f1b6d0d83d58c799133dff2afe01daf`.
+
+## Step 4 — integrated; status GUI verified; handoff GUI BLOCKED_HUMAN
+
+Codex integrated the DOM-free handoff, Terminal fixture/configuration,
+channel transport/core/service, activity, path/lease/subprocess ownership,
+hook configuration, notifier/socket/Terminal installers and tests. Claude
+Opus 5.5 session `6271d45a-5ce2-4284-911b-ffe3b6616404` wrote every frontend
+and mixed actor/service change in four implementation/review rounds: native
+shortcut/context menu, clipboard composer, explicit synthetic Terminal action,
+Settings, notifications, return actions and project activity. Codex created or
+edited no frontend code. Claude reviewed the four saved status/Settings PNGs.
+
+Review findings corrected by Claude: focused-frame/depth ambiguity; selected-tab
+replacement during awaits; engine/frame-loader changes and selection vetoes on
+return; project mutation during home/activity reads; and late old handoff feedback
+replacing a newer result. Final dispatch rechecks native identity and project
+authority. Unknown privacy, engine, frame or stale project state refuses.
+Superseded feedback cannot disturb a newer composer/result; uncertain launches
+are deferred until no newer result is present. All product agents remain
+NOT_AUTHORIZED; undocumented desktop schemes are UNVERIFIED_CAPABILITY.
+
+Final verification on 3 October 2026:
+
+- `./dev test` and `./dev check`: exit 0. Browser 1162/1162; contexts 153/153;
+  provider-host 122; root Python 165 (including 55 Terminal cleanup/leaf cases);
+  bootstrap 33, containment reader 22, arrival 18 and socket POSIX 11 passed.
+  Other repository suites passed; CEF native/check/stream remain
+  SKIPPED_ENGINE_WORKSTREAM. Final logs:
+  `.local/logs/plan4-step4-reviewed-final-{test,check}.log`.
+- Storage mounted, external-wrapper `./dev setup`: exit 0; `zen.py describe`:
+  PASS. Verified 85 packaged chrome files and 9 sandbox-readable Zen resources.
+  Final fingerprint `1c68a500c488707b6aec67d5d7b14421c09a143319dd1dee09d48d4d62709b60`.
+  Build/describe logs: `.local/logs/plan4-step4-reviewed-final-build.log` and
+  `plan4-step4-reviewed-final-describe.json`.
+- Clean native status run D: CUA enabled the endpoint, a separate fixed synthetic
+  reporter sent Harbor Suite completion, and the app showed activity/notification.
+  Light PNG inspected. CUA disabled it; one persistent helper wait and lease exit
+  observed, socket/listener removed, native exit 0, app/fixture reaped, all 31
+  fixture metadata files unchanged. All phase and 38 final checks passed.
+- Clean native status run E: Inkline needs_input in dark mode plus Settings On
+  and Off captures. All three PNGs inspected. From Projects, CUA Go to project
+  returned to exact Inkline home and focused its heading. This proves known-home
+  fallback; result-tab reload remains untested. Native exit 0/all final checks
+  passed. D/E use the prior verified status build fingerprint `1ce12178…`; the
+  subsequent Terminal rounds changed only handoff runtime/tests and added its
+  DOM-free modules, preserving the reviewed status UI.
+- Earlier status A failed before app launch; B/C were stopped/reaped after the
+  observer incorrectly expected zero live endpoint claims. Corrected expectation:
+  exactly one verified live claim, zero after disablement. C had a corrected
+  address-entry error and is not clean acceptance evidence. No hook, provider,
+  MCP or P4 action ran.
+- Actual native Terminal-leaf diagnostic: live-child TERM works, while signalling
+  a zombie-only process group returns EPERM. The fixture-only repair executes
+  immutable checksum-pinned source with exact retained-child WNOWAIT ownership,
+  no descendant/group claim and no signal after reap. Final actual leaf probe
+  exited 0, produced the expected proof and was reaped. Helper SHA
+  `082dba3a2f91febe98d77cbb57112fc710ab2267949ee1a1e9479f8afdb79986`.
+  This is backend proof, not a Terminal GUI launch.
+- Real handoff GUI attempt B reached OWNED_HANDOFF_CUA_READY on a fresh owned
+  profile with both synthetic Projects rendered, normal window, TLS defaults,
+  endpoint/providers off and zero handoff counters. CUA then reported the Mac
+  locked and automatic unlock unavailable. Per the plan, interaction stopped:
+  clipboard/context-menu/shortcut/fake Terminal and their light/dark captures
+  are BLOCKED_HUMAN, not passed. Only this owned app and fixture were stopped;
+  both reaped, both listeners closed, source/build/original metadata and store
+  bytes unchanged. Native graceful exit 0 was not established after that stop.
+  Prior attempt A refused before app launch because two retained diagnostic
+  directories existed; they were preserved. The repaired observer compares their
+  exact immediate metadata baseline and claims only absence of new launch state.
+  Its 137 preparation/audit cases passed. No Terminal, provider or clipboard
+  action occurred in these two attempts.
+
+Accepted status evidence (ignored):
+`docs/evidence/plan4-4/status-harbor-done-20261003-d/` and
+`docs/evidence/plan4-4/status-inkline-input-dark-20261003-e/`, each with native
+report and lead review. Worth inspecting: `harbor-suite-done-light-window.png`,
+`inkline-needs_input-dark-window.png`, `settings-on-dark-window.png` and
+`settings-off-dark-window.png`. Handoff gate/cleanup evidence:
+`docs/evidence/plan4-4/handoff-harbor-light-20261003-b/lead-review.json`.
+All data is invented/seeded; reference admission remains ADMISSION_NOT_RUN.
+
+Decisions taken for Step 4:
+
+- Endpoint disabled each process; normal Settings enables that session. Its
+  current-profile `/.a/s` must fit 100 bytes; no alias paths.
+- Native status profiles use owned `p4c-<16hex>/gecko`; Terminal fixtures use
+  owned `runtime/<worktree-hash>/plan4-handoff-<32hex>/gecko`, with exact flags,
+  private roots and verified ownership. No personal profile fallback.
+- Ordinary Send to agent defaults to clipboard. Only an explicitly configured
+  synthetic profile offers the fixed fake Terminal action. Merely opening the
+  composer does not construct a fixture. Trusted activation passes AbortSignal
+  and synchronous current-tab/project authority through metadata, dispatch,
+  adoption and context write. Uncertain launch never retries or auto-copies.
+- Hook snippets bind actual socket/checksum-pinned notify script; copyable only.
+  Browser never installs or executes them. Official Claude exec-form and Codex
+  user-level notify-array schemas were checked on 2 October 2026.
+- Screenshots/console capture await their own privacy proof, P4 awaits Step 8,
+  live AI stays NOT_AUTHORIZED. VoiceOver and full Terminal GUI stay unverified.
+
+Continue to Step 5 under the explicit human gate. E1/E2 remain NOT_VERIFIED and
+this app is not READY. No push, tag or release.

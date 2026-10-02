@@ -369,7 +369,7 @@ test("step seams: the home shows reported agent activity, console errors and a s
   const quiet = await loadPage({ hash: "#project=p_harbor1" });
   const activity = quiet.section("activity");
   assert.equal(activity.className, "home-section quiet");
-  assert.match(activity.textContent, /Agents cannot report to AxioSozo yet; status reporting is not part of this build\./u);
+  assert.match(activity.textContent, /Agent activity cannot be shown right now\./u);
   assert.match(activity.textContent, /Console errors are not collected in this build\./u);
   assert.match(activity.textContent, /In the folder: AGENTS\.md, CLAUDE\.md, \.claude, 3 agent worktrees\. These show the folder is set up for agents, not that one is running\./u);
   assert.match(quiet.section("about").querySelector(".brief.absent").textContent, /No brief yet\. .*not available in this build\./u);
@@ -390,6 +390,30 @@ test("step seams: the home shows reported agent activity, console errors and a s
   assert.equal(busy.$("project-home").querySelector(".home-lede").textContent, BRIEF.document.product);
   assert.deepEqual(busy.section("about").querySelectorAll(".brief h5").map(h5 => h5.textContent),
     ["Apps", "How to start", "Services", "Domains it mentions", "Known risks"]);
+});
+
+test("agent activity (step 4): off says where to turn it on; a browser session can be ended; an agents event re-reads the home", async () => {
+  const page = await loadPage({ hash: "#project=p_harbor1", home: { agent_activity: { records: [], reporting: false,
+    sessions: [{ session: "s_0123456789abcdef", agent: "codex", state: "approved" }, { session: "../x", agent: "codex", state: "approved" }] } },
+  handlers: { revokeAgentSession: params => ({ revoked: params.sessionId === "s_0123456789abcdef" }) } });
+  const activity = page.section("activity");
+  assert.match(activity.textContent, /Agent status is off; turn it on under AI & keys\./u);
+  const link = activity.querySelector('a[href="#ai"]');
+  assert.equal(link.textContent, "Agent status settings");
+  assert.deepEqual(activity.querySelectorAll(".sessions li").map(li => li.textContent), ["AllowedCodex: browser sessionEnd"], "only valid sessions");
+  const before = homeCalls(page).length;
+  page.button(activity, "End the browser session of Codex").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "revokeAgentSession"),
+    [["revokeAgentSession", { projectId: "p_harbor1", sessionId: "s_0123456789abcdef" }]]);
+  assert.equal(page.$("status").textContent, "Codex's browser session ended.");
+  assert.equal(homeCalls(page).length, before + 1, "the home is read again");
+  await page.emit("agents");
+  assert.equal(homeCalls(page).length, before + 2, "an agents event re-reads the shown home");
+  assert.equal(page.calls.some(([name]) => /AgentEndpoint|AgentHook/u.test(name)), false, "the home starts and reads no endpoint");
+  const reporting = await loadPage({ hash: "#project=p_harbor1", home: { agent_activity: { records: [], reporting: true, sessions: [] } } });
+  assert.match(reporting.section("activity").textContent, /No agent reported on this project in the last day\./u);
+  assert.equal(reporting.section("activity").querySelector('a[href="#ai"]'), null);
 });
 
 test("keyboard and names: menus move with arrow keys, every control has a name, the heading outline holds", async () => {

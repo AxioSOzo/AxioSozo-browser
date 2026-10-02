@@ -845,6 +845,38 @@ button.small { min-height: var(--button-min-height-small); padding-inline: var(-
 .key-row input:disabled { opacity: 0.5; }
 p.errors:empty { display: none; }
 
+/* Agent status: one setting row in the same panel as the Jev card, then the
+ * copyable hook settings as quiet rows. Text only; snippets scroll inside. */
+.agent-panel { display: flex; flex-direction: column; gap: var(--space-large); padding: var(--space-large); }
+.agent-panel[aria-busy="true"]:empty { min-height: 3.5rem; }
+.agent-setting { align-items: flex-start; }
+.agent-setting .row-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); }
+.agent-setting .help { max-width: 34rem; }
+.agent-setting .card-actions { flex: none; padding-top: 2px; }
+.agent-setting button[aria-disabled="true"] { opacity: 0.45; }
+.agent-hooks { display: flex; flex-direction: column; gap: var(--space-small); padding-top: var(--space-medium); box-shadow: 0 -1px 0 var(--hairline); }
+.agent-hooks h4 { color: var(--ink); font-size: var(--font-size-small); font-weight: var(--font-weight-semibold); }
+.agent-hooks .rows { border-radius: var(--radius-small); background: none; box-shadow: inset 0 0 0 1px var(--hairline); }
+.hook-row { align-items: flex-start; }
+.hook-row .row-main { gap: 2px; }
+.hook-row .help { max-width: 34rem; }
+.snippet { margin-top: var(--space-xsmall); }
+.snippet > summary { width: max-content; padding-block: 2px; font-size: var(--font-caption); border-radius: var(--radius-small); }
+.snippet pre {
+  max-height: 14rem;
+  margin: var(--space-small) 0 0;
+  padding: var(--space-small) var(--space-medium);
+  overflow: auto;
+  border-radius: var(--radius-small);
+  background: var(--surface-hover);
+  font-family: var(--mono);
+  font-size: var(--font-micro);
+  line-height: 1.5;
+  white-space: pre;
+}
+.activity-list.sessions { margin-top: var(--space-xsmall); }
+a.button-link.small { min-height: var(--button-min-height-small); padding-inline: var(--space-small); font-size: var(--font-caption); }
+
 /* ---- Toast ------------------------------------------------------------------------------ */
 
 .toast {

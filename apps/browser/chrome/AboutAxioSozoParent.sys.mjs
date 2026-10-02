@@ -16,7 +16,7 @@ export const MESSAGES = Object.freeze({
   UNSUBSCRIBE: "AxioSozoOverview:Unsubscribe",
   EVENT: "AxioSozoOverview:Event",
 });
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
 // Provider status and Jev key actions are served by ProviderStatus.sys.mjs
 // directly (Providers workstream), not through AxioSozoServices.
@@ -103,6 +103,8 @@ const T = {
   hostText: value => typeof value === "string" && value.length >= 1 && value.length <= 253 && !/[\s\u0000-\u001f\u007f]/u.test(value),
   hostList: value => Array.isArray(value) && value.length <= 32 && value.every(T.hostText),
   accountLabelOrNull: value => value === null || (typeof value === "string" && value.length <= 200),
+  hookAgent: value => value === "claude-code" || value === "codex",
+  sessionId: value => typeof value === "string" && /^s_[0-9a-f]{16}$/.test(value),
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -162,6 +164,30 @@ export function checkWebUrl(value) {
 function requirePickedRoot(ctx, name, root) {
   if (!ctx.pickedRoots.has(root)) fail("ROOT_NOT_PICKED", `${name}: choose the folder with the folder picker first`);
 }
+
+/** The requesting tab's window, only while this document is current and the
+ * window is a registered normal one; unknown privacy counts as private. */
+function agentWindow(ctx, name) {
+  if (ctx.isPrivate?.() !== false) fail("PRIVATE_WINDOW", `${name}: agents are managed from a normal window`);
+  if (ctx.current?.() !== true) fail("DOCUMENT_GONE", `${name}: this page is no longer shown`);
+  const window = ctx.window();
+  if (!window) fail("NO_WINDOW", `${name}: the requesting tab has no browser window`);
+  if (typeof ctx.services.isNormalWindow !== "function" || ctx.services.isNormalWindow(window) !== true) {
+    fail("PRIVATE_WINDOW", `${name}: agents are managed from a normal window`);
+  }
+  return window;
+}
+
+/** Agent methods: the window and current document are checked before the
+ * service is asked anything, and again after it answered; a stale answer is
+ * refused rather than shown. Native dependencies, paths and presenters are
+ * never page parameters. */
+const agentMethod = (name, params, run) => ({ params, run: async (ctx, p) => {
+  const window = agentWindow(ctx, name);
+  const value = await run(ctx, p, window);
+  if (agentWindow(ctx, name) !== window) fail("NO_WINDOW", `${name}: the window changed`);
+  return value;
+} });
 
 // ---------------------------------------------------------------- methods
 
@@ -305,6 +331,20 @@ export const METHODS = Object.freeze({
     return ctx.services.openProjectUrl({ window, projectId: p.projectId, url });
   } },
   getOverviewFlags: { params: {}, run: ({ flags }) => flags() },
+  // Agents (P3, agent-channel-v1): the endpoint's state, its explicit
+  // per-session switch, copyable hook settings for the verified listening
+  // socket, and one known project's activity and browser sessions.
+  getAgentEndpointState: agentMethod("getAgentEndpointState", {}, ({ services }) => services.getAgentEndpointState()),
+  setAgentEndpointEnabled: agentMethod("setAgentEndpointEnabled", { enabled: T.boolean },
+    ({ services }, p, window) => services.setAgentEndpointEnabled({ window, enabled: p.enabled })),
+  getAgentHookConfig: agentMethod("getAgentHookConfig", { agent: T.hookAgent },
+    ({ services }, p, window) => services.getAgentHookConfig({ window, agent: p.agent })),
+  listAgentActivity: agentMethod("listAgentActivity", { projectId: T.projectId },
+    ({ services }, p) => services.listAgentActivity(p.projectId)),
+  listAgentSessions: agentMethod("listAgentSessions", { projectId: T.projectId },
+    ({ services }, p, window) => services.listAgentSessions({ window, projectId: p.projectId })),
+  revokeAgentSession: agentMethod("revokeAgentSession", { projectId: T.projectId, sessionId: T.sessionId },
+    ({ services }, p, window) => services.revokeAgentSession({ window, projectId: p.projectId, sessionId: p.sessionId })),
 });
 
 export function validateRequest(data) {
@@ -370,7 +410,14 @@ export class AboutAxioSozoParent extends Base {
       flags: () => readFlags(prefsProvider()),
       providers: () => providerStatusProvider(),
       isPrivate: () => !!this.browsingContext?.usePrivateBrowsing,
+      current: () => this.#current(),
     };
+  }
+
+  /** The sender is still this actor's live, current about:axiosozo document. */
+  #current() {
+    if (this.#destroyed) return false;
+    try { return validateSender(senderSnapshot(this)) === true; } catch { return false; }
   }
 
   async receiveMessage(message) {
@@ -383,7 +430,11 @@ export class AboutAxioSozoParent extends Base {
     switch (message.name) {
       case MESSAGES.REQUEST:
         try {
-          return { ok: true, value: (await dispatch(this.#context(), message.data)) ?? null };
+          const value = await dispatch(this.#context(), message.data);
+          // An answer for a document that went away or was replaced while the
+          // service worked is never handed to whatever is shown now.
+          if (!this.#current()) return toErrorReply(new OverviewError("DOCUMENT_GONE", "the requesting page is no longer shown"));
+          return { ok: true, value: value ?? null };
         } catch (error) {
           // Contract errors (OverviewError, ContextsError codes) are expected
           // user-facing results; only unexpected exceptions are logged.

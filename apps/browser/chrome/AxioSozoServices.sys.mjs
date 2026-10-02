@@ -23,11 +23,20 @@ import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
 import { createProjectArrival } from "./ProjectArrival.sys.mjs";
 import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
 import { createNativeProjectArrivalSubprocess } from "./ProjectArrivalSubprocess.sys.mjs";
-import { createProjectContainers, createGeckoIdentityAdapter } from "./ProjectContainers.sys.mjs";
+import { createProjectContainers, createGeckoIdentityAdapter, MAX_PUBLIC_USER_CONTEXT_ID } from "./ProjectContainers.sys.mjs";
 import { canonicalContainerColor, projectContainerPresentation, PROJECT_CONTAINER_ICON } from "./ProjectAccountRuntime.sys.mjs";
+import { createAgentChannelService } from "./AgentChannelService.sys.mjs";
+import { createGeckoAgentTransportRuntime } from "./AgentChannelTransport.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
+// Documented default only (contracts/agent-channel-v1.md §1): every process
+// starts with the agent endpoint off, and a saved true never starts it.
+export const AGENT_ENDPOINT_PREF = "axiosozo.agent.endpoint.enabled";
+export const AGENT_HOOK_AGENTS = Object.freeze(["claude-code", "codex"]);
+const AGENT_NAMES = Object.freeze({ "claude-code": "Claude Code", codex: "Codex", other: "An agent" });
+const AGENT_SESSION = /^s_[0-9a-f]{16}$/u;
+const AGENT_CHANNEL_EVENTS = new Set(["endpoint", "enablement", "activity", "cleanup", "capabilities"]);
 export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json" });
 export const PROBE_MIN_INTERVAL_MS = 5000;
 export const PROBE_TIMEOUT_MS = 2000;
@@ -80,6 +89,36 @@ function defaultRandomId(prefix) {
   const bytes = new Uint8Array(12);
   globalThis.crypto.getRandomValues(bytes);
   return prefix + Array.from(bytes, byte => alphabet[byte % alphabet.length]).join("");
+}
+
+/** 16 lowercase hex characters from the platform CSPRNG (agent session and status ids). */
+function defaultRandomHex() {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+const unavailableNative = () => { throw new ServicesError("NATIVE_CONFIGURATION_UNAVAILABLE"); };
+
+/** Privileged diagnostics keep booleans, non-negative counts and nesting only:
+ * never paths, sessions, argv, output, handles or tokens. */
+function countsOnly(value, depth = 0) {
+  if (value === null || typeof value === "boolean") return value;
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  if (depth >= 6 || !value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key)) continue;
+    const kept = countsOnly(child, depth + 1);
+    if (kept !== undefined) out[key] = kept;
+  }
+  return Object.freeze(out);
+}
+
+/** A project name for chrome text: one line, at most 80 characters. */
+function displayName(project) {
+  const name = typeof project?.manifest?.name === "string" ? project.manifest.name.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ").trim() : "";
+  return name ? [...name].slice(0, 80).join("") : "This project";
 }
 
 /** Opaque arrival token: a browser crypto UUID without braces (36 characters),
@@ -168,11 +207,18 @@ export class AxioSozoServices {
   // every deletion or reset observation bumps so an opening in progress stops.
   #containers = null; #identities = null; #containersConfigured = false;
   #containerReset = null; #containerResetFailed = false; #failedDeletions = new Set(); #containerGeneration = 0;
+  // Each reset or deletion cleanup is one tracked attempt; only the latest
+  // attempt for its key may set or clear that key's failure latch.
+  #cleanupSerial = 0; #resetAttempt = null; #deletionAttempts = new Map();
   // Routing marks: a monotonic value per project (and one for every project)
   // that changes synchronously when a store mutation that can change a
   // project's route starts and again when it settles, failed or not, plus the
   // mutations still in flight. Service memory only; never stored or sent.
   #routingSequence = 0; #routingAll = 0; #routingMarks = new Map(); #routingPending = new Map(); #routingPendingAll = 0;
+  // Agent channel (P3): one process-wide AgentChannelService, created on first
+  // use. Its project cache is only ever filled by #loadAgentProjects at global
+  // quiescence. Presenters are registered per normal window.
+  #agentChannel = null; #agentChannelClosed = false; #agentPresenters = new Map();
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -199,9 +245,14 @@ export class AxioSozoServices {
    * containersEnabled() → boolean (the privacy.userContext.enabled pref) and
    * observeContainers({ identityDeleted(id), containersDisabled() }) →
    * unobserve.
+   * Agent channel: randomHex() → 16 hex (CSPRNG); agentNative
+   * { createNativeConfiguration(), createTransportRuntime({ exactPosixBackend }),
+   * buildHookConfig({ agent, socketPath }) } (absent = never available);
+   * createAgentChannel(deps) (tests only; default createAgentChannelService);
+   * resetAgentEndpointPref() (clears a saved true; nothing reads it to start).
    */
   constructor(deps = {}) {
-    this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId,
+    this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId, randomHex: defaultRandomHex,
       timers: globalThis, newToken: browserToken, ...deps };
     const storageFor = this.#deps.storageFor ?? (name => profileStorage(name));
     const migration = createStoreMigrationValidator({ core });
@@ -257,6 +308,8 @@ export class AxioSozoServices {
     this.#emit("contexts");
     return () => {
       unsubscribe();
+      // Its agent presenter goes first: outstanding prompts are cancelled.
+      this.#agentPresenters.get(window)?.();
       if (this.#windows.get(window) === adapter) this.#windows.delete(window);
       // Arrival offers and acceptances are bound to this window; they never outlive it.
       this.#revokeAcceptances(window);
@@ -707,10 +760,52 @@ export class AxioSozoServices {
   /** Runs a profile-store mutation that can change how `projectIds` (null:
    * every project) route: space, sharing, account labels, container mapping,
    * existence or stored record. Their mark changes synchronously when it starts
-   * and again when it settles, so an opening of those projects in flight stops. */
+   * and again when it settles, so an opening of those projects in flight stops.
+   *
+   * Agent channel authority (agent-channel-v1 §7): the pending mark is visible
+   * first, then an existing channel's project cache is invalidated, both before
+   * `run` reaches its first await. Only the scope that settles at global
+   * quiescence (no pending mark anywhere, no container cleanup in flight or
+   * failed) refreshes it; a nested or earlier scope never does. The refresh is
+   * isolated: its failure or a closed channel never replaces this mutation's
+   * own result or error, and the cache stays unavailable instead. */
   async #routingMutation(projectIds, run) {
     this.#markRouting(projectIds, 1);
-    try { return await run(); } finally { this.#markRouting(projectIds, -1); }
+    this.#invalidateAgentProjects();
+    try { return await run(); } finally {
+      this.#markRouting(projectIds, -1);
+      this.#settleAgentProjects();
+    }
+  }
+
+  /** No project or container write is pending, in flight or failed. */
+  #agentAuthorityQuiet() {
+    return this.#routingPendingAll === 0 && this.#routingPending.size === 0 && this.#resetAttempt === null
+      && this.#deletionAttempts.size === 0 && !this.#containerResetFailed && this.#failedDeletions.size === 0;
+  }
+
+  #invalidateAgentProjects() {
+    try { this.#agentChannel?.invalidateProjects(); } catch (error) { console.error("AxioSozo: agent project cache not invalidated", error); }
+  }
+
+  #settleAgentProjects() {
+    if (!this.#agentChannel || !this.#agentAuthorityQuiet()) return;
+    try { Promise.resolve(this.#agentChannel.refreshProjects()).catch(() => {}); } catch { /* cache stays unavailable */ }
+  }
+
+  /** The channel's only project loader. Refuses at once (PROJECT_CACHE_BUSY)
+   * unless every project and container write has settled; after the validated
+   * read it refuses again if anything is pending or the global routing
+   * sequence or container generation moved during the read, so a write that
+   * started and settled inside it is never published as authority. No await
+   * follows the final check. Container cleanups keep their own raw reads. */
+  async #loadAgentProjects() {
+    const sequence = this.#routingSequence, generation = this.#containerGeneration;
+    if (!this.#agentAuthorityQuiet()) fail("PROJECT_CACHE_BUSY");
+    const { projects } = await this.#loadContexts();
+    if (!this.#agentAuthorityQuiet() || sequence !== this.#routingSequence || generation !== this.#containerGeneration)
+      fail("PROJECT_CACHE_BUSY");
+    return projects;
   }
 
   /** The project's current routing mark; null while a mutation of it is in flight. */
@@ -752,34 +847,63 @@ export class AxioSozoServices {
   }
 
   /** Compare-and-set of a project's container inside the serialized store
-   * write; null when the project is gone or its mapping changed meanwhile. */
+   * write; null when the project is gone or its mapping changed meanwhile.
+   * The preliminary load is inside the tracked scope, so the mark is set from
+   * the moment the assignment starts. */
   async #assignContainer(projectId, userContextId, assignment) {
     let assigned = null;
-    await this.#loadContexts();
-    await this.#routingMutation([projectId], () => this.#stores.contexts.update(doc => {
-      assigned = null;
-      const current = doc.projects.find(item => item.id === projectId);
-      if (!current) return doc;
-      const next = this.#records.withBrowserAssignedContainer(current, userContextId, assignment);
-      if (!next) return doc;
-      assigned = next;
-      return { ...doc, projects: doc.projects.map(item => (item.id === projectId ? next : item)) };
-    }));
+    await this.#routingMutation([projectId], async () => {
+      await this.#loadContexts();
+      return this.#stores.contexts.update(doc => {
+        assigned = null;
+        const current = doc.projects.find(item => item.id === projectId);
+        if (!current) return doc;
+        const next = this.#records.withBrowserAssignedContainer(current, userContextId, assignment);
+        if (!next) return doc;
+        assigned = next;
+        return { ...doc, projects: doc.projects.map(item => (item.id === projectId ? next : item)) };
+      });
+    });
     if (!assigned) return null;
     this.#emit("projects");
     return clone(assigned);
   }
 
+  /** One complete container cleanup (a reset, or one deleted identity's
+   * mappings) as an all-project tracked scope: the container generation moves
+   * and the agent cache is invalidated before the controller is called, and
+   * the scope lasts through the controller's nested assignments and final
+   * verification, which therefore never refresh. The latch for `key` changes
+   * inside the scope, so it is set before the scope's settle step looks at it,
+   * and only for the latest attempt: an older attempt settling later changes
+   * nothing, and only a current success clears a failure. */
+  #containerCleanup(key, start) {
+    this.#containerGeneration++;
+    const token = ++this.#cleanupSerial;
+    const reset = key === "reset";
+    if (reset) this.#resetAttempt = token; else this.#deletionAttempts.set(key, token);
+    const current = () => (reset ? this.#resetAttempt : this.#deletionAttempts.get(key)) === token;
+    return this.#routingMutation(null, async () => {
+      try {
+        const result = await start();
+        if (current()) { if (reset) this.#containerResetFailed = false; else this.#failedDeletions.delete(key); }
+        return result;
+      } catch (error) {
+        if (current()) { if (reset) this.#containerResetFailed = true; else this.#failedDeletions.add(key); }
+        throw error;
+      } finally {
+        if (current()) { if (reset) this.#resetAttempt = null; else this.#deletionAttempts.delete(key); }
+      }
+    });
+  }
+
   /** Observer: Firefox deleted a container. In-flight routes stop at once; the
-   * projects that named it lose the mapping (never the project or its data). */
+   * projects that named it lose the mapping (never the project or its data).
+   * An ID the controller would refuse changes nothing, as before. */
   #identityDeleted(userContextId) {
     if (!this.#containers) return;
-    let cleanup;
-    try { cleanup = this.#containers.identityDeleted(userContextId); } catch { return; }
-    this.#containerGeneration++;
-    this.#failedDeletions.delete(userContextId);
-    cleanup.catch(error => {
-      this.#failedDeletions.add(userContextId);
+    if (!Number.isInteger(userContextId) || userContextId < 1 || userContextId > MAX_PUBLIC_USER_CONTEXT_ID) return;
+    this.#containerCleanup(userContextId, () => this.#containers.identityDeleted(userContextId)).catch(error => {
       console.error("AxioSozo: deleted container still mapped; project links wait for a retry", error?.code ?? error);
     });
   }
@@ -789,29 +913,26 @@ export class AxioSozoServices {
    * retry succeeds (#containersReady). */
   #resetContainers() {
     if (!this.#containers) return Promise.resolve(0);
-    this.#containerGeneration++;
-    const run = this.#containers.identitiesReset();
+    const run = this.#containerCleanup("reset", () => this.#containers.identitiesReset());
     this.#containerReset = run;
-    this.#containerResetFailed = false;
     run.then(() => {
       if (this.#containerReset === run) this.#containerReset = null;
       this.#emit("projects"); // views re-read availability once the cleanup is saved
     }, error => {
-      if (this.#containerReset === run) { this.#containerReset = null; this.#containerResetFailed = true; }
+      if (this.#containerReset === run) this.#containerReset = null;
       console.error("AxioSozo: container reset not saved; project links wait for a retry", error?.code ?? error);
     });
     return run;
   }
 
-  /** Waits for a reset in flight and retries failed cleanups first; rejects
-   * while they still fail, so nothing is routed against stale mappings. */
+  /** Waits for a reset in flight and retries failed cleanups first, each as
+   * its own tracked attempt; rejects while they still fail, so nothing is
+   * routed against stale mappings. */
   async #containersReady() {
     if (this.#containerReset) await this.#containerReset.catch(() => {});
     if (this.#containerResetFailed) await this.#resetContainers();
     for (const id of [...this.#failedDeletions]) {
-      this.#containerGeneration++;
-      await this.#containers.identityDeleted(id);
-      this.#failedDeletions.delete(id);
+      await this.#containerCleanup(id, () => this.#containers.identityDeleted(id));
     }
   }
 
@@ -876,8 +997,10 @@ export class AxioSozoServices {
    * unknown or removed id UNKNOWN_PROJECT. The record is the current stored
    * one (upgraded to version 2) without its container mapping; the container
    * is presented as listProjectContainers does, never by ID. Nothing is
-   * probed, detected or created here. `agent_activity` and `console_errors`
-   * are null until this build collects them (Plan 4 steps 4 and 7).
+   * probed, detected or created here. `agent_activity` is the agent channel's
+   * RAM history for this project and its current root, { records, reporting,
+   * sessions }, or null while that cache is unavailable; `console_errors` is
+   * null until this build collects them (Plan 4 step 7).
    *
    * The answer is current when it is returned: the project's routing mark,
    * the container deletion/reset generation and availability are taken before
@@ -904,14 +1027,47 @@ export class AxioSozoServices {
     const { projects } = await this.#loadContexts();
     const current = projects.find(item => item.id === id);
     if (!current) fail("UNKNOWN_PROJECT");
+    // Everything that can call back into listeners is read first: an expiring
+    // activity record emits synchronously, and a listener may start a project
+    // write right there. The final checks follow these reads, with nothing
+    // between them and the return.
+    const space = project.context_uuid ? this.#liveWorkspaces().get(project.context_uuid) : null;
+    const agentActivity = this.#agentActivity(id, current.root);
     if (this.#routingMark(id) !== mark || this.#containerGeneration !== generation || this.#containerAvailability() !== availability
       || JSON.stringify(current) !== JSON.stringify(stored)) fail("PROJECT_CHANGED");
     // The window may have closed or been unregistered meanwhile.
     if (!this.#normalWindow(window, adapter)) fail("NO_WINDOW");
-    const space = project.context_uuid ? this.#liveWorkspaces().get(project.context_uuid) : null;
     const { container: _mapping, ...record } = clone(project);
     return { version: 1, project: record, space: space ? { uuid: space.uuid, name: space.name } : null, container,
-      agent_activity: null, console_errors: null };
+      agent_activity: agentActivity, console_errors: null };
+  }
+
+  /** The channel's validated history of one project: null unless its cache is
+   * ready and still names this project with this root, both before and after
+   * the activity and session reads (an expiry callback inside them can start a
+   * write to any project, which revokes the whole cache even when this
+   * project's own routing mark is untouched). Only the matching group's
+   * records, never a hook payload; bridge sessions by agent and state only. */
+  #agentActivity(id, root) {
+    const channel = this.#agentChannel;
+    if (!channel) return null;
+    try {
+      const authority = () => {
+        const cache = channel.getProjectCacheState();
+        return cache.state === "ready" && channel.getProjects().some(project => project.id === id && project.root === root)
+          ? cache.generation : null;
+      };
+      const before = authority();
+      if (before === null) return null;
+      const group = channel.listActivity(id).find(item => item.project_id === id && item.project_path === root) ?? null;
+      const sessions = channel.listSessions(id).filter(view => view.project_id === id && AGENT_SESSION.test(view.session)
+        && (view.state === "approved" || view.state === "pending"))
+        .map(view => ({ session: view.session, agent: Object.hasOwn(AGENT_NAMES, view.client?.agent) ? view.client.agent : "other",
+          state: view.state }));
+      const reporting = channel.getEndpointState().state === "listening";
+      if (authority() !== before) return null;
+      return { records: group ? clone(group.history) : [], reporting, sessions };
+    } catch { return null; }
   }
 
   /** The space a project link opens in: the caller's (live) space, else the
@@ -1338,7 +1494,8 @@ export class AxioSozoServices {
   }
 
   // ── attention ─────────────────────────────────────────────────────────
-  /** M1 sources only: a declared service found down by the last requested probe,
+  /** A declared service found down by the last requested probe, an agent whose
+   * latest report says it needs input or failed (current project root only),
    * and rules whose daily limit is reached today. Never probes by itself. */
   async needsAttention() {
     const items = [];
@@ -1350,6 +1507,16 @@ export class AxioSozoServices {
           detail: `${project.manifest.name} · ${entry.url}`,
           target: { type: "project", id: project.id, service: entry.name } });
       }
+    }
+    let waiting = [];
+    try { waiting = this.#agentChannel?.needsAttention() ?? []; } catch { waiting = []; }
+    for (const group of waiting) {
+      const { state, agent, title } = group.latest ?? {};
+      if (state !== "needs_input" && state !== "failed") continue;
+      const project = projects.find(item => item.id === group.project_id && item.root === group.project_path);
+      if (!project) continue;
+      items.push({ kind: "agent", title: `${displayName(project)}: ${AGENT_NAMES[agent] ?? AGENT_NAMES.other} ${state === "failed" ? "failed" : "needs you"}`,
+        detail: typeof title === "string" ? title : "", target: { type: "project", id: project.id } });
     }
     const { rules } = await this.#stores.rules.load();
     const contexts = rules.some(rule => rule.contexts !== "all") ? await this.listContexts() : [];
@@ -1373,6 +1540,228 @@ export class AxioSozoServices {
     let total = 0;
     for (const uuid of scope) total += await this.usageFor({ hosts, contextUuid: uuid });
     return total;
+  }
+
+  // ── agent channel (P3; agent-channel-v1 §1, §7) ───────────────────────
+  /** The process-wide channel, created on first use. Creating it starts
+   * nothing: it only loads the guarded project cache. The endpoint starts off
+   * in every process; setAgentEndpointEnabled is the only way to start it. */
+  #agentService() {
+    if (this.#agentChannel || this.#agentChannelClosed) return this.#agentChannel;
+    const native = this.#deps.agentNative ?? null;
+    const factory = typeof this.#deps.createAgentChannel === "function" ? this.#deps.createAgentChannel : createAgentChannelService;
+    let channel;
+    try {
+      channel = factory({
+        loadProjects: () => this.#loadAgentProjects(),
+        validateProject: core.validateProject, validateStatusRecord: core.validateStatusRecord,
+        parseHookEvent: core.parseHookEvent, isSensitiveHost: core.isSensitiveHost,
+        now: () => this.#deps.clock(), randomHex: () => this.#deps.randomHex(),
+        timers: { setTimeout: (fn, ms) => this.#deps.timers.setTimeout(fn, ms), clearTimeout: id => this.#deps.timers.clearTimeout(id) },
+        createNativeConfiguration: typeof native?.createNativeConfiguration === "function" ? () => native.createNativeConfiguration() : unavailableNative,
+        createTransportRuntime: typeof native?.createTransportRuntime === "function"
+          ? ({ exactPosixBackend }) => native.createTransportRuntime({ exactPosixBackend }) : unavailableNative,
+        ...(typeof native?.buildHookConfig === "function"
+          ? { buildHookConfig: ({ agent, socketPath }) => native.buildHookConfig({ agent, socketPath }) } : {}),
+        onChange: event => this.#onAgentChange(event),
+      });
+    } catch (error) {
+      console.error("AxioSozo: agent channel unavailable", error);
+      return null;
+    }
+    this.#agentChannel = channel;
+    try { this.#deps.resetAgentEndpointPref?.(); } catch { /* the endpoint never reads it */ }
+    try { this.#deps.onShutdown?.(() => this.closeAgentChannel(), "AxioSozo: close agent channel"); }
+    catch (error) { console.error("AxioSozo: agent channel shutdown not registered", error); }
+    // At quiescence this fills the cache; otherwise it stays unavailable until
+    // the final settling write refreshes it.
+    Promise.resolve().then(() => (this.#agentChannel === channel ? channel.initialize() : null)).catch(() => {});
+    return channel;
+  }
+
+  /** Channel changes reach pages only as event names. A cache invalidation is
+   * not one of them (the projects event of the same write already reloads);
+   * its ready or unavailable outcome is. Hook sessions are not either. */
+  #onAgentChange(event) {
+    const kind = event?.kind;
+    if (AGENT_CHANNEL_EVENTS.has(kind) || (kind === "projects" && event.state !== "loading")
+      || (kind === "session" && event.client?.name === "agent-bridge")) this.#emit("agents");
+    if (kind === "activity") this.#emit("attention");
+  }
+
+  /** A window this service knows and that is known not to be private. */
+  isNormalWindow(window) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    return !!adapter && this.#normalWindow(window, adapter);
+  }
+
+  #agentProject(id) {
+    let project;
+    try { project = this.#agentChannel?.getProjects().find(item => item.id === id); } catch { project = null; }
+    return project ? Object.freeze({ id: project.id, root: project.root, name: displayName(project) }) : null;
+  }
+
+  /**
+   * One chrome presenter per registered normal window (AgentStatusRuntime):
+   * isNormal(), requestApproval({ agent, project_id, project_name }, { cwd,
+   * signal }) → literally true to allow, and onStatus({ project_id,
+   * project_name, record }). Private, unknown and unregistered windows are
+   * refused here and are never eligible later. Returns unregister(); it also
+   * runs when the window unregisters, cancelling its outstanding prompts.
+   */
+  registerAgentPresenter(window, presenter) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (!adapter || !this.#normalWindow(window, adapter)) fail("PRIVATE_WINDOW");
+    if (typeof presenter?.isNormal !== "function" || typeof presenter?.requestApproval !== "function") fail("INVALID_PRESENTER");
+    if (this.#agentPresenters.has(window)) fail("INVALID_PRESENTER");
+    const channel = this.#agentService();
+    if (!channel) fail("AGENT_CHANNEL_UNAVAILABLE");
+    const unregister = channel.registerPresenter(window, {
+      isNormal: () => this.#normalWindow(window, adapter) && presenter.isNormal() === true,
+      requestApproval: (view, controls) => {
+        const project = this.#agentProject(view?.project_id);
+        if (!project) return false;
+        const agent = Object.hasOwn(AGENT_NAMES, view?.client?.agent) ? view.client.agent : "other";
+        return presenter.requestApproval(Object.freeze({ agent, project_id: project.id, project_name: project.name }),
+          { signal: controls?.signal });
+      },
+      onStatus: event => {
+        const project = this.#agentProject(event?.project_id);
+        const latest = event?.latest;
+        if (!project || !latest || latest.project_path !== project.root || typeof presenter.onStatus !== "function") return undefined;
+        return presenter.onStatus(Object.freeze({ project_id: project.id, project_name: project.name,
+          record: Object.freeze({ id: latest.id, agent: latest.agent, state: latest.state, title: latest.title, at: latest.at }) }));
+      },
+    });
+    const remove = () => {
+      if (this.#agentPresenters.get(window) === remove) this.#agentPresenters.delete(window);
+      unregister();
+    };
+    this.#agentPresenters.set(window, remove);
+    return remove;
+  }
+
+  /** A normal window came to the front: its presenter is the most recent one. */
+  activateAgentPresenter(window) {
+    return this.#agentPresenters.has(window) && this.isNormalWindow(window) ? this.#agentChannel?.activatePresenter(window) === true : false;
+  }
+
+  /** { enabled, state, reason, cleanup_pending, cleanup_blocked, projects,
+   * methods } and socketPath only while listening. Reading starts nothing. */
+  getAgentEndpointState() {
+    const channel = this.#agentService();
+    if (!channel) return { enabled: false, state: "unavailable", reason: "AGENT_CHANNEL_UNAVAILABLE", cleanup_pending: false,
+      cleanup_blocked: false, projects: { state: "unavailable", reason: null, generation: 0, count: 0 }, methods: [] };
+    return clone(channel.getEndpointState());
+  }
+
+  /** The explicit Settings action of a registered normal window; on for this
+   * browser session only. Every P4 method stays unavailable (no tools). */
+  async setAgentEndpointEnabled({ window, enabled } = {}) {
+    if (typeof enabled !== "boolean") fail("INVALID_INPUT");
+    if (!this.isNormalWindow(window)) fail("PRIVATE_WINDOW");
+    const channel = this.#agentService();
+    if (!channel) fail("AGENT_CHANNEL_UNAVAILABLE");
+    return clone(await channel.setEnabled(enabled));
+  }
+
+  /** Copyable hook configuration bound to the listening, verified socket and
+   * the verified installed notify script. Nothing is installed or run. */
+  async getAgentHookConfig({ window, agent } = {}) {
+    if (!AGENT_HOOK_AGENTS.includes(agent)) fail("INVALID_INPUT");
+    if (!this.isNormalWindow(window)) fail("PRIVATE_WINDOW");
+    const channel = this.#agentService();
+    if (!channel) fail("ENDPOINT_UNAVAILABLE");
+    const text = await channel.getHookConfig(agent);
+    if (!this.isNormalWindow(window)) fail("NO_WINDOW");
+    return { agent, text };
+  }
+
+  /** The channel's groups for one known project ([] for any other id). */
+  listAgentActivity(projectId) {
+    if (!core.isProjectId(projectId)) return [];
+    try { return clone(this.#agentService()?.listActivity(projectId) ?? []); } catch { return []; }
+  }
+
+  /** Approved or pending browser-bridge sessions of a project: agent and state. */
+  listAgentSessions({ window, projectId } = {}) {
+    if (!core.isProjectId(projectId)) fail("UNKNOWN_PROJECT");
+    if (!this.isNormalWindow(window)) fail("PRIVATE_WINDOW");
+    return (this.#agentChannel?.listSessions(projectId) ?? []).filter(view => view.project_id === projectId)
+      .map(view => ({ session: view.session, agent: Object.hasOwn(AGENT_NAMES, view.client?.agent) ? view.client.agent : "other",
+        state: view.state }));
+  }
+
+  revokeAgentSession({ window, projectId, sessionId } = {}) {
+    if (!core.isProjectId(projectId) || typeof sessionId !== "string" || !AGENT_SESSION.test(sessionId)) fail("INVALID_INPUT");
+    if (!this.isNormalWindow(window)) fail("PRIVATE_WINDOW");
+    return { revoked: this.#agentChannel?.revokeSession(projectId, sessionId) === true };
+  }
+
+  /** Return targets are native identity only (agent-channel-v1 §7). */
+  rememberAgentReturnTarget(target) {
+    try { return this.#agentChannel?.rememberReturnTarget(target) === true; } catch { return false; }
+  }
+
+  agentReturnTarget(projectId) {
+    try { return this.#agentChannel?.returnTarget(projectId) ?? null; } catch { return null; }
+  }
+
+  /** Privileged evidence only (never the actor or the wire): booleans and
+   * counts, including the channel's read-only ownership snapshot. */
+  getAgentDiagnostics() {
+    const channel = this.#agentChannel;
+    if (!channel) return Object.freeze({ created: false, ownership: null });
+    let raw;
+    try { raw = channel.diagnostics(); } catch { return Object.freeze({ created: true, ownership: null }); }
+    return countsOnly({ created: true, closed: raw.closed === true, enabled: raw.enabled === true,
+      listening: raw.endpoint === "listening", cache_ready: raw.cache === "ready", projects: raw.projects,
+      sessions: raw.sessions, presenters: raw.presenters, presentations: raw.presentations,
+      cleanup_blocked: raw.cleanupBlocked === true, ownership: raw.ownership ?? null });
+  }
+
+  /** Process shutdown: the listener stops and owned cleanup runs once. */
+  async closeAgentChannel() {
+    this.#agentChannelClosed = true;
+    const channel = this.#agentChannel;
+    for (const remove of [...this.#agentPresenters.values()]) remove();
+    if (channel) await channel.close();
+  }
+
+  // ── handoff project authority (P3; never the actor or the wire) ───────
+  /**
+   * The project of a page being handed off, captured only while no project or
+   * container write is pending, in flight or failed: { project: null | { id,
+   * root }, name, check() }. `check()` is synchronous and true only while the
+   * global routing sequence and container generation are unchanged, nothing is
+   * pending, the window is still registered and normal and the tab is still in
+   * the same space; the handoff calls it immediately before its clipboard write.
+   * An ambiguous match is no project; unknown or pending authority refuses
+   * (PROJECT_CHANGED) instead of claiming no project. Engine and workspace
+   * identity of the tab stay with the caller's native tab checks.
+   */
+  async captureHandoffAuthority({ window, tab, url, userContextId } = {}) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (!adapter || !this.#normalWindow(window, adapter)) fail("PRIVATE");
+    if (typeof url !== "string" || !URL.parse(url) || !Number.isSafeInteger(userContextId) || userContextId < 0
+      || userContextId > MAX_PUBLIC_USER_CONTEXT_ID) fail("INVALID_INPUT");
+    const workspace = () => { try { return adapter.workspaceForTab(tab) ?? null; } catch { return undefined; } };
+    const contextUuid = workspace();
+    if (contextUuid === undefined) fail("POLICY_UNAVAILABLE");
+    if (!this.#agentAuthorityQuiet()) fail("PROJECT_CHANGED");
+    const sequence = this.#routingSequence, generation = this.#containerGeneration;
+    const { projects } = await this.#loadContexts();
+    const check = () => this.#agentAuthorityQuiet() && sequence === this.#routingSequence && generation === this.#containerGeneration
+      && this.#normalWindow(window, adapter) && workspace() === contextUuid;
+    if (!check()) fail("PROJECT_CHANGED");
+    const match = core.matchProjectForUrl(projects, url, { contextUuid: contextUuid ?? undefined });
+    const byUrl = match && !match.ambiguous ? projects.find(item => item.id === match.project_id) ?? null : null;
+    const owners = userContextId > 0
+      ? projects.filter(item => core.upgradeProject(item).container.user_context_id === userContextId) : [];
+    const byContainer = owners.length === 1 ? owners[0] : null;
+    const found = byUrl && byContainer && byUrl !== byContainer ? null : byUrl ?? byContainer;
+    return Object.freeze({ project: found ? Object.freeze({ id: found.id, root: found.root }) : null,
+      name: found ? displayName(found) : null, check });
   }
 
   // ── navigation helpers for the Overview actor ─────────────────────────
@@ -1509,10 +1898,27 @@ function chromeDependencies() {
     timers: { setTimeout, clearTimeout },
     pickFolder: pickFolderWithFilePicker,
     mostRecentWindow: () => Services.wm.getMostRecentWindow("navigator:browser"),
-    onShutdown(flush) {
+    onShutdown(flush, label = "AxioSozo: flush usage ledger") {
       const { AsyncShutdown } = ChromeUtils.importESModule("resource://gre/modules/AsyncShutdown.sys.mjs");
-      AsyncShutdown.profileBeforeChange.addBlocker("AxioSozo: flush usage ledger", () => flush().catch(() => {}));
+      AsyncShutdown.profileBeforeChange.addBlocker(label, () => flush().catch(() => {}));
     },
+    // Agent channel natives, each loaded only when the explicit Settings action
+    // (or a copy of hook settings) needs it. No path comes from a caller: the
+    // configuration uses the current profile and the pinned helper, and the
+    // hook builder its verified installed notify script. A missing or failing
+    // module makes that capability unavailable; there is no fallback.
+    agentNative: Object.freeze({
+      createNativeConfiguration: async () => (await import("./AgentChannelConfig.sys.mjs")).createNativeAgentChannelConfiguration(),
+      createTransportRuntime: ({ exactPosixBackend }) => createGeckoAgentTransportRuntime({ exactPosixBackend }),
+      buildHookConfig: async ({ agent, socketPath }) => {
+        let build;
+        try { build = (await import("./AgentHookConfig.sys.mjs")).buildNativeAgentHookConfig; }
+        catch { throw new ServicesError("AGENT_HOOK_CONFIG_UNAVAILABLE"); }
+        if (typeof build !== "function") throw new ServicesError("AGENT_HOOK_CONFIG_UNAVAILABLE");
+        return build({ agent, socketPath });
+      },
+    }),
+    resetAgentEndpointPref: () => { if (Services.prefs.prefHasUserValue(AGENT_ENDPOINT_PREF)) Services.prefs.clearUserPref(AGENT_ENDPOINT_PREF); },
     // Fixed interpreter/helper paths and checksum (ProjectReaderConfig); created
     // per admitted detection, never from page or actor parameters.
     createReader: () => createNativeProjectReader(),

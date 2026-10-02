@@ -3,26 +3,41 @@
 Owner: integration lead. One local channel connects the running browser to
 the user's coding agents: `axiosozo-notify` (status reports, P3) and the
 `packages/agent-bridge` MCP server (browser tools, P4). It is not an
-automation protocol: Gecko tab work behind it uses Firefox's own chrome APIs
-and, for act tools, WebDriver BiDi-equivalent internals; Chromium tabs are
-reached only through the CEF workstream's API (see §6).
+automation protocol. Gecko automation must use the pinned WebDriver BiDi
+implementation with native browser ownership and privacy checks. No invented
+BiDi-equivalent protocol or public remote-debugging listener substitutes for it.
+Chromium tabs are reached only through the CEF workstream's API (see §6).
+Step 4 exposes status reports and approval/session lifecycle only; every P4
+method remains UNAVAILABLE until Step 8 installs and verifies its native adapter.
 
 ## 1. Transport
 
 - A **Unix domain socket** owned by the browser (`nsIServerSocket.initWithFilename`),
   mode `0600`, in a directory of mode `0700`. Web content cannot reach it, and
   there is no TCP listener.
-- Path: pref `axiosozo.agent.socketPath`; default `~/.axiosozo/run/agent.sock`.
-  Clients use `$AXIOSOZO_AGENT_SOCKET` when set, else the default. The path
-  must be absolute and at most 100 bytes.
-- If a live socket already answers at the path, the browser does not take it
-  over (another AxioSozo instance owns it) and shows the endpoint as
-  `in use by another instance`. A stale socket file (connect refused) owned by
-  the user is removed and recreated. A non-socket file at the path is never
-  removed (endpoint `blocked`).
-- Pref `axiosozo.agent.endpoint.enabled` (default `true`) is the kill switch.
-  Private-browsing-only sessions still run the endpoint, but private windows
-  and their tabs are invisible to every method.
+- Native path: the current canonical profile directory plus `/.a/s`, at most
+  100 UTF-8 bytes. No path preference, actor-supplied pathname, shortened alias
+  or fallback profile is accepted. Long profile paths make the endpoint
+  unavailable. Generated client snippets bind `AXIOSOZO_AGENT_SOCKET` to this
+  exact verified path. Legacy client fallback `~/.axiosozo/run/agent.sock`
+  does not discover this endpoint; use the generated configuration.
+- A checksum-pinned helper supplies exact UID/type/mode/inode/link facts and
+  retains a nonblocking flock lease. The directory is owned by the current UID
+  and mode 0700; the socket is 0600. Existing live endpoints are not adopted.
+  Stale unlink requires the same verified socket identity under the owned lease;
+  unknown paths, changed identities and non-sockets are preserved and refused.
+- `axiosozo.agent.endpoint.enabled` defaults false. Every browser process starts
+  disabled; only an explicit action in a current registered normal window enables
+  this process's endpoint. Saved preferences alone never start it. Private-only
+  startup creates no endpoint. An already enabled process can retain the listener
+  after its normal window closes, but private windows cannot present approvals,
+  expose activity or supply tab data.
+- Enable/disable operations are serialized. Startup, listener loss and cleanup
+  publish authoritative states (`disabled`, `starting`, `listening`, `in_use`,
+  `blocked`, `unavailable`). `CLEANUP_INCOMPLETE` retains owned handles/claims and
+  blocks rebinding; explicit retry must finish their cleanup first. A socket
+  disappearing is not evidence of a waited child. Native diagnostic receipts
+  describe owned waits, not guaranteed OS exit status or universal group cleanup.
 - Framing: UTF-8 JSON, one object per line (`\n`). Client lines ≤ 262 144
   bytes; browser lines ≤ 4 194 304 bytes. A longer line, invalid UTF-8 or
   invalid JSON closes the connection. At most 8 concurrent connections and 16
@@ -62,7 +77,7 @@ After `welcome` with `approval:"pending"`, the browser shows one Zen-native
 notification in the most recent normal window: "**Claude Code** in
 **DomuCortex** wants to use this browser" with *Allow for this session* and
 *Deny*. It then sends `{"v":1,"type":"approval","granted":true|false}`. No
-answer within 120 s is a denial. The grant lives as long as the connection;
+answer within 55 s is a denial. The grant lives as long as the connection;
 the user can revoke it from the project home or the notification, which
 closes the connection. Requests before a grant fail with `NOT_APPROVED`.
 
@@ -123,6 +138,48 @@ for the CEF workstream: a chrome-side `EngineRegistry` call that returns
 console errors and a viewport PNG for a Chromium tab, and per-container
 request contexts (P2).
 
-## 7. Changelog
+## 7. Browser ownership and status presentation
+
+One process service owns the endpoint and bounded validated project cache.
+Construction and activity reads spawn nothing. Project mutations invalidate
+channel authority synchronously before their first await, revoke sessions and
+cancel prompts. Only global quiescence after all pending project/container writes
+and cleanup can refresh the cache. The loader checks routing/container generations
+and pending/failure quarantine before and after its read. Failed or stale reads
+leave the cache unavailable, never an authoritative intermediate snapshot.
+
+A normal-window presenter must return literal true for approval. Closing,
+revoking, expiry, project mutation or shutdown cancels the presentation; late
+responses cannot grant. Status acceptance does not wait for notification clicks.
+Only parsed records for a current known project root enter RAM history: 24 hours,
+20 records per project, 128 projects and 2,560 records globally. Unavailable cache
+hides history; verified refresh purges removed or changed roots. Notification
+text is rendered as text, never markup. Short agent titles may contain user data;
+the parser is a bound, not a general secret scrubber.
+
+Read-only ownership diagnostics count a verified live endpoint claim in
+`pending_claims` until its cleanup releases that claim. A listening single
+endpoint therefore retains one claim; successful disablement retains zero. The
+counts distinguish active ownership from failed cleanup. Persistent lock-helper
+wait and lease-release receipts describe those owned handles only; they do not
+certify arbitrary descendant or transient-process cleanup.
+
+Return actions use a native captured tab/navigation/project/container identity
+and revalidate it at the action. A hook's URL, path, title or PID cannot grant a
+navigation action. Without a current safe target, return to the known project
+home. No unsolicited reload is allowed.
+
+Hook configuration is copyable only for a listening verified endpoint and a
+verified installed copy of the shipped notify script. Claude Code command hooks
+use direct `command` plus `args`; Codex `notify` uses an argv array in user-level
+configuration. No provider configuration is read, installed or executed by the
+browser. These shapes follow the [Claude hook reference](https://code.claude.com/docs/en/hooks#command-hook-fields)
+and [Codex configuration reference](https://developers.openai.com/codex/config-reference/),
+checked 2 October 2026. Live provider integration remains NOT_AUTHORIZED.
+
+## 8. Changelog
 
 - 2 October 2026 — created for Plan 4.
+
+- 2 October 2026 — Step 4 current-profile path, explicit session enablement,
+  55-second approval, owned cleanup and quiescent project authority.

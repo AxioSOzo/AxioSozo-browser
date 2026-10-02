@@ -50,3 +50,4 @@ export {
   STATUS_STATES, STATUS_AGENTS, HOOK_SOURCES, MAX_HOOK_PAYLOAD_BYTES, STATUS_KEEP_MS, STATUS_HISTORY,
   parseHookEvent, validateStatusRecord, statusBoard, hookConfig,
 } from './agent-status.mjs';
+export { bridgeConfig } from './agent-config.mjs';

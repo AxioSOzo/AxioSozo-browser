@@ -94,16 +94,17 @@ test('statusBoard: newest first per project, ≤ 20, older than keepMs dropped',
   throwsCode(() => statusBoard([], { now: NOW, keepMs: -1 }), 'INVALID_INPUT', '$.keepMs');
 });
 
-test('hookConfig: copyable snippets, path validated and quoted', () => {
+test('hookConfig: copyable snippets use literal argv and the current socket', () => {
   const path = '/Users/me/Code/AxioSozo browser/tools/axiosozo-notify/axiosozo-notify';
-  const claude = JSON.parse(hookConfig({ agent: 'claude-code', notifyPath: path }));
+  const socketPath = '/Volumes/AxioSozoBuild/workstation/p4c-test/gecko/.a/s';
+  const claude = JSON.parse(hookConfig({ agent: 'claude-code', notifyPath: path, socketPath }));
   assert.deepEqual(Object.keys(claude.hooks), ['Stop', 'Notification', 'UserPromptSubmit']);
   for (const event of ['Stop', 'Notification', 'UserPromptSubmit']) {
-    assert.deepEqual(claude.hooks[event], [{ hooks: [{ type: 'command', command: `'${path}' claude-code ${event}` }] }]);
+    assert.deepEqual(claude.hooks[event], [{ hooks: [{ type: 'command', command: '/usr/bin/env', args: [`AXIOSOZO_AGENT_SOCKET=${socketPath}`, '/bin/sh', path, 'claude-code', event], timeout: 5 }] }]);
   }
-  assert.equal(hookConfig({ agent: 'codex', notifyPath: path }), `notify = ["${path}", "codex"]\n`);
-  for (const bad of ['relative/notify', '/a"b', "/a'b", '/a\nb', '/a\\b', '/a`b', '', '/', null]) {
-    throwsCode(() => hookConfig({ agent: 'codex', notifyPath: bad }), 'INVALID_INPUT', '$.notifyPath');
+  assert.equal(hookConfig({ agent: 'codex', notifyPath: path, socketPath }), `notify = ${JSON.stringify(['/usr/bin/env', `AXIOSOZO_AGENT_SOCKET=${socketPath}`, '/bin/sh', path, 'codex'])}\n`);
+  for (const bad of ['relative/notify', '/a\nb', '/a/../b', '', '/', null]) {
+    throwsCode(() => hookConfig({ agent: 'codex', notifyPath: bad, socketPath }), 'INVALID_INPUT', '$.notifyPath');
   }
-  throwsCode(() => hookConfig({ agent: 'cursor', notifyPath: path }), 'INVALID_INPUT', '$.agent');
+  throwsCode(() => hookConfig({ agent: 'cursor', notifyPath: path, socketPath }), 'INVALID_INPUT', '$.agent');
 });

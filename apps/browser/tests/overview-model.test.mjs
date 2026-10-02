@@ -253,10 +253,17 @@ test("home services: fixed integration names with the user's own labels, then la
   assert.deepEqual(M.homeServices({}), []);
 });
 
-test("agent activity (step 4 seam): unavailable until reported; only valid records of this folder, newest first", () => {
-  assert.deepEqual(M.homeAgentActivity(null), { state: "unavailable", text: M.AGENTS_UNAVAILABLE, items: [] });
+test("agent activity (step 4): unavailable, off, empty or only valid records of this folder, newest first", () => {
+  assert.deepEqual(M.homeAgentActivity(null), { state: "unavailable", text: M.AGENTS_UNAVAILABLE, items: [], sessions: [] });
   assert.deepEqual(M.homeAgentActivity({ records: "x" }).state, "unavailable");
-  assert.deepEqual(M.homeAgentActivity({ records: [] }, { root: "/w/shop" }), { state: "empty", text: M.AGENTS_EMPTY, items: [] });
+  assert.deepEqual(M.homeAgentActivity({ records: [] }, { root: "/w/shop" }), { state: "empty", text: M.AGENTS_EMPTY, items: [], sessions: [] });
+  assert.deepEqual(M.homeAgentActivity({ records: [], reporting: false, sessions: [] }, { root: "/w/shop" }),
+    { state: "off", text: M.AGENTS_OFF, items: [], sessions: [] });
+  assert.deepEqual(M.homeAgentActivity({ records: [], reporting: true, sessions: [
+    { session: "s_0123456789abcdef", agent: "codex", state: "approved" }, { session: "s_1111111111111111", agent: "gpt", state: "pending" },
+    { session: "bad", agent: "codex", state: "approved" }, { session: "s_2222222222222222", agent: "codex", state: "denied" }] }).sessions,
+  [{ session: "s_0123456789abcdef", agent: "Codex", state: "approved", stateText: "Allowed" },
+    { session: "s_1111111111111111", agent: "Agent", state: "pending", stateText: "Waiting for you" }]);
   const record = (over = {}) => ({ version: 1, id: "as_0123456789abcdef", project_path: "/w/shop/apps/web", agent: "codex",
     state: "done", title: "Agent finished", at: 1_000_000, session: null, ...over });
   const records = [record(), record({ id: "as_1111111111111111", agent: "claude-code", state: "needs_input", title: "Approve the migration?", at: 1_060_000 }),
@@ -267,8 +274,34 @@ test("agent activity (step 4 seam): unavailable until reported; only valid recor
   assert.equal(activity.state, "list");
   assert.deepEqual(activity.items.map(item => [item.agent, item.stateText, item.title, item.ago]), [
     ["Claude Code", "Needs you", "Approve the migration?", "59 min ago"], ["Codex", "Done", "Agent finished", "1 h ago"]]);
-  assert.match(M.AGENTS_UNAVAILABLE, /not part of this build/u);
+  assert.match(M.AGENTS_UNAVAILABLE, /cannot be shown right now/u);
+  assert.match(M.AGENTS_OFF, /turn it on under AI & keys/u);
   assert.match(M.PRESENCE_TEXT, /not that one is running/u, "agent files never read as a running agent");
+});
+
+test("agent status setting follows the browser's own endpoint state; codes stay in a detail line", () => {
+  const base = { enabled: false, state: "disabled", reason: null, cleanup_pending: false, cleanup_blocked: false,
+    projects: { state: "ready", count: 2 }, methods: [] };
+  const off = M.agentEndpointView(base);
+  assert.deepEqual([off.label, off.action, off.secondary, off.listening], ["Off", { kind: "enable", label: "Turn on" }, null, false]);
+  const on = M.agentEndpointView({ ...base, enabled: true, state: "listening", socketPath: "/synthetic/p/.a/s" });
+  assert.deepEqual([on.label, on.action, on.listening, on.tone], ["On", { kind: "disable", label: "Turn off" }, true, "ok"]);
+  assert.equal(M.agentEndpointView({ ...base, enabled: true, state: "starting" }).busy, true);
+  assert.deepEqual([M.agentEndpointView({ ...base, enabled: true }).label, M.agentEndpointView({ ...base, enabled: true }).action.kind],
+    ["Starting…", "disable"], "asked to start, not begun yet: never shown as a failure");
+  const failed = M.agentEndpointView({ ...base, enabled: true, state: "unavailable", reason: "EXACT_SOCKET_METADATA_UNAVAILABLE" });
+  assert.deepEqual([failed.label, failed.detail, failed.action.label, failed.secondary.kind], ["Not started", "EXACT_SOCKET_METADATA_UNAVAILABLE", "Try again", "disable"]);
+  assert.doesNotMatch(failed.text, /[A-Z]{2,}_[A-Z]/u, "no machine code in the sentence");
+  const blocked = M.agentEndpointView({ ...base, state: "unavailable", reason: "CLEANUP_INCOMPLETE", cleanup_blocked: true });
+  assert.deepEqual([blocked.label, blocked.action.kind, blocked.secondary], ["Not closed", "enable", null]);
+  assert.equal(M.agentEndpointView({ ...base, enabled: true, state: "in_use", reason: "SOCKET_IN_USE" }).label, "In use");
+  assert.equal(M.agentEndpointView({ ...base, enabled: true, state: "unavailable", reason: "PROJECT_CACHE_UNAVAILABLE" }).text,
+    "Your projects were changing, so agent status did not start. Try again.");
+  assert.equal(M.agentEndpointView(null).label, "Checking…");
+  assert.equal(M.agentEndpointView(null, { error: "PRIVATE_WINDOW" }).action, null);
+  assert.equal(M.agentEndpointView({ ...base, reason: "<b>x</b>" }).detail, null);
+  assert.match(M.agentHookErrorText("AGENT_HOOK_CONFIG_UNAVAILABLE"), /no verified copy of its notify script/u);
+  assert.deepEqual(M.AGENT_HOOKS.map(hook => hook.agent), ["claude-code", "codex"]);
 });
 
 test("console errors (step 7 seam) and the brief (step 6 seam): unavailable, empty or validated text", () => {

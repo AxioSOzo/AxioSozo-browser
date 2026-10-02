@@ -291,12 +291,62 @@ local channel (§7). The core turns raw hook payloads into status records:
 - `validateStatusRecord(v)`, `STATUS_STATES`.
 - `statusBoard(records, { now, keepMs = 24 h }) → [{ project_path, latest, history }]`
   newest first, ≤ 20 per project, older than `keepMs` dropped.
-- `hookConfig({ agent: "claude-code" | "codex", notifyPath }) → string` —
-  copyable snippets: Claude Code `settings.json` `hooks` for `Stop`,
-  `Notification` and `UserPromptSubmit` calling
-  `<notifyPath> claude-code <Event>`; Codex `config.toml`
-  `notify = ["<notifyPath>", "codex"]`. `notifyPath` must be absolute without
-  quotes or newlines.
+- `hookConfig({ agent: "claude-code" | "codex", notifyPath, socketPath }) → string`
+  constructs copyable config only. Paths are canonical absolute lexical strings,
+  controls/unpaired surrogates/placeholders are refused; socket path ≤100 UTF-8
+  bytes. A trusted browser caller supplies the actual native-verified socket and
+  installed script path; pages cannot supply either. Claude hooks use direct exec
+  `/usr/bin/env` with one literal socket assignment, `/bin/sh`, script filename,
+  agent and event as separate arguments. Codex uses that argv as `notify` in its
+  user-level config. No shell `-c`, interpolation, installation or execution.
+- `bridgeConfig({ agent, nodePath, bridgePath, socketPath }) → string` similarly
+  constructs direct executable/argv/environment snippets; Step 8 owns native
+  bridge availability and confirmation. Constructing a snippet grants nothing.
+
+### 5.1 Native handoff (P3)
+
+`AgentHandoff.sys.mjs` is DOM-free and takes injected native tab observation,
+clipboard and test-only terminal adapters. The closed version-1 context contains
+request ID, timestamp, optional known project ID/root, page URL/title/selection/
+PNG, bounded console errors and task text. URLs omit query and fragment; context
+text is explicitly selected user data, not universally secret-sanitized. Limits:
+URL4096, title512, selection16384, task8192, 50 errors of 1000 characters, PNG1MiB
+and maximum side1280, total serialized context1.5MiB. Images are optional and
+require separately verified native capture; console data stays empty until P5.
+
+Only a trusted chrome action can authorize the exact request object once. Content
+actors cannot grant a handoff. Native normal-window, HTTP(S), sensitive-host,
+password and current-document checks precede any title/selection/image read and
+are repeated around awaits. Unknown facts deny. Project authority is captured
+at quiescence and checked synchronously together with tab/global/navigation and
+cancellation immediately before a clipboard write. No await separates that final
+check from the native side effect. Navigation, selection/ownership changes,
+project mutations, dismissal and teardown invalidate pending work.
+
+Production terminal launches remain NOT_AUTHORIZED; undocumented desktop schemes
+are UNVERIFIED_CAPABILITY. The user can explicitly choose clipboard fallback.
+An uncertain external launch never falls back and duplicates the handoff. A
+real terminal fake-agent acceptance test is separate from injected pure tests;
+unverified native cleanup cannot count as a successful terminal launch.
+
+`createNativeTerminalHandoffFixture({ signal, isActive })` is a privileged,
+synthetic-only constructor. Its exact environment/profile/policy namespace and
+checksum-pinned helper admit only the fixed fake; missing configuration returns
+null and invalid requested configuration refuses. The synchronous `isActive`
+callback must still attest the same sending session, selected native tab and
+current project authority around each policy await, immediately before dispatch,
+after child adoption and at the context write. It is never page or actor data.
+Constructing this adapter and launching are separate from the trusted user click.
+
+The helper sends structured context on stdin, opens stock Terminal using fixed
+argv and a fixed wrapper, and executes the unchanged known fake from verified
+immutable bytes. Its no-descendant fixture owns only its retained direct child:
+non-reaping kernel observation precedes any signal, observed exit skips signalling,
+and final reap irrevocably ends signal authority. Generic group cleanup keeps
+its separate conservative behavior. A delivery acknowledgement proves start,
+not task completion; the native acceptance gate also needs the exact fresh fake
+proof, child exit and owned state cleanup. Product-agent and arbitrary-descendant
+capability are not inferred from this fixture.
 
 ## 6. Understand tier (§4, `packages/provider-host`)
 

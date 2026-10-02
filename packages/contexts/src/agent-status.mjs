@@ -116,18 +116,4 @@ export function statusBoard(records, { now, keepMs = STATUS_KEEP_MS } = {}) {
   return deepFreeze(board);
 }
 
-// Copyable hook configuration that calls axiosozo-notify. The path is
-// absolute and contains no quotes, backslashes or control characters, so it
-// can be single-quoted for the hook's shell command and written as a TOML string.
-export function hookConfig({ agent, notifyPath } = {}) {
-  if (typeof notifyPath !== 'string' || !notifyPath.startsWith('/') || notifyPath.length < 2 || notifyPath.length > PATH_MAX ||
-      /["'`\\]/.test(notifyPath) || CONTROL.test(notifyPath)) {
-    throw new ContextsError('INVALID_INPUT', '$.notifyPath: expected an absolute path without quotes, backslashes or control characters', '$.notifyPath');
-  }
-  if (agent === 'claude-code') {
-    const hook = event => [{ hooks: [{ type: 'command', command: `'${notifyPath}' claude-code ${event}` }] }];
-    return `${JSON.stringify({ hooks: { Stop: hook('Stop'), Notification: hook('Notification'), UserPromptSubmit: hook('UserPromptSubmit') } }, null, 2)}\n`;
-  }
-  if (agent === 'codex') return `notify = ["${notifyPath}", "codex"]\n`;
-  throw new ContextsError('INVALID_INPUT', '$.agent: expected claude-code or codex', '$.agent');
-}
+export { hookConfig } from './agent-config.mjs';

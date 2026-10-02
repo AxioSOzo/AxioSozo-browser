@@ -26,6 +26,14 @@ export class Node {
   append(...nodes) { for (const n of nodes) this.childNodes.push(this.#adopt(n)); }
   appendChild(node) { this.append(node); return node; }
   prepend(...nodes) { this.childNodes.unshift(...nodes.map(n => this.#adopt(n))); }
+  // Like the DOM: a null reference appends; a reference elsewhere throws.
+  insertBefore(node, reference) {
+    if (reference === null || reference === undefined) { this.append(node); return node; }
+    if (reference.parentNode !== this) throw new Error("mini-dom: reference is not a child");
+    const adopted = this.#adopt(node);
+    this.childNodes.splice(this.childNodes.indexOf(reference), 0, adopted);
+    return adopted;
+  }
   replaceChildren(...nodes) { for (const n of [...this.childNodes]) n.remove(); this.append(...nodes); }
   remove() {
     if (!this.parentNode) return;
