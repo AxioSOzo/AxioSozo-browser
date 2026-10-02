@@ -17,8 +17,10 @@ results (localhost, previews, PRs, dashboards) and the rest of the day (mail,
 bank, tax office). That is our place.
 
 **Build for Wout first.** The reference users are Wout's own projects:
-DomuCortex (`/Volumes/T9/Code/DomuCortex`) and RemoteDraw
-(`/Volumes/T9/Code/RemoteDraw`). A feature is done when it is useful on those two.
+DomuCortex (`/Volumes/T9/Code/DomuCortex`), RemoteDraw
+(`/Volumes/T9/Code/RemoteDraw`) and Life OS (`/Users/wout/life-os`; the copy at
+`/Volumes/T9/Life-OS` is older, ignore it). A feature is done when it is useful
+on these three.
 But every feature is a general mechanism driven by detection or configuration;
 nothing is hard-coded for those repos or for specific websites.
 
@@ -277,6 +279,7 @@ to the next step without waiting.
 8. **P4 agent bridge**, read tools first, then act tools with confirmation.
 9. **Watches**, then **P6 start page** (flag off), then **P7** first-run choice.
 
+**Frontend is done by Claude Opus 5.5 only** (see `docs/CODEX_PROMPT_PLAN4.md`).
 Use sub-agents for independent parts (pure logic in `packages/`, provider
 adapters, the bridge package) while the lead keeps contracts, integration and
 the GUI runs. Sub-agents get disjoint paths.
@@ -315,6 +318,5 @@ the GUI runs. Sub-agents get disjoint paths.
 
 ## 8. Open questions for Wout (do not block on these)
 
-1. "Live OS" was not found under `/Volumes/T9/Code`. Where is it?
-2. Live AI on the reference projects: allowed, and with which provider?
-3. Should the start page (P6) become the main surface, or stay an experiment?
+1. Live AI on the reference projects: allowed, and with which provider?
+2. Should the start page (P6) become the main surface, or stay an experiment?
