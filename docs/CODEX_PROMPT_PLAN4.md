@@ -23,18 +23,20 @@ can get, without asking Wout anything.
   agent is working there on the native engine branch and builds into
   `/Volumes/AxioSozoBuild/zen`.
 - Use `AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/workstation` for every build.
-- Step 0 is already committed (`cb8748c`): isolated build roots and the Plan 4
-  contracts in `contracts/workstation-v1.md`, `agent-channel-v1.md`,
-  `understand-v1.md` and the `decision-v1.md` extensions. Verify step 0
-  yourself: the upstream for this worktree, a baseline `./dev check` and
-  `./dev test`, and that a build into the workstation root works. Then continue
-  with step 1.
+- Work already done is listed in `docs/PLAN_4_STATUS.md`: step 0 contracts and
+  build roots (`cb8748c`) and package-level logic for steps 1, 4, 5, 6 and 8
+  (`93e4e4c`: `packages/contexts`, `packages/provider-host`,
+  `packages/agent-bridge`, `tools/axiosozo-notify`). There is no chrome or
+  frontend integration yet. Start by finishing step 0 verification: the
+  upstream for this worktree, a baseline `./dev check` and `./dev test`, and a
+  build into the workstation root. Then handle the follow-ups in the status
+  file, and integrate step by step in PLAN_4 §5 order.
 
 ## Read first
 
 1. `AGENTS.md`. Every rule there is binding: storage helpers, no personal
    profile data, no push or release, and evidence only from real commands.
-2. `docs/PLAN_4.md`, the plan.
+2. `docs/PLAN_4.md`, the plan, and `docs/PLAN_4_STATUS.md`, the current state.
 3. `contracts/workstation-v1.md`, `contracts/agent-channel-v1.md`,
    `contracts/understand-v1.md`, `contracts/decision-v1.md` and
    `contracts/contexts-api-v1.md`.
