@@ -39,6 +39,8 @@ Package logic and tests, re-run on 2 October 2026 with the pinned Node via
 
 ## Step 0 verification — completed by Codex, 2 October 2026
 
+Local verification commit: `da2977b`.
+
 All commands ran in `/Volumes/T9/Code/AxioSozo-browser-workstation` on
 `product/workstation`; the main checkout and engine paths were not edited.
 Every build used `AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/workstation`,
@@ -94,11 +96,110 @@ Claude Opus 5.5 CLI developer readiness: **PASS**, session
 no changes. No frontend code was created or edited by Codex; actual frontend
 integration remains delegated to Claude in later steps.
 
-Steps 1–9 remain unintegrated. Their ignored pure-logic preparation and fake
-tests are not claims that those steps or their GUI gates passed. E1/E2 remain
+Step 1 integration is in progress below. Steps 2–9 remain unintegrated; their
+ignored pure-logic preparation and fake tests do not establish GUI gate passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
-## Open follow-ups for the integration lead
+## Step 1 — integrated source; interactive GUI BLOCKED_HUMAN
+
+Codex integrated the DOM-free detection/arrival/record/migration adapters and a
+checksum-pinned containment reader. Claude Opus 5.5 (session
+`7c769e60-ffb6-4f30-9143-2c89510567b7`) owns every frontend change: service and
+actor glue, startup, native arrival notification/runtime, detection preview and
+its overview styling. No frontend code was created or edited by Codex.
+
+The service now creates project record v2 in store v3, validates legacy stores
+before atomic migration, retains privileged detection snapshots, re-detects on
+confirmation, preserves manual fields on refresh, and admits `/Volumes/T9/Code`
+for arrival. An opaque arrival offer is bound to the exact normal window, tab,
+URL and lifetime; navigation, tab closure and window removal revoke acceptance.
+Canonical root policy is checked before metadata/content access and again before
+returning the result. Independent fake probes reproduce and verify the fixes
+for root aliases changing during reader startup and acceptance revoked mid-read.
+
+Actual verification, including the pinned native subprocess repair:
+
+- `./dev test` and `./dev check`: exit 0, with browser tests 627/627 passing,
+  provider-host 122, contexts 141 and containment reader
+  Python 22 and arrival supervisor Python 18. The other root suites passed; CEF native gates stayed skipped.
+- Warm `./dev setup`: exit 0; fingerprint
+  `c14bde3bb9c95d38e82c329f94fcf9b60671e816fd9cb2ab5edb6ee24df6f916`.
+- Real app runs A and B used newly owned synthetic profiles and fixture servers.
+  Product provider hosts, the agent endpoint, key-entry prefs and engine switching
+  stayed off; TLS checks remained enabled. Both owned apps and fixture servers
+  were reaped and their Marionette listeners closed. Fixture metadata hashes
+  were unchanged. Run A expired without completing its UI gate. Run B finished
+  cleanly, but its functional arrival/picker gate did not pass.
+- Native containment-reader detection of both synthetic projects passed. Actual
+  native read-only detection of all three authorized reference folders passed
+  with fixed metadata allowlists, `.git/config` excluded, and aggregate-only
+  evidence. This does not establish native picker/actor admission or a project
+  home GUI pass. No private reference content was copied into this repository.
+- Native GUI showed no arrival notification. A fixed read-only diagnostic then
+  observed `/usr/bin/id` exit 0 and `/usr/sbin/lsof` exit -9, before any filesystem
+  inspection. Run C measured the lsof failure at 2 ms, not a deadline expiry. Pinned Gecko uses inherited FD3 as an exit sentinel; Apple's lsof
+  closes descriptors above 2. A checksum-pinned, fixed-operation Python supervisor now preserves
+  that sentinel without engine changes. Its 18 actual synthetic process tests
+  cover deadline, cancellation, abrupt outer death, stream bounds and reaping.
+  Claude wired its lazy native adapter with retry and no direct-lsof fallback;
+  36 arrival/adapter Node tests and independent service wiring review passed.
+  Run E verified actual native discovery through this supervisor: id and three
+  fixed lsof operations exited 0, all four children waited once with zero kills,
+  and the exact owned Harbor folder was found in 229 ms. No UI token, acceptance,
+  profile write or fixture write occurred. Receipt:
+  `docs/evidence/plan4-1/supervisor-native-20261002-e/c7fd87d785ac10b2-arrival_diagnostics.json`.
+  Run E finished with native exit 0, owned children reaped, listener closed
+  and metadata unchanged. Interactive arrival remains a separate human gate.
+- The native picker showed the owned fixture folder selected while Open remained
+  disabled. A third owned run reproduced the same behavior with the stock
+  Firefox Downloads folder chooser in the same build. Cancel worked; no
+  TCC/Keychain prompt appeared and no download preference was changed. Claude
+  found no supported product wiring bug and made no speculative repair. Native
+  confirmation needs human reproduction; it remains unverified and is not
+  bypassed with fabricated picker provenance.
+
+Evidence (ignored): `docs/evidence/plan4-1/cua-observer-20261002-a/` and
+`docs/evidence/plan4-1/cua-observer-20261002-b/`, plus the fixed native
+diagnostic and stock-picker comparison in `cua-observer-20261002-c/`; root test/check/build logs are
+`.local/logs/plan4-step1-lead-test-privacy.log`,
+`plan4-step1-lead-check-privacy.log` and `plan4-step1-build-privacy.log`.
+- Rebuilt native run D verified the current fingerprint, runtime installation,
+  provider/endpoint/engine gates and rendered Projects overview. Both bounded
+  synthetic listeners had exact owned PID/UID/CWD admission. The actual CUA
+  call reported that the Mac was locked and automatic unlock failed. Native
+  arrival Keep, folder confirmation and reference-project UI are therefore
+  **BLOCKED_HUMAN**. No UI admission was fabricated. The plan's human-click gate
+  permits continuing to Step 2. Overview screenshots were inspected; lower
+  content is visibly faded/clipped, reserved for Claude's Step 3 redesign.
+  Run D finished with native exit 0, both fixture children reaped, both owned
+  listeners closed, and unchanged metadata hashes.
+
+Current logs: `.local/logs/plan4-step1-lead-test-supervisor.log`,
+`plan4-step1-lead-check-supervisor.log`, `plan4-step1-build-supervisor.log`.
+Evidence: `docs/evidence/plan4-1/cua-observer-20261002-d/`, including
+`lead-observations.json` and `startup-startup-window.png`. No interactive arrival
+pass is claimed. Step 1 is locally committed with this record; its hash is recorded in the next step.
+
+## Follow-ups handled in current source
+
+- Decision results retain and validate provider/confidence/shape status,
+  `IMAGE_UNSUPPORTED`, `UNVERIFIED_SHAPE`, and watch-1. Contracts now define
+  the understand reason and watch context. Legacy Jev replies may omit both
+  provider and confidence only for the existing site-rule context; current
+  results and watches retain strict provider/confidence validation.
+- Decision and understand product calls remain `NOT_AUTHORIZED`; direct live
+  decision-host service is refused. No real product provider was called.
+- Key entry enforces separate Jev/OpenAI prefs, fixed trusted helper paths,
+  stdin-only secret input, bounded output/deadlines and cancellation cleanup.
+  Missing prefs are false; removal remains allowed. Focused fake tests passed
+  100/100. Native entry UI is Step 5, not yet integrated.
+- Project records and external arrival roots are integrated as described above.
+- Buffered channel EOF handling and 55-second approval timing are prepared for
+  Step 4 only. Codex bridge guidance remains `tool_timeout_sec = 90`.
+- Git executable modes were staged explicitly for `dev` and the new reader
+  installer; exFAT file permissions are not used as Git mode evidence.
+
+## Original follow-ups (retained for traceability)
 
 1. **Blocker:** `apps/browser/chrome/ProviderDecision.sys.mjs` drops any reply
    with keys outside `RESULT_KEYS`. Fix this before integrating, along with:
@@ -133,8 +234,9 @@ None of these were run:
 - live OpenAI Decisions;
 - live Claude Code or Codex understand runs.
 
-The OpenAI Decisions API has no public documentation yet (all docs URLs return
-404). Its adapter is marked `UNVERIFIED_SHAPE` and never sends data. The Claude
+The three specific OpenAI Decisions documentation URLs checked on 2 October
+2026 returned 404. That limited check does not prove no documentation exists.
+The adapter is marked `UNVERIFIED_SHAPE` and never sends data. The Claude
 Code and Codex argument arrays have never been run against the real CLIs. Codex
 has no per-path read deny, so `.env*` is excluded only by the prompt.
 

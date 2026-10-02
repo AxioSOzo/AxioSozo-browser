@@ -350,7 +350,63 @@ export function draftToReview(draft, { contextUuid = null } = {}) {
     filesRead: [...(draft.files_read ?? [])],
     refused: (draft.refused ?? []).map(item => ({ path: item.path, reason: item.reason })),
     warnings: [...(draft.warnings ?? [])],
+    findings: detectionSummary(draft),
   };
+}
+
+// ---------------------------------------------------------------- detected (workstation-v1 §1)
+
+export const PLATFORM_LABELS = Object.freeze({ tauri: "Desktop (Tauri)", electron: "Desktop (Electron)",
+  macos: "macOS", ios: "iOS", android: "Android" });
+export const DOCUMENTED_DOMAIN_NOTE = "Found in docs, unconfirmed";
+export const PRESENCE_NOTE = "Agent files and app folders are noted by name only; they are not opened.";
+
+const textOr = (value, fallback = "") => (typeof value === "string" ? value : fallback);
+const listOf = value => (Array.isArray(value) ? value : []);
+
+/** What static detection found besides environments and links: services
+ * (integrations), native and mobile apps, production domains (documented ones
+ * kept apart as unconfirmed) and agent presence. Takes a detection draft or a
+ * project's `detected` snapshot; tolerant of null and partial data. Every
+ * string is shown as text only. */
+export function detectionSummary(detected) {
+  const integrations = listOf(detected?.integrations).filter(item => textOr(item?.name)).map(item => ({
+    id: textOr(item.id), name: item.name, url: isHttpUrl(item.dashboard_url) ? item.dashboard_url : null,
+    sources: listOf(item.sources).filter(source => typeof source === "string"),
+  }));
+  const platforms = listOf(detected?.platforms).filter(item => Object.hasOwn(PLATFORM_LABELS, item?.kind)).map(item => {
+    const name = textOr(item.name);
+    return { kind: item.kind, label: name ? `${PLATFORM_LABELS[item.kind]} · ${name}` : PLATFORM_LABELS[item.kind],
+      path: textOr(item.path), source: textOr(item.source) };
+  });
+  const domains = listOf(detected?.domains).filter(item => textOr(item?.host));
+  const domainRow = item => ({ host: item.host, source: textOr(item.source) });
+  const configuredDomains = domains.filter(item => item.origin !== "docs").map(domainRow);
+  const documentedDomains = domains.filter(item => item.origin === "docs").map(domainRow);
+  const worktrees = Number.isSafeInteger(detected?.agents?.worktrees) && detected.agents.worktrees > 0 ? detected.agents.worktrees : 0;
+  const agents = [...listOf(detected?.agents?.files), ...listOf(detected?.agents?.dirs)]
+    .filter(name => typeof name === "string" && name)
+    .map(name => (name === ".agent-worktrees" && worktrees ? `${worktrees} agent worktree${worktrees === 1 ? "" : "s"}` : name));
+  return {
+    integrations, platforms, configuredDomains, documentedDomains, agents,
+    empty: !integrations.length && !platforms.length && !domains.length && !agents.length,
+  };
+}
+
+/** Readable text for service and actor error codes the page can show. */
+export const ERROR_TEXT = Object.freeze({
+  READ_CONTAINMENT_UNAVAILABLE: "This build cannot read project folders safely, so nothing was read.",
+  ROOT_DENIED: "AxioSozo does not read this folder: it holds settings, keys or a browser profile, not a project.",
+  ROOT_CHANGED: "The folder changed while it was being read. Try again.",
+  ROOT_NOT_FOUND: "That folder no longer exists.",
+  ROOT_NOT_DIRECTORY: "That is not a folder.",
+  INVALID_ROOT: "That folder cannot be used.",
+  PROJECT_EXISTS: "This folder is already a project.",
+  UNKNOWN_PROJECT: "That project no longer exists.",
+  ROOT_NOT_PICKED: "Choose the folder with the folder picker first.",
+});
+export function errorMessage(code) {
+  return typeof code === "string" && Object.hasOwn(ERROR_TEXT, code) ? ERROR_TEXT[code] : null;
 }
 
 export function projectToReview(project) {

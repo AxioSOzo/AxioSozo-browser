@@ -68,7 +68,7 @@ reused for later checkpoints, and exits at the normal two-minute idle.
 - Result `reason` is one of `validated`, `disabled`, `cancelled`, `timeout`,
   `BLOCKED_AUTH`, `HTTP_ERROR`, `NETWORK_ERROR`, `KEYCHAIN_ERROR`,
   `malformed_output`, `budget_exhausted`, `INVALID_INPUT`, `IMAGE_UNSUPPORTED`,
-  `UNVERIFIED_SHAPE` (the last two: Plan 4, below).
+  `UNVERIFIED_SHAPE`, `NOT_AUTHORIZED` (Plan 4, below).
 - The Keychain is read only after validation, never at host start. No key means
   reason `disabled` and zero network calls.
 - **Budget (defense in depth).** Each host process allows at most
@@ -86,7 +86,7 @@ reused for later checkpoints, and exits at the normal two-minute idle.
   chrome; if it throws, nothing is sent. It re-validates every reply against the
   request (outcome listed in `rule.effects`, fixed codes, authority fields,
   no extra keys). Chrome-only reasons: `HOST_UNAVAILABLE` (host missing, exited
-  or silent) and `INVALID_INPUT` (shape gate or line over 73,728 bytes). When a
+  or silent) and `INVALID_INPUT` (shape gate or a request over its bounded transport line cap). When a
   request reached the host but no valid reply arrived, `data_sent` is reported
   as `true` (unknown is disclosed as sent). The host runs with only `PATH`,
   `LANG` and `AXIOSOZO_BUILD_ROOT` in its environment.
@@ -113,14 +113,17 @@ Implementation: `packages/provider-host/src/decision.mjs`; spec: decision-v1
   outline level). The serialized-state cap is 1.5 MiB for `screen` only; every
   other level keeps 64 KiB. Chrome remains responsible for the rule/watch
   allowing `screen`, private windows and the sensitive-category cap.
-- **Gates, in order, before any Keychain read:** validation (`INVALID_INPUT`) →
+- **Product gates, before any Keychain read:** validation (`INVALID_INPUT`) →
+  disabled live authorization (`NOT_AUTHORIZED`, neutral outcome,
+  `data_sent: false`). The browser serve factory always disables live calls.
+  Explicit fixture-only adapters then apply:
   a `screen` request to a provider without `image` → outcome `none`/`unknown`,
   reason `IMAGE_UNSUPPORTED`, `data_sent: false` → an `UNVERIFIED_SHAPE` provider
   in the product host → reason `UNVERIFIED_SHAPE`, `data_sent: false`. Neither
   gate counts against the budget. New reasons: `IMAGE_UNSUPPORTED`,
   `UNVERIFIED_SHAPE`.
 - **`watch_v1`.** `choice_set: "watch_v1"`, `context_version: "watch-1"`
-  (chosen here; decision-v1 does not name one). State exactly
+  (also defined in decision-v1). State exactly
   `{ watch: { id: ^w_[a-z0-9]{4,32}$, question: 1–500 chars, outcomes: 2–6 × { id: ^[a-z][a-z0-9_]{0,31}$, label: 1–80 chars, no control characters } }, observation }`;
   outcome ids unique, `unknown` reserved. One `choice` question named `watch`
   whose criteria are the outcome labels plus

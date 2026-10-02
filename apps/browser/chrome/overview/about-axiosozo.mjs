@@ -143,7 +143,7 @@ function errorText(error) {
   if (error?.code === "SENDER_REJECTED" || error?.code === "ACTOR_ERROR") {
     return "This page is not connected to AxioSozo.";
   }
-  return error?.message ? String(error.message) : "Something went wrong.";
+  return M.errorMessage(error?.code) ?? (error?.message ? String(error.message) : "Something went wrong.");
 }
 
 async function call(name, params) {
@@ -396,6 +396,37 @@ function urlChip(label, url, contextUuid, description, glyph = "globe") {
   icon(glyph, 14), h("span", {}, label), h("span", { class: "chip-detail" }, hostOf(url)));
 }
 
+/** Rows for what static detection found (M.detectionSummary): services, apps,
+ * domains (documented ones apart, marked unconfirmed) and agent presence.
+ * `project` turns services into dashboard links in the project's space; the
+ * add-project preview shows plain labels. Every value is text, never markup. */
+function findingFacts(summary, { project = null } = {}) {
+  const sources = list => (list.length ? `Found in ${list.join(", ")}` : null);
+  // A vendor's general dashboard (no project ids); the name says enough.
+  const dashboardChip = item => h("button", { type: "button", class: "chip", "aria-label": `Open the ${item.name} dashboard`,
+    title: item.url, onclick: () => act("openUrl", { url: item.url, contextUuid: project.context_uuid ?? null }) },
+  icon("open", 14), h("span", {}, item.name));
+  return [
+    summary.integrations.length ? ["Services", summary.integrations.map(item => (project && item.url
+      ? dashboardChip(item) : h("span", { class: "tag", title: sources(item.sources) }, item.name)))] : null,
+    summary.platforms.length ? ["Apps", summary.platforms.map(item =>
+      h("span", { class: "tag", title: item.source || item.path || null }, item.label))] : null,
+    summary.configuredDomains.length ? ["Domains", summary.configuredDomains.map(item =>
+      h("span", { class: "tag", title: item.source ? `From ${item.source}` : null }, item.host))] : null,
+    summary.documentedDomains.length ? ["From docs", [
+      ...summary.documentedDomains.map(item => h("span", { class: "tag unconfirmed",
+        title: item.source ? `${M.DOCUMENTED_DOMAIN_NOTE}: ${item.source}` : M.DOCUMENTED_DOMAIN_NOTE }, item.host)),
+      h("span", { class: "fact-note" }, "unconfirmed")]] : null,
+    summary.agents.length ? ["Agents", summary.agents.map(name =>
+      h("span", { class: "tag", title: "Present in the folder; not opened" }, name))] : null,
+  ].filter(Boolean);
+}
+
+async function refreshDetectionFlow(project) {
+  const result = await act("refreshProjectDetection", { id: project.id }, `Read the folder of ${projectName(project)} again.`);
+  if (result.ok) await loadProjects();
+}
+
 /** First run: what adding a project does, as the empty state of this view. */
 function firstRunGuide() {
   const steps = [
@@ -406,7 +437,8 @@ function firstRunGuide() {
   return h("section", { class: "guide", "aria-labelledby": "guide-heading" },
     h("div", { class: "guide-head" },
       h("h3", { id: "guide-heading" }, "Add your first project"),
-      h("p", {}, "Any space can hold projects, personal ones included. Everything stays on this Mac.")),
+      h("p", {}, "Any space can hold projects, personal ones included. Everything stays on this Mac."),
+      h("p", {}, "Opening your app on localhost also works: AxioSozo offers to keep its folder as a project.")),
     h("ol", { class: "steps" }, steps.map(([title, text], index) => h("li", { class: "step" },
       h("span", { class: "step-mark", "aria-hidden": "true" }, String(index + 1)),
       h("span", { class: "step-title" }, title),
@@ -448,6 +480,7 @@ function projectCard(project) {
       urlChip(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
     secondary.length ? ["More links", secondary.map(surface =>
       urlChip(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
+    ...findingFacts(M.detectionSummary(project.detected), { project }),
   ].filter(Boolean);
   return h("li", { class: "card", id: `project-${project.id}`, "aria-labelledby": headingId, tabindex: "-1" },
     h("div", { class: "card-head" },
@@ -461,6 +494,7 @@ function projectCard(project) {
         h("button", { type: "button", class: "ghost", "data-focus-key": key("edit"), "aria-label": `Edit ${projectName(project)}`,
           onclick: () => openProjectReview({ mode: "edit", project }) }, "Edit"),
         overflowMenu(`More for ${projectName(project)}`, [
+          { label: project.detected ? "Read folder again" : "Read folder", focusKey: key("refresh"), run: () => refreshDetectionFlow(project) },
           { label: inRepo ? "Update .axiosozo/project.json…" : "Save as .axiosozo/project.json…", focusKey: key("write"), run: () => writeManifestFlow(project) },
           { label: "Remove project…", destructive: true, focusKey: key("remove"), run: () => removeProjectFlow(project) },
         ]))),
@@ -639,6 +673,11 @@ function openProjectReview({ mode, root, draft, project, contextUuid = null }) {
     state.contexts.map(context => option(context.uuid,
       `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · this window" : ""}`, review.contextUuid)));
 
+  const findingRows = mode === "new" ? findingFacts(review.findings) : [];
+  const findings = findingRows.length ? h("fieldset", { class: "findings" }, h("legend", {}, "Also found in the folder"),
+    h("p", { class: "help" }, `Kept with the project in this browser, never written to the folder. ${M.PRESENCE_NOTE}`),
+    h("dl", { class: "facts" }, findingRows.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))) : null;
+
   const detectionDetails = mode === "new" ? h("details", {},
     h("summary", {}, `What was read: ${review.filesRead.length} file${review.filesRead.length === 1 ? "" : "s"}, ${review.refused.length} refused`),
     review.frameworks.length ? h("p", {}, "Frameworks: " + review.frameworks.join(", ")) : null,
@@ -695,7 +734,7 @@ function openProjectReview({ mode, root, draft, project, contextUuid = null }) {
         help: "The live site, for the environment switch. Hosting links such as Vercel only point to the dashboard, so add it here." }),
       h("fieldset", {}, h("legend", {}, "Links"),
         h("h4", {}, "Shown in the sidebar"), surfacesShown, moreDetails, h("div", {}, addLinkButton)),
-      detectionDetails, writeChoice, errorsList],
+      findings, detectionDetails, writeChoice, errorsList],
     footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
       h("button", { type: "button", class: "primary", onclick: submit }, mode === "new" ? "Add project" : "Save")],
   });

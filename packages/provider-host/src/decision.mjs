@@ -71,7 +71,7 @@ export const WATCH_INSTRUCTIONS = 'Answer the user\'s watch question about the o
   + 'Choose unknown when unsure. Your answer is a status only and never authorizes an action.';
 
 export const DECISION_REASONS = Object.freeze(['validated', 'disabled', 'cancelled', 'timeout', 'BLOCKED_AUTH', 'HTTP_ERROR',
-  'NETWORK_ERROR', 'KEYCHAIN_ERROR', 'malformed_output', 'budget_exhausted', 'INVALID_INPUT', 'IMAGE_UNSUPPORTED', UNVERIFIED_SHAPE]);
+  'NETWORK_ERROR', 'KEYCHAIN_ERROR', 'malformed_output', 'budget_exhausted', 'INVALID_INPUT', 'NOT_AUTHORIZED', 'IMAGE_UNSUPPORTED', UNVERIFIED_SHAPE]);
 const EFFECTS = ['nudge', 'suggest_leave', 'pause_site'];
 const CONTEXT_TYPES = ['personal', 'organization', 'project'];
 const OUTLINE_KINDS = ['heading', 'link', 'label'];
@@ -213,10 +213,13 @@ export class DecisionProvider {
    * `keyStore` is the Jev Keychain item (unchanged); `openaiKeyStore` the separate OpenAI item.
    * `unverifiedOpenAIFixture` is TEST-ONLY: it lets the UNVERIFIED_SHAPE OpenAI adapter reach the
    * injected fake `fetchImpl`. The product (`cli.mjs serve`) never sets it.
+   * `liveAuthorized` is a host-owned capability: browser serve explicitly disables it.
+   * The default preserves direct diagnostics and existing injected fake tests.
    */
-  constructor({ keyStore, openaiKeyStore, fetchImpl = fetch, now = Date.now, unverifiedOpenAIFixture = false } = {}) {
+  constructor({ keyStore, openaiKeyStore, fetchImpl = fetch, now = Date.now, unverifiedOpenAIFixture = false, liveAuthorized = true } = {}) {
     this.keyStore = keyStore; this.openaiKeyStore = openaiKeyStore; this.fetchImpl = fetchImpl; this.now = now;
     this.unverifiedOpenAIFixture = unverifiedOpenAIFixture === true;
+    this.liveAuthorized = liveAuthorized === true;
   }
   /** Routes by choice set. Without `choice_set` the unchanged synthetic diagnostic runs. */
   decide(input, options) {
@@ -287,12 +290,14 @@ export class DecisionProvider {
   }
   // Capability and verification gates run before the Keychain is read: neither touches anything.
   async #ask(input, provider, questions, signal, allowSend) {
+    if (!this.liveAuthorized) return { reason: 'NOT_AUTHORIZED', dataSent: false };
     if (input.state.observation.level === 'screen' && !provider.capabilities.image) return { reason: 'IMAGE_UNSUPPORTED', dataSent: false };
     if (provider.shape_status === UNVERIFIED_SHAPE && !this.unverifiedOpenAIFixture) return { reason: UNVERIFIED_SHAPE, dataSent: false };
     return this.#exchange(input, signal, payloadFor(provider, input.state, questions), allowSend, provider);
   }
   // The only network step. `dataSent` is true once a fetch carrying the key and body was started.
   async #exchange(input, signal, payload, allowSend, provider) {
+    if (!this.liveAuthorized) return { reason: 'NOT_AUTHORIZED', dataSent: false };
     if (signal?.aborted) return { reason: 'cancelled', dataSent: false };
     if (this.now() >= input.deadline_ms) return { reason: 'timeout', dataSent: false };
     const keyStore = provider.id === 'jev' ? this.keyStore : this.openaiKeyStore;

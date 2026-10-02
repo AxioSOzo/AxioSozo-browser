@@ -161,9 +161,11 @@ function requirePickedRoot(ctx, name, root) {
 // ---------------------------------------------------------------- methods
 
 // The closed method list: every §3.3 service method (pickFolder is called
-// with the requesting tab's window) plus openContext, openUrl, the
-// read-only getOverviewFlags and the provider status / Jev key methods
-// (contracts/provider-v1.md). Nothing else is callable.
+// with the requesting tab's window), refreshProjectDetection (workstation-v1
+// §1, by project id) plus openContext, openUrl, the read-only
+// getOverviewFlags and the provider status / Jev key methods
+// (contracts/provider-v1.md). Nothing else is callable. Arrival offers are
+// accepted in the native notification only; no page method takes a token.
 export const METHODS = Object.freeze({
   // contexts
   listContexts: { params: {}, run: ({ services }) => services.listContexts() },
@@ -195,10 +197,12 @@ export const METHODS = Object.freeze({
     ctx.pickedRoots.add(root);
     return root;
   } },
+  // Static detection through the containment reader; returns the draft only.
   detect: { params: { root: T.root }, run: (ctx, p) => {
     requirePickedRoot(ctx, "detect", p.root);
     return ctx.services.detect(p.root);
   } },
+  // The service detects the picked folder again before it creates the record.
   confirmProject: { params: { root: T.root, manifest: T.object, contextUuid: optional(T.uuidOrNull) },
     run: async (ctx, p) => {
       requirePickedRoot(ctx, "confirmProject", p.root);
@@ -206,6 +210,10 @@ export const METHODS = Object.freeze({
       ctx.pickedRoots.delete(p.root);
       return project;
     } },
+  // A registered project's own folder, read again; the page names the project
+  // id only, never a path, and the detected snapshot is never page-supplied.
+  refreshProjectDetection: { params: { id: T.projectId },
+    run: ({ services }, p) => services.refreshProjectDetection(p.id) },
   writeManifest: { params: { projectId: T.projectId }, run: ({ services }, p) => services.writeManifest(p.projectId) },
   updateProject: { params: { id: T.projectId, patch: T.object },
     run: ({ services }, p) => services.updateProject(p.id, checkPatch("updateProject", p.patch, PROJECT_PATCH_KEYS)) },

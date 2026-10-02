@@ -169,15 +169,33 @@ manifest):
   `["-nP", "-a", "-iTCP:<port>", "-sTCP:LISTEN", "-F", "pun"]` (port is an
   integer 1–65535, else `INVALID_INPUT`). `LSOF_CWD_ARGS(pid)` →
   `["-nP", "-a", "-p", "<pid>", "-d", "cwd", "-F", "pn"]`.
+- Native Gecko executes lsof through a fixed checksum-pinned supervisor,
+  preserving Gecko's inherited FD3 exit sentinel. It accepts only `listen
+  PORT UID` or `cwd PID UID`, verifies UID against the OS owner, and retains
+  the exact selectors above with `-u UID` ANDed. There is no direct-lsof
+  fallback or actor-selected executable/environment/cwd. The helper checks
+  its own regular canonical file, UID/link count, mode 0400 and private parent
+  mode 0700 before lsof. The installer checks the same boundary; Gecko checks
+  path/type/mode/hash, without claiming an unavailable UID metadata API.
+  The operation has a 2.60-second deadline, 1 MiB stdout and 16 KiB stderr cap;
+  failure releases no partial stdout. Control-pipe EOF, parent loss, signals
+  and abrupt helper death cancel and reap the isolated owned child group.
+  The arrival adapter keeps its overall three-second deadline and fixed
+  failure refusal before filesystem inspection.
 - `parseLsofListen(text, { uid }) → [{ pid }]` — `-F` field output (`p`, `u`,
   `n` lines); only processes whose `u` equals `uid` and whose `n` is a
   loopback address (`127.0.0.1:`, `[::1]:`, `localhost:`, `*:`) are kept. At
   most 8, unique pids. Hostile input never throws.
 - `parseLsofCwd(text) → string | null` — the `n` of the `fcwd` entry;
   absolute, no NUL, ≤ 4096.
-- `rootCandidates(cwd, { home }) → string[]` — `cwd` and its ancestors,
-  deepest first, at most 6, never `/`, never `home` itself, never outside
-  `home` (when `cwd` is outside `home` → `[]`).
+- `rootCandidates(cwd, { home, roots? }) → string[]` — `cwd` and its ancestors,
+  deepest first, at most 6. The optional privileged `roots` array allows
+  reference projects outside home; native configuration includes
+  `/Volumes/T9/Code`. Candidates stay strictly below the deepest matching
+  allowed base, never `/`, `home` or a configured base itself. No match → `[]`.
+  Chrome canonicalizes bases/cwd, rejects system/profile/credential directories,
+  and rechecks own-UID process cwd before issuing any proposal. Pages cannot
+  supply roots, PIDs, UID, executables or folder paths.
 - `chooseArrivalRoot(candidates, present) → string | null` — `present` maps
   `<dir>/.git` → `"file" | "dir"`; returns the nearest ancestor holding `.git`,
   else `candidates[0]`.
@@ -188,9 +206,11 @@ manifest):
 ### 4.1 Surface matching
 
 `matchSurfaceForUrl(projects, url) → { project_id, surface } | null` — a URL on
-`github.com`/`gitlab.com`/`bitbucket.org` whose first two path segments equal a
-project's `repository` surface (case-insensitive), or on `vercel.com` whose
-path starts with the `/team/project` of a project's Vercel `hosting` surface.
+`github.com`/`bitbucket.org` whose owner/repository path segments equal a
+project's `repository` surface (case-insensitive), or `gitlab.com` whose complete
+repository path (including subgroups) matches on segment boundaries. A terminal
+`.git` suffix is ignored. Vercel matches `/team/project` of a stored `hosting`
+surface; a sibling GitLab repository never inherits another project's match.
 Ambiguity → the first project in list order. This links a tab to an existing
 project; it never discovers folders (no scanning).
 

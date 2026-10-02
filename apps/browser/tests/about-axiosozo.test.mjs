@@ -121,14 +121,16 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus openContext, openUrl and flags", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, openContext, openUrl and flags", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
     "getOverviewFlags", "getProject", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
     "listOrphans", "listProjects", "listRules", "needsAttention", "openContext", "openUrl", "pickFolder",
-    "projectForUrl", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus", "setContextType",
-    "setEnginePreference", "setJevSettings", "storeJevKey", "updateProject", "usageSummary", "writeManifest",
+    "projectForUrl", "refreshProjectDetection", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus",
+    "setContextType", "setEnginePreference", "setJevSettings", "storeJevKey", "updateProject", "usageSummary", "writeManifest",
   ]);
+  // Arrival is accepted in the native notification only (ProjectArrivalRuntime).
+  assert.ok(!Object.keys(METHODS).some(name => /arrival/iu.test(name)));
 });
 
 test("unknown methods, prototype names and malformed params are rejected at the parent boundary", async () => {

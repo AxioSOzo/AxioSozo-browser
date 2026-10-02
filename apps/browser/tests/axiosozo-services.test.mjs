@@ -6,8 +6,10 @@ import { fakeZenWindow } from "./support/fake-zen.mjs";
 // Synthetic profile storage, filesystem, clock and probe. No network, no real
 // profile, no files outside memory. Not evidence of a running browser.
 const skip = contextsCoreAvailable ? false : "packages/contexts/src/index.mjs is absent (contexts core not written yet)";
-const { AxioSozoServices, processSingleton, PROBE_MIN_INTERVAL_MS, LEDGER_FLUSH_MS, MAX_PENDING_LEDGER, loopbackAddresses } = skip ? {}
-  : await import("../chrome/AxioSozoServices.sys.mjs");
+const { AxioSozoServices, processSingleton, PROBE_MIN_INTERVAL_MS, LEDGER_FLUSH_MS, MAX_PENDING_LEDGER, loopbackAddresses,
+  arrivalRootsFromEnvironment, DEFAULT_ARRIVAL_ROOTS, lazyArrivalSubprocess } = skip ? {} : await import("../chrome/AxioSozoServices.sys.mjs");
+const { createNativeProjectArrivalSubprocess, arrivalSubprocessPaths, ARRIVAL_LSOF_SHA256, ARRIVAL_LSOF_PYTHON } = skip ? {}
+  : await import("../chrome/ProjectArrivalSubprocess.sys.mjs");
 const { ZenWorkspaceAdapter } = await import("../chrome/ZenWorkspaceAdapter.sys.mjs");
 
 const HOME = "11111111-1111-4111-8111-111111111111";
@@ -57,30 +59,10 @@ function fakeFs(tree, hooks = {}) {
     async lstat(path) { return info(nodes.get(resolve(path, false))); },
     async stat(path) { return info(nodes.get(resolve(path, true))); },
     async realpath(path) { const real = resolve(path, true); if (!nodes.has(real)) throw new Error("ENOENT"); return real; },
-    listed: [],
-    /** Immediate entries of a directory with no-follow types (IOUtils.getChildren + lstat). */
-    async listDirectory(path, limit = Infinity) {
-      const real = resolve(path, true);
-      if (!nodes.get(real)?.dir) throw new Error("ENOTDIR");
-      this.listed.push(real);
-      const out = [];
-      for (const [key, node] of nodes) {
-        if (key === real || !key.startsWith(real === "/" ? "/" : real + "/")) continue;
-        const name = key.slice(real.length + 1);
-        if (name.includes("/")) continue;
-        out.push({ name, type: info(node).type });
-      }
-      return out.slice(0, limit);
-    },
-    async read(path, maxBytes) {
-      hooks.beforeRead?.(path, nodes);
-      const real = resolve(path, true);
-      reads.push(real);
-      const node = nodes.get(real);
-      if (!node?.file && node?.file !== "") throw new Error("EISDIR");
-      const bytes = typeof node.file === "string" ? Buffer.from(node.file) : node.file;
-      return new Uint8Array(bytes.subarray(0, maxBytes));
-    },
+    // Project content is read and listed only through the containment reader;
+    // a plain path read or listing would be a containment bypass.
+    async listDirectory() { throw new Error("PLAIN_LISTING_MUST_NEVER_BE_USED"); },
+    async read() { throw new Error("PLAIN_READ_MUST_NEVER_BE_USED"); },
     /** The entry a leaf operation acts on: parents resolved, the leaf itself not followed. */
     entryPath(path) {
       const parts = split(path);
@@ -111,7 +93,89 @@ function fakeFs(tree, hooks = {}) {
   };
 }
 
-function harness({ spaces, tree = {}, probe, hooks } = {}) {
+// The containment reader's contract (ProjectReader) over the same tree: every
+// path component is checked without following links, entries carry
+// device/inode identities (a replaced node gets a new one), and content is
+// returned only for the expected file identity. Reads land in fs.reads.
+function secureReader(fs, hooks = {}) {
+  const ids = new WeakMap();
+  let next = 0;
+  const calls = [];
+  const identity = node => { if (!ids.has(node)) ids.set(node, { device: "1", inode: String(++next) }); return ids.get(node); };
+  const refused = () => Object.assign(new Error("READ_CONTAINMENT_REFUSED"), { code: "READ_CONTAINMENT_REFUSED" });
+  const nofollow = path => {
+    let current = "";
+    for (const part of path.split("/").filter(Boolean)) {
+      current += `/${part}`;
+      const node = fs.nodes.get(current);
+      if (!node || node.link) throw refused();
+    }
+    return fs.nodes.get(path);
+  };
+  const meta = node => ({ type: node.dir ? "directory" : node.link ? "other" : "regular",
+    size: node.dir ? 0 : (typeof node.file === "string" ? Buffer.from(node.file) : node.file).length, identity: identity(node) });
+  const same = (a, b) => a?.device === b?.device && a?.inode === b?.inode;
+  const checkRoot = (root, expected) => { if (!same(identity(nofollow(root)), expected)) throw refused(); };
+  return {
+    calls,
+    async rootMetadata(root) { calls.push(["root", root]); return meta(nofollow(root)); },
+    async fileMetadata({ root, relative, expectedRoot }) {
+      calls.push(["file", relative]); checkRoot(root, expectedRoot); return meta(nofollow(`${root}/${relative}`));
+    },
+    async presenceMetadata({ root, relative, expectedRoot }) {
+      calls.push(["presence", relative]); checkRoot(root, expectedRoot);
+      try { return meta(nofollow(`${root}/${relative}`)); } catch { return null; }
+    },
+    async listContained({ root, relative, expectedRoot, expectedDirectory, limit }) {
+      const path = relative ? `${root}/${relative}` : root;
+      checkRoot(root, expectedRoot);
+      const node = nofollow(path);
+      if (!node.dir || !same(identity(node), expectedDirectory)) throw refused();
+      calls.push(["list", path]);
+      const entries = [];
+      for (const [key, child] of fs.nodes) {
+        if (!key.startsWith(`${path}/`) || key.slice(path.length + 1).includes("/")) continue;
+        entries.push({ name: key.slice(path.length + 1), type: child.link ? "symlink" : child.dir ? "directory" : "regular" });
+      }
+      return { entries: entries.slice(0, limit), identity: identity(node) };
+    },
+    async readContained({ root, relative, expectedRoot, expectedFile, maxBytes }) {
+      const path = `${root}/${relative}`;
+      hooks.beforeRead?.(path, fs.nodes);
+      checkRoot(root, expectedRoot);
+      const node = nofollow(path);
+      if (node.dir || !same(identity(node), expectedFile)) throw refused();
+      calls.push(["read", path]);
+      fs.reads.push(path);
+      const bytes = typeof node.file === "string" ? Buffer.from(node.file) : node.file;
+      return new Uint8Array(bytes.subarray(0, maxBytes));
+    },
+  };
+}
+
+// Gecko Subprocess.call shape for /usr/bin/id and /usr/sbin/lsof only; answers
+// from `listeners` (port → { pid, cwd, uid }). No real process is started.
+function fakeArrivalRuntime(listeners = {}) {
+  const calls = [];
+  const pipe = text => { let done = false; return { async readString() { if (done) return ""; done = true; return text; }, async close() {} }; };
+  const reply = text => ({ stdout: pipe(text), stderr: pipe(""), stdin: { async close() {} },
+    async wait() { return { exitCode: 0 }; }, async kill() {} });
+  return { calls, async call({ command, arguments: args }) {
+    calls.push([command, ...args]);
+    if (command === "/usr/bin/id") return reply("501\n");
+    if (command !== "/usr/sbin/lsof") throw new Error("unexpected command");
+    const port = args.find(arg => arg.startsWith("-iTCP:"))?.slice(6);
+    if (port) {
+      const entry = listeners[port];
+      return reply(entry ? `p${entry.pid}\nu${entry.uid ?? 501}\nn127.0.0.1:${port}\n` : "");
+    }
+    const pid = Number(args[args.indexOf("-p") + 1]);
+    const entry = Object.values(listeners).find(item => item.pid === pid);
+    return reply(entry ? `p${pid}\nfcwd\nn${entry.cwd}\n` : "");
+  } };
+}
+
+function harness({ spaces, tree = {}, probe, hooks, deps = {} } = {}) {
   const storage = memoryStorage();
   let now = NOON;
   const timers = { queue: [], setTimeout(fn, ms) { const t = { fn, ms }; this.queue.push(t); return t; },
@@ -125,8 +189,9 @@ function harness({ spaces, tree = {}, probe, hooks } = {}) {
     { uuid: BV, name: "AxioSozo BV", containerTabId: 1 },
     { uuid: APP, name: "Shop app", containerTabId: 2 }] });
   const fs = fakeFs(tree, hooks);
+  const reader = secureReader(fs, hooks);
   const make = () => new AxioSozoServices({
-    storageFor: storage.storageFor, fs, timers,
+    storageFor: storage.storageFor, fs, timers, reader,
     clock: () => now,
     localTime: ms => { const d = new Date(ms); return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(),
       minutes: d.getUTCHours() * 60 + d.getUTCMinutes(), weekday: d.getUTCDay() }; },
@@ -134,11 +199,12 @@ function harness({ spaces, tree = {}, probe, hooks } = {}) {
     probe: async target => { probes.push(target); return probe ? probe(target) : "up"; },
     pickFolder: async () => "/work/shop",
     onShutdown: fn => shutdown.push(fn),
+    ...deps,
   });
   const services = make();
   const adapter = new ZenWorkspaceAdapter(zen.window);
   const unregister = services.registerWindow(zen.window, adapter);
-  return { services, storage, zen, adapter, unregister, fs, timers, probes, shutdown, make,
+  return { services, storage, zen, adapter, unregister, fs, reader, timers, probes, shutdown, make,
     advance(ms) { now += ms; }, get now() { return now; } };
 }
 
@@ -741,4 +807,592 @@ test("activeContext reports the requesting window's space and nothing for privat
   const privateZen = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }], isPrivate: true });
   h.services.registerWindow(privateZen.window, new ZenWorkspaceAdapter(privateZen.window));
   assert.deepEqual(await h.services.activeContext({ window: privateZen.window }), { uuid: null });
+});
+
+// ── Plan 4 step 1: detection v2, store v3 persistence, records v2, arrival ──
+
+const code = expected => error => error?.code === expected;
+const RICH_TREE = {
+  "/work": { dir: true },
+  "/work/shop": { dir: true },
+  "/work/shop/package.json": { file: JSON.stringify({ name: "shop", scripts: { dev: "vite --port 5174" },
+    dependencies: { "@clerk/clerk-react": "1", convex: "1" }, devDependencies: { vite: "^5" } }) },
+  "/work/shop/convex.json": { file: JSON.stringify({ functions: "convex/" }) },
+  "/work/shop/convex": { dir: true },
+  "/work/shop/vercel.json": { file: JSON.stringify({ redirects: [{ source: "/a", destination: "https://app.shop-product.dev/" }] }) },
+  "/work/shop/docs": { dir: true },
+  "/work/shop/docs/domains.md": { file: "Production: `api.shop-product.dev`\n" },
+  "/work/shop/AGENTS.md": { file: "TRAP-AGENTS-CONTENT" },
+  "/work/shop/CLAUDE.md": { file: "TRAP-CLAUDE-CONTENT" },
+  "/work/shop/.claude": { dir: true },
+  "/work/shop/.claude/settings.json": { file: "TRAP-CLAUDE-SETTINGS" },
+  "/work/shop/.env": { file: "SECRET=never-read" },
+  "/work/shop/.git": { dir: true },
+  "/work/shop/apps": { dir: true },
+  "/work/shop/apps/web": { dir: true },
+  "/work/shop/ios": { dir: true },
+  "/work/shop/ios/Shop.xcodeproj": { dir: true },
+  "/work/shop/ios/Shop.xcodeproj/project.pbxproj": { file: "TRAP-XCODE" },
+  "/work/other": { dir: true },
+};
+const neverRead = /\.env|AGENTS|CLAUDE|\.claude|xcodeproj|pbxproj/u;
+
+test("detection v2 runs every phase through the containment reader; agent files and native folders are names only", { skip }, async () => {
+  const h = harness({ tree: RICH_TREE });
+  const draft = await h.services.detect("/work/shop");
+  assert.equal(draft.version, 2);
+  assert.deepEqual(draft.integrations.map(item => item.id), ["vercel", "convex", "clerk"]);
+  assert.deepEqual(draft.platforms.map(item => [item.kind, item.name]), [["ios", "Shop"]]);
+  assert.deepEqual(draft.domains.map(item => [item.host, item.origin, item.confirmed]),
+    [["app.shop-product.dev", "vercel_json", false], ["api.shop-product.dev", "docs", false]]);
+  assert.deepEqual(draft.agents, { files: ["AGENTS.md", "CLAUDE.md"], dirs: [".claude"], worktrees: 0 });
+  assert.ok(h.fs.reads.length > 0 && h.fs.reads.every(path => path.startsWith("/work/shop/")));
+  assert.ok(!h.fs.reads.some(path => neverRead.test(path)), JSON.stringify(h.fs.reads));
+  assert.doesNotMatch(JSON.stringify(draft), /TRAP|SECRET/u);
+  assert.ok(h.reader.calls.some(([kind, path]) => kind === "list" && path === "/work/shop/ios"), "native folders are listed by name");
+});
+
+test("without a containment reader nothing is read; the native reader is made only for an admitted detection", { skip }, async () => {
+  const none = harness({ tree: RICH_TREE, deps: { reader: null } });
+  await assert.rejects(none.services.detect("/work/shop"), code("READ_CONTAINMENT_UNAVAILABLE"));
+  await assert.rejects(none.services.confirmProject({ root: "/work/shop", manifest: MANIFEST }), code("READ_CONTAINMENT_UNAVAILABLE"));
+  assert.deepEqual(none.fs.reads, []);
+  assert.deepEqual(await none.services.listProjects(), [], "nothing is stored without a fresh detection");
+  let created = 0;
+  const lazy = harness({ tree: RICH_TREE, deps: { reader: null, createReader: async () => { created++; return lazy.reader; } } });
+  await lazy.services.listProjects();
+  await lazy.services.listContexts();
+  assert.equal(created, 0, "loading the service or the store creates no reader");
+  assert.equal((await lazy.services.detect("/work/shop")).version, 2);
+  assert.equal(created, 1);
+  const broken = harness({ tree: RICH_TREE, deps: { reader: null, createReader: async () => { throw new Error("helper checksum mismatch"); } } });
+  await assert.rejects(broken.services.detect("/work/shop"), error => error.code === "READ_CONTAINMENT_UNAVAILABLE" && !/checksum/u.test(error.message));
+});
+
+test("settings, key and profile folders are refused by name and resolved path before any reader call", { skip }, async () => {
+  const tree = { ...RICH_TREE, "/Users": { dir: true }, "/Users/synthetic": { dir: true }, "/Users/synthetic/.ssh": { dir: true },
+    "/Users/synthetic/.ssh/package.json": { file: "{\"name\":\"TRAP\"}" }, "/Users/synthetic/Library": { dir: true },
+    "/Users/synthetic/.codex": { dir: true }, "/profiles": { dir: true }, "/profiles/synthetic": { dir: true },
+    "/work/keys": { link: "/Users/synthetic/.ssh" } };
+  const h = harness({ tree, deps: { home: "/Users/synthetic", profileDir: "/profiles/synthetic" } });
+  for (const root of ["/Users/synthetic/.ssh", "/Users/synthetic/Library", "/Users/synthetic/.codex", "/profiles/synthetic", "/work/keys", "/System", "/etc"]) {
+    await assert.rejects(h.services.detect(root), code("ROOT_DENIED"), root);
+  }
+  assert.deepEqual(h.reader.calls, [], "no metadata, listing or content request reached the reader");
+  assert.deepEqual(h.fs.reads, []);
+});
+
+test("confirm detects the picked folder again: a same-path replacement is read afresh, a moved root is refused, duplicates by canonical root", { skip }, async () => {
+  const tree = { ...RICH_TREE, "/work/link": { link: "/work/shop" } };
+  const h = harness({ tree });
+  const preview = await h.services.detect("/work/shop");
+  assert.ok(!preview.integrations.some(item => item.id === "stripe"));
+  // A different folder now sits at the same path (new identities, new content).
+  for (const key of [...h.fs.nodes.keys()]) if (key.startsWith("/work/shop/")) h.fs.nodes.delete(key);
+  h.fs.nodes.set("/work/shop", { dir: true });
+  h.fs.nodes.set("/work/shop/package.json", { file: JSON.stringify({ name: "shop", dependencies: { stripe: "1" } }) });
+  h.advance(1000);
+  const project = await h.services.confirmProject({ root: "/work/shop", manifest: MANIFEST, contextUuid: APP });
+  assert.deepEqual([project.version, project.root, project.context_uuid, project.trusted, project.manifest_state], [2, "/work/shop", APP, false, "none"]);
+  assert.deepEqual(project.detected.integrations.map(item => item.id), ["stripe"], "the confirmed record reflects the folder as it is now");
+  assert.equal(project.detected.at, h.now);
+  assert.deepEqual([project.container, project.accounts, project.brief], [{ user_context_id: null }, [], null]);
+  assert.equal(project.shared_sites.confirmed, false);
+  assert.deepEqual(h.fs.writes, [], "confirming writes nothing to the folder");
+  const stored = JSON.parse(h.storage.files.get("contexts.json"));
+  assert.deepEqual([stored.version, stored.projects[0].version], [3, 2]);
+  assert.ok(!JSON.stringify(stored.projects[0].manifest).includes("detected"), "detection stays out of the manifest");
+  await assert.rejects(h.services.confirmProject({ root: "/work/link", manifest: MANIFEST }), code("PROJECT_EXISTS"),
+    "an alias of a registered folder is the same project");
+
+  const moved = harness({ tree });
+  await moved.services.detect("/work/link");
+  moved.fs.nodes.set("/work/link", { link: "/work/other" });
+  await assert.rejects(moved.services.confirmProject({ root: "/work/link", manifest: MANIFEST }), code("ROOT_CHANGED"));
+  assert.deepEqual(await moved.services.listProjects(), []);
+});
+
+test("refreshProjectDetection reads the stored root again and keeps manifest, space, container, accounts, shared sites, brief and trust", { skip }, async () => {
+  const h = harness({ tree: RICH_TREE });
+  const record = { version: 2, id: "p_seeded1", root: "/work/shop", manifest: MANIFEST, manifest_state: "written", context_uuid: APP,
+    trusted: false, created_at: 5, updated_at: 6, detected: null, container: { user_context_id: 7 },
+    shared_sites: { hosts: ["github.com"], confirmed: true }, accounts: [{ key: "vercel", label: "Work Google" }], brief: null };
+  h.storage.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [], projects: [record] }));
+  const services = h.make();
+  services.registerWindow(h.zen.window, h.adapter);
+  const events = [];
+  services.on("projects", () => events.push("projects"));
+  const stored = await services.getProject("p_seeded1");
+  h.advance(1000);
+  const refreshed = await services.refreshProjectDetection("p_seeded1");
+  assert.deepEqual(refreshed.detected.integrations.map(item => item.id), ["vercel", "convex", "clerk"]);
+  assert.equal(refreshed.detected.domains.find(item => item.origin === "docs").confirmed, false);
+  assert.equal(refreshed.updated_at, h.now);
+  for (const key of ["id", "root", "manifest", "manifest_state", "context_uuid", "trusted", "created_at", "container", "shared_sites", "accounts", "brief"]) {
+    assert.deepEqual(refreshed[key], stored[key], key);
+  }
+  assert.deepEqual([refreshed.container.user_context_id, refreshed.accounts[0].label, refreshed.shared_sites.confirmed], [7, "Work Google", true]);
+  assert.deepEqual(events, ["projects"]);
+  assert.deepEqual(h.fs.writes, []);
+  await assert.rejects(services.refreshProjectDetection("p_missing1"), code("UNKNOWN_PROJECT"));
+  h.fs.nodes.set("/work/other/package.json", { file: "{\"name\":\"TRAP-other\"}" });
+  h.fs.nodes.set("/work/shop", { link: "/work/other" });
+  const before = h.storage.files.get("contexts.json");
+  const callsBefore = h.reader.calls.length;
+  await assert.rejects(services.refreshProjectDetection("p_seeded1"), code("ROOT_CHANGED"));
+  assert.equal(h.storage.files.get("contexts.json"), before, "a folder that now resolves elsewhere changes nothing");
+  assert.deepEqual(h.reader.calls.slice(callsBefore), [], "the registered root's new target is never opened");
+  assert.ok(!h.fs.reads.some(path => path.startsWith("/work/other")));
+});
+
+function flakyStorage(failures) {
+  const files = new Map(), writes = [];
+  return { files, writes, storageFor: name => ({ read: async () => files.get(name) ?? null,
+    write: async text => { writes.push(name); if (name === "contexts.json" && failures.count > 0) { failures.count--; throw new Error("disk full"); } files.set(name, text); } }) };
+}
+const legacyProject = (id, over = {}) => ({ version: 1, id, root: `/work/${id}`, manifest: MANIFEST, manifest_state: "none",
+  context_uuid: null, trusted: false, created_at: 11, updated_at: 13, ...over });
+
+test("store v3: a v2 store is written back once; a failed write keeps the old file and is retried; persistence emits no event", { skip }, async () => {
+  const failures = { count: 1 };
+  const storage = flakyStorage(failures);
+  const legacy = JSON.stringify({ version: 2, projects: [legacyProject("p_legacy2", { context_uuid: APP })],
+    contexts: [{ version: 1, workspace_uuid: APP, type: "project", organization_uuid: null, project_id: null, engine_preference: null, updated_at: 7 }] });
+  storage.files.set("contexts.json", legacy);
+  const h = harness({ deps: { storageFor: storage.storageFor } });
+  const events = [];
+  for (const name of ["contexts", "projects"]) h.services.on(name, () => events.push(name));
+  const originalError = console.error; console.error = () => {};
+  let first;
+  try { first = await h.services.listProjects(); } finally { console.error = originalError; }
+  assert.deepEqual([first[0].version, first[0].context_uuid], [2, APP], "the migrated document is served while the write fails");
+  assert.equal(storage.files.get("contexts.json"), legacy, "the old file is kept after a failed write");
+  await h.services.listProjects();
+  const written = JSON.parse(storage.files.get("contexts.json"));
+  assert.deepEqual([written.version, written.projects[0].version, written.projects[0].updated_at, written.contexts[0].updated_at], [3, 2, 13, 7]);
+  const count = storage.writes.length;
+  await h.services.listContexts();
+  await h.services.getProject("p_legacy2");
+  assert.equal(storage.writes.length, count, "written once");
+  assert.deepEqual(events, [], "persistence alone is not a project or context change");
+});
+
+test("store v3: v3 files with v1 records are upgraded; current files are not rewritten; invalid files are never written", { skip }, async () => {
+  const storage = flakyStorage({ count: 0 });
+  const current = { ...legacyProject("p_current1"), version: 2, detected: null, container: { user_context_id: null },
+    shared_sites: { hosts: ["github.com"], confirmed: false }, accounts: [], brief: null };
+  storage.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [], projects: [current, legacyProject("p_old1")] }));
+  const mixed = harness({ deps: { storageFor: storage.storageFor } });
+  const projects = await mixed.services.listProjects();
+  assert.deepEqual(projects.map(project => project.version), [2, 2]);
+  assert.deepEqual(JSON.parse(storage.files.get("contexts.json")).projects.map(project => project.version), [2, 2]);
+  assert.equal(storage.writes.filter(name => name === "contexts.json").length, 1);
+
+  const clean = flakyStorage({ count: 0 });
+  clean.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [], projects: [current] }));
+  await harness({ deps: { storageFor: clean.storageFor } }).services.listProjects();
+  assert.deepEqual(clean.writes, [], "a current v3 file is left as it is");
+
+  const invalid = flakyStorage({ count: 0 });
+  const text = JSON.stringify({ version: 2, contexts: [], projects: [legacyProject("p_bad1", { trusted: true })] });
+  invalid.files.set("contexts.json", text);
+  const broken = harness({ deps: { storageFor: invalid.storageFor } });
+  await assert.rejects(broken.services.listProjects(), code("INVALID_STORE"));
+  await assert.rejects(broken.services.listProjects(), code("INVALID_STORE"));
+  assert.deepEqual(invalid.writes, []);
+  assert.equal(invalid.files.get("contexts.json"), text);
+});
+
+// ── arrival ──
+const ARRIVAL_URL = "http://localhost:5174/cart?x=1#top";
+function fakeTab(window, { url = ARRIVAL_URL, browserId = 7, privateBrowsing = false, space = APP } = {}) {
+  return { ownerGlobal: window, closing: false,
+    linkedBrowser: { browserId, currentURI: { spec: url }, browsingContext: privateBrowsing === null ? null : { usePrivateBrowsing: privateBrowsing } },
+    getAttribute: name => (name === "zen-workspace-id" ? space : null) };
+}
+function arrivalHarness({ listeners = { 5174: { pid: 42, cwd: "/work/shop/apps/web" } }, tree = RICH_TREE, deps = {} } = {}) {
+  const runtime = fakeArrivalRuntime(listeners);
+  const h = harness({ tree: { ...tree, "/Users": { dir: true }, "/Users/synthetic": { dir: true } },
+    deps: { arrivalRuntime: runtime, home: "/Users/synthetic", arrivalRoots: ["/work"], ...deps } });
+  return { ...h, runtime, window: h.zen.window };
+}
+const ticks = async (count = 10) => { for (let i = 0; i < count; i++) await new Promise(resolve => setImmediate(resolve)); };
+const storedProjects = h => JSON.parse(h.storage.files.get("contexts.json") ?? "{\"projects\":[]}").projects;
+
+test("arrival: a new loopback folder gets an opaque one-use token; Keep adds a v2 project in the tab's space and writes nothing to the folder", { skip }, async () => {
+  const h = arrivalHarness();
+  const tab = fakeTab(h.window);
+  const offer = await h.services.offerArrival({ window: h.window, tab });
+  assert.deepEqual([offer.kind, offer.root, offer.name, offer.displayRoot], ["new", "/work/shop", "shop", "/work/shop"]);
+  assert.match(offer.token, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u, "a browser UUID");
+  assert.ok(!offer.token.includes("shop") && !offer.token.includes("5174"));
+  assert.equal(offer.expiresAt, h.now + 120000);
+  assert.deepEqual(h.runtime.calls.map(([command]) => command), ["/usr/bin/id", "/usr/sbin/lsof", "/usr/sbin/lsof", "/usr/sbin/lsof"]);
+  assert.ok(h.runtime.calls.slice(1).every(call => call.includes("-u") && call.includes("501")), "own UID only");
+  assert.deepEqual(h.fs.reads, [], "discovery opens no file content");
+  const project = await h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+  assert.deepEqual([project.version, project.root, project.context_uuid, project.manifest.name, project.manifest_state, project.trusted],
+    [2, "/work/shop", APP, "shop", "none", false]);
+  assert.deepEqual(project.detected.integrations.map(item => item.id), ["vercel", "convex", "clerk"]);
+  assert.ok(!h.fs.reads.some(path => neverRead.test(path)));
+  assert.deepEqual(h.fs.writes, [], "accepting an arrival never writes a repository manifest");
+  await assert.rejects(h.services.acceptArrival({ window: h.window, tab, token: offer.token }), code("UNKNOWN_ARRIVAL"), "one use");
+  assert.deepEqual(await h.services.offerArrival({ window: h.window, tab }), { kind: "known", project_id: project.id });
+});
+
+test("arrival: private windows, private or unknown-privacy tabs and foreign tabs get nothing and start no process", { skip }, async () => {
+  const h = arrivalHarness();
+  const privateZen = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }], isPrivate: true });
+  h.services.registerWindow(privateZen.window, new ZenWorkspaceAdapter(privateZen.window));
+  const other = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }] });
+  h.services.registerWindow(other.window, new ZenWorkspaceAdapter(other.window));
+  const cases = [
+    [privateZen.window, fakeTab(privateZen.window)],
+    [h.window, fakeTab(h.window, { privateBrowsing: true })],
+    [h.window, fakeTab(h.window, { privateBrowsing: null })],
+    [h.window, fakeTab(other.window)],
+    [{ unregistered: true }, fakeTab({ unregistered: true })],
+    [h.window, fakeTab(h.window, { browserId: 0 })],
+    [h.window, fakeTab(h.window, { url: "http://user:pw@localhost:5174/" })],
+    [h.window, fakeTab(h.window, { url: "https://shop-product.dev/" })],
+  ];
+  for (const [window, tab] of cases) assert.equal(await h.services.offerArrival({ window, tab }), null);
+  assert.deepEqual(h.runtime.calls, []);
+  assert.deepEqual(h.fs.reads, []);
+});
+
+test("arrival: a known repository URL links to its project without any process", { skip }, async () => {
+  const h = arrivalHarness();
+  const manifest = { ...MANIFEST, surfaces: [{ name: "Repository", url: "https://github.com/acme/shop", kind: "repository" }] };
+  const project = await h.services.confirmProject({ root: "/work/shop", manifest });
+  const tab = fakeTab(h.window, { url: "https://github.com/acme/shop/pull/3" });
+  assert.deepEqual(await h.services.offerArrival({ window: h.window, tab }), { kind: "known", project_id: project.id });
+  assert.deepEqual(h.runtime.calls, []);
+});
+
+test("arrival: tokens are bound to the originating tab's exact URL, window and privacy and die with dismissal, disposal and time", { skip }, async () => {
+  const h = arrivalHarness();
+  const tab = fakeTab(h.window);
+  const accept = (token, target = tab) => h.services.acceptArrival({ window: h.window, tab: target, token });
+  let offer = await h.services.offerArrival({ window: h.window, tab });
+  tab.linkedBrowser.currentURI.spec = "http://localhost:5174/cart?x=2#top";
+  await assert.rejects(accept(offer.token), code("STALE_ARRIVAL"), "another URL of the same page");
+  tab.linkedBrowser.currentURI.spec = ARRIVAL_URL;
+  await assert.rejects(accept(offer.token, fakeTab(h.window, { browserId: 8 })), code("STALE_ARRIVAL"), "another tab on the same URL");
+  tab.linkedBrowser.browsingContext.usePrivateBrowsing = true;
+  await assert.rejects(accept(offer.token), code("ARRIVAL_UNAVAILABLE"));
+  tab.linkedBrowser.browsingContext.usePrivateBrowsing = false;
+  h.services.discardArrival({ window: h.window, tab });
+  await assert.rejects(accept(offer.token), code("UNKNOWN_ARRIVAL"), "dismissed or navigated away");
+
+  offer = await h.services.offerArrival({ window: h.window, tab });
+  h.unregister();
+  h.services.registerWindow(h.window, h.adapter);
+  await assert.rejects(accept(offer.token), code("UNKNOWN_ARRIVAL"), "the window went away");
+
+  offer = await h.services.offerArrival({ window: h.window, tab });
+  h.advance(120000);
+  await assert.rejects(accept(offer.token), code("UNKNOWN_ARRIVAL"), "two minutes at most");
+
+  offer = await h.services.offerArrival({ window: h.window, tab });
+  h.fs.nodes.set("/work/shop", { link: "/work/other" });
+  await assert.rejects(accept(offer.token), code("ROOT_CHANGED"), "the folder now resolves elsewhere");
+  await assert.rejects(accept("forged-token-0000000000000000000000"), code("UNKNOWN_ARRIVAL"));
+  assert.deepEqual(await h.services.listProjects(), []);
+});
+
+// The token is spent before detection; what may still finish is the
+// acceptance in flight. Detection is paused after consumption, the page or
+// window changes, then detection resumes.
+for (const change of ["navigation", "reload", "tab close", "window disposal", "private browsing"]) {
+  test(`arrival: an acceptance in flight is revoked by ${change}; nothing is added and the token cannot be replayed`, { skip }, async () => {
+    const h = arrivalHarness();
+    const tab = fakeTab(h.window);
+    const offer = await h.services.offerArrival({ window: h.window, tab });
+    let entered, release;
+    const paused = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const rootMetadata = h.reader.rootMetadata;
+    let first = true;
+    h.reader.rootMetadata = async root => { if (first) { first = false; entered(); await gate; } return rootMetadata(root); };
+    const accepting = h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+    await paused;
+    if (change === "navigation") { tab.linkedBrowser.currentURI.spec = "http://localhost:5174/elsewhere"; h.services.discardArrival({ window: h.window, tab }); }
+    if (change === "reload") h.services.discardArrival({ window: h.window, tab }); // same URL; the runtime still revokes
+    if (change === "tab close") { tab.closing = true; h.services.discardArrival({ window: h.window, tab }); }
+    if (change === "window disposal") h.unregister();
+    if (change === "private browsing") tab.linkedBrowser.browsingContext.usePrivateBrowsing = true;
+    release();
+    await assert.rejects(accepting, error => ["STALE_ARRIVAL", "ARRIVAL_UNAVAILABLE"].includes(error.code));
+    assert.deepEqual(storedProjects(h), []);
+    assert.deepEqual(await h.services.listProjects(), []);
+    assert.deepEqual(h.fs.writes, []);
+    // Restore a valid page: the spent token stays spent, a fresh offer still works.
+    if (change === "window disposal") h.services.registerWindow(h.window, h.adapter);
+    Object.assign(tab, { closing: false });
+    tab.linkedBrowser.currentURI.spec = ARRIVAL_URL;
+    tab.linkedBrowser.browsingContext.usePrivateBrowsing = false;
+    await assert.rejects(h.services.acceptArrival({ window: h.window, tab, token: offer.token }), code("UNKNOWN_ARRIVAL"));
+    const again = await h.services.offerArrival({ window: h.window, tab });
+    assert.equal((await h.services.acceptArrival({ window: h.window, tab, token: again.token })).root, "/work/shop");
+  });
+}
+
+test("arrival: the acceptance is checked again inside the serialized store write, after earlier queued writes", { skip }, async () => {
+  const hold = { gate: null };
+  const files = new Map();
+  const storageFor = name => ({ read: async () => files.get(name) ?? null,
+    write: async text => { if (hold.gate) await hold.gate; files.set(name, text); } });
+  for (const moveOn of [true, false]) {
+    files.clear();
+    const h = arrivalHarness({ deps: { storageFor } });
+    const tab = fakeTab(h.window);
+    const offer = await h.services.offerArrival({ window: h.window, tab });
+    let release;
+    hold.gate = new Promise(resolve => { release = resolve; });
+    const earlier = h.services.setContextType(BV, "organization"); // its atomic write is held
+    let rootChecks = 0;
+    const rootMetadata = h.reader.rootMetadata;
+    h.reader.rootMetadata = async root => { rootChecks++; return rootMetadata(root); };
+    const accepting = h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+    while (rootChecks < 2) await ticks(1);
+    await ticks(); // detection done and its post-detection check passed; the append waits in the queue
+    assert.ok(h.fs.reads.includes("/work/shop/package.json"));
+    if (moveOn) tab.linkedBrowser.currentURI.spec = "http://localhost:5174/other"; // no discard: only the in-queue check can see it
+    hold.gate = null;
+    release();
+    await earlier;
+    const projects = () => JSON.parse(files.get("contexts.json")).projects;
+    if (moveOn) {
+      await assert.rejects(accepting, code("STALE_ARRIVAL"));
+      assert.deepEqual(projects(), [], "nothing appended for a page the tab left");
+    } else {
+      assert.equal((await accepting).root, "/work/shop");
+      assert.deepEqual(projects().map(project => project.root), ["/work/shop"]);
+    }
+    assert.equal(JSON.parse(files.get("contexts.json")).contexts.find(meta => meta.workspace_uuid === BV).type, "organization",
+      "the earlier queued write is unaffected");
+  }
+});
+
+// ── canonical root admission (ProjectDetection allowCanonicalRoot) ──
+// The folder may be swapped while the reader is still being set up. The
+// detector asks the service about the canonical target it resolved before any
+// reader request; the test reader logs every root, file, presence, listing and
+// content request, so an empty log proves the new target was never opened.
+function pausedReaderHarness({ tree, listeners = { 5174: { pid: 42, cwd: "/work/shop" } } } = {}) {
+  const pause = { armed: false };
+  let h = null;
+  h = arrivalHarness({ tree, listeners, deps: { reader: null, createReader: async () => {
+    if (pause.armed) { pause.armed = false; pause.entered(); await new Promise(resolve => { pause.release = resolve; }); }
+    return h.reader;
+  } } });
+  const hold = () => { pause.armed = true; return new Promise(resolve => { pause.entered = resolve; }); };
+  return { ...h, hold, release: () => pause.release() };
+}
+const SETTINGS_TREE = { ...RICH_TREE, "/Users": { dir: true }, "/Users/synthetic": { dir: true }, "/Users/synthetic/.ssh": { dir: true },
+  "/Users/synthetic/.ssh/package.json": { file: "{\"name\":\"TRAP-settings\"}" },
+  "/work/other/package.json": { file: "{\"name\":\"TRAP-other\"}" } };
+
+for (const operation of ["detect", "acceptArrival"]) {
+  test(`root admission: ${operation} refuses a folder swapped for a blocked settings folder during reader setup, before opening it`, { skip }, async () => {
+    const h = pausedReaderHarness({ tree: SETTINGS_TREE });
+    const tab = fakeTab(h.window);
+    const offer = operation === "acceptArrival" ? await h.services.offerArrival({ window: h.window, tab }) : null;
+    const held = h.hold();
+    const pending = operation === "detect" ? h.services.detect("/work/shop") : h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+    await held; // the early deny check passed; the reader is being created
+    h.fs.nodes.set("/work/shop", { link: "/Users/synthetic/.ssh" });
+    h.release();
+    await assert.rejects(pending, code("ROOT_DENIED"));
+    assert.deepEqual(h.reader.calls, [], "no root, file, presence, listing or content request for the new target");
+    assert.deepEqual(h.fs.reads, []);
+    assert.deepEqual(storedProjects(h), []);
+    assert.deepEqual(await h.services.listProjects(), []);
+    if (offer) await assert.rejects(h.services.acceptArrival({ window: h.window, tab, token: offer.token }), code("UNKNOWN_ARRIVAL"), "spent");
+  });
+}
+
+test("root admission: a consumed arrival whose folder now resolves to another allowed folder is refused before it is opened", { skip }, async () => {
+  const h = pausedReaderHarness({ tree: SETTINGS_TREE });
+  const tab = fakeTab(h.window);
+  const offer = await h.services.offerArrival({ window: h.window, tab });
+  const held = h.hold();
+  const pending = h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+  await held; // the token is spent against /work/shop
+  h.fs.nodes.set("/work/shop", { link: "/work/other" });
+  h.release();
+  await assert.rejects(pending, code("ROOT_CHANGED"));
+  assert.deepEqual(h.reader.calls, []);
+  assert.deepEqual(storedProjects(h), []);
+
+  // The same canonical folder with a new identity and content is still read afresh.
+  const renewed = pausedReaderHarness({ tree: SETTINGS_TREE });
+  const renewedTab = fakeTab(renewed.window);
+  const again = await renewed.services.offerArrival({ window: renewed.window, tab: renewedTab });
+  const wait = renewed.hold();
+  const accepting = renewed.services.acceptArrival({ window: renewed.window, tab: renewedTab, token: again.token });
+  await wait;
+  for (const key of [...renewed.fs.nodes.keys()]) if (key.startsWith("/work/shop/")) renewed.fs.nodes.delete(key);
+  renewed.fs.nodes.set("/work/shop", { dir: true });
+  renewed.fs.nodes.set("/work/shop/package.json", { file: JSON.stringify({ name: "shop-renewed", dependencies: { stripe: "1" } }) });
+  renewed.release();
+  const project = await accepting;
+  assert.deepEqual([project.root, project.manifest.name, project.detected.integrations.map(item => item.id)], ["/work/shop", "shop-renewed", ["stripe"]]);
+});
+
+test("root admission: confirm refuses a picked alias that now resolves elsewhere than its preview, before opening it", { skip }, async () => {
+  const tree = { ...SETTINGS_TREE, "/work/link": { link: "/work/shop" } };
+  const h = harness({ tree });
+  await h.services.detect("/work/link");
+  const callsBefore = h.reader.calls.length;
+  const readsBefore = h.fs.reads.length;
+  h.fs.nodes.set("/work/link", { link: "/work/other" });
+  await assert.rejects(h.services.confirmProject({ root: "/work/link", manifest: MANIFEST }), code("ROOT_CHANGED"));
+  assert.deepEqual(h.reader.calls.slice(callsBefore), [], "the new target is not opened");
+  assert.equal(h.fs.reads.length, readsBefore);
+  assert.deepEqual(await h.services.listProjects(), []);
+
+  // Unchanged generic behaviour: without a cached preview the picked folder is
+  // detected as it is now; a missing folder is still ROOT_NOT_FOUND.
+  const fresh = harness({ tree });
+  assert.equal((await fresh.services.confirmProject({ root: "/work/link", manifest: MANIFEST })).root, "/work/shop");
+  await assert.rejects(fresh.services.confirmProject({ root: "/work/missing", manifest: MANIFEST }), code("ROOT_NOT_FOUND"));
+  await assert.rejects(fresh.services.detect("/work/missing"), code("ROOT_NOT_FOUND"));
+});
+
+test("arrival: settings folders and foreign listeners are never offered", { skip }, async () => {
+  const tree = { ...RICH_TREE, "/Users": { dir: true }, "/Users/synthetic": { dir: true }, "/Users/synthetic/.codex": { dir: true },
+    "/Users/synthetic/.codex/.git": { dir: true } };
+  const settings = arrivalHarness({ tree, listeners: { 5174: { pid: 42, cwd: "/Users/synthetic/.codex" } } });
+  assert.equal(await settings.services.offerArrival({ window: settings.window, tab: fakeTab(settings.window) }), null);
+  const foreign = arrivalHarness({ listeners: { 5174: { pid: 42, uid: 0, cwd: "/work/shop" } } });
+  assert.equal(await foreign.services.offerArrival({ window: foreign.window, tab: fakeTab(foreign.window) }), null);
+  assert.deepEqual(foreign.fs.reads, []);
+});
+
+test("arrival roots: /Volumes/T9/Code by default; synthetic GUI roots only below the build root's gui-fixtures", { skip }, () => {
+  const env = values => name => values[name] ?? "";
+  assert.deepEqual(DEFAULT_ARRIVAL_ROOTS, ["/Volumes/T9/Code"]);
+  assert.deepEqual(arrivalRootsFromEnvironment(env({})), ["/Volumes/T9/Code"]);
+  assert.deepEqual(arrivalRootsFromEnvironment(env({ AXIOSOZO_ARRIVAL_ROOTS: "[\"/Users/synthetic\"]" })), ["/Volumes/T9/Code"],
+    "ignored without the synthetic test flag");
+  const synthetic = { AXIOSOZO_SYNTHETIC_TEST: "1", AXIOSOZO_BUILD_ROOT: "/Volumes/AxioSozoBuild/workstation" };
+  const fixture = "/Volumes/AxioSozoBuild/workstation/gui-fixtures/harbor-suite";
+  assert.deepEqual(arrivalRootsFromEnvironment(env({ ...synthetic, AXIOSOZO_ARRIVAL_ROOTS: JSON.stringify([fixture, fixture]) })), [fixture]);
+  assert.deepEqual(arrivalRootsFromEnvironment(env({ ...synthetic, AXIOSOZO_STATIC_READER_ROOT: "/Volumes/AxioSozoBuild/other",
+    AXIOSOZO_ARRIVAL_ROOTS: JSON.stringify(["/Volumes/AxioSozoBuild/other/gui-fixtures/a"]) })), ["/Volumes/AxioSozoBuild/other/gui-fixtures/a"]);
+  const rejected = [
+    ["/Volumes/AxioSozoBuild/workstation/gui-fixtures"], ["/Volumes/AxioSozoBuild/workstation/gui-fixtures/"],
+    ["/Volumes/AxioSozoBuild/workstation/gui-fixtures/../zen"], ["/Volumes/AxioSozoBuild/workstation/gui-fixtures/a/./b"],
+    ["/Volumes/AxioSozoBuild/workstation/zen"], ["/Users/synthetic/Code"], ["gui-fixtures/a"], [`${fixture}\nx`], [42], [],
+    Array.from({ length: 9 }, (_, i) => `${fixture}${i}`), "not-an-array"];
+  for (const roots of rejected) {
+    assert.deepEqual(arrivalRootsFromEnvironment(env({ ...synthetic, AXIOSOZO_ARRIVAL_ROOTS: JSON.stringify(roots) })), [], JSON.stringify(roots));
+  }
+  assert.deepEqual(arrivalRootsFromEnvironment(env({ ...synthetic, AXIOSOZO_ARRIVAL_ROOTS: "{not json" })), []);
+  for (const buildRoot of ["/Users/synthetic", "/Volumes/AxioSozoBuild/zen", "/Volumes/AxioSozoBuild/providers", ""]) {
+    assert.deepEqual(arrivalRootsFromEnvironment(env({ AXIOSOZO_SYNTHETIC_TEST: "1", AXIOSOZO_BUILD_ROOT: buildRoot,
+      AXIOSOZO_ARRIVAL_ROOTS: JSON.stringify([`${buildRoot}/gui-fixtures/a`]) })), [], buildRoot);
+  }
+});
+
+// ── native arrival subprocess (ProjectArrivalSubprocess via lazyArrivalSubprocess) ──
+const unavailableArrival = error => error?.code === "ARRIVAL_SUBPROCESS_UNAVAILABLE";
+
+test("arrival runtime: the trusted adapter is built on the first call only, shared, retried after a failed build", { skip }, async () => {
+  const forwarded = [];
+  let builds = 0, failNext = 1, release;
+  const child = Object.freeze({ synthetic: true });
+  const adapter = Object.freeze({ call: async options => { forwarded.push(options); return child; } });
+  const runtime = lazyArrivalSubprocess(async () => {
+    builds++;
+    if (failNext > 0) { failNext--; throw new Error("helper checksum mismatch /private/detail"); }
+    await new Promise(resolve => { release = resolve; });
+    return adapter;
+  });
+  assert.equal(builds, 0, "nothing is built before an actual discovery");
+  assert.deepEqual(Object.keys(runtime), ["call"]);
+  const options = { command: "/usr/bin/id", arguments: ["-u"], environmentAppend: false, environment: {}, stderr: "pipe" };
+  await assert.rejects(runtime.call(options), error => unavailableArrival(error) && !/checksum|private/u.test(error.message));
+  assert.deepEqual(forwarded, [], "no call reaches anything after a failed build");
+  const first = runtime.call(options), second = runtime.call(options);
+  for (let i = 0; !release && i < 100; i++) await ticks(1);
+  assert.equal(typeof release, "function", "the failed build is retried by the next call");
+  release();
+  assert.deepEqual([await first, await second], [child, child], "the child is handed back unchanged");
+  assert.equal(builds, 2, "one retry after the failure, shared by concurrent calls");
+  assert.ok(forwarded.length === 2 && forwarded.every(item => item === options), "ProjectArrival's options are forwarded as they are");
+  await runtime.call(options);
+  assert.equal(builds, 2, "a built adapter is reused");
+
+  const refusing = lazyArrivalSubprocess(async () => ({ call: async () => { throw Object.assign(new Error("x"), { code: "ARRIVAL_SUBPROCESS_UNAVAILABLE" }); } }));
+  await assert.rejects(refusing.call(options), unavailableArrival, "an adapter refusal is not replaced by anything else");
+  let shapeless = 0;
+  const invalid = lazyArrivalSubprocess(async () => { shapeless++; return { spawn() {} }; });
+  await assert.rejects(invalid.call(options), unavailableArrival);
+  await assert.rejects(invalid.call(options), unavailableArrival);
+  assert.equal(shapeless, 2, "an adapter without call is not kept");
+});
+
+// The pinned helper as seen through the adapter's own runtime seam (the one the
+// adapter's tests use): it answers only the helper's two operations and id.
+function trustedArrivalFixture(listeners, { digest = () => ARRIVAL_LSOF_SHA256 } = {}) {
+  const spawned = [];
+  const pipe = text => { let done = false; return { async readString() { if (done) return ""; done = true; return text; }, async close() {} }; };
+  const reply = text => ({ stdout: pipe(text), stderr: pipe(""), stdin: { async close() {} }, async wait() { return { exitCode: 0 }; }, async kill() {} });
+  const runtime = { env: name => (name === "AXIOSOZO_STATIC_READER_ROOT" ? "/Volumes/AxioSozoBuild/workstation" : ""),
+    verifyFile: async () => true, sha256: async () => digest(), timers: globalThis,
+    Subprocess: { call: async options => {
+      spawned.push(options);
+      if (options.command === "/usr/bin/id") return reply("501\n");
+      const [, , , , operation, number, uid] = options.arguments;
+      if (operation === "listen") {
+        const entry = listeners[number];
+        return reply(entry ? `p${entry.pid}\nu${uid}\nn127.0.0.1:${number}\n` : "");
+      }
+      const entry = Object.values(listeners).find(item => String(item.pid) === number);
+      return reply(entry ? `p${number}\nfcwd\nn${entry.cwd}\n` : "");
+    } } };
+  let builds = 0;
+  const arrivalRuntime = lazyArrivalSubprocess(() => { builds++; return createNativeProjectArrivalSubprocess({ runtime }); });
+  return { spawned, arrivalRuntime, get builds() { return builds; } };
+}
+
+test("arrival through the trusted adapter: id runs directly, own-UID lsof selectors go through the pinned helper, never lsof itself", { skip }, async () => {
+  const trusted = trustedArrivalFixture({ 5174: { pid: 42, cwd: "/work/shop/apps/web" } });
+  const h = arrivalHarness({ deps: { arrivalRuntime: trusted.arrivalRuntime } });
+  assert.equal(trusted.builds, 0, "creating the service builds nothing");
+  const tab = fakeTab(h.window);
+  const offer = await h.services.offerArrival({ window: h.window, tab });
+  assert.deepEqual([offer.kind, offer.root], ["new", "/work/shop"]);
+  const helper = arrivalSubprocessPaths("/Volumes/AxioSozoBuild/workstation").helperPath;
+  const fixed = { environmentAppend: false, environment: { PATH: "/usr/bin:/bin:/usr/sbin", LANG: "C", LC_ALL: "C" }, stderr: "pipe", workdir: "/" };
+  assert.deepEqual(trusted.spawned, [
+    { command: "/usr/bin/id", arguments: ["-u"], ...fixed },
+    { command: ARRIVAL_LSOF_PYTHON, arguments: ["-I", "-S", "-B", helper, "listen", "5174", "501"], ...fixed },
+    { command: ARRIVAL_LSOF_PYTHON, arguments: ["-I", "-S", "-B", helper, "cwd", "42", "501"], ...fixed },
+    { command: ARRIVAL_LSOF_PYTHON, arguments: ["-I", "-S", "-B", helper, "cwd", "42", "501"], ...fixed },
+  ]);
+  assert.ok(!trusted.spawned.some(options => options.command === "/usr/sbin/lsof"), "lsof is never started directly");
+  assert.deepEqual(h.runtime.calls, [], "the direct-call fake is not used");
+  const project = await h.services.acceptArrival({ window: h.window, tab, token: offer.token });
+  assert.equal(project.root, "/work/shop");
+  assert.deepEqual(await h.services.offerArrival({ window: h.window, tab }), { kind: "known", project_id: project.id });
+  assert.equal(trusted.builds, 1, "one adapter for every later discovery");
+});
+
+test("arrival through an untrusted adapter: nothing starts, no offer, and a later discovery tries again", { skip }, async () => {
+  let digest = "f".repeat(64);
+  const trusted = trustedArrivalFixture({ 5174: { pid: 42, cwd: "/work/shop" } }, { digest: () => digest });
+  const h = arrivalHarness({ deps: { arrivalRuntime: trusted.arrivalRuntime } });
+  const tab = fakeTab(h.window);
+  assert.equal(await h.services.offerArrival({ window: h.window, tab }), null);
+  assert.deepEqual(trusted.spawned, [], "no process at all, id included, with an unverified helper");
+  assert.deepEqual(h.runtime.calls, [], "no direct-lsof fallback");
+  assert.deepEqual(h.fs.reads, []);
+  digest = ARRIVAL_LSOF_SHA256;
+  const offer = await h.services.offerArrival({ window: h.window, tab });
+  assert.deepEqual([offer.kind, offer.root], ["new", "/work/shop"]);
+  assert.equal(trusted.builds, 2, "the failed build was retried by the later discovery");
 });

@@ -178,6 +178,12 @@ test("add project: review sheet with the current space, environments per app, pr
   assert.ok(sheet.querySelectorAll(".tag.guess").some(tag => tag.textContent === "guessed"), "the Vite default port is marked guessed");
   assert.match(sheet.textContent, /Shown in the sidebarRepositorygithub\.comMove to More/u, "only the repository is shown");
   assert.match(sheet.textContent, /More \(behind … in the sidebar\): 4Issues.*Vercel \(synthetic-web\)vercel\.com/u, "issues, CI, releases and the Vercel dashboard go behind …");
+  // Detection v2 preview: services and apps as plain text, no links before the project exists.
+  const findings = sheet.querySelector("fieldset.findings");
+  assert.equal(findings.querySelector("legend").textContent, "Also found in the folder");
+  assert.deepEqual(findings.querySelectorAll("dt").map(dt => dt.textContent), ["Services", "Apps"]);
+  assert.deepEqual(findings.querySelectorAll("dd .tag").map(tag => tag.textContent), ["Vercel", "Desktop (Tauri) · Tauri Plus Web"]);
+  assert.equal(findings.querySelectorAll("button").length, 0);
   const production = sheet.querySelectorAll("input").find(input => input.getAttribute("placeholder") === "https://example.com");
   production.value = "https://domo.example";
   production.dispatchEvent(makeEvent("input"));

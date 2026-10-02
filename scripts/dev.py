@@ -30,6 +30,8 @@ CARGO_HOME_DIR = storage.VOLUME / "cargo-home"
 SUBROOT = storage.BUILD_ROOT != storage.VOLUME
 os.environ["AXIOSOZO_BUILD_ROOT"] = str(storage.BUILD_ROOT)
 ZEN = ROOT / "scripts" / "zen.py"
+PROJECT_READER = ROOT / "scripts" / "project_reader.py"
+ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
 RELEASE = ROOT / "scripts" / "release" / "preview.py"
@@ -157,6 +159,8 @@ def setup_components():
     results.append(component(PROVIDER, "keychain-positive-setup"))
     results.append(component(CEF, "setup"))
     results.append(component(ZEN, "setup"))
+    results.append(component(PROJECT_READER, "setup"))
+    results.append(component(ARRIVAL_SUBPROCESS, "setup"))
     print("SETUP: " + ("completed" if not any(results) else "incomplete; see component results"), flush=True)
     return 2 if any(results) else 0
 
@@ -176,7 +180,8 @@ def setup():
 def check():
     results = [run(["cargo", "fmt", "--all", "--", "--check"]),
                run(["cargo", "clippy", "--locked", "--offline", "--workspace", "--all-targets", "--jobs", "2", "--", "-D", "warnings"], build=True),
-               component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check")]
+               component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check"),
+               component(PROJECT_READER, "check"), component(ARRIVAL_SUBPROCESS, "check")]
     for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("scripts/release/*.py"), *ROOT.glob("tests/test_*.py")]:
         if path.name.startswith("._"):
             continue
@@ -193,6 +198,8 @@ def test():
                component(PROVIDER, "keychain-negative-test"),
                component(PROVIDER, "keychain-positive-test"),
                component(ZEN, "check"),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
                run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
                # Handoff 3 contexts core: DOM-free logic and fixture repositories.
@@ -219,6 +226,7 @@ def test():
 def browser_environment():
     return {**os.environ, "AXIOSOZO_COORDINATOR_BINARY": str(CORE),
             "AXIOSOZO_BUILD_ROOT": str(storage.BUILD_ROOT),
+            "AXIOSOZO_STATIC_READER_ROOT": str(storage.BUILD_ROOT),
             "AXIOSOZO_PROVIDER_HOST": str(PROVIDER),
             "AXIOSOZO_PROVIDER_NODE": provider_node(),
             # A location only: the provider host must never inspect personal

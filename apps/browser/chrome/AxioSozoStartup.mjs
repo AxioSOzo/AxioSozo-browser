@@ -120,6 +120,12 @@ async function installContexts({ engineProbe, aboutRegistered }) {
     ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decide }],
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],
   ];
+  // P1 arrival: one native "keep as project?" notification for a localhost
+  // page served from a new folder. Normal windows only; unknown privacy counts
+  // as private and installs nothing.
+  if (guarded("arrival privacy check", () => zen.isPrivateWindow() === false)) {
+    installers.push(["ProjectArrivalRuntime.sys.mjs", "installProjectArrival", { services, adapter: zen, openOverview }]);
+  }
   for (const [file, name, options] of installers) {
     const module = optionalModule(file);
     const installed = guarded(name, () => module?.[name]?.(window, options));

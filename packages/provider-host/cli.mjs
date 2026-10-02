@@ -30,11 +30,11 @@ function sourceFiles(directory) {
 }
 function nativeRun(args) { return run('/Users/wout/.local/bin/dev-external', ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
 try {
-  // Keychain is read only when a decision request reaches the network step. The OpenAI
-  // adapter is UNVERIFIED_SHAPE: without the test-only fixture flag it never reads its key or
-  // fetches. The understand runner is NOT_AUTHORIZED for live CLIs (liveAuthorized: false).
+  // Browser product AI calls are NOT_AUTHORIZED: the decision factory disables live
+  // authorization before any Keychain read or fetch. OpenAI remains UNVERIFIED_SHAPE.
+  // The understand runner likewise disables live CLIs (liveAuthorized: false).
   if (command === 'serve') await serveStdio({ createAdapter: createLiveAdapter,
-    createDecisionProvider: () => new DecisionProvider({ keyStore: { read: async () => new MacKeychain(helperPath()).read() },
+    createDecisionProvider: () => new DecisionProvider({ liveAuthorized: false, keyStore: { read: async () => new MacKeychain(helperPath()).read() },
       openaiKeyStore: { read: async () => new MacKeychain(helperPath(), 'openai').read() } }),
     createKeyStore: provider => new MacKeychain(helperPath(), provider),
     createUnderstandRunner: () => new UnderstandRunner({ liveAuthorized: false }) });
@@ -127,7 +127,7 @@ try {
     if (![driver, ...flags].includes('--authorized')) throw Object.assign(new Error('Explicit Jev diagnostic authorization required; no Keychain/network access occurred'), { code: 'BLOCKED_AUTH' });
     const helper = helperPath();
     if (!existsSync(helper)) throw Object.assign(new Error('Run provider-host setup to build the Keychain helper'), { code: 'BLOCKED_ENV' });
-    const result = await new DecisionProvider({ keyStore: new MacKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
+    const result = await new DecisionProvider({ liveAuthorized: true, keyStore: new MacKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
     print(result); if (result.reason !== 'validated') process.exitCode = 78;
   } else {
     print({ status: 'UNSUPPORTED', command, usage: 'discover | serve | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;

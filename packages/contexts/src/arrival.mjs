@@ -155,8 +155,15 @@ export function matchSurfaceForUrl(projects, url) {
       if (!s || s.hostname !== host) continue;
       const ss = segmentsOf(s);
       const kind = own(surface, 'kind');
+      // GitLab repositories may live under several subgroup segments.
+      // The complete stored repository path must match on segment boundaries.
+      const repositorySegments = ss.map((segment, i) => i === ss.length - 1 ? segment.replace(/\.git$/, '') : segment);
+      const repositoryMatches = host === 'gitlab.com'
+        ? repositorySegments.length >= 2 && segs.length >= repositorySegments.length && repositorySegments.every((segment, i) =>
+          segment === (i === repositorySegments.length - 1 ? segs[i].replace(/\.git$/, '') : segs[i]))
+        : ss.length >= 2 && ss[0] === segs[0] && ss[1].replace(/\.git$/, '') === segs[1].replace(/\.git$/, '');
       const ok = forge
-        ? kind === 'repository' && ss.length >= 2 && ss[0] === segs[0] && ss[1] === segs[1].replace(/\.git$/, '')
+        ? kind === 'repository' && repositoryMatches
         : kind === 'hosting' && ss.length >= 2 && ss[0] === segs[0] && ss[1] === segs[1];
       if (ok) return Object.freeze({ project_id: p.id, surface });
     }

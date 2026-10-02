@@ -18,7 +18,7 @@ Reached from chrome over the existing provider-host stdio transport
 | --- | --- | --- |
 | `understand/run` | `{ request_id, kind, cli, project_root, input?, timeout_ms? }` | understand result (§3) |
 | `understand/cancel` | `{ request_id }` | `{ cancelled: boolean }` |
-| `understand/available` | `{}` | `{ clis: [{ cli, path, version }] }` from discovery only (no auth, no launch beyond `--version`) |
+| `understand/available` | `{}` | `{ clis: [{ cli, path, version }] }` from metadata discovery only (no auth or process launch, including `--version`) |
 
 - `kind` ∈ `brief`, `explain_errors`. `cli` ∈ `claude-code`, `codex`.
 - `project_root`: absolute, existing directory, not `/`, not `$HOME`.
@@ -49,10 +49,19 @@ Reached from chrome over the existing provider-host stdio transport
 ```jsonc
 { "version": 1, "request_id": "…", "kind": "brief", "cli": "claude-code",
   "status": "ok" | "failed" | "cancelled" | "timeout" | "unavailable" | "invalid_output" | "busy",
+  "reason": null | <fixed reason below>,
   "document": <brief | error_explanation> | null,
   "data_sent": true | false,       // true once the CLI was started (it may contact its provider)
   "duration_ms": 1234 }
 ```
+
+`reason` is `null` only for `ok`. Other statuses use one of
+`NOT_AUTHORIZED`, `CLI_NOT_INSTALLED`, `SPAWN_FAILED`, `EXIT_NONZERO`,
+`CLI_REPORTED_ERROR`, `OUTPUT_LIMIT`, `SCHEMA_MISMATCH`, `TIMEOUT`,
+`CANCELLED`, `QUEUE_FULL`, `HOST_CLOSED`. The product host explicitly uses
+`liveAuthorized: false`; a valid run returns `unavailable` / `NOT_AUTHORIZED`
+with `data_sent: false` before any CLI launch. Fake-only tests may use the
+explicit test launch seam.
 
 ### 3.1 `brief` document
 

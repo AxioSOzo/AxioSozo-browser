@@ -108,7 +108,13 @@ test('matchSurfaceForUrl: forge owner/repo and Vercel team/project', () => {
   const m = url => { const r = matchSurfaceForUrl(projects, url); return r && [r.project_id, r.surface.url]; };
   assert.deepEqual(m('https://github.com/acme/app/pull/12'), ['p_one1', 'https://github.com/Acme/App'], 'case-insensitive; ambiguity → first project');
   assert.deepEqual(m('https://github.com/acme/app.git'), ['p_one1', 'https://github.com/Acme/App']);
-  assert.deepEqual(m('https://gitlab.com/group/sub/-/issues'), ['p_two2', 'https://gitlab.com/group/sub/tool'], 'first two segments only');
+  assert.deepEqual(m('https://gitlab.com/group/sub/tool/-/issues'), ['p_two2', 'https://gitlab.com/group/sub/tool'], 'complete subgroup repository path');
+  assert.deepEqual(m('https://gitlab.com/group/sub/tool.git'), ['p_two2', 'https://gitlab.com/group/sub/tool']);
+  assert.equal(m('https://gitlab.com/group/sub/-/issues'), null, 'parent group is not the repository');
+  assert.equal(m('https://gitlab.com/group/sub/other/-/issues'), null, 'sibling repository stays separate');
+  assert.equal(m('https://gitlab.com/group/sub/toolbox/-/issues'), null, 'path segment boundary');
+  assert.equal(matchSurfaceForUrl([{ id: 'p_git1', surfaces: [{ kind: 'repository', url: 'https://gitlab.com/group/sub/tool.git' }] }],
+    'https://gitlab.com/group/sub/tool/-/issues').project_id, 'p_git1', 'stored git suffix is normalized');
   assert.deepEqual(m('https://bitbucket.org/team/repo/pull-requests'), ['p_fou4', 'https://bitbucket.org/team/repo']);
   assert.deepEqual(m('https://vercel.com/acme-team/app-web/deployments'), ['p_one1', 'https://vercel.com/acme-team/app-web']);
   assert.deepEqual(m('https://vercel.com/acme-team/app-web'), ['p_one1', 'https://vercel.com/acme-team/app-web']);

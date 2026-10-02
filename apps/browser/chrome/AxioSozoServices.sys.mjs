@@ -3,10 +3,12 @@
 
 // Process-wide model for contexts, projects, site rules and the usage ledger
 // (contexts-api-v1 §3.3). Pure logic comes from the contexts core; this module
-// adds profile storage, the allowlisted project-file reads, on-request status
-// checks of loopback services (TCP connect only; remote services are never
-// contacted), the no-follow manifest write and events. Every Zen call goes
-// through ZenWorkspaceAdapter.
+// adds profile storage, static project detection through the checksum-pinned
+// containment reader (ProjectDetection), port-to-folder arrival offers
+// (ProjectArrival, ProjectRecords), on-request status checks of loopback
+// services (TCP connect only; remote services are never contacted), the
+// no-follow manifest write and events. Every Zen call goes through
+// ZenWorkspaceAdapter.
 // All methods except on()/registerWindow() return promises of JSON data.
 
 // Relative specifiers resolve to chrome://browser/content/axiosozo/… in the JAR;
@@ -14,7 +16,14 @@
 import * as core from "./contexts/index.mjs";
 import { JsonStore, profileStorage } from "./JsonStore.sys.mjs";
 import { isContextEngine, toContextEngine } from "./EngineRegistry.sys.mjs";
+import { createProjectDetection } from "./ProjectDetection.sys.mjs";
+import { createProjectRecords } from "./ProjectRecords.sys.mjs";
+import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
+import { createProjectArrival } from "./ProjectArrival.sys.mjs";
+import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
+import { createNativeProjectArrivalSubprocess } from "./ProjectArrivalSubprocess.sys.mjs";
 
+export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
 export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json" });
 export const PROBE_MIN_INTERVAL_MS = 5000;
@@ -23,6 +32,15 @@ export const LEDGER_FLUSH_MS = 30000;
 // Distinct (day, host, context) entries kept in memory while the ledger file
 // cannot be written (for example an invalid file the user has to resolve).
 export const MAX_PENDING_LEDGER = 4096;
+// Folders the user keeps projects in besides home (privileged configuration;
+// never a page or actor parameter). Arrival only looks below these and home.
+export const DEFAULT_ARRIVAL_ROOTS = Object.freeze(["/Volumes/T9/Code"]);
+// Never detected, listed or offered: settings, keys and browser profiles in
+// home, and system folders. Checked on the given and the resolved path before
+// any reader is created.
+export const HOME_DENIED_FOLDERS = Object.freeze(["Library", ".mozilla", ".thunderbird", ".config", ".cache",
+  ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".codex", ".claude"]);
+export const SYSTEM_DENIED_ROOTS = Object.freeze(["/System", "/Library", "/dev", "/etc", "/private/etc", "/usr", "/bin", "/sbin", "/cores"]);
 const DAY_MS = 86400000;
 const CONTEXT_TYPES = ["personal", "organization", "project"];
 // Only services on this machine are ever contacted, and only by a TCP connect to
@@ -30,8 +48,7 @@ const CONTEXT_TYPES = ["personal", "organization", "project"];
 const LOOPBACK_ADDRESSES = Object.freeze({ "localhost": ["127.0.0.1", "::1"], "127.0.0.1": ["127.0.0.1"], "[::1]": ["::1"] });
 const LEDGER_HOST = /^[a-z0-9.-]{1,253}$/u;
 const WORKSPACE_UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/u;
-// Directory entries looked at per listed parent in the workspace phase (§2.2).
-export const MAX_LISTING_ENTRIES = 512;
+const MAX_DENIED_ROOTS = 32;
 
 export class ServicesError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "ServicesError"; this.code = code; }
@@ -53,15 +70,85 @@ function defaultRandomId(prefix) {
   return prefix + Array.from(bytes, byte => alphabet[byte % alphabet.length]).join("");
 }
 
+/** Opaque arrival token: a browser crypto UUID without braces (36 characters),
+ * never derived from paths, URLs or page data. */
+export function browserToken() {
+  const uuid = typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID()
+    : Services.uuid.generateUUID().toString();
+  return uuid.replace(/[{}]/gu, "");
+}
+
 function metadataRecord(uuid, now) {
   return { version: 1, workspace_uuid: uuid, type: "personal", organization_uuid: null,
     project_id: null, engine_preference: null, updated_at: now };
 }
 
+const within = (path, base) => path === base || path.startsWith(`${base}/`);
+const normalAbsolute = path => typeof path === "string" && path.startsWith("/") && path.length > 1 && path.length <= 4096
+  && !/[\u0000-\u001f\u007f]/u.test(path) && !path.endsWith("/") && path.slice(1).split("/").every(part => part && part !== "." && part !== "..");
+
+/**
+ * Extra arrival roots from the environment. Normally DEFAULT_ARRIVAL_ROOTS.
+ * Development only: with AXIOSOZO_SYNTHETIC_TEST=1, AXIOSOZO_ARRIVAL_ROOTS (a
+ * JSON array) replaces them, and every entry must be an absolute path below
+ * <build root>/gui-fixtures/ of the configured workstation build root
+ * (AXIOSOZO_STATIC_READER_ROOT or AXIOSOZO_BUILD_ROOT, validated like the
+ * project reader's). Anything else yields no extra roots (fails closed).
+ */
+export function arrivalRootsFromEnvironment(env) {
+  const read = name => { try { const value = env(name); return typeof value === "string" ? value : ""; } catch { return ""; } };
+  const raw = read("AXIOSOZO_ARRIVAL_ROOTS");
+  if (read("AXIOSOZO_SYNTHETIC_TEST") !== "1" || !raw) return [...DEFAULT_ARRIVAL_ROOTS];
+  let base;
+  try {
+    const buildRoot = read("AXIOSOZO_STATIC_READER_ROOT") || read("AXIOSOZO_BUILD_ROOT");
+    projectReaderPaths(buildRoot);
+    base = `${buildRoot}/gui-fixtures/`;
+  } catch { return []; }
+  let list;
+  try { list = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(list) || !list.length || list.length > 8) return [];
+  const valid = list.every(path => normalAbsolute(path) && path.length <= 1024 && path.startsWith(base) && path.length > base.length);
+  return valid ? [...new Set(list)] : [];
+}
+
+/**
+ * The arrival runtime handed to ProjectArrival: `{ call(options) }` with the
+ * Subprocess.call shape, backed by an adapter that `create()` builds only when
+ * the first call arrives (an actual discovery), never at startup. Concurrent
+ * first calls share one construction; a successful adapter is reused. A failed
+ * construction rejects that call with ARRIVAL_SUBPROCESS_UNAVAILABLE and is
+ * forgotten, so a later discovery tries again. Only the adapter's own call is
+ * used, with ProjectArrival's options passed through unchanged; the adapter
+ * accepts nothing but its fixed operations. ProjectArrival keeps owning the
+ * returned child (draining, killing, reaping).
+ */
+export function lazyArrivalSubprocess(create) {
+  const unavailable = () => Object.assign(new Error("ARRIVAL_SUBPROCESS_UNAVAILABLE"), { code: "ARRIVAL_SUBPROCESS_UNAVAILABLE" });
+  let pending = null;
+  const adapter = () => {
+    if (pending) return pending;
+    const attempt = Promise.resolve().then(create).then(value => {
+      if (typeof value?.call !== "function") throw unavailable();
+      return value;
+    }, () => { throw unavailable(); });
+    pending = attempt;
+    attempt.catch(() => { if (pending === attempt) pending = null; });
+    return attempt;
+  };
+  return Object.freeze({ call: async options => (await adapter()).call(options) });
+}
+
 export class AxioSozoServices {
   #deps; #stores; #listeners = new Map(); #windows = new Map();
   #serviceStatus = new Map(); #lastProbe = new Map(); #probing = new Map(); #pendingLedger = new Map(); #effectiveLedger = null;
-  #flushTimer = null; #prunedDay = null; #detectCache = new Map(); #contextsFileIsV1 = false;
+  #flushTimer = null; #prunedDay = null;
+  // Store v3 persistence: set when the file on disk was a valid v1/v2 store or
+  // held v1 project records; cleared only after the migrated document was written.
+  #contextsNeedPersistence = false; #persistingContexts = null;
+  #records; #arrival;
+  // Arrival acceptances between token consumption and the store append.
+  #acceptances = new Set();
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -76,18 +163,28 @@ export class AxioSozoServices {
    * clock() → ms; localTime(ms) → { year, month, day, minutes, weekday }; randomId(prefix);
    * timers { setTimeout, clearTimeout }; pickFolder(window) → path|null;
    * onShutdown(fn); mostRecentWindow() → window.
+   * Detection: reader (an injected containment reader, tests) or createReader()
+   * → the checksum-pinned native reader, called only for an admitted detection.
+   * Arrival: arrivalRuntime ({ call } with the Gecko Subprocess.call shape; in
+   * chrome the lazily built ProjectArrivalSubprocess adapter, see
+   * lazyArrivalSubprocess),
+   * home, profileDir, arrivalRoots, newToken() (browser UUID, see browserToken).
    */
   constructor(deps = {}) {
     this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId,
-      timers: globalThis, ...deps };
+      timers: globalThis, newToken: browserToken, ...deps };
     const storageFor = this.#deps.storageFor ?? (name => profileStorage(name));
+    const migration = createStoreMigrationValidator({ core });
+    this.#records = createProjectRecords({ core, clock: () => this.#deps.clock(), newToken: () => this.#deps.newToken() });
     this.#stores = {
-      // contexts.json v1 (contexts[].project_id) is read through the pure
-      // migration; the first load writes the v2 document back atomically.
+      // contexts.json v1/v2 (or v3 holding v1 project records) is read through
+      // the pure migration; the next load writes the v3 document back atomically.
+      // An invalid file throws before anything is flagged and is never written.
       contexts: new JsonStore({ storage: storageFor(STORE_FILES.contexts),
         validate: value => {
-          if (value?.version === 1) this.#contextsFileIsV1 = true;
-          return core.migrateContextStore(value);
+          const { document, needsPersistence } = migration.validateOriginalVersion(value);
+          if (needsPersistence) this.#contextsNeedPersistence = true;
+          return document;
         }, empty: core.DEFAULT_CONTEXT_STORE }),
       rules: new JsonStore({ storage: storageFor(STORE_FILES.rules),
         validate: core.validateRuleStore, empty: core.DEFAULT_RULE_STORE }),
@@ -130,6 +227,9 @@ export class AxioSozoServices {
     return () => {
       unsubscribe();
       if (this.#windows.get(window) === adapter) this.#windows.delete(window);
+      // Arrival offers and acceptances are bound to this window; they never outlive it.
+      this.#revokeAcceptances(window);
+      this.#records.discardWindow(window);
     };
   }
 
@@ -163,17 +263,19 @@ export class AxioSozoServices {
   }
 
   // ── contexts ──────────────────────────────────────────────────────────
-  /** The validated v2 contexts document. A v1 file is migrated on read and
-   * written back as v2 once (atomic JsonStore write); a failed write is retried
-   * on the next load and never loses the v1 file. */
+  /** The validated v3 contexts document. A v1/v2 file, or a v3 file with v1
+   * project records, is migrated on read and written back as v3 once (atomic
+   * JsonStore write of a copy; an identical document would be skipped). A
+   * failed write keeps the flag, is retried on the next load and never loses
+   * the old file. Persistence alone emits no event. */
   async #loadContexts() {
     const doc = await this.#stores.contexts.load();
-    if (this.#contextsFileIsV1) {
-      this.#contextsFileIsV1 = false;
-      try { return await this.#stores.contexts.update(current => ({ ...current })); }
-      catch (error) { this.#contextsFileIsV1 = true; console.error("AxioSozo: contexts.json v2 write failed", error); }
-    }
-    return doc;
+    if (!this.#contextsNeedPersistence) return doc;
+    this.#persistingContexts ??= this.#stores.contexts.update(current => ({ ...current }))
+      .then(written => { this.#contextsNeedPersistence = false; return written; })
+      .finally(() => { this.#persistingContexts = null; });
+    try { return await this.#persistingContexts; }
+    catch (error) { console.error("AxioSozo: contexts.json v3 write failed", error); return doc; }
   }
 
   #contextView(space, meta, projects = []) {
@@ -357,141 +459,118 @@ export class AxioSozoServices {
     return this.#deps.fs ?? fail("UNAVAILABLE");
   }
 
-  /** Static, read-only detection (§6.1, contexts-api-v1 §2.1–§2.2), two phases:
-   * 1. only DETECTION_FILES under root, each a regular file ≤ MAX_FILE_BYTES,
-   *    refusing symlinks that leave the root;
-   * 2. for workspaces: the names of the immediate child directories of the
-   *    parents the core plans (nothing below them is opened), then only
-   *    PACKAGE_DETECTION_FILES in the package directories the core expands.
-   * Same lstat/realpath/size refusal policy in both phases; never executes. */
+  /** Static, read-only detection (contexts-api-v1 §2.1–§2.2, workstation-v1 §1):
+   * root files, workspace packages, inventory (names and presence only) and
+   * documented domains, all through ProjectDetection and the containment
+   * reader. No plain path read or listing exists; without a reader nothing is
+   * read (READ_CONTAINMENT_UNAVAILABLE). Never executes. The complete result
+   * is remembered privately; the caller gets the validated draft only. The
+   * Overview actor admits only roots chosen with the native folder picker. */
   async detect(root) {
-    const fs = this.#fs();
+    const result = await this.#detectSecurely(root);
+    return clone(this.#records.rememberDetection(result));
+  }
+
+  #deniedRoots() {
+    const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
+    const profile = normalAbsolute(this.#deps.profileDir) ? this.#deps.profileDir : null;
+    return [...SYSTEM_DENIED_ROOTS, ...(home ? HOME_DENIED_FOLDERS.map(name => `${home}/${name}`) : []),
+      ...(profile ? [profile] : [])].slice(0, MAX_DENIED_ROOTS);
+  }
+
+  /** Settings, key and profile folders are refused by name and by resolved
+   * path before any reader exists; their contents are never inspected. */
+  async #refuseDeniedRoot(fs, root) {
+    const denied = this.#deniedRoots();
+    if (denied.some(base => within(root, base))) fail("ROOT_DENIED");
+    let real = null;
+    try { real = await fs.realpath(root); } catch { return; } // the detector reports a missing root
+    if (typeof real === "string" && denied.some(base => within(real, base))) fail("ROOT_DENIED");
+  }
+
+  async #containmentReader() {
+    if (this.#deps.reader) return this.#deps.reader;
+    if (typeof this.#deps.createReader !== "function") fail("READ_CONTAINMENT_UNAVAILABLE");
+    try { return await this.#deps.createReader(); } catch { fail("READ_CONTAINMENT_UNAVAILABLE"); }
+  }
+
+  /** One admitted detection of `root`: deny list, then the reader, then the
+   * four phases. Returns the detector's complete (privileged) result.
+   * The folder can change while the reader is being set up, so the detector
+   * asks again (allowCanonicalRoot) for the canonical target it actually
+   * resolved, before any metadata, listing or content request and once more
+   * before its result: denied folders are refused (ROOT_DENIED), and
+   * `expectedCanonicalRoot` (a consumed arrival offer, a registered project)
+   * or `checkCanonicalRoot` (a still-cached preview) refuse any other target
+   * with ROOT_CHANGED. Synchronous and service-owned; never page input. */
+  async #detectSecurely(root, { expectedCanonicalRoot = null, checkCanonicalRoot = null } = {}) {
     if (typeof root !== "string" || !root.startsWith("/") || root.includes("\0")) fail("INVALID_ROOT");
-    const rootInfo = await fs.lstat(root);
-    if (!rootInfo) fail("ROOT_NOT_FOUND");
-    const rootReal = await fs.realpath(root);
-    const rootStat = rootInfo.type === "symlink" ? await fs.stat(rootReal) : rootInfo;
-    if (rootStat?.type !== "directory") fail("ROOT_NOT_DIRECTORY");
-    const files = {}; const refused = [];
-    for (const relative of core.DETECTION_FILES) {
-      if (!core.isAllowedPath(relative)) { refused.push({ path: relative, reason: "not_allowlisted" }); continue; }
-      const result = await this.#readAllowlisted(fs, rootReal, relative,
-        (resolvedPath, target) => core.detectionRefusal({ path: relative, resolvedPath, isFile: target.type === "regular", size: target.size }));
-      if (result.text !== undefined) files[relative] = result.text;
-      else if (result.reason) refused.push({ path: relative, reason: result.reason });
-    }
-    const packages = await this.#readWorkspace(fs, rootReal, files);
-    const draft = core.detectProject({ rootName: fs.basename(root), files, refused, packages });
-    this.#detectCache.set(root, files[core.MANIFEST_PATH] ?? null);
-    return clone(draft);
+    const fs = this.#fs();
+    await this.#refuseDeniedRoot(fs, root);
+    const reader = await this.#containmentReader();
+    const allowCanonicalRoot = canonical => {
+      if (this.#deniedRoots().some(base => within(canonical, base))) return false;
+      if (expectedCanonicalRoot !== null && canonical !== expectedCanonicalRoot) fail("ROOT_CHANGED");
+      checkCanonicalRoot?.(canonical);
+      return true;
+    };
+    return createProjectDetection({ fs, reader, core, clock: () => this.#deps.clock(), allowCanonicalRoot }).detect(root);
   }
 
-  /** Phase 2 (§2.2). Returns { [dir]: { files, refused } } for packages with
-   * anything readable or refused. */
-  async #readWorkspace(fs, rootReal, rootFiles) {
-    if (typeof fs.listDirectory !== "function") return {};
-    const plan = core.workspaceCandidates(rootFiles);
-    const prefix = rootReal.endsWith("/") ? rootReal : rootReal + "/";
-    const listing = {};
-    for (const parent of plan.list.slice(0, 16)) {
-      const names = await this.#listChildDirectories(fs, rootReal, prefix, parent);
-      if (names) listing[parent] = names;
-    }
-    const packages = {};
-    for (const dir of core.expandWorkspaceGlobs(plan.patterns, listing).slice(0, core.MAX_WORKSPACE_PACKAGES)) {
-      if (!core.isPackageDir(dir)) continue;
-      const files = {}; const refused = [];
-      for (const rel of core.PACKAGE_DETECTION_FILES) {
-        if (!core.isAllowedPackagePath(dir, rel)) continue;
-        const result = await this.#readAllowlisted(fs, rootReal, `${dir}/${rel}`,
-          (resolvedPath, target) => core.packageDetectionRefusal({ dir, path: rel, resolvedPath,
-            isFile: target.type === "regular", size: target.size }));
-        if (result.text !== undefined) files[rel] = result.text;
-        else if (result.reason) refused.push({ path: rel, reason: result.reason });
-      }
-      if (Object.keys(files).length || refused.length) packages[dir] = { files, refused };
-    }
-    return packages;
-  }
-
-  /** Names of the immediate child directories (and symlinks, which phase 2
-   * re-checks) of one planned parent inside the root; null when the parent is
-   * absent, not a directory or resolves outside the root. Nothing below the
-   * children is opened or stat'ed. */
-  async #listChildDirectories(fs, rootReal, prefix, parent) {
-    if (typeof parent !== "string" || (parent && !core.isPackageDir(parent))) return null;
-    const full = parent ? fs.join(rootReal, parent) : rootReal;
-    try {
-      if (parent) {
-        if (!await fs.lstat(full)) return null;
-        const real = await fs.realpath(full);
-        if (!real.startsWith(prefix)) return null;
-        if ((await fs.stat(real))?.type !== "directory") return null;
-      }
-      const entries = await fs.listDirectory(full, MAX_LISTING_ENTRIES);
-      return entries.slice(0, MAX_LISTING_ENTRIES)
-        .filter(entry => entry && (entry.type === "directory" || entry.type === "symlink") && typeof entry.name === "string")
-        .map(entry => entry.name);
-    } catch { return null; }
-  }
-
-  async #readAllowlisted(fs, rootReal, relative, refusalFor) {
-    const full = fs.join(rootReal, relative);
-    let info;
-    try { info = await fs.lstat(full); } catch { return { reason: "unreadable" }; }
-    if (!info) return {}; // absent: nothing to report
-    let real;
-    try { real = await fs.realpath(full); } catch { return { reason: "unreadable" }; }
-    // Covers a symlinked leaf and any symlinked intermediate directory.
-    const prefix = rootReal.endsWith("/") ? rootReal : rootReal + "/";
-    if (!real.startsWith(prefix)) return { reason: "symlink_outside_root" };
-    const target = info.type === "symlink" ? await fs.stat(real).catch(() => null) : info;
-    if (!target) return { reason: "unreadable" };
-    // An in-root symlink may only resolve to another allowlisted file, so
-    // `package.json -> .env` is refused before anything is opened.
-    const refusal = refusalFor(real.slice(prefix.length), target);
-    if (refusal) return { reason: refusal };
-    let bytes;
-    try { bytes = await fs.read(real, core.MAX_FILE_BYTES + 1); } catch { return { reason: "unreadable" }; }
-    // TOCTOU: a directory or leaf swapped for a link between the check and the
-    // read changes the resolved path; nothing read that way is used.
-    try {
-      if (await fs.realpath(real) !== real || await fs.realpath(full) !== real) return { reason: "unreadable" };
-    } catch { return { reason: "unreadable" }; }
-    if (bytes.length > core.MAX_FILE_BYTES) return { reason: "too_large" };
-    try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) }; }
-    catch { return { reason: "invalid_utf8" }; }
-  }
-
+  /** Adds a folder chosen with the native picker. The selected root is
+   * detected again right before the record is made, so a folder replaced at
+   * the same path since the preview is read afresh, and a root that now
+   * resolves to another folder than the preview did is refused (ROOT_CHANGED).
+   * The record is version 2 with the detected snapshot (profile only);
+   * nothing is written to the folder. */
   async confirmProject({ root, manifest, contextUuid = null } = {}) {
     if (typeof root !== "string" || !root.startsWith("/")) fail("INVALID_ROOT");
     const validManifest = core.validateManifest(manifest);
     core.assertNoSecrets(validManifest);
     if (contextUuid !== null) this.#requireLive(contextUuid);
-    const fs = this.#deps.fs;
-    if (fs) {
-      const info = await fs.lstat(root);
-      const stat = info?.type === "symlink" ? await fs.stat(await fs.realpath(root)) : info;
-      if (stat?.type !== "directory") fail("ROOT_NOT_DIRECTORY");
-    }
-    const repoText = this.#detectCache.get(root);
-    let external = false;
-    if (repoText) {
-      try { external = core.serializeManifest(core.parseManifest(repoText)) === core.serializeManifest(validManifest); }
-      catch { external = false; }
-    }
-    const now = this.#deps.clock();
+    // A preview still cached for this root names the folder the user reviewed;
+    // a different resolved target is refused before it is opened.
+    const result = await this.#detectSecurely(root, { checkCanonicalRoot: canonical => this.#records.detectionFor(root, canonical) });
+    this.#records.detectionFor(root, result.canonicalRoot);
+    this.#records.rememberDetection(result);
+    return this.#addProject({ root, canonicalRoot: result.canonicalRoot, manifest: validManifest, contextUuid });
+  }
+
+  /** The one path that appends a project (folder picker and arrival). The
+   * record comes from ProjectRecords (version 2, canonical root, detected
+   * snapshot only from a matching fresh detection). `guard` (arrival) runs
+   * inside the serialized store mutation, after every earlier queued write,
+   * and throws when the acceptance no longer holds. Duplicates are checked
+   * there too; events follow the atomic write. */
+  async #addProject({ root, canonicalRoot, manifest, contextUuid, guard = null }) {
     const id = this.#deps.randomId("p_");
-    const project = { version: 1, id, root, manifest: clone(validManifest),
-      manifest_state: external ? "external" : "none", context_uuid: null, trusted: false,
-      created_at: now, updated_at: now };
+    const record = this.#records.createRecord({ id, root, canonicalRoot, manifest, contextUuid: null });
     await this.#updateContexts(doc => {
-      if (doc.projects.some(item => item.root === root)) fail("PROJECT_EXISTS");
+      guard?.();
+      if (doc.projects.some(item => item.root === record.root || item.root === root)) fail("PROJECT_EXISTS");
       if (doc.projects.some(item => item.id === id)) fail("DUPLICATE_PROJECT_ID");
       // Any space may hold the project; its type (a label) is left as it is.
-      const next = { ...doc, projects: [...doc.projects, project] };
+      const next = { ...doc, projects: [...doc.projects, record] };
       return contextUuid !== null ? this.#placeProject(next, id, contextUuid) : next;
     }, ["projects", "contexts"]);
+    return this.getProject(id);
+  }
+
+  /** Reads a registered project's folder again (its stored root, never a
+   * parameter). Only `detected` and `updated_at` change; manifest, space,
+   * container, accounts, shared sites, brief and trust stay as they are. */
+  async refreshProjectDetection(id) {
+    const project = (await this.#loadContexts()).projects.find(item => item.id === id);
+    if (!project) fail("UNKNOWN_PROJECT");
+    // The registered root is canonical; a folder that now resolves elsewhere is not opened.
+    const result = await this.#detectSecurely(project.root, { expectedCanonicalRoot: project.root });
+    this.#records.rememberDetection(result);
+    await this.#updateContexts(doc => {
+      const current = doc.projects.find(item => item.id === id);
+      if (!current) fail("UNKNOWN_PROJECT");
+      const next = this.#records.refreshedRecord(current, { root: project.root, canonicalRoot: result.canonicalRoot });
+      return { ...doc, projects: doc.projects.map(item => (item.id === id ? next : item)) };
+    }, ["projects"]);
     return this.getProject(id);
   }
 
@@ -543,6 +622,143 @@ export class AxioSozoServices {
     }, ["projects", "contexts", "attention"]);
     this.#serviceStatus.delete(id);
     return { removed: true };
+  }
+
+  // ── arrival (P1; privileged chrome callers only, never the Overview actor) ──
+  /** What the browser itself says about a tab: a registered normal window,
+   * the tab's own browser id and its current top-level URL. The window object
+   * is the offer's private window key. Unknown privacy fails closed. */
+  #arrivalBinding(window, tab) {
+    const adapter = this.#windows.get(window);
+    let normal = false;
+    try { normal = !!adapter && adapter.isPrivateWindow() === false; } catch { normal = false; }
+    const browser = tab?.linkedBrowser;
+    let normalBrowser = false;
+    try { normalBrowser = browser?.browsingContext?.usePrivateBrowsing === false; } catch { normalBrowser = false; }
+    if (!normal || !normalBrowser || tab.ownerGlobal !== window || tab.closing || tab.isConnected === false) fail("ARRIVAL_UNAVAILABLE");
+    const tabId = browser.browserId;
+    const url = browser.currentURI?.spec;
+    if (!Number.isSafeInteger(tabId) || tabId < 1 || typeof url !== "string") fail("ARRIVAL_UNAVAILABLE");
+    return { tabId, url, windowKey: window, isPrivate: false };
+  }
+
+  #arrivalDiscovery() {
+    if (this.#arrival !== undefined) return this.#arrival;
+    const { arrivalRuntime, fs } = this.#deps;
+    const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
+    const roots = Array.isArray(this.#deps.arrivalRoots) ? this.#deps.arrivalRoots.filter(normalAbsolute) : [];
+    this.#arrival = typeof arrivalRuntime?.call === "function" && fs && (home || roots.length)
+      ? createProjectArrival({ runtime: arrivalRuntime, fs, core, home, roots, deniedRoots: this.#deniedRoots(),
+        getProjects: async () => (await this.#loadContexts()).projects, clock: () => this.#deps.clock(), timers: this.#deps.timers })
+      : null;
+    return this.#arrival;
+  }
+
+  #displayPath(path) {
+    const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
+    return home && path !== home && within(path, home) ? `~${path.slice(home.length)}` : path;
+  }
+
+  #arrivalSpace(window, tab) {
+    const adapter = this.#windows.get(window);
+    let uuid = null;
+    try { uuid = adapter?.workspaceForTab(tab) ?? adapter?.activeWorkspaceUuid() ?? null; } catch { uuid = null; }
+    return uuid && this.#liveWorkspaces().has(uuid) ? uuid : null;
+  }
+
+  /**
+   * Arrival for the current top-level URL of `tab` in `window` (called by
+   * ProjectArrivalRuntime). Returns null; { kind: "known", project_id } for a
+   * registered project (a known repository or hosting URL needs no process);
+   * or { kind: "new", token, name, root, displayRoot, expiresAt } for a folder
+   * served by one of the user's own loopback processes. The token is opaque,
+   * one-use, two minutes, bound to this window, tab and exact URL; the root is
+   * for the native notification only. Never for private windows.
+   */
+  async offerArrival({ window, tab, signal } = {}) {
+    let binding;
+    try { binding = this.#arrivalBinding(window, tab); } catch { return null; }
+    const arrival = this.#arrivalDiscovery();
+    if (!arrival || signal?.aborted) return null;
+    let offer = null;
+    try { offer = await arrival.discover(binding.url, { isPrivate: false, signal }); } catch { offer = null; }
+    if (!offer || signal?.aborted) return null;
+    if (offer.kind === "known") return typeof offer.project_id === "string" ? { kind: "known", project_id: offer.project_id } : null;
+    if (offer.kind !== "new" || !normalAbsolute(offer.root) || this.#deniedRoots().some(base => within(offer.root, base))) return null;
+    try {
+      // Bound to what the tab shows now; a tab that moved on gets nothing.
+      const current = this.#arrivalBinding(window, tab);
+      if (current.url !== binding.url || current.tabId !== binding.tabId) return null;
+      const issued = this.#records.issueArrival({ root: offer.root, canonicalRoot: offer.root, ...current });
+      return { kind: "new", token: issued.token, name: offer.name, root: issued.root,
+        displayRoot: this.#displayPath(issued.root), expiresAt: issued.expiresAt };
+    } catch { return null; }
+  }
+
+  /** Marks in-flight acceptances of `window` (or of one of its tabs) revoked.
+   * Synchronous, so a discard can never lose a race with an acceptance. */
+  #revokeAcceptances(window, tab = null) {
+    const tabId = tab?.linkedBrowser?.browserId;
+    for (const acceptance of this.#acceptances) {
+      if (acceptance.window !== window) continue;
+      if (tab && acceptance.tab !== tab && acceptance.tabId !== tabId) continue;
+      acceptance.revoked = true;
+    }
+  }
+
+  /** An acceptance may only finish for the page it was made on: not revoked,
+   * the window still registered and normal, the same tab and browser id and
+   * the exact same URL, privacy known to be off. */
+  #assertAcceptance(acceptance) {
+    if (acceptance.revoked) fail("STALE_ARRIVAL");
+    const binding = this.#arrivalBinding(acceptance.window, acceptance.tab);
+    if (binding.tabId !== acceptance.tabId || binding.url !== acceptance.url) fail("STALE_ARRIVAL");
+  }
+
+  /**
+   * "Keep as project" on the arrival notification of `tab` (the originating
+   * tab, whichever tab is selected now). The token is checked against that
+   * tab's current URL, window and privacy and the folder's canonical path,
+   * then consumed before detection, so it works once. From then on an
+   * in-flight acceptance stands for it: navigation, dismissal, tab close and
+   * window disposal (discardArrival, unregister) revoke it, and it is checked
+   * again after the fresh detection and inside the serialized store mutation
+   * right before the record is appended. The folder is detected again through
+   * the containment reader and added through the same path as a picked
+   * folder, in the tab's space. No repository file is written.
+   */
+  async acceptArrival({ window, tab, token } = {}) {
+    const offer = this.#records.inspectArrival(token, this.#arrivalBinding(window, tab));
+    const fs = this.#fs();
+    let canonical;
+    try { canonical = await fs.realpath(offer.root); } catch { fail("ROOT_CHANGED"); }
+    if ((await fs.stat(canonical))?.type !== "directory") fail("ROOT_NOT_DIRECTORY");
+    const binding = this.#arrivalBinding(window, tab);
+    const claimed = this.#records.consumeArrival(token, { ...binding, canonicalRoot: canonical });
+    const acceptance = { window, tab, tabId: binding.tabId, url: binding.url, revoked: false };
+    this.#acceptances.add(acceptance);
+    try {
+      const contextUuid = this.#arrivalSpace(window, tab);
+      // Only the canonical folder the spent token was checked against may be opened.
+      const result = await this.#detectSecurely(claimed.root, { expectedCanonicalRoot: claimed.canonicalRoot });
+      this.#assertAcceptance(acceptance);
+      this.#records.rememberDetection(result);
+      return await this.#addProject({ root: claimed.root, canonicalRoot: result.canonicalRoot,
+        manifest: core.draftToManifest(result.draft), contextUuid, guard: () => this.#assertAcceptance(acceptance) });
+    } finally {
+      this.#acceptances.delete(acceptance);
+    }
+  }
+
+  /** Invalidates the arrival offers and in-flight acceptances of one tab
+   * (navigation, dismissal, close) or, without a tab, of the whole window.
+   * Synchronous; returns nothing. */
+  discardArrival({ window, tab } = {}) {
+    if (!window) return;
+    this.#revokeAcceptances(window, tab ?? null);
+    if (!tab) { this.#records.discardWindow(window); return; }
+    const tabId = tab.linkedBrowser?.browserId;
+    if (Number.isSafeInteger(tabId)) this.#records.discardTab(window, tabId);
   }
 
   /** Tab ↔ project linking (§2.5): the project and environment whose declared
@@ -900,6 +1116,7 @@ export function processSingleton(key, factory) {
 // ── chrome-only dependencies (never evaluated under Node tests) ─────────
 function chromeDependencies() {
   const { setTimeout, clearTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
+  const directory = key => { try { return Services.dirsvc.get(key, Ci.nsIFile).path; } catch { return null; } };
   return {
     storageFor: name => profileStorage(name),
     fs: chromeFileSystem(),
@@ -911,6 +1128,18 @@ function chromeDependencies() {
       const { AsyncShutdown } = ChromeUtils.importESModule("resource://gre/modules/AsyncShutdown.sys.mjs");
       AsyncShutdown.profileBeforeChange.addBlocker("AxioSozo: flush usage ledger", () => flush().catch(() => {}));
     },
+    // Fixed interpreter/helper paths and checksum (ProjectReaderConfig); created
+    // per admitted detection, never from page or actor parameters.
+    createReader: () => createNativeProjectReader(),
+    newToken: browserToken,
+    home: directory("Home"),
+    profileDir: directory("ProfD"),
+    arrivalRoots: arrivalRootsFromEnvironment(name => Services.env.get(name)),
+    // ProjectArrival's fixed /usr/bin/id and own-UID lsof requests run through
+    // the checksum-pinned supervisor (ProjectArrivalSubprocess), built on the
+    // first actual discovery. Unavailable means no discovery; there is no
+    // direct-lsof fallback.
+    arrivalRuntime: lazyArrivalSubprocess(() => createNativeProjectArrivalSubprocess()),
   };
 }
 
@@ -920,8 +1149,10 @@ function localFile(path) {
   return file;
 }
 
-/** Minimal filesystem seam: lstat without following the leaf, realpath, bounded
- * read, and the no-follow write primitives used by writeManifestFile. */
+/** Minimal filesystem seam: lstat without following the leaf, stat, realpath
+ * (metadata only) and the no-follow write primitives used by writeManifestFile.
+ * It has no read or listing on purpose: project content is only ever read and
+ * listed through the containment reader (ProjectDetection). */
 export function chromeFileSystem() {
   const statOf = (file, followLeaf) => {
     if (!followLeaf && file.isSymlink()) return { type: "symlink", size: 0 };
@@ -951,27 +1182,6 @@ export function chromeFileSystem() {
       const file = localFile(path);
       file.normalize();
       return file.path;
-    },
-    async read(path, maxBytes) {
-      return IOUtils.read(path, { maxBytes });
-    },
-    /** Names and no-follow types of a directory's entries (workspace phase):
-     * IOUtils.getChildren lists names only; each entry is lstat'ed through
-     * nsIFile.isSymlink() before isDirectory(), so a link is reported as a link
-     * and nothing below an entry is touched. At most `limit` entries. */
-    async listDirectory(path, limit = MAX_LISTING_ENTRIES) {
-      const children = await IOUtils.getChildren(path, { ignoreAbsent: true });
-      const entries = [];
-      for (const child of children.slice(0, limit)) {
-        const file = localFile(child);
-        let type = "other";
-        try {
-          if (file.isSymlink()) type = "symlink";
-          else if (file.isDirectory()) type = "directory";
-        } catch { continue; }
-        entries.push({ name: PathUtils.filename(child), type });
-      }
-      return entries;
     },
     /** One directory level; rejects when anything (a link included) already exists. */
     async makeDirectory(path) {

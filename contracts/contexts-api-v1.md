@@ -3,6 +3,7 @@
 Owner: integration lead. This file fixes the seams between the workstreams in
 [HANDOFF_3](../docs/HANDOFF_3.md) §7 so they can work in parallel. Data shapes
 are defined by [context-v1](context-v1.schema.json),
+[context-v2](context-v2.schema.json) and [workstation-v1](workstation-v1.md),
 [site-rule-v1](site-rule-v1.schema.json) and [decision-v1](decision-v1.md).
 A change to any name below goes through the lead.
 
@@ -42,7 +43,7 @@ Rules for every file in `packages/contexts/src/`:
 | Module | Exports |
 | --- | --- |
 | `errors.mjs` | `class ContextsError extends Error { code; path }` |
-| `schema.mjs` | `validateContextMetadata(v)`, `validateProject(v)`, `validateManifest(v)` (version 1 or 2, §2.4), `validateContextStore(v)` (version 1 or 2, §2.3), `migrateContextStore(store) → v2 store`, `projectsInContext(store, uuid) → project[]`, `surfaceProminence(surface) → "primary"\|"secondary"`, `environmentKey(env)`, `CONTEXT_STORE_VERSION = 2`, `SURFACE_PROMINENCE`, `PRIMARY_SURFACE_KINDS`, `validateSiteRule(v)`, `validateRuleStore(v)`, `validateLedger(v)`, `validateLedgerRecord(v)`, `validateHostPattern(s)`, `validateBaseUrl(s)`, `newRule({now, id}) → siteRule` (defaults: enabled true, contexts "all", observation "none", effects ["nudge"], override "confirm", limits nulls, agents none), `DEFAULT_RULE_STORE`, `DEFAULT_LEDGER`, `EFFECTS`, `OUTCOMES`, `REASON_CODES` |
+| `schema.mjs` | `validateContextMetadata(v)`, `validateProject(v)`, `validateManifest(v)` (version 1 or 2, §2.4), `validateContextStore(v)` (version 1, 2 or 3), `migrateContextStore(store) → v3 store`, `projectsInContext(store, uuid) → project[]`, `surfaceProminence(surface) → "primary"\|"secondary"`, `environmentKey(env)`, `CONTEXT_STORE_VERSION = 3`, `SURFACE_PROMINENCE`, `PRIMARY_SURFACE_KINDS`, `validateSiteRule(v)`, `validateRuleStore(v)`, `validateLedger(v)`, `validateLedgerRecord(v)`, `validateHostPattern(s)`, `validateBaseUrl(s)`, `newRule({now, id}) → siteRule` (defaults: enabled true, contexts "all", observation "none", effects ["nudge"], override "confirm", limits nulls, agents none), `DEFAULT_RULE_STORE`, `DEFAULT_LEDGER`, `EFFECTS`, `OUTCOMES`, `REASON_CODES` |
 | `detect.mjs` | `MAX_FILE_BYTES = 262144`, `DETECTION_FILES` (exact relative paths, see §2.1), `isAllowedPath(rel)`, `detectionRefusal(...)`, `detectProject({ rootName, files, refused, packages? }) → detectionDraft` where `files` is `{ [relPath]: string }` of files the caller actually read, plus `refused` passed through as `{ path, reason }[]`; workspace phase (§2.2): `workspaceCandidates(files)`, `expandWorkspaceGlobs(patterns, listing)`, `normalizeWorkspacePattern(p)`, `PACKAGE_DETECTION_FILES`, `MAX_WORKSPACE_PACKAGES = 24`, `isPackageDir(dir)`, `isAllowedPackagePath(dir, rel)`, `packageDetectionRefusal(...)` |
 | `manifest.mjs` | `MANIFEST_PATH = ".axiosozo/project.json"`, `draftToManifest(draft, edits) → manifest` (`edits` may also hold `production_url`, §2.4), `withProductionUrl(manifest, url, { app? }) → manifest`, `mainWebApp(manifest) → app \| undefined`, `parseManifest(text) → manifest`, `serializeManifest(manifest) → string` (stable key order, 2-space indent, trailing newline), `assertNoSecrets(manifest)` |
 | `environments.mjs` | `ENV_ORDER = ["local","preview","production"]`, `orderedEnvironments(project)`, `matchEnvironment(environments, url) → { environment, rest: { path, search, hash } } \| null`, `switchEnvironment(environments, url, targetName, { app }?) → string \| null` (preserves path below the base prefix, query and fragment; stays in the current environment's app, falls back to an app-less environment, never jumps app implicitly), `matchProjectForUrl(projects, url, { contextUuid }?) → { project_id, environment, app, ambiguous } \| null` (§2.5), `isDeclaredLocalOrigin(environments, url) → boolean` (true only for a declared environment whose host is `localhost`, `127.0.0.1` or `[::1]`) |
@@ -183,6 +184,53 @@ are the same host (never `0.0.0.0`). Order: a project in `contextUuid`, then
 an exact host over a loopback alias, then the longest prefix, then list
 order. Returns a frozen `{ project_id, environment, app (null when absent),
 ambiguous }` (`ambiguous`: another project matched equally well) or `null`.
+
+### 2.6 Plan 4 detection and record migration (current)
+
+[workstation-v1](workstation-v1.md) §1–§4 defines detection draft v2,
+project record v2 and context store v3; these supersede the historical v2-only
+store defaults in §2.3. Existing manifests remain version 1 or 2.
+`migrateContextStore` is pure/idempotent, accepts v1/v2/v3 and upgrades every
+project with profile-local detected/container/shared-sites/accounts/brief fields
+without changing timestamps. Chrome persists valid migrated source documents
+atomically; invalid stores are never overwritten. Missing files use the v3
+default directly. Failed migration writes retain a retry flag.
+
+The reader performs root, workspace, inventory and allowlisted docs phases.
+Native/mobile and agent files are presence only; only the explicit content
+allowlist is read, capped at 256 KiB with strict UTF-8. Domain discoveries remain
+unconfirmed. Native-only packages remain in inventory without package.json.
+Content and directory listings require descriptor-bound no-follow root/leaf
+identities; a post-read path check alone is insufficient. The fixed Python
+helper refuses symlink/hardlink/special files before content reads, never runs
+project code, and opens no arbitrary docs. Missing trusted configuration or
+required OS primitives produces `READ_CONTAINMENT_UNAVAILABLE`, with no
+path-read/list fallback. Helpers/interpreters are fixed, checksum-pinned,
+externally installed and launched with sanitized environment, bounded output,
+three-second per-operation deadlines and forced pipe/child cleanup.
+For owned synthetic reference GUI checks only, the conjunction of privileged
+`AXIOSOZO_SYNTHETIC_TEST=1` and `AXIOSOZO_METADATA_NO_REMOTE_CONFIG=1`
+refuses canonical `.git/config` helper metadata/content requests. No actor or
+page controls this policy, and every other flag combination preserves the
+production allowlist. Original path stat/resolution may still observe existence;
+this seam never opens the excluded file's content.
+
+`ProjectDetection.detect(root)` returns privileged canonical provenance plus a
+validated draft. Its privileged synchronous `allowCanonicalRoot(path)` gate
+requires literal `true`, runs immediately after the initial canonical resolution
+before target stat, reader metadata, listing or content, and runs again before
+the final root identity check. The browser service applies its settings/profile/
+system deny policy there; an accepted arrival also requires the consumed offer's
+canonical root, and confirmation preserves a still-valid preview binding.
+A changed target fails `ROOT_CHANGED`, and denied or unknown admission fails
+`ROOT_DENIED`; no target content is opened on either initial refusal. Only the
+draft crosses the Overview actor. The service owns a bounded detector cache; new/refresh records take their detected snapshot only
+from this trusted cache, never an actor field. Confirmation freshly detects the
+authorized folder, checks canonical duplicates and preserves repository-write
+confirmation as a separate operation. Refresh preserves user metadata/trust.
+Arrival offers use one-use opaque tokens bound to canonical root, exact native
+tab URL and normal window, expire within two minutes, and are invalidated on
+navigation/removal/disposal. Neither arrival nor confirmation executes a repo.
 
 ## 3. Chrome-side services
 

@@ -30,7 +30,8 @@ presence (see [provider-v1](provider-v1.md#jev-key-entry-decided-ships)).
 
 Reason strings for failures are fixed: `disabled`, `cancelled`, `timeout`,
 `BLOCKED_AUTH`, `HTTP_ERROR`, `NETWORK_ERROR`, `KEYCHAIN_ERROR`,
-`malformed_output`, `budget_exhausted`, `INVALID_INPUT`, `validated`, and
+`malformed_output`, `budget_exhausted`, `INVALID_INPUT`, `validated`,
+`IMAGE_UNSUPPORTED`, `UNVERIFIED_SHAPE`, `NOT_AUTHORIZED`, and
 `HOST_UNAVAILABLE` (produced only by the chrome helper when the provider host
 cannot be reached).
 
@@ -184,6 +185,11 @@ All additive; a request without the new fields behaves exactly as above.
 - Providers declare capabilities: `{ image: boolean }`. Jev: `image: false`
   until its documentation says otherwise.
 - Result adds `provider` (the provider that answered or would have answered).
+- The browser product host disables live authorization. After strict request
+  validation, it returns the neutral outcome with `reason: "NOT_AUTHORIZED"`,
+  `data_sent: false`, and no Keychain read, network request or budget use.
+  OpenAI retains `shape_status: "UNVERIFIED_SHAPE"` at this gate. Fixture-only
+  adapters may exercise the provider/image/shape gates below.
 
 ### Image input (`screen` observation)
 
@@ -205,8 +211,18 @@ All additive; a request without the new fields behaves exactly as above.
   and is applied by the host, so chrome sees the post-threshold outcome plus
   the raw confidence.
 
+For this additive transition only, chrome accepts the original Jev site-rule
+reply shape when **both** `provider` and `confidence` are absent, and normalizes
+it to `provider: "jev"`, `confidence: null`. Partial additive replies are
+rejected. Watches and OpenAI always require the new fields. New non-neutral
+results require numeric confidence ≥ 0.8, the expected provider/model and a
+validated sent result. Replies arriving after the request deadline cannot apply
+a positive outcome; a bounded reply grace retains disclosure only. Cancellation
+covers host startup and the outgoing indicator as well as the written request.
+
 ### `watch_v1` choice set (watches, PLAN_4 §4)
 
+- Request uses `choice_set: "watch_v1"`, `context_version: "watch-1"`.
 - Request `state`: `{ "watch": { "id": "w_…", "question": "≤ 500 chars", "outcomes": [ { "id": "^[a-z][a-z0-9_]{0,31}$", "label": "≤ 80" } ] }, "observation": { … } }`
   with 2–6 outcomes; `unknown` is reserved and always allowed.
 - Result `outcome` is one of the outcome ids or `unknown` (the neutral outcome
