@@ -23,7 +23,11 @@ PROJECT_ID = hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
 BUILD_ID = hashlib.sha256((str(ROOT) + "\n").encode()).hexdigest()[:16]
 CORE = storage.BUILD_ROOT / "cargo-target" / "debug" / "browser-core"
 SESSION_ROOT = storage.BUILD_ROOT / "runtime" / PROJECT_ID
-CARGO_HOME_DIR = storage.BUILD_ROOT / "cargo-home"
+# Crate registry cache and pinned toolchains are shared across build roots on the volume.
+CARGO_HOME_DIR = storage.VOLUME / "cargo-home"
+# In a sub build root (another worktree) the CEF component belongs to the engine
+# workstream's volume-root build; its gates are reported as skipped, never passed.
+SUBROOT = storage.BUILD_ROOT != storage.VOLUME
 os.environ["AXIOSOZO_BUILD_ROOT"] = str(storage.BUILD_ROOT)
 ZEN = ROOT / "scripts" / "zen.py"
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
@@ -34,7 +38,7 @@ RELEASE = ROOT / "scripts" / "release" / "preview.py"
 def provider_node():
     # Setup already verifies this project-local runtime. Do not make normal
     # browser use depend on the developer's global Node installation.
-    pinned = storage.BUILD_ROOT / "toolchains/zen/node/bin/node"
+    pinned = storage.VOLUME / "toolchains/zen/node/bin/node"
     return str(pinned) if pinned.is_file() else shutil.which("node") or ""
 
 
@@ -106,6 +110,9 @@ def run(argv, build=False, env=None):
 
 
 def component(script, *args):
+    if SUBROOT and script == CEF:
+        print(f"SKIPPED_ENGINE_WORKSTREAM: CEF {' '.join(args)} is not run in sub build root {storage.BUILD_ROOT}", flush=True)
+        return 0
     if not script.is_file():
         print("BLOCKED_ENV: component entrypoint missing:", script.relative_to(ROOT), flush=True)
         return 2
@@ -202,7 +209,10 @@ def test():
     results.append(run([sys.executable, ROOT / "native/chromium-host/test_probe.py"], build=True))
     # Real CEF OSR fixture/input/lifecycle coverage is a component gate. A PASS
     # here still does not establish E1 in the Zen content area.
-    results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True))
+    if SUBROOT:
+        print("SKIPPED_ENGINE_WORKSTREAM: native/chromium-host/stream_test.py (needs the volume-root CEF build)", flush=True)
+    else:
+        results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True))
     return 1 if any(results) else 0
 
 

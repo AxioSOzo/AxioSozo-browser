@@ -168,6 +168,50 @@ defense in depth only (the host idles out after two minutes); the chrome-side
 budget is authoritative. The host is started on demand for this call only
 if an eligible checkpoint fires; otherwise it is never started.
 
+## Plan 4 extensions (2 October 2026)
+
+All additive; a request without the new fields behaves exactly as above.
+
+### Providers
+
+- Request top-level `provider` (optional) ∈ `jev` (default), `openai`. Each
+  provider has its own Keychain item and its own key entry in Settings
+  (presence only is visible to chrome). Choice is per call.
+- `openai` uses the OpenAI Decisions API with the user's own key. Its request
+  and response shapes must come from OpenAI's official documentation; if the
+  documentation is not available, the adapter is marked `UNVERIFIED_SHAPE`
+  in code, in `provider-v1.md` and in the status file, and stays fixture-only.
+- Providers declare capabilities: `{ image: boolean }`. Jev: `image: false`
+  until its documentation says otherwise.
+- Result adds `provider` (the provider that answered or would have answered).
+
+### Image input (`screen` observation)
+
+- New observation level `screen` = `address` plus
+  `observation.screen = { "mime": "image/png", "width": ≤ 1280, "height": ≤ 1280, "data_base64": "…" }`
+  (decoded ≤ 1 MiB, a PNG signature is required). `outline` may accompany it.
+- Only allowed when the rule or watch allows `screen` observation, never for
+  private windows, never for sensitive-category hosts (capped to `address`),
+  and only to a provider whose capabilities include `image`. A `screen`
+  request to a provider without image support → outcome `none` /
+  `unknown`, reason `IMAGE_UNSUPPORTED`, **no network call**.
+- The serialized `state` cap rises to 1.5 MiB **only** for `screen` requests;
+  the transport line limit for those requests is 1.6 MiB.
+
+### Confidence
+
+- Every result carries `confidence`: a number 0–1 from the provider, or
+  `null` when no answer was obtained. The 0.8 threshold above still applies
+  and is applied by the host, so chrome sees the post-threshold outcome plus
+  the raw confidence.
+
+### `watch_v1` choice set (watches, PLAN_4 §4)
+
+- Request `state`: `{ "watch": { "id": "w_…", "question": "≤ 500 chars", "outcomes": [ { "id": "^[a-z][a-z0-9_]{0,31}$", "label": "≤ 80" } ] }, "observation": { … } }`
+  with 2–6 outcomes; `unknown` is reserved and always allowed.
+- Result `outcome` is one of the outcome ids or `unknown` (the neutral outcome
+  for every failure). Host method `decision/watch`.
+
 ## `highlight_v1` (M2, specified, not implemented in M1)
 
 - Input: `address` plus `outline` items (same rules as above) with opaque IDs,

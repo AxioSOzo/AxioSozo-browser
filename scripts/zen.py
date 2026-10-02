@@ -13,12 +13,14 @@ import stat
 import subprocess
 import sys
 import urllib.request
+import storage
 import zen_toolchain
 import zen_import
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / 'upstream/zen'
-BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', '/Volumes/AxioSozoBuild'))
+# The volume root or one named sub-root on it (storage.build_root validates).
+BUILD_ROOT = storage.build_root()
 BUILD = BUILD_ROOT / 'zen'
 STAGE = BUILD / 'source'
 OBJECT = BUILD / 'obj'
@@ -258,7 +260,7 @@ def doctor():
     issues = []
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         issues.append('macOS Apple Silicon required for this build')
-    if not Path('/Volumes/DevStorage').is_mount() or not BUILD_ROOT.is_mount():
+    if not Path('/Volumes/DevStorage').is_mount() or not storage.mounted():
         issues.append('Project APFS build storage is not mounted')
         free = 0
     else:
@@ -544,7 +546,7 @@ export MOZ_APP_REMOTINGNAME=AxioSozoDev
 
 def setup(build_native=True):
     subprocess.run([MOUNT], check=True)
-    if not BUILD_ROOT.is_mount():
+    if not storage.mounted():
         raise RuntimeError('PROJECT_STORAGE_NOT_MOUNTED')
     unexpected = unexpected_source_changes()
     if unexpected:
@@ -669,7 +671,7 @@ def native_build():
     """Fast path for edits under apps/browser/native only: mirror, then rebuild just the
     changed native directories and relink libxul. Anything else needs a full setup."""
     subprocess.run([MOUNT], check=True)
-    if not BUILD_ROOT.is_mount():
+    if not storage.mounted():
         raise RuntimeError('PROJECT_STORAGE_NOT_MOUNTED')
     stamp_path = BUILD / 'build-stamp.json'
     engine = STAGE / 'engine'

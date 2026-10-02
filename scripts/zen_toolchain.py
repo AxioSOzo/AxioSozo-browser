@@ -10,9 +10,12 @@ import subprocess
 import sys
 import tarfile
 
+import storage
+
 ROOT = Path(__file__).resolve().parents[1]
-BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', '/Volumes/AxioSozoBuild'))
-TOOLS = BUILD_ROOT / 'toolchains/zen'
+BUILD_ROOT = storage.build_root()
+# Pinned, checksum-verified tools are shared by every build root on the volume.
+TOOLS = storage.VOLUME / 'toolchains/zen'
 DOWNLOADS = TOOLS / 'downloads'
 PIN_FILE = ROOT / 'patches/zen/toolchains.json'
 STORAGE = ROOT / 'scripts/storage.py'
@@ -119,7 +122,7 @@ def installed(name, pin):
 
 
 def fetch():
-    if not BUILD_ROOT.is_mount():
+    if not storage.mounted():
         raise RuntimeError('PROJECT_STORAGE_NOT_MOUNTED')
     DOWNLOADS.mkdir(parents=True, exist_ok=True)
     empty_npm_config = TOOLS / 'npm-global-emptyrc'

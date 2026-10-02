@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -13,8 +14,30 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = Path('/Volumes/T9/AxioSozoBuild.sparsebundle')
-BUILD_ROOT = Path('/Volumes/AxioSozoBuild')
+# The mounted project volume. Several worktrees may build side by side on it,
+# each in its own build root (AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/<name>).
+VOLUME = Path('/Volumes/AxioSozoBuild')
+# Top-level names on the volume that belong to the default (volume-root) build
+# or are shared; a sub-root may never alias them.
+RESERVED_SUBROOTS = {'zen', 'toolchains', 'cargo-home', 'cargo-target', 'caches', 'runtime', 'tmp',
+                     'cef', 'providers', 'logs', 'release', 'diag', 'diagnostics', 'gui-fixtures'}
 MOUNT_SHARED = '/Users/wout/.local/bin/mount-dev-storage'
+
+
+def build_root(value=None):
+    """The volume root, or one named build root directly below it. Anything
+    else (relative, nested, `..`, a shared top-level name) is refused."""
+    raw = os.environ.get('AXIOSOZO_BUILD_ROOT') if value is None else value
+    if not raw or Path(raw) == VOLUME:
+        return VOLUME
+    path = Path(raw)
+    if (not path.is_absolute() or path.parent != VOLUME or path.name in RESERVED_SUBROOTS
+            or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', path.name)):
+        raise RuntimeError('INVALID_AXIOSOZO_BUILD_ROOT: ' + str(raw))
+    return path
+
+
+BUILD_ROOT = build_root()
 
 
 def image_mounts():
@@ -26,12 +49,19 @@ def image_mounts():
 
 
 def mounted():
-    return BUILD_ROOT.is_mount() and str(BUILD_ROOT) in image_mounts()
+    """The verified project volume is mounted and this build root exists on it."""
+    if not (VOLUME.is_mount() and str(VOLUME) in image_mounts()):
+        return False
+    if BUILD_ROOT != VOLUME:
+        BUILD_ROOT.mkdir(exist_ok=True)
+        if BUILD_ROOT.is_symlink() or BUILD_ROOT.resolve() != BUILD_ROOT:
+            return False
+    return True
 
 
 def report():
     active = mounted()
-    return {'image': str(IMAGE), 'mountpoint': str(BUILD_ROOT), 'mounted': active,
+    return {'image': str(IMAGE), 'mountpoint': str(VOLUME), 'build_root': str(BUILD_ROOT), 'mounted': active,
             'image_exists': IMAGE.exists(), 'virtual_capacity_gib': 200,
             't9_free_gib': round(shutil.disk_usage('/Volumes/T9').free / 2**30, 2)
                 if Path('/Volumes/T9').is_mount() else None,
@@ -49,7 +79,7 @@ def ensure():
         fcntl.flock(lock, fcntl.LOCK_EX)
         if mounted():
             return report()
-        if BUILD_ROOT.is_mount():
+        if VOLUME.is_mount():
             raise RuntimeError('Unexpected mounted filesystem at project build path')
         if not Path('/Volumes/T9').is_mount():
             raise RuntimeError('T9 is unavailable; no internal-storage fallback')
@@ -61,7 +91,7 @@ def ensure():
             subprocess.run(['/usr/bin/hdiutil', 'create', '-size', '200g', '-type', 'SPARSEBUNDLE',
                             '-fs', 'APFS', '-volname', 'AxioSozoBuild', '-nospotlight', str(IMAGE)],
                            check=True, timeout=180)
-        if BUILD_ROOT.exists() and any(BUILD_ROOT.iterdir()):
+        if VOLUME.exists() and any(VOLUME.iterdir()):
             raise RuntimeError('Refusing to obscure files underneath the project mountpoint')
         mounts = image_mounts()
         if mounts:
