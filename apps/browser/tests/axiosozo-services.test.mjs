@@ -669,7 +669,7 @@ test("Overview rule editor contract: a new rule is saved without the model's pla
   assert.match(page, /if \(!rule\) delete payload\.id;/u, "the page drops the placeholder id for new rules");
 });
 
-test("store v2: a v1 contexts.json is migrated on load and written back as v2 once", { skip }, async () => {
+test("store v3: a v1 contexts.json is migrated on load and written back as v3 once", { skip }, async () => {
   const h = harness();
   const project = { version: 1, id: "p_legacy1", root: "/work/shop", manifest: MANIFEST, manifest_state: "none",
     context_uuid: null, trusted: false, created_at: 5, updated_at: 5 };
@@ -681,7 +681,8 @@ test("store v2: a v1 contexts.json is migrated on load and written back as v2 on
   const [listed] = await services.listProjects();
   assert.equal(listed.context_uuid, APP, "the v1 link becomes projects[].context_uuid");
   const written = JSON.parse(h.storage.files.get("contexts.json"));
-  assert.equal(written.version, 2);
+  assert.equal(written.version, 3);
+  assert.equal(written.projects[0].version, 2);
   assert.equal(written.contexts[0].project_id, null, "the deprecated mirror is cleared");
   assert.equal(written.projects[0].updated_at, 5, "migration changes nothing else");
   const before = h.storage.files.get("contexts.json");
@@ -709,7 +710,8 @@ test("projects live in any space: several per space, personal spaces included, m
   assert.equal((await h.services.getProject(shop.id)).context_uuid, null);
   assert.equal((await h.services.getProject(docs.id)).context_uuid, BV, "only that space's projects are released");
   const stored = JSON.parse(h.storage.files.get("contexts.json"));
-  assert.equal(stored.version, 2);
+  assert.equal(stored.version, 3);
+  assert.ok(stored.projects.every(project => project.version === 2));
   assert.ok(stored.contexts.every(meta => meta.project_id === null));
 });
 

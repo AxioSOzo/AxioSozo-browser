@@ -6,8 +6,8 @@
 
 | Commit | What |
 | --- | --- |
-| `cb8748c` | Step 0, partial: isolated build roots (`AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/<name>`), contracts `workstation-v1`, `agent-channel-v1`, `understand-v1`, and the `decision-v1` extensions. The upstream for this worktree, a baseline `./dev check`/`./dev test` and a build into the workstation root are **not yet verified**. |
-| (next commit) | Package-level logic for steps 1, 4, 5, 6 and 8, built by three Claude sub-agents. No chrome or frontend integration yet. |
+| `cb8748c` | Step 0 contracts and isolated build roots. Workstation upstream, baseline checks, native build and real-app GUI verification are now verified below. |
+| `93e4e4c` | Package-level logic for steps 1, 4, 5, 6 and 8, built by three Claude sub-agents. No chrome or frontend integration yet. |
 
 Package logic and tests, re-run on 2 October 2026 with the pinned Node via
 `dev-external` + `storage.py exec`:
@@ -36,6 +36,67 @@ Package logic and tests, re-run on 2 October 2026 with the pinned Node via
   - a stdio MCP server with read tools;
   - act tools behind approval;
   - a hook script for Claude Code and Codex.
+
+## Step 0 verification — completed by Codex, 2 October 2026
+
+All commands ran in `/Volumes/T9/Code/AxioSozo-browser-workstation` on
+`product/workstation`; the main checkout and engine paths were not edited.
+Every build used `AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/workstation`,
+`mount-dev-storage`, `dev-external` and `scripts/storage.py exec`.
+
+- Worktree Zen upstream pin: `f0f21cdade1fd519a660d756942f7032a8c7a518`.
+  `zen.py doctor` and `zen.py describe`: **PASS**. The independent generated
+  APFS checkout, object directory, dependencies and synthetic runtime are under
+  the workstation root; shared checksum-pinned toolchains remain under the
+  project volume's toolchain directory.
+- `./dev check`: **PASS** (exit 0). Browser Node 391/391; bootstrap Python 33/33;
+  Cargo fmt/clippy and provider check passed. CEF check was explicitly
+  `SKIPPED_ENGINE_WORKSTREAM`.
+- `./dev test`: **PASS** (exit 0). Cargo 10; provider 108; sandbox OS 5;
+  negative Keychain 8; positive synthetic Keychain 3; browser Node 391;
+  bootstrap Python 33; CEF adapter Node 38; saved-pages Python 3;
+  contexts 141; root Python 40; coordinator Python 4; probe Python 14.
+  CEF native/stream gates were `SKIPPED_ENGINE_WORKSTREAM`, not passes.
+- Direct package suites on Node 24.14.0: **302/302 PASS** (contexts 141,
+  provider-host 108, agent-bridge/notify 53).
+- `./dev setup`: **PASS** (exit 0). Native Gecko build completed and verified
+  9 sandbox-readable Zen content resources and all 53 AxioSozo chrome files.
+  App: `/Volumes/AxioSozoBuild/workstation/zen/obj/dist/AxioSozo Dev.app`;
+  bundle `nl.axiosozo.browser.dev`; source fingerprint
+  `854ceec83b62d3faa350034bfa02c6875547d3a8ba5ee10dd543d660705c3fdd`.
+- Real macOS GUI: **PASS** on a newly created owned synthetic profile. Overview
+  actor, process-wide services, normal projects view and keyboard entry button
+  were present; no product provider host or engine switcher ran. Native exit 0,
+  process reaped, owned Marionette listener gone. TLS verification stayed on.
+  Screenshots were inspected; this is a functional baseline, not the step 3
+  design review or a VoiceOver audit.
+
+Evidence (git-ignored):
+
+- `docs/evidence/plan4-0/baseline-20261002-a/session.json`
+- `docs/evidence/plan4-0/baseline-20261002-a/overview-window.png`
+- `docs/evidence/plan4-0/baseline-20261002-a/overview-content.png`
+- `.local/logs/plan4-step0-check-pass.log`
+- `.local/logs/plan4-step0-test-complete.log`
+- `.local/logs/plan4-step0-build.log`
+- `.local/logs/plan4-step0-packages-node24.log`
+
+Baseline repairs by Codex: stale tests now assert context store v3/project v2
+and the shared pinned toolchain cache. The positive Keychain fixture now accepts
+one validated named build root and rejects traversal, symlink/prefix spoofing,
+invalid ownership/permissions and reused files. Its three tests use only fresh
+synthetic Keychains with interaction disabled; no personal profile or credential
+was read. Initial failing logs were retained, and both baseline commands were
+rerun to exit 0 after repairs.
+
+Claude Opus 5.5 CLI developer readiness: **PASS**, session
+`3ba061a1-ca62-4273-bb91-f1a3ca60c330`. It read the instruction set and made
+no changes. No frontend code was created or edited by Codex; actual frontend
+integration remains delegated to Claude in later steps.
+
+Steps 1–9 remain unintegrated. Their ignored pure-logic preparation and fake
+tests are not claims that those steps or their GUI gates passed. E1/E2 remain
+**NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
 ## Open follow-ups for the integration lead
 

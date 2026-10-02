@@ -157,7 +157,8 @@ class BootstrapTests(unittest.TestCase):
             self.assertNotIn(name, environment)
         self.assertEqual(environment['GIT_CONFIG_GLOBAL'], '/dev/null')
         self.assertEqual(environment['npm_config_userconfig'], '/dev/null')
-        self.assertTrue(environment['CARGO_HOME'].startswith(str(zen.BUILD_ROOT)))
+        self.assertEqual(environment['CARGO_HOME'], str(zen.zen_toolchain.TOOLS / 'cargo-home'))
+        self.assertTrue(zen.zen_toolchain.TOOLS.is_relative_to(zen.storage.VOLUME))
 
     def test_overlay_refuses_unknown_local_edit(self):
         record = json.loads((ROOT / 'patches/zen/overlay.json').read_text())[0]

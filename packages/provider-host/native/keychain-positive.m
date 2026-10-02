@@ -2,6 +2,7 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #include <Security/Security.h>
 #include <limits.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,16 +46,67 @@ static OSStatus readPrivate(SecKeychainRef keychain, LAContext *context, NSData 
   return result;
 }
 
+/* Match storage.py's volume-root or one named build root. Parse complete path
+ * components before resolving filesystem paths; prefix matches alone are unsafe.
+ * The two validation-only modes exercise this exact policy without Keychain APIs. */
+static bool fixturePathAllowed(const char *directory) {
+  const char *volume = "/Volumes/AxioSozoBuild/";
+  const char *fixture = "providers/keychain-runs/positive-";
+  const char *reserved[] = { "zen", "toolchains", "cargo-home", "cargo-target", "caches", "runtime", "tmp",
+    "cef", "providers", "logs", "release", "diag", "diagnostics", "gui-fixtures" };
+  if (strlen(directory) >= PATH_MAX || strncmp(directory, volume, strlen(volume))) return false;
+  const char *relative = directory + strlen(volume);
+  if (strncmp(relative, fixture, strlen(fixture))) {
+    const char *separator = strchr(relative, '/');
+    if (!separator) return false;
+    size_t length = (size_t)(separator - relative);
+    if (!length || length > 40 || !((relative[0] >= 'a' && relative[0] <= 'z')
+      || (relative[0] >= '0' && relative[0] <= '9'))) return false;
+    for (size_t i = 0; i < length; i++) {
+      char character = relative[i];
+      if (!((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
+        || character == '-')) return false;
+    }
+    for (size_t i = 0; i < sizeof(reserved) / sizeof(reserved[0]); i++) {
+      if (strlen(reserved[i]) == length && !strncmp(relative, reserved[i], length)) return false;
+    }
+    relative = separator + 1;
+    if (strncmp(relative, fixture, strlen(fixture))) return false;
+  }
+  const char *suffix = relative + strlen(fixture);
+  size_t length = strlen(suffix);
+  if (!length || length > 64) return false;
+  for (size_t i = 0; i < length; i++) {
+    char character = suffix[i];
+    if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
+      || (character >= '0' && character <= '9'))) return false;
+  }
+  return true;
+}
+
+static bool fixtureDirectoryAllowed(const char *requested) {
+  char canonical[PATH_MAX]; struct stat info;
+  return fixturePathAllowed(requested) && realpath(requested, canonical)
+    && !strcmp(requested, canonical) && !lstat(requested, &info)
+    && S_ISDIR(info.st_mode) && info.st_uid == getuid() && !(info.st_mode & 077);
+}
+
+static int invalidFixtureDirectory(void) {
+  fputs("TEST_FIXTURE: rejected private-keychain directory or existing fixture file\n", stderr);
+  return 64;
+}
+
 int main(int argc, char **argv) {
   @autoreleasepool {
-    if (argc != 2) return 64;
-    const char *prefix = "/Volumes/AxioSozoBuild/providers/keychain-runs/positive-";
-    char directory[PATH_MAX], file[PATH_MAX]; struct stat info;
-    if (!realpath(argv[1], directory) || strcmp(argv[1], directory)
-      || strncmp(directory, prefix, strlen(prefix)) || stat(directory, &info)
-      || !S_ISDIR(info.st_mode) || info.st_uid != getuid() || (info.st_mode & 077)) return 64;
-    if (snprintf(file, sizeof(file), "%s/axiosozo-synthetic.keychain", directory) >= (int)sizeof(file)
-      || access(file, F_OK) == 0) return 64;
+    if (argc == 3 && !strcmp(argv[1], "--validate-path"))
+      return fixturePathAllowed(argv[2]) ? 0 : invalidFixtureDirectory();
+    if (argc == 3 && !strcmp(argv[1], "--validate-directory"))
+      return fixtureDirectoryAllowed(argv[2]) ? 0 : invalidFixtureDirectory();
+    if (argc != 2 || !fixtureDirectoryAllowed(argv[1])) return invalidFixtureDirectory();
+    char file[PATH_MAX]; struct stat info;
+    if (snprintf(file, sizeof(file), "%s/axiosozo-synthetic.keychain", argv[1]) >= (int)sizeof(file))
+      return invalidFixtureDirectory();
+    if (!lstat(file, &info) || errno != ENOENT) return invalidFixtureDirectory();
     NSMutableArray *steps = [NSMutableArray array];
     NSMutableDictionary *report = [@{ @"label": @"TEST_FIXTURE", @"status": @"BLOCKED_ENV",
       @"scope": @"one new private keychain on T9", @"steps": steps,
