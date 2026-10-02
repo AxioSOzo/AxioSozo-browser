@@ -9,7 +9,13 @@
 // port is scanned: status comes from services.serviceStatus (declared loopback
 // services only) or one injected probe for exactly the refused origin's port.
 // Private windows never probe: no status refresh, no polling (manual retry only).
+// P2: a project link that needs a new tab is opened by services.openProjectUrl,
+// which resolves the project's container first; an open tab is reused, or an
+// environment switched in place, only when the tab already has that container.
+// The pill shows the tab's actual container in Firefox's own colour and offers
+// a visible "Reopen in …" (a new tab) when the tab is elsewhere.
 import * as defaultCore from "./contexts/index.mjs";
+import { containerIndicator, expectedContainer, identityColorClass, tabFits } from "./ProjectAccountRuntime.sys.mjs";
 
 export const XHTML = "http://www.w3.org/1999/xhtml";
 export const RUNTIME_STYLESHEET = "chrome://browser/content/axiosozo/axiosozo-runtime.css";
@@ -24,6 +30,7 @@ export const WAIT_MAX_ATTEMPTS = 40; // ≈ 6 minutes, then the overlay offers "
 export const WAIT_MAX_RELOAD_FAILURES = 3; // probe said up but the page still refused
 export const SERVICE_REFRESH_MS = 30000;
 export const SERVICE_EVENT_THROTTLE_MS = 5000;
+export const CONTAINERS_PREF = "privacy.userContext.enabled";
 // Projects shown per space before the rest fold into "N more projects".
 export const FOLDER_LIMIT = 3;
 const STATUS_TEXT = Object.freeze({ up: "running", down: "not running", unknown: "status unknown" });
@@ -99,10 +106,12 @@ function hostLabel(baseUrl) {
 
 /**
  * F4. `services`: AxioSozoServices (listProjects, serviceStatus, updateProject,
- * on). `adapter`: ZenWorkspaceAdapter (activeWorkspaceUuid, workspaceForTab,
- * isPrivateWindow, onChange, optional workspaceHeader / workspaceElement).
+ * openProjectUrl, on). `adapter`: ZenWorkspaceAdapter (activeWorkspaceUuid,
+ * workspaceForTab, isPrivateWindow, onChange, optional workspaceHeader /
+ * workspaceElement, containerForWorkspace, containerIdentity, tabUserContextId).
  * Optional: `core` (contexts core), `timers`, `clock`, `probe({ url, port }) → boolean`,
- * `openUrl(url, where, tab)`, `openSettings(projectId, { edit })` (the project in about:axiosozo).
+ * `openUrl(url, where, tab)` (in-place loads, and private windows' new tabs),
+ * `openSettings(projectId, { edit })` (the project in about:axiosozo).
  */
 export function installDevLoop(window, { services, adapter, core = defaultCore, timers = defaultTimers(window),
   clock = () => Date.now(), probe = null, openUrl = null, openSettings = null } = {}) {
@@ -114,7 +123,8 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   let disposed = false;
   const releaseSheet = ensureRuntimeStylesheet(document);
   cleanups.push(releaseSheet);
-  const diagnostics = { pillShown: false, blockShown: false, foldersShown: 0, waits: 0, probes: 0, reloads: 0, switches: 0 };
+  const diagnostics = { pillShown: false, blockShown: false, foldersShown: 0, waits: 0, probes: 0, reloads: 0, switches: 0,
+    projectOpens: 0, pillContainer: null };
   // The target URL is built from a repository manifest: load it like an
   // untrusted web link (null principal in the tab's container), never with the
   // system principal.
@@ -141,12 +151,26 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   let projectsGeneration = 0;
   function loadProjects() {
     const generation = ++projectsGeneration;
+    invalidateMenus();
     projectsLoad = (async () => {
       let list = [];
       try { const result = await services.listProjects(); list = Array.isArray(result) ? result : []; } catch { list = projects; }
-      if (generation === projectsGeneration && !disposed) projects = list;
+      if (generation === projectsGeneration && !disposed) { projects = list; invalidateMenus(); }
     })();
     return projectsLoad;
+  }
+
+  // ---- Menu bindings ---------------------------------------------------------------------
+  // An open menu acts only for what it showed (its tab, address, project and
+  // space). Selecting or closing a tab, a navigation of the selected tab, a
+  // space change and any project model change make every shown action stale:
+  // open menus close and a stale command does nothing.
+  let bindings = 0;
+  function invalidateMenus() {
+    bindings++;
+    for (const popup of [menu, moreMenu]) {
+      if (popup?.state === "open" || popup?.state === "showing") { try { popup.hidePopup?.(); } catch {} }
+    }
   }
   const ensureProjects = () => projectsLoad ?? loadProjects();
   const projectById = id => projects.find(project => project.id === id) ?? null;
@@ -166,6 +190,60 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   }
   const spaceOfTab = tab => adapter.workspaceForTab(tab) ?? adapter.activeWorkspaceUuid();
   const matchTab = tab => (tab && !tab.closing ? matchUrl(tab.linkedBrowser?.currentURI?.spec, spaceOfTab(tab)) : null);
+  /** The address a tab's browser shows right now (pushState and fragments
+   * included), or null for a non-web page. */
+  const liveHref = tab => webURL(tab?.linkedBrowser?.currentURI?.spec)?.href ?? null;
+
+  // ---- Project containers (P2) -------------------------------------------------------
+  // Read-only: what the stored project and Firefox's identities say. Only the
+  // service's router creates a container or opens a project tab.
+  const containersOn = () => !privateWindow && prefEnabled(window, CONTAINERS_PREF, false);
+  const tabContainer = tab => {
+    let id = null;
+    try { id = adapter.tabUserContextId ? adapter.tabUserContextId(tab) : tab?.userContextId; } catch { id = null; }
+    return Number.isSafeInteger(id) && id >= 0 ? id : null;
+  };
+  const identityOf = id => { try { return adapter.containerIdentity?.(id) ?? null; } catch { return null; } };
+  const spaceDefault = uuid => {
+    let id = 0;
+    try { id = uuid ? adapter.containerForWorkspace?.(uuid) ?? 0 : 0; } catch { id = 0; }
+    return Number.isSafeInteger(id) && id >= 0 ? id : 0;
+  };
+  const expectation = (project, url, uuid) => expectedContainer({ core, project, projects, url,
+    defaultUserContextId: spaceDefault(uuid), identity: identityOf, enabled: containersOn() });
+  /** Accepts an open tab for `url` only when it already has the container the
+   * link would get; private windows have no project containers. */
+  const fitsFor = (project, url, uuid) => {
+    if (privateWindow) return () => true;
+    const expected = expectation(project, url, uuid);
+    return tab => tabFits(expected, tabContainer(tab));
+  };
+  /** The colour of the project's own container, when it exists and no other
+   * project names it. */
+  function projectColor(project) {
+    const id = project?.container?.user_context_id;
+    if (!containersOn() || !Number.isSafeInteger(id) || id < 1
+      || projects.some(other => other.id !== project.id && other.container?.user_context_id === id)) return null;
+    const identity = identityOf(id);
+    return identity?.userContextId === id ? identity.color : null;
+  }
+  /** Firefox's container colour class (usercontext.css) on one of our marks;
+   * axiosozo-runtime.css paints the mark with it. */
+  function paintContainer(node, baseClass, color) {
+    node.className = [baseClass, identityColorClass(color)].filter(Boolean).join(" ");
+  }
+
+  /** A project link in a new tab. Normal windows: services.openProjectUrl
+   * resolves the container route before the tab exists. Private windows open
+   * a plain tab and never use a project container. */
+  function openInProject(project, url, uuid) {
+    if (privateWindow) { open(url, "tab", gBrowser.selectedTab); return "opened"; }
+    if (typeof services.openProjectUrl !== "function") return null;
+    diagnostics.projectOpens++;
+    Promise.resolve().then(() => services.openProjectUrl({ window, projectId: project.id, url, contextUuid: uuid ?? null }))
+      .catch(error => console.error("AxioSozo: project link not opened", error?.code ?? error));
+    return "opened";
+  }
 
   const isLoopbackUrl = spec => ["localhost", "127.0.0.1", "[::1]"].includes(webURL(spec)?.hostname);
   /** "up" | "down" | "unknown" for a local environment (its declared service on
@@ -202,11 +280,16 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   const pill = element(document, "button", { className: "axiosozo-env-pill",
     attrs: { id: "axiosozo-env-pill", "aria-haspopup": "menu", "aria-expanded": "false" } });
   pill.hidden = true;
+  // The tab's container: the runtime status dot, filled with Firefox's own
+  // container colour; a ring when the tab is in no container.
+  const PILL_CONTAINER = "axiosozo-status-dot axiosozo-env-pill-container";
+  const pillContainer = element(document, "span", { className: PILL_CONTAINER, attrs: { "aria-hidden": "true" } }, pill);
+  pillContainer.hidden = true;
   const pillLabel = element(document, "span", { className: "axiosozo-env-pill-label" }, pill);
   element(document, "span", { className: "axiosozo-env-pill-alert", attrs: { "aria-hidden": "true" } }, pill);
   const menu = document.createXULElement("menupopup");
   menu.id = "axiosozo-env-menu";
-  let pillState = null; // { tab, url, project, environment, app, current, environments, statuses }
+  let pillState = null; // { tab, url, project, environment, app, current, environments, statuses, container }
   let pillToken = 0;
   const lastActive = new Map(); // projectId → clock() when one of its tabs was last in front
 
@@ -218,27 +301,41 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   }
 
   function hidePill() {
-    pillState = null; pill.hidden = true; diagnostics.pillShown = false;
-    pill.removeAttribute("data-environment"); pill.removeAttribute("data-services");
+    pillState = null; pill.hidden = true; diagnostics.pillShown = false; diagnostics.pillContainer = null;
+    pill.removeAttribute("data-environment"); pill.removeAttribute("data-services"); pill.removeAttribute("data-container");
+  }
+
+  /** The selected tab's container against where this project would open the URL. */
+  function containerOf(tab, project, href) {
+    const id = tabContainer(tab);
+    return containerIndicator({ projectName: project.manifest?.name, expected: expectation(project, href, spaceOfTab(tab)),
+      tabUserContextId: id, tabIdentity: id ? identityOf(id) : null });
   }
 
   function renderPill() {
     if (!pillState) return hidePill();
-    const { project, environment, statuses } = pillState;
+    const { project, environment, statuses, container } = pillState;
     const name = project.manifest?.name ?? "Project";
     const label = envLabel(project, environment);
     const down = statuses.filter(s => s.status === "down").length;
     pillLabel.textContent = label;
     pill.setAttribute("data-environment", environment.name);
     if (down) pill.setAttribute("data-services", "down"); else pill.removeAttribute("data-services");
+    const marked = !!(container.info || container.action);
+    pillContainer.hidden = !marked;
+    paintContainer(pillContainer, PILL_CONTAINER, container.color);
+    if (marked) pill.setAttribute("data-container", container.action ? "elsewhere" : "fits"); else pill.removeAttribute("data-container");
+    diagnostics.pillContainer = marked ? pill.getAttribute("data-container") : null;
     const serviceText = down ? `, ${down} of ${statuses.length} services not running` : "";
-    pill.setAttribute("aria-label", `${name}: ${label} environment${serviceText}. Switch environment`);
-    pill.setAttribute("title", `${name} · ${label}${serviceText}`); // HTML elements in chrome use title for tooltips
+    pill.setAttribute("aria-label", `${name}: ${label} environment${container.phrase}${serviceText}. Switch environment`);
+    pill.setAttribute("title", `${name} · ${label}${container.phrase}${serviceText}`); // HTML elements in chrome use title for tooltips
     pill.hidden = false; diagnostics.pillShown = true;
   }
 
   async function refreshPill() {
     const token = ++pillToken;
+    // A new selected tab, navigation or model: the shown pill menu is stale.
+    invalidateMenus();
     await ensureProjects();
     if (disposed || token !== pillToken) return;
     const tab = gBrowser.selectedTab;
@@ -247,7 +344,8 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     if (!match) { hidePill(); scheduleFolders(); return; }
     lastActive.set(match.project.id, clock());
     pillState = { tab, url: url.href, project: match.project, environment: match.environment, app: match.app,
-      current: match.environment.name, environments: environmentsOf(match.project), statuses: cachedStatuses(match.project) };
+      current: match.environment.name, environments: environmentsOf(match.project), statuses: cachedStatuses(match.project),
+      container: containerOf(tab, match.project, url.href) };
     renderPill();
     scheduleFolders();
     const statuses = await statusesFor(match.project);
@@ -262,12 +360,28 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     popup.appendChild(item);
     return item;
   }
+  /** Firefox's container menu icon (usercontext.css: briefcase in the container's colour). */
+  const containerIcon = (color, userContextId) => {
+    const colorClass = identityColorClass(color);
+    return colorClass && Number.isSafeInteger(userContextId)
+      ? { class: `menuitem-iconic identity-icon-briefcase ${colorClass}`, "data-usercontextid": String(userContextId) } : {};
+  };
+  let menuBinding = null; // what the shown pill menu acts for
   function buildMenu() {
     clearMenu();
+    menuBinding = null;
     if (!pillState) return false;
-    const { project, environment: currentEnv, environments, statuses } = pillState;
+    const { project, environment: currentEnv, environments, statuses, container, tab } = pillState;
+    menuBinding = { bindings, tab, url: pillState.url, projectId: project.id, uuid: spaceOfTab(tab) };
     const app = appOf(currentEnv);
     menuItem(menu, { label: project.manifest?.name ?? "Project", disabled: "true" });
+    // Where this tab's sign-ins come from; a loaded tab keeps its container, so
+    // the only change offered is a new tab in the right one.
+    if (container.info) menuItem(menu, { label: container.info, disabled: "true", ...containerIcon(container.color, tabContainer(tab)) });
+    if (container.action) {
+      const expected = expectation(project, pillState.url, spaceOfTab(tab));
+      menuItem(menu, { label: container.action.label, "data-reopen": "true", ...containerIcon(container.action.color, expected.userContextId) });
+    }
     menu.appendChild(document.createXULElement("menuseparator"));
     // The current app's environments (and project-wide ones) switch in place,
     // keeping the path; other apps of the project open at their base address.
@@ -294,30 +408,64 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return true;
   }
 
+  /** The pill still describes what the selected tab shows: the same tab, still
+   * open, at exactly the address the pill was built for. */
+  const pillIsLive = () => !!pillState && gBrowser.selectedTab === pillState.tab && !pillState.tab.closing
+    && liveHref(pillState.tab) === pillState.url;
+
   /** Switches the selected tab to the same path/query/hash on `target` (an
    * environment name; `app` picks that app's environment, null a project-wide one). */
   function switchTo(target, app) {
-    if (!pillState) return null;
+    // Never from an address the tab has already left (its notification may not have arrived yet).
+    if (!pillIsLive()) return null;
+    // The current record of the pill's project, never a copy kept by the pill.
+    const project = projectById(pillState.project.id);
+    if (!project) return null;
     const options = app === undefined ? {} : { app };
-    const next = core.switchEnvironment(pillState.environments, pillState.url, target, options);
+    const next = core.switchEnvironment(environmentsOf(project), pillState.url, target, options);
     if (!next || !webURL(next) || next === pillState.url) return null;
     diagnostics.switches++;
-    open(next, "current", pillState.tab);
+    const { tab } = pillState;
+    const uuid = spaceOfTab(tab);
+    // In place only when the tab already has the new address's container;
+    // otherwise the routed new tab, and this one stays as it is.
+    if (fitsFor(project, next, uuid)(tab)) open(next, "current", tab);
+    else openInProject(project, next, uuid);
     return next;
   }
 
-  const onPillClick = event => {
-    event.stopPropagation?.();
+  const showMenu = () => {
     if (!buildMenu()) return;
     if (typeof menu.openPopup === "function") menu.openPopup(pill, "after_end");
+  };
+  const onPillClick = event => {
+    event.stopPropagation?.();
+    // The tab moved on before its location notification arrived: show the
+    // menu for the address it has now, never for the one the pill remembers.
+    if (pillState && !pillIsLive()) { refreshPill().then(showMenu, () => {}); return; }
+    showMenu();
   };
   const onPillMouseDown = event => event.stopPropagation?.(); // keep the urlbar from taking focus
   const onMenuCommand = event => {
     const item = event.target;
+    // Only for the tab, address and project the menu showed, with nothing
+    // changed since; otherwise the shown action is stale and does nothing.
+    // The address is also read from the tab's browser itself, so a
+    // pushState or fragment change counts even before it is reported.
+    const binding = menuBinding;
+    if (!binding || binding.bindings !== bindings || pillState?.tab !== binding.tab || pillState.url !== binding.url
+      || pillState.project.id !== binding.projectId || !pillIsLive()) return;
     const target = item?.getAttribute?.("data-environment");
     if (target) { const app = item.getAttribute("data-app"); switchTo(target, app ? app : null); return; }
+    const project = projectById(binding.projectId);
+    if (!project) return;
+    if (item?.getAttribute?.("data-reopen")) {
+      // A new tab in the right container; this tab, its page and its cookies stay.
+      openInProject(project, binding.url, binding.uuid);
+      return;
+    }
     const url = item?.getAttribute?.("data-open-url");
-    if (url && pillState) goTo(url, spaceOfTab(pillState.tab));
+    if (url) goTo(project, url, binding.uuid);
   };
   const onMenuShowing = event => { if (event.target === menu) pill.setAttribute("aria-expanded", "true"); };
   const onMenuHidden = event => { if (event.target === menu) pill.setAttribute("aria-expanded", "false"); };
@@ -350,7 +498,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   let foldersState = null; // { uuid, entries: [{ project, active, running }] }
   let folderSerial = 0;
   let foldersScheduled = false;
-  let moreTarget = null; // { project, uuid } for the open "…" menu
+  let moreTarget = null; // { project, uuid, anchor, bindings } for the open "…" menu
 
   function removeFolders() { foldersState = null; folders.remove(); diagnostics.foldersShown = 0; diagnostics.blockShown = false; }
 
@@ -376,12 +524,13 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return true;
   }
 
-  /** An open tab of this space whose page is under `base` (same origin, path prefix). */
-  function openTabUnder(base, uuid) {
+  /** An open tab of this space whose page is under `base` (same origin, path
+   * prefix) and that `accept`s it (its container). */
+  function openTabUnder(base, uuid, accept) {
     const target = webURL(base);
     if (!target) return null;
     for (const tab of gBrowser.tabs ?? []) {
-      if (tab.closing || adapter.workspaceForTab(tab) !== uuid) continue;
+      if (tab.closing || adapter.workspaceForTab(tab) !== uuid || !accept(tab)) continue;
       const url = webURL(tab.linkedBrowser?.currentURI?.spec);
       if (url && url.origin === target.origin && url.pathname.startsWith(target.pathname)) return tab;
     }
@@ -390,22 +539,34 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
 
   /** An open tab of this space linked to exactly this project environment
    * (loopback aliases included); else one under the base address. */
-  function openTabForEnvironment(project, environment, uuid) {
+  function openTabForEnvironment(project, environment, uuid, accept) {
     for (const tab of gBrowser.tabs ?? []) {
-      if (tab.closing || adapter.workspaceForTab(tab) !== uuid) continue;
+      if (tab.closing || adapter.workspaceForTab(tab) !== uuid || !accept(tab)) continue;
       const match = matchUrl(tab.linkedBrowser?.currentURI?.spec, uuid);
       if (match?.project.id === project.id && envKey(match.environment) === envKey(environment)) return tab;
     }
-    return openTabUnder(environment.base_url, uuid);
+    return openTabUnder(environment.base_url, uuid, accept);
   }
 
-  function goTo(url, uuid, existing = undefined) {
-    const target = webURL(url);
+  /** Selects an open tab of the link that already has its container, else
+   * opens the project link (openInProject). `environment`: look for a tab of
+   * that environment first. The project's current record decides (sharing,
+   * container, environments), never the copy a row or menu was built from;
+   * a project or environment that is gone does nothing. */
+  function goTo(shown, url, uuid, environment = null) {
+    const project = projectById(shown?.id);
+    if (!project) return null;
+    let target = webURL(url);
+    if (environment) {
+      environment = environmentsOf(project).find(item => envKey(item) === envKey(environment)) ?? null;
+      if (!environment) return null;
+      target = webURL(environment.base_url);
+    }
     if (!target) return null;
-    const tab = existing === undefined ? openTabUnder(target.href, uuid) : existing;
+    const accept = fitsFor(project, target.href, uuid);
+    const tab = environment ? openTabForEnvironment(project, environment, uuid, accept) : openTabUnder(target.href, uuid, accept);
     if (tab) { gBrowser.selectedTab = tab; return "selected"; }
-    open(target.href, "tab", gBrowser.selectedTab);
-    return "opened";
+    return openInProject(project, target.href, uuid);
   }
 
   /** Projects of the space with their activity, most relevant first. */
@@ -471,7 +632,9 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     const toggle = element(document, "button", { className: "axiosozo-project-toggle",
       attrs: { "aria-expanded": String(expanded), "aria-controls": bodyId, "data-focus-key": `${id}:toggle`,
         "aria-label": `${name}${statusSentence(project, statuses)}. ${expanded ? "Collapse" : "Expand"} project` } }, block);
-    element(document, "span", { className: "axiosozo-project-glyph", attrs: { "aria-hidden": "true" } }, toggle);
+    // The folder takes the colour of the project's own container, as its tabs do.
+    const glyph = element(document, "span", { className: "axiosozo-project-glyph", attrs: { "aria-hidden": "true" } }, toggle);
+    paintContainer(glyph, "axiosozo-project-glyph", projectColor(project));
     element(document, "span", { className: "axiosozo-project-name", text: name }, toggle);
     const summary = element(document, "span", { className: "axiosozo-project-summary", attrs: { "aria-hidden": "true" } }, toggle);
     const environments = environmentsOf(project);
@@ -503,13 +666,13 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
         row(list, { kind: "environment", label: envLabel(project, environment), detail: hostLabel(environment.base_url),
           status: status === "remote" ? "remote" : status, focusKey: `${id}:env:${envKey(environment)}`,
           current: !!selectedMatch && envKey(selectedMatch) === envKey(environment),
-          onActivate: () => goTo(environment.base_url, uuid, openTabForEnvironment(project, environment, uuid)) });
+          onActivate: () => goTo(project, environment.base_url, uuid, environment) });
       }
     }
     const surfaces = project.manifest?.surfaces ?? [];
     for (const surface of surfaces.filter(s => core.surfaceProminence(s) === "primary")) {
       row(list, { kind: "surface", label: surface.name, detail: hostLabel(surface.url), url: surface.url, focusKey: `${id}:surface:${surface.url}`,
-        onActivate: () => goTo(surface.url, uuid) });
+        onActivate: () => goTo(project, surface.url, uuid) });
     }
     const moreItem = element(document, "li", { className: "axiosozo-project-link" }, list);
     const more = element(document, "button", { className: "axiosozo-project-more", attrs: { "data-kind": "more",
@@ -526,7 +689,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
 
   function buildMoreMenu(project, uuid, anchor) {
     while (moreMenu.firstChild) moreMenu.firstChild.remove();
-    moreTarget = { project, uuid, anchor };
+    moreTarget = { project, uuid, anchor, bindings };
     const secondary = (project.manifest?.surfaces ?? []).filter(s => core.surfaceProminence(s) !== "primary");
     for (const surface of secondary) menuItem(moreMenu, { label: `${surface.name} · ${hostLabel(surface.url)}`, "data-url": surface.url });
     if (secondary.length) moreMenu.appendChild(document.createXULElement("menuseparator"));
@@ -536,11 +699,14 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
 
   const onMoreCommand = event => {
     const item = event.target;
-    if (!moreTarget) return;
-    const { project, uuid } = moreTarget;
+    // A menu shown before a tab, space or model change is stale and does nothing.
+    if (!moreTarget || moreTarget.bindings !== bindings) return;
+    const project = projectById(moreTarget.project.id);
+    if (!project) return;
+    const { uuid } = moreTarget;
     const url = item?.getAttribute?.("data-url");
     const action = item?.getAttribute?.("data-action");
-    if (url) goTo(url, uuid);
+    if (url) goTo(project, url, uuid);
     else if (action === "edit") openSettings?.(project.id, { edit: true });
     else if (action === "remove") {
       // Reversible from about:axiosozo (Projects); the folder and repository are untouched.
@@ -774,7 +940,16 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
       onRefused(tab, spec).catch(() => {});
     },
     onLocationChange(browser, webProgress, request, location, flags) {
-      if (!webProgress?.isTopLevel || (flags & WPL.LOCATION_CHANGE_SAME_DOCUMENT)) return;
+      if (!webProgress?.isTopLevel) return;
+      if (flags & WPL.LOCATION_CHANGE_SAME_DOCUMENT) {
+        // pushState, replaceState or a fragment: the same document stays, so a
+        // wait over it and its refusal bookkeeping stay exactly as they are.
+        // The pill and its menu are bound to the address, so they follow it.
+        const changed = gBrowser.getTabForBrowser(browser);
+        if (changed && changed === gBrowser.selectedTab) refreshPill().catch(() => {});
+        else if (changed) scheduleFolders();
+        return;
+      }
       const tab = gBrowser.getTabForBrowser(browser);
       const state = tab && waits.get(tab);
       const errorPage = !!(flags & WPL.LOCATION_CHANGE_ERROR_PAGE);
@@ -788,7 +963,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   cleanups.push(addTabsProgressListener(window, progress));
 
   const onTabSelect = () => { refreshPill().catch(() => {}); };
-  const onTabClose = event => { const state = waits.get(event.target); if (state) endWait(state); scheduleFolders(); };
+  const onTabClose = event => { const state = waits.get(event.target); if (state) endWait(state); invalidateMenus(); scheduleFolders(); };
   gBrowser.tabContainer.addEventListener("TabSelect", onTabSelect);
   gBrowser.tabContainer.addEventListener("TabClose", onTabClose);
   cleanups.push(() => {
@@ -830,7 +1005,9 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     diagnostics: () => ({ ...diagnostics, waiting: [...waits.values()].map(s => ({ url: s.url, port: s.port, mode: s.mode, attempts: s.attempts })) }),
     dispose() {
       if (disposed) return;
+      invalidateMenus();
       disposed = true;
+      menuBinding = null; moreTarget = null;
       for (const state of [...waits.values()]) endWait(state);
       for (const cleanup of cleanups.reverse()) { try { cleanup?.(); } catch {} }
       clearMenu();

@@ -23,6 +23,8 @@ const state = {
   view: "projects",
   flags: { contexts: true, enginePreferences: false, jevKeyEntry: true },
   contexts: [], projects: [], rules: [], orphans: [], attention: [], jev: null,
+  // project id → its own container as the browser reports it (listProjectContainers)
+  containers: new Map(),
   serviceStatus: new Map(), ledgerSummary: [], usageToday: [], usageWeek: [],
   activeSpace: null, providers: null, providersLoading: false, jevKey: null, placement: null,
 };
@@ -372,10 +374,26 @@ function renderOrphans() {
 async function loadProjects() {
   try {
     state.projects = await call("listProjects");
+    await loadContainers();
     await keepFocus(renderProjects);
   } catch (error) {
     $("projects-body").replaceChildren(h("p", { class: "empty" }, "Could not load projects. " + errorText(error)));
   }
+}
+
+async function loadContainers() {
+  try {
+    const list = await call("listProjectContainers");
+    state.containers = new Map((Array.isArray(list) ? list : []).map(info => [info.project_id, info]));
+  } catch { state.containers = new Map(); }
+}
+
+/** A link of one project: the browser picks the project's own container (or
+ * the space's sign-ins for a shared site) before the tab opens. */
+async function openProjectLink(project, url) {
+  const opened = await act("openProjectUrl", { projectId: project.id, url });
+  const note = opened.ok ? M.openedNote(opened.result) : null;
+  if (note) setStatus(note);
 }
 
 async function refreshServiceStatus(project, { quiet = false } = {}) {
@@ -390,9 +408,9 @@ async function refreshServiceStatus(project, { quiet = false } = {}) {
   setStatus(down ? `${down} local server${down === 1 ? " is" : "s are"} not running in ${projectName(project)}.` : `Local servers checked for ${projectName(project)}.`);
 }
 
-function urlChip(label, url, contextUuid, description, glyph = "globe") {
+function urlChip(project, label, url, description, glyph = "globe") {
   return h("button", { type: "button", class: "chip", "aria-label": description ?? `Open ${label}`, title: url,
-    onclick: () => act("openUrl", { url, contextUuid: contextUuid ?? null }) },
+    onclick: () => openProjectLink(project, url) },
   icon(glyph, 14), h("span", {}, label), h("span", { class: "chip-detail" }, hostOf(url)));
 }
 
@@ -404,7 +422,7 @@ function findingFacts(summary, { project = null } = {}) {
   const sources = list => (list.length ? `Found in ${list.join(", ")}` : null);
   // A vendor's general dashboard (no project ids); the name says enough.
   const dashboardChip = item => h("button", { type: "button", class: "chip", "aria-label": `Open the ${item.name} dashboard`,
-    title: item.url, onclick: () => act("openUrl", { url: item.url, contextUuid: project.context_uuid ?? null }) },
+    title: item.url, onclick: () => openProjectLink(project, item.url) },
   icon("open", 14), h("span", {}, item.name));
   return [
     summary.integrations.length ? ["Services", summary.integrations.map(item => (project && item.url
@@ -466,8 +484,9 @@ function projectCard(project) {
   const secondary = manifest.surfaces.filter(surface => M.surfaceProminence(surface) !== "primary");
   const facts = [
     ["Space", [spaceSelect]],
+    ...signInFacts(project),
     manifest.environments.length ? ["Environments", manifest.environments.map(env =>
-      urlChip(envLabel(env), env.base_url, project.context_uuid, `Open ${envLabel(env)} environment ${env.base_url}`, env.name === "local" ? "laptop" : "globe"))] : null,
+      urlChip(project, envLabel(env), env.base_url, `Open ${envLabel(env)} environment ${env.base_url}`, env.name === "local" ? "laptop" : "globe"))] : null,
     manifest.services.length ? ["Local servers", [
       ...manifest.services.map(service => {
         const status = statuses.get(service.name)?.status ?? "unknown";
@@ -477,9 +496,9 @@ function projectCard(project) {
       }),
       iconButton("refresh", `Check local servers of ${projectName(project)}`, () => refreshServiceStatus(project), { "data-focus-key": key("status") })]] : null,
     primary.length ? ["Links", primary.map(surface =>
-      urlChip(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
+      urlChip(project, surface.name, surface.url, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
     secondary.length ? ["More links", secondary.map(surface =>
-      urlChip(surface.name, surface.url, project.context_uuid, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
+      urlChip(project, surface.name, surface.url, `Open ${surface.name} (${surface.kind.replaceAll("_", " ")})`))] : null,
     ...findingFacts(M.detectionSummary(project.detected), { project }),
   ].filter(Boolean);
   return h("li", { class: "card", id: `project-${project.id}`, "aria-labelledby": headingId, tabindex: "-1" },
@@ -499,6 +518,117 @@ function projectCard(project) {
           { label: "Remove project…", destructive: true, focusKey: key("remove"), run: () => removeProjectFlow(project) },
         ]))),
     h("dl", { class: "facts" }, facts.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)])));
+}
+
+/** Sign-ins (the project's own container in Firefox's colour, and the account
+ * labels the user typed) and shared sites, each with a small editor. */
+function signInFacts(project) {
+  const name = projectName(project);
+  const key = suffix => `project:${project.id}:${suffix}`;
+  const container = M.containerSummary(state.containers.get(project.id));
+  const accounts = M.accountRows(project).filter(row => row.label);
+  const shared = M.sharedSites(project);
+  const signIns = [
+    container ? h("span", { class: "container-line", "data-state": container.state, title: M.CHROMIUM_SIGN_INS_NOTE },
+      h("span", { class: `container-mark${container.color ? ` identity-color-${container.color}` : ""}`, "aria-hidden": "true" }),
+      container.name && container.name !== name ? `${container.text}: ${container.name}` : container.text) : null,
+    accounts.map(row => h("span", { class: "tag account", title: M.ACCOUNTS_NOTE }, `${row.name} · ${row.label}`)),
+    h("button", { type: "button", class: "ghost small", "data-focus-key": key("accounts"), "aria-label": `Accounts for ${name}`,
+      onclick: () => openAccountsEditor(project) }, accounts.length ? "Edit accounts…" : "Note accounts…"),
+  ];
+  return [
+    ["Sign-ins", signIns],
+    ["Shared sites", [
+      h("span", { class: "fact-text", "data-confirmed": shared.confirmed }, shared.text),
+      h("button", { type: "button", class: "ghost small", "data-focus-key": key("shared"), "aria-label": `Shared sites of ${name}`,
+        onclick: () => openSharedSitesEditor(project) }, shared.confirmed ? "Edit…" : "Review…")]],
+  ];
+}
+
+/** Account labels: free text the user types per service or site. */
+function openAccountsEditor(project) {
+  const rows = M.accountRows(project);
+  const errorsList = h("ul", { class: "errors", role: "alert" });
+  const list = h("div", { class: "form-rows" });
+  let close = () => {};
+  const labelInput = (row, ariaLabel) => h("input", { type: "text", value: row.label, maxlength: String(M.ACCOUNT_LABEL_MAX),
+    placeholder: "e.g. work Google", class: "account-label", "aria-label": ariaLabel, oninput: event => { row.label = event.target.value; } });
+  const render = focusIndex => {
+    list.replaceChildren(...rows.map((row, index) => {
+      if (row.added) {
+        const site = h("input", { type: "text", value: row.key, placeholder: "example.com", spellcheck: "false", class: "account-site",
+          "aria-label": `Site ${index + 1}`, oninput: event => { row.key = event.target.value; } });
+        return h("div", { class: "review-row account-row", "data-index": index }, site, labelInput(row, `Account on site ${index + 1}`),
+          iconButton("close", `Remove site ${index + 1}`, () => { rows.splice(index, 1); render(-1); }));
+      }
+      return h("div", { class: "review-row account-row", "data-index": index },
+        h("span", { class: "account-name", "aria-hidden": "true" }, row.name), labelInput(row, `Account for ${row.name}`),
+        row.label ? iconButton("close", `Clear the account for ${row.name}`, () => { row.label = ""; render(index); }) : null);
+    }));
+    if (!rows.length) list.append(h("p", { class: "help" }, "No services were found in the folder. Add the sites you sign in to for this project."));
+    if (focusIndex !== undefined && focusIndex >= 0) list.querySelector(`[data-index="${focusIndex}"] input`)?.focus();
+    else if (focusIndex !== undefined) addSite.focus();
+  };
+  const addSite = h("button", { type: "button", class: "ghost", onclick: () => {
+    rows.push({ key: "", name: "", label: "", kind: "site", added: true });
+    render(rows.length - 1);
+  } }, icon("plus", 14), "Add a site");
+  const save = async () => {
+    const { changes, errors } = M.accountChanges(rows, project);
+    errorsList.replaceChildren(...errors.map(text => h("li", {}, text)));
+    if (!changes) return;
+    for (const change of changes) {
+      const saved = await act("setAccountLabel", { projectId: project.id, key: change.key, label: change.label });
+      if (!saved.ok) { await loadProjects(); return; }
+    }
+    close();
+    setStatus(changes.length ? `Accounts for ${projectName(project)} saved.` : "Nothing changed.");
+    await loadProjects();
+  };
+  close = openSheet({
+    title: `Accounts for ${projectName(project)}`,
+    body: [
+      h("p", { class: "notice" }, `Note which account you use where, for example “work Google”. ${M.ACCOUNTS_NOTE}`),
+      list, h("div", {}, addSite),
+      h("p", { class: "help" }, `Each project signs in through its own Firefox container. ${M.CHROMIUM_SIGN_INS_NOTE}`), errorsList],
+    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: save }, "Save")],
+  });
+  render();
+}
+
+/** Shared sites: the suggested list is offered, never used until the user turns sharing on. */
+function openSharedSitesEditor(project) {
+  const form = M.sharedSitesForm(project);
+  const errorsList = h("ul", { class: "errors", role: "alert" });
+  let close = () => {};
+  const hostsInput = h("textarea", { rows: "6", value: form.hostsText, spellcheck: "false", placeholder: "github.com\n*.github.com",
+    oninput: event => { form.hostsText = event.target.value; } });
+  const suggested = h("button", { type: "button", class: "ghost small", onclick: () => {
+    form.hostsText = M.DEFAULT_SHARED_SITES.join("\n");
+    hostsInput.value = form.hostsText;
+    hostsInput.focus();
+  } }, "Use the suggested sites");
+  const share = choice({ type: "checkbox", name: "share-sites", checked: form.confirmed, label: "Share these sites with the space",
+    help: "On: links to these sites from this project use the space's own sign-ins. Off: they stay in the project's container.",
+    onchange: event => { form.confirmed = event.target.checked; } });
+  const save = async () => {
+    const { sites, errors } = M.formToSharedSites(form);
+    errorsList.replaceChildren(...errors.map(text => h("li", {}, text)));
+    if (!sites) return;
+    const saved = await act("setSharedSites", { projectId: project.id, hosts: sites.hosts, confirmed: sites.confirmed },
+      sites.confirmed && sites.hosts.length ? `${projectName(project)} shares ${sites.hosts.length} site${sites.hosts.length === 1 ? "" : "s"} with the space.`
+        : `${projectName(project)} shares no sites with the space.`);
+    if (saved.ok) { close(); await loadProjects(); }
+  };
+  close = openSheet({
+    title: `Shared sites for ${projectName(project)}`,
+    body: [h("p", { class: "notice" }, M.SHARED_SITES_NOTE),
+      field({ label: "Sites", control: hostsInput, help: "One per line. *.github.com covers its subdomains." }),
+      h("div", {}, suggested), share, errorsList],
+    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: save }, "Save")],
+  });
 }
 
 function renderProjects() {

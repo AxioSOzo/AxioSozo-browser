@@ -4,13 +4,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CONTAINER_COLORS, ContextsError, DEFAULT_SHARED_SITES, INTEGRATION_HOSTS, INTEGRATION_IDS, accountKeyForHost, isSharedSite, projectContainerStyle,
+  CONTAINER_COLORS, ContextsError, DEFAULT_SHARED_SITES, INTEGRATION_HOSTS, INTEGRATION_IDS, MAX_USER_CONTEXT_ID, accountKeyForHost, isSharedSite, projectContainerStyle,
   routeForUrl, validateAccountLabel,
 } from '../src/index.mjs';
 
 const throwsCode = (fn, code, path) => assert.throws(fn, e => e instanceof ContextsError && e.code === code && (path === undefined || e.path === path), `${code} ${path ?? ''}`);
 const project = (over = {}) => ({
-  id: 'p_abcd', container: { user_context_id: 12 }, shared_sites: { hosts: [...DEFAULT_SHARED_SITES], confirmed: false },
+  id: 'p_abcd', container: { user_context_id: 12 }, shared_sites: { hosts: [...DEFAULT_SHARED_SITES], confirmed: true },
   accounts: [{ key: 'vercel', label: 'Work Google' }, { key: '*.atlassian.net', label: 'Work Microsoft' }, { key: 'linear.app', label: 'Personal' }], ...over,
 });
 
@@ -47,7 +47,7 @@ test('isSharedSite and routeForUrl', () => {
   assert.deepEqual(route('https://github.com/', project({ container: { user_context_id: null } })), [0, 'no_container']);
   assert.deepEqual(route('https://vercel.com/', null), [0, 'no_container']);
   assert.deepEqual(routeForUrl({ project: p, url: new URL('https://x.io/'), defaultUserContextId: 5 }), { userContextId: 12, reason: 'project' }, 'URL objects');
-  for (const d of [-1, 1.5, '0', undefined]) throwsCode(() => routeForUrl({ project: p, url: 'https://x.io', defaultUserContextId: d }), 'INVALID_INPUT', '$.defaultUserContextId');
+  for (const d of [-1, 1.5, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, '0', undefined]) throwsCode(() => routeForUrl({ project: p, url: 'https://x.io', defaultUserContextId: d }), 'INVALID_INPUT', '$.defaultUserContextId');
 });
 
 test('INTEGRATION_HOSTS and accountKeyForHost', () => {
@@ -74,4 +74,34 @@ test('validateAccountLabel', () => {
   assert.equal(validateAccountLabel('  wout@company Google  '), 'wout@company Google');
   assert.equal(validateAccountLabel('x'.repeat(80)).length, 80);
   for (const bad of ['', '  ', 'x'.repeat(81), 'a\u0000b', 'a\nb', 'a\u009fb', null, 1]) throwsCode(() => validateAccountLabel(bad), 'INVALID_INPUT');
+});
+
+test('shared-site suggestions require explicit boolean confirmation before sharing', () => {
+  for (const confirmed of [false, undefined, null, 0, 1, 'true']) {
+    const p = project({ shared_sites: { hosts: [...DEFAULT_SHARED_SITES], confirmed } });
+    assert.equal(isSharedSite(p, 'github.com'), false);
+    assert.equal(isSharedSite(p, 'gist.github.com'), false);
+    assert.deepEqual(routeForUrl({ project: p, url: 'https://github.com/acme/app', defaultUserContextId: 0 }), { userContextId: 12, reason: 'project' });
+  }
+  const p = project({ shared_sites: { hosts: ['github.com', '*.github.com'], confirmed: true } });
+  assert.equal(isSharedSite(p, 'gist.github.com'), true);
+  assert.deepEqual(routeForUrl({ project: p, url: 'https://github.com/acme/app', defaultUserContextId: 7 }), { userContextId: 7, reason: 'shared_site' });
+});
+
+test('routing permits default zero and the last public id but excludes the extension-storage sentinel', () => {
+  assert.equal(MAX_USER_CONTEXT_ID, 4294967294);
+  const route = (id, url = 'https://vercel.com/') => routeForUrl({ project: project({ container: { user_context_id: id } }), url, defaultUserContextId: 0 });
+  assert.deepEqual(route(1), { userContextId: 1, reason: 'project' });
+  assert.deepEqual(route(MAX_USER_CONTEXT_ID), { userContextId: MAX_USER_CONTEXT_ID, reason: 'project' });
+  for (const id of [null, 0, -1, 1.5, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, '12', undefined]) {
+    assert.deepEqual(route(id), { userContextId: 0, reason: 'no_container' });
+    assert.deepEqual(route(id, 'https://github.com/'), { userContextId: 0, reason: 'no_container' });
+  }
+  for (const id of [0, 1, MAX_USER_CONTEXT_ID]) {
+    assert.deepEqual(routeForUrl({ project: null, url: 'https://vercel.com/', defaultUserContextId: id }), { userContextId: id, reason: 'no_container' });
+    assert.deepEqual(routeForUrl({ project: null, url: 'about:blank', defaultUserContextId: id }), { userContextId: id, reason: 'not_web' });
+  }
+  for (const id of [4294967295, 4294967296, -1, 0.5, '0', undefined]) {
+    for (const url of ['https://vercel.com/', 'about:blank']) throwsCode(() => routeForUrl({ project: project(), url, defaultUserContextId: id }), 'INVALID_INPUT', '$.defaultUserContextId');
+  }
 });

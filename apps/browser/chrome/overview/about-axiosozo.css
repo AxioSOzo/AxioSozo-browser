@@ -620,6 +620,28 @@ select.compact { min-height: 26px; font-size: 12px; }
 .surface-host { flex: 1; min-width: 0; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.small { min-height: 24px; padding-inline: 8px; font-size: 12px; }
 
+/* ---- Sign-ins: project container, account labels, shared sites -------------------------- */
+
+/* The container's colour comes from Firefox's own .identity-color-* classes
+ * (usercontext.css); without one the mark is an empty ring. */
+.container-line { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; }
+.container-line:not([data-state="own"]) { color: var(--ink-soft); }
+.container-mark {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--hairline-strong);
+}
+.container-mark[class*="identity-color-"] { background: var(--identity-icon-color); box-shadow: 0 0 0 2px var(--surface-strong); }
+.tag.account { color: var(--ink); }
+.fact-text { color: var(--ink-soft); font-size: 12px; }
+.fact-text[data-confirmed] { color: var(--ink); }
+.account-row .account-name { flex: 0 0 8rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-row .account-site { flex: 0 0 8rem; width: 8rem; }
+.account-row .account-label { flex: 1 1 12rem; min-width: 10rem; }
+
 /* ---- Site rules: screen time -------------------------------------------------------------- */
 
 .usage-line { font-variant-numeric: tabular-nums; }

@@ -11,16 +11,23 @@ const core = await import("../../../packages/contexts/src/index.mjs");
 const { installDevLoop, WAIT_BACKOFF_MS, WAIT_MAX_ATTEMPTS, RUNTIME_STYLESHEET, WPL } = await import("../chrome/DevLoop.sys.mjs");
 
 const WEB = { name: "web", url: "http://localhost:5173/", port: 5173 };
+// Project links that need a new tab go to services.openProjectUrl (the
+// container router); this fake records them.
+function routed(services) {
+  services.calls.openProjectUrl = [];
+  services.openProjectUrl = async args => { services.calls.openProjectUrl.push(args); return { opened: true, container: "project" }; };
+  return services;
+}
 function setup({ privateWindow = false, statuses = null, contexts = null, probe = null, services: serviceList = [WEB], prefs = {} } = {}) {
   const h = createFakeWindow({ privateWindow, prefs });
   // The real adapter resolves Zen's <zen-workspace id=uuid>; DevLoop never looks it up itself.
   const adapter = createFakeAdapter({ privateWindow, elements: uuid => h.document.getElementById(uuid) });
   const p = project({ services: serviceList });
-  const services = createFakeServices(core, {
+  const services = routed(createFakeServices(core, {
     projects: [p],
     contexts: contexts ?? [context(WORKSPACE_A, "project", { project_id: p.id }), context(WORKSPACE_B, "personal")],
     statuses: { [p.id]: statuses ?? [{ ...WEB, status: "down", checked_at: 0 }] },
-  });
+  }));
   const clock = createClock();
   const loop = installDevLoop(h.window, { services, adapter, core, timers: clock.timersApi, clock: clock.fn,
     ...(probe ? { probe } : {}) });
@@ -186,7 +193,10 @@ test("folder rows select an open tab of that environment in this space before op
   assert.notEqual(t.h.gBrowser.selectedTab, other);
   assert.equal(t.h.opened.length, 0);
   row("preview").click();
-  assert.deepEqual(t.h.opened.map(o => [o.url, o.where]), [["https://preview.webapp.example/", "tab"]], "no open preview tab: a new one");
+  await flushMicrotasks();
+  assert.deepEqual(t.services.calls.openProjectUrl.map(c => [c.window === t.h.window, c.projectId, c.url, c.contextUuid]),
+    [[true, t.project.id, "https://preview.webapp.example/", WORKSPACE_A]], "no open preview tab: a new one, routed by the service");
+  assert.equal(t.h.opened.length, 0, "the runtime never creates a project tab itself");
   t.loop.dispose();
 });
 
@@ -222,9 +232,9 @@ test("multi-app projects: rows grouped per app, pill names the app, switching st
       { name: "production", app: "web", base_url: "https://domo.example" }],
     services: [{ name: "Tauri dev server", app: "desktop", url: "http://localhost:1420/", port: 1420 },
       { name: "Vite dev server", app: "web", url: "http://localhost:5173/", port: 5173 }] });
-  const services = createFakeServices(core, { projects: [domo], statuses: { p_domo: [
+  const services = routed(createFakeServices(core, { projects: [domo], statuses: { p_domo: [
     { name: "Tauri dev server", url: "http://localhost:1420/", port: 1420, status: "down", checked_at: 1 },
-    { name: "Vite dev server", url: "http://localhost:5173/", port: 5173, status: "up", checked_at: 1 }] } });
+    { name: "Vite dev server", url: "http://localhost:5173/", port: 5173, status: "up", checked_at: 1 }] } }));
   const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
   const tab = h.addTab({ url: "http://localhost:5173/boards/7?q=1" });
   await flushMicrotasks();
@@ -244,7 +254,9 @@ test("multi-app projects: rows grouped per app, pill names the app, switching st
   assert.equal(h.opened.at(-1).url, "https://domo.example/boards/7?q=1");
   assert.equal(h.opened.at(-1).where, "current");
   menu.dispatch("command", { target: items.find(i => i.getAttribute("data-open-url")) });
-  assert.deepEqual([h.opened.at(-1).url, h.opened.at(-1).where], ["http://localhost:1420/", "tab"]);
+  await flushMicrotasks();
+  assert.deepEqual(services.calls.openProjectUrl.map(c => [c.projectId, c.url]), [["p_domo", "http://localhost:1420/"]],
+    "another app of the project opens as a routed project link");
   assert.equal(loop.switchEnvironment("production"), "https://domo.example/boards/7?q=1", "implicit: the current app");
   assert.equal(tab.linkedBrowser.currentURI.spec, "http://localhost:5173/boards/7?q=1");
   loop.dispose();
@@ -257,7 +269,7 @@ test("the … row: secondary surfaces, Edit project… and Remove from space", a
     { name: "Repository", url: "https://github.com/acme/webapp", kind: "repository" },
     { name: "CI", url: "https://github.com/acme/webapp/actions", kind: "ci" },
     { name: "Vercel", url: "https://vercel.com/dashboard", kind: "hosting" }] });
-  const services = createFakeServices(core, { projects: [p] });
+  const services = routed(createFakeServices(core, { projects: [p] }));
   const settings = [];
   const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0,
     openSettings: (id, options) => settings.push([id, options]) });
@@ -277,7 +289,8 @@ test("the … row: secondary surfaces, Edit project… and Remove from space", a
   assert.deepEqual(items.map(i => i.getAttribute("label")),
     ["CI · github.com", "Vercel · vercel.com", "Edit project…", "Remove from space"]);
   menu.dispatch("command", { target: items[0] });
-  assert.equal(h.opened.at(-1).url, "https://github.com/acme/webapp/actions");
+  await flushMicrotasks();
+  assert.equal(services.calls.openProjectUrl.at(-1).url, "https://github.com/acme/webapp/actions");
   menu.dispatch("command", { target: items[2] });
   assert.deepEqual(settings, [[p.id, { edit: true }]]);
   menu.dispatch("command", { target: items[3] });
@@ -285,6 +298,403 @@ test("the … row: secondary surfaces, Edit project… and Remove from space", a
   assert.deepEqual(services.calls.updateProject, [[p.id, { context_uuid: null }]]);
   assert.equal(folders(h), null, "the project left this space");
   loop.dispose();
+});
+
+// ---- P2: project containers in the runtime ---------------------------------------------
+// A v2 project whose own container is 40; the adapter reports Firefox's identities
+// and each tab's loaded container. Synthetic: no cookie, account or real tab.
+const IDENTITIES = { 40: { userContextId: 40, name: "Webapp", color: "cyan", icon: "briefcase" },
+  7: { userContextId: 7, name: "Personal", color: "orange", icon: "fingerprint" } };
+function containerSetup({ privateWindow = false, container = 40, containers = true } = {}) {
+  const h = createFakeWindow({ privateWindow, prefs: { "privacy.userContext.enabled": containers } });
+  const adapter = Object.assign(createFakeAdapter({ privateWindow, elements: uuid => h.document.getElementById(uuid) }), {
+    containerForWorkspace: uuid => (uuid === WORKSPACE_B ? 2 : 0),
+    containerIdentity: id => IDENTITIES[id] ?? null,
+    tabUserContextId: tab => tab.userContextId,
+  });
+  const p = core.validateProject({ ...core.upgradeProject(project({ services: [WEB] })), container: { user_context_id: container } });
+  const services = routed(createFakeServices(core, { projects: [p], statuses: { [p.id]: [{ ...WEB, status: "up", checked_at: 0 }] } }));
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
+  return { h, adapter, services, loop, project: p,
+    pill: () => h.document.getElementById("axiosozo-env-pill"), menu: () => h.document.getElementById("axiosozo-env-menu"),
+    mark: () => h.document.getElementById("axiosozo-env-pill").querySelector(".axiosozo-env-pill-container") };
+}
+
+test("P2 pill: a tab in the project's container shows Firefox's own colour and names the container", async () => {
+  const t = containerSetup();
+  t.h.addTab({ url: "http://localhost:5173/app", userContextId: 40 });
+  await flushMicrotasks();
+  assert.equal(t.mark().hidden, false);
+  assert.deepEqual(t.mark().className.split(" "), ["axiosozo-status-dot", "axiosozo-env-pill-container", "identity-color-cyan"]);
+  assert.deepEqual(Object.keys(t.mark().style), [], "colour comes from the stylesheet, not inline style");
+  assert.equal(t.mark().getAttribute("aria-hidden"), "true", "the colour is decorative; the label says it");
+  assert.equal(t.pill().getAttribute("data-container"), "fits");
+  assert.equal(t.pill().getAttribute("aria-label"), "Webapp: local environment, in the Webapp container. Switch environment");
+  t.pill().click();
+  const items = t.menu().querySelectorAll("menuitem");
+  assert.deepEqual([items[1].getAttribute("label"), items[1].getAttribute("disabled"), items[1].getAttribute("class"), items[1].getAttribute("data-usercontextid")],
+    ["In the Webapp container", "true", "menuitem-iconic identity-icon-briefcase identity-color-cyan", "40"], "Firefox's container menu icon");
+  assert.equal(t.menu().querySelector("[data-reopen]"), null);
+  assert.equal(t.loop.diagnostics().pillContainer, "fits");
+  const glyph = t.h.document.getElementById("axiosozo-project-folders").querySelector(".axiosozo-project-glyph");
+  assert.ok(glyph.classList.contains("identity-color-cyan"), "the project block takes its container's colour");
+  assert.deepEqual(Object.keys(glyph.style), []);
+  t.loop.dispose();
+});
+
+test("P2 runtime stylesheet: Firefox's container colour paints the marks; a hidden pill mark stays hidden", () => {
+  const css = readFileSync(new URL("../chrome/axiosozo-runtime.css", import.meta.url), "utf8");
+  // .axiosozo-status-dot sets display: inline-block, which would beat the UA [hidden] rule.
+  assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[hidden\] \{ display: none; \}/u);
+  assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[class\*="identity-color-"\] \{\s*background: var\(--identity-icon-color\);\s*border-color: transparent;\s*\}/u);
+  assert.match(css, /\.axiosozo-project-glyph\[class\*="identity-color-"\] \{ fill: var\(--identity-icon-color\); fill-opacity: 1; \}/u);
+  assert.doesNotMatch(css, /#[0-9a-f]{6}\b[^}]*identity/iu, "no copied container colours");
+});
+
+test("P2 pill: a project URL in another container is marked and offers a visible reopen; the tab is never reloaded", async () => {
+  const t = containerSetup();
+  const tab = t.h.addTab({ url: "http://localhost:5173/app?x=1#y", userContextId: 0 });
+  await flushMicrotasks();
+  assert.equal(t.mark().hidden, false);
+  assert.deepEqual(t.mark().className.split(" "), ["axiosozo-status-dot", "axiosozo-env-pill-container"], "a ring: no container");
+  assert.equal(t.pill().getAttribute("data-container"), "elsewhere");
+  assert.match(t.pill().getAttribute("aria-label"), /^Webapp: local environment, not in the Webapp container\. Switch environment$/u);
+  t.pill().click();
+  const reopen = t.menu().querySelector("[data-reopen]");
+  assert.equal(reopen.getAttribute("label"), "Reopen in the Webapp container");
+  assert.equal(reopen.getAttribute("class"), "menuitem-iconic identity-icon-briefcase identity-color-cyan");
+  t.menu().dispatch("command", { target: reopen });
+  await flushMicrotasks();
+  assert.deepEqual(t.services.calls.openProjectUrl.map(call => [call.projectId, call.url, call.contextUuid]),
+    [[t.project.id, "http://localhost:5173/app?x=1#y", WORKSPACE_A]], "a new tab through the router");
+  assert.deepEqual([tab.linkedBrowser.reloads, t.h.opened.length, tab.linkedBrowser.currentURI.spec], [0, 0, "http://localhost:5173/app?x=1#y"],
+    "the old tab, its page and its cookies stay as they are");
+  // A tab in some other container shows that container's colour.
+  t.h.addTab({ url: "http://localhost:5173/other", userContextId: 7 });
+  await flushMicrotasks();
+  assert.ok(t.mark().classList.contains("identity-color-orange"));
+  assert.equal(t.pill().getAttribute("data-container"), "elsewhere");
+  t.loop.dispose();
+});
+
+test("P2: an environment switch stays in place only inside the right container; otherwise a routed new tab", async () => {
+  const t = containerSetup();
+  t.h.addTab({ url: "http://localhost:5173/a", userContextId: 40 });
+  await flushMicrotasks();
+  assert.equal(t.loop.switchEnvironment("production"), "https://webapp.example/a");
+  assert.deepEqual(t.h.opened.map(o => [o.url, o.where, o.options.triggeringPrincipal.originAttributes.userContextId]),
+    [["https://webapp.example/a", "current", 40]], "same container: in place, null principal in that container");
+  t.h.addTab({ url: "http://localhost:5173/b", userContextId: 0 });
+  await flushMicrotasks();
+  assert.equal(t.loop.switchEnvironment("production"), "https://webapp.example/b");
+  await flushMicrotasks();
+  assert.equal(t.h.opened.length, 1, "never loaded into the default container's jar");
+  assert.equal(t.services.calls.openProjectUrl.at(-1).url, "https://webapp.example/b");
+  t.loop.dispose();
+});
+
+test("P2: the project block reuses only a tab that already has the link's container", async () => {
+  const t = containerSetup();
+  const wrong = t.h.addTab({ url: "http://localhost:5173/x", userContextId: 0 });
+  t.h.addTab({ url: "https://docs.example/" });
+  await flushMicrotasks();
+  const row = label => rowsOf(blockFor(t.h, t.project.id)).find(button => button.getAttribute("aria-label").startsWith(`${label},`));
+  row("local").click();
+  await flushMicrotasks();
+  assert.notEqual(t.h.gBrowser.selectedTab, wrong);
+  assert.deepEqual(t.services.calls.openProjectUrl.map(call => call.url), ["http://localhost:5173/"]);
+  const right = t.h.addTab({ url: "http://localhost:5173/y", userContextId: 40, select: false });
+  await flushMicrotasks();
+  row("local").click();
+  assert.equal(t.h.gBrowser.selectedTab, right);
+  assert.equal(t.services.calls.openProjectUrl.length, 1);
+  t.loop.dispose();
+});
+
+test("P2: a project without its container yet offers to open it there; containers off and private windows stay as before", async () => {
+  const pending = containerSetup({ container: null });
+  pending.h.addTab({ url: "http://localhost:5173/", userContextId: 0 });
+  await flushMicrotasks();
+  assert.equal(pending.pill().getAttribute("data-container"), "elsewhere");
+  pending.pill().click();
+  const offer = pending.menu().querySelector("[data-reopen]");
+  assert.deepEqual([offer.getAttribute("label"), offer.getAttribute("class")], ["Open in Webapp's own container", null]);
+  pending.menu().dispatch("command", { target: offer });
+  await flushMicrotasks();
+  assert.equal(pending.services.calls.openProjectUrl.length, 1);
+  pending.loop.dispose();
+
+  const off = containerSetup({ containers: false });
+  off.h.addTab({ url: "http://localhost:5173/a", userContextId: 0 });
+  await flushMicrotasks();
+  assert.equal(off.mark().hidden, true);
+  assert.equal(off.pill().hasAttribute("data-container"), false);
+  off.loop.switchEnvironment("production");
+  assert.deepEqual(off.h.opened.map(o => o.where), ["current"], "containers off: in place, like before");
+  off.loop.dispose();
+
+  const priv = containerSetup({ privateWindow: true });
+  priv.h.addTab({ url: "http://localhost:5173/a", userContextId: 0 });
+  await flushMicrotasks();
+  assert.equal(priv.mark().hidden, true);
+  assert.equal(priv.pill().getAttribute("aria-label"), "Webapp: local environment. Switch environment");
+  priv.loop.switchEnvironment("production");
+  await flushMicrotasks();
+  assert.deepEqual(priv.h.opened.map(o => o.where), ["current"]);
+  assert.equal(priv.services.calls.openProjectUrl.length, 0, "private windows never route through project containers");
+  priv.loop.dispose();
+});
+
+// ---- P2: menus act only for what they showed ------------------------------------------
+// Alpha (own container 40) shares github.com with the space (default container
+// 0) and has a CI surface there; Beta (own container 41) lives on another port.
+const ALPHA_ID = "p_alpha1";
+const BETA_ID = "p_beta1";
+function alphaBeta({ shared = true } = {}) {
+  const h = createFakeWindow({ prefs: { "privacy.userContext.enabled": true } });
+  const identities = { ...IDENTITIES, 41: { userContextId: 41, name: "Beta", color: "orange", icon: "briefcase" } };
+  const adapter = Object.assign(createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) }), {
+    containerForWorkspace: uuid => (uuid === WORKSPACE_B ? 2 : 0),
+    containerIdentity: id => identities[id] ?? null,
+    tabUserContextId: tab => tab.userContextId,
+  });
+  const alpha = (over = {}) => core.validateProject({ ...core.upgradeProject(project({ id: ALPHA_ID, name: "Alpha",
+    environments: [{ name: "local", base_url: "http://localhost:5101" }, { name: "production", base_url: "https://alpha.example" }],
+    surfaces: [{ name: "Repository", url: "https://github.com/acme/alpha", kind: "repository" },
+      { name: "CI", url: "https://github.com/acme/alpha/actions", kind: "ci" }] })),
+  container: { user_context_id: 40 }, shared_sites: { hosts: ["github.com"], confirmed: shared }, ...over });
+  const beta = core.validateProject({ ...core.upgradeProject(project({ id: BETA_ID, name: "Beta",
+    environments: [{ name: "local", base_url: "http://localhost:5102" }, { name: "production", base_url: "https://beta.example" }] })),
+  container: { user_context_id: 41 } });
+  const services = routed(createFakeServices(core, { projects: [alpha(), beta] }));
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0 });
+  const replace = async list => { services.projects = list; services.emit("projects"); await flushMicrotasks(); };
+  return { h, services, loop, alpha, beta, replace,
+    pill: () => h.document.getElementById("axiosozo-env-pill"), menu: () => h.document.getElementById("axiosozo-env-menu"),
+    more: () => h.document.getElementById("axiosozo-project-more-menu"),
+    item: (popup, predicate) => popup.querySelectorAll("menuitem").find(predicate) };
+}
+const nothingHappened = (t, before) => {
+  assert.equal(t.services.calls.openProjectUrl.length, 0, "no project link was routed");
+  assert.equal(t.h.opened.length, 0, "no page was loaded in any tab");
+  assert.equal(t.h.gBrowser.selectedTab, before, "no other tab was selected");
+};
+
+test("P2 menus: a pill menu shown for Alpha does nothing after another tab is selected", async () => {
+  const t = alphaBeta();
+  const alphaTab = t.h.addTab({ url: "http://localhost:5101/a", userContextId: 0 });
+  await flushMicrotasks();
+  t.pill().click();
+  const reopen = t.item(t.menu(), item => item.hasAttribute("data-reopen"));
+  const production = t.item(t.menu(), item => item.getAttribute("data-environment") === "production");
+  assert.ok(reopen && production);
+  const betaTab = t.h.addTab({ url: "http://localhost:5102/b", userContextId: 41 });
+  await flushMicrotasks();
+  assert.equal(t.menu().state, "closed", "the stale menu was closed");
+  t.menu().dispatch("command", { target: reopen });
+  t.menu().dispatch("command", { target: production });
+  await flushMicrotasks();
+  nothingHappened(t, betaTab);
+  assert.equal(betaTab.linkedBrowser.currentURI.spec, "http://localhost:5102/b", "Beta's tab never got Alpha's switch");
+  assert.equal(alphaTab.linkedBrowser.currentURI.spec, "http://localhost:5101/a");
+  t.loop.dispose();
+});
+
+test("P2 menus: a pill menu does nothing after its tab navigated, closed another tab, or the window's runtime went away", async () => {
+  const t = alphaBeta();
+  const tab = t.h.addTab({ url: "http://localhost:5101/a", userContextId: 40 });
+  await flushMicrotasks();
+  t.pill().click();
+  let production = t.item(t.menu(), item => item.getAttribute("data-environment") === "production");
+  t.h.commit(tab, "http://localhost:5102/elsewhere");
+  await flushMicrotasks();
+  t.menu().dispatch("command", { target: production });
+  await flushMicrotasks();
+  nothingHappened(t, tab);
+  assert.equal(tab.linkedBrowser.currentURI.spec, "http://localhost:5102/elsewhere");
+  // Closing a tab makes the shown menu stale too.
+  t.h.commit(tab, "http://localhost:5101/a");
+  await flushMicrotasks();
+  t.pill().click();
+  production = t.item(t.menu(), item => item.getAttribute("data-environment") === "production");
+  const spare = t.h.addTab({ url: "https://news.example/", select: false });
+  t.h.gBrowser.removeTab(spare);
+  t.menu().dispatch("command", { target: production });
+  await flushMicrotasks();
+  nothingHappened(t, tab);
+  // A fresh menu acts.
+  t.pill().click();
+  t.menu().dispatch("command", { target: t.item(t.menu(), item => item.getAttribute("data-environment") === "production") });
+  assert.deepEqual(t.h.opened.map(o => [o.url, o.where]), [["https://alpha.example/a", "current"]]);
+  // After dispose nothing listens any more.
+  t.pill().click();
+  production = t.item(t.menu(), item => item.getAttribute("data-environment") === "production");
+  const menu = t.menu();
+  t.loop.dispose();
+  menu.dispatch("command", { target: production });
+  assert.equal(t.h.opened.length, 1);
+});
+
+// pushState, replaceState and fragment changes keep the document but change
+// the address the pill's actions are bound to.
+const OLD_ADDRESS = "http://localhost:5101/a?old=1#old";
+const NEW_ADDRESS = "http://localhost:5101/b?new=2#new";
+const pillItem = (t, action) => t.item(t.menu(), item => (action === "reopen" ? item.hasAttribute("data-reopen")
+  : item.getAttribute("data-environment") === "production"));
+const actedOn = t => ({ opened: t.h.opened.map(o => [o.url, o.where]), routed: t.services.calls.openProjectUrl.map(call => [call.projectId, call.url]) });
+
+for (const action of ["production", "reopen"]) {
+  // Production switches in place inside Alpha's container (40); Reopen is offered in the default one (0).
+  const container = action === "reopen" ? 0 : 40;
+  const fresh = action === "reopen" ? { opened: [], routed: [[ALPHA_ID, NEW_ADDRESS]] }
+    : { opened: [["https://alpha.example/b?new=2#new", "current"]], routed: [] };
+
+  test(`P2 menus: ${action} shown before a same-document address change does nothing; a fresh one keeps the new route`, async () => {
+    const t = alphaBeta();
+    const tab = t.h.addTab({ url: OLD_ADDRESS, userContextId: container });
+    await flushMicrotasks();
+    t.pill().click();
+    const stale = pillItem(t, action);
+    assert.ok(stale);
+    t.h.sameDocument(tab, NEW_ADDRESS);
+    await flushMicrotasks();
+    assert.equal(t.menu().state, "closed", "the menu bound to the old address closed");
+    t.menu().dispatch("command", { target: stale });
+    await flushMicrotasks();
+    nothingHappened(t, tab);
+    assert.equal(tab.linkedBrowser.currentURI.spec, NEW_ADDRESS);
+    t.pill().click();
+    t.menu().dispatch("command", { target: pillItem(t, action) });
+    await flushMicrotasks();
+    assert.deepEqual(actedOn(t), fresh, "path, query and fragment of the current route are kept");
+    t.loop.dispose();
+  });
+
+  test(`P2 menus: ${action} checks the tab's live address even before its location notification arrives`, async () => {
+    const t = alphaBeta();
+    const tab = t.h.addTab({ url: OLD_ADDRESS, userContextId: container });
+    await flushMicrotasks();
+    t.pill().click();
+    const stale = pillItem(t, action);
+    tab.linkedBrowser.currentURI = { spec: NEW_ADDRESS }; // moved on; no progress notification yet
+    t.menu().dispatch("command", { target: stale });
+    await flushMicrotasks();
+    nothingHappened(t, tab);
+    assert.equal(t.loop.switchEnvironment("production"), null, "no switch from an address the tab has left");
+    assert.deepEqual(t.h.opened, []);
+    // Opening the menu again shows it for the address the tab has now.
+    t.pill().click();
+    await flushMicrotasks();
+    assert.equal(t.menu().state, "open");
+    t.menu().dispatch("command", { target: pillItem(t, action) });
+    await flushMicrotasks();
+    assert.deepEqual(actedOn(t), fresh);
+    t.loop.dispose();
+  });
+}
+
+test("P2 menus: a same-document change of a background tab leaves the selected tab's menu alone", async () => {
+  const t = alphaBeta();
+  const background = t.h.addTab({ url: "http://localhost:5102/b?x=1", userContextId: 41, select: false });
+  const tab = t.h.addTab({ url: OLD_ADDRESS, userContextId: 40 });
+  await flushMicrotasks();
+  t.pill().click();
+  const production = pillItem(t, "production");
+  t.h.sameDocument(background, "http://localhost:5102/b?x=2#y");
+  await flushMicrotasks();
+  assert.equal(t.menu().state, "open");
+  t.menu().dispatch("command", { target: production });
+  assert.deepEqual(actedOn(t), { opened: [["https://alpha.example/a?old=1#old", "current"]], routed: [] });
+  assert.equal(t.h.gBrowser.selectedTab, tab);
+  t.loop.dispose();
+});
+
+test("same-document notifications keep a connection-refusal wait as it was", async () => {
+  const t = setup();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.fail(tab, "http://localhost:5173/app");
+  await flushMicrotasks();
+  const overlay = t.overlay(tab);
+  assert.equal(overlay?.getAttribute("data-mode"), "polling");
+  t.h.sameDocument(tab, "http://localhost:5173/app#retry");
+  await flushMicrotasks();
+  assert.equal(t.overlay(tab), overlay, "the wait over the same document stays");
+  assert.equal(overlay.getAttribute("data-mode"), "polling");
+  // A real navigation still ends it, as before.
+  t.h.commit(tab, "https://docs.example/");
+  await flushMicrotasks();
+  assert.equal(t.overlay(tab), null);
+  t.loop.dispose();
+});
+
+test("P2 menus: a More menu shown while sharing was on cannot reuse the space's tab after sharing is revoked", async () => {
+  const t = alphaBeta();
+  const shared = t.h.addTab({ url: "https://github.com/acme/alpha/actions/runs/1", userContextId: 0, select: false });
+  const start = t.h.addTab({ url: "http://localhost:5101/a", userContextId: 40 });
+  await flushMicrotasks();
+  const openMore = () => {
+    rowsOf(blockFor(t.h, ALPHA_ID)).find(button => button.getAttribute("data-kind") === "more").click();
+    return t.item(t.more(), item => item.getAttribute("data-url") === "https://github.com/acme/alpha/actions");
+  };
+  // Control: with sharing confirmed, the open tab in the space's container fits.
+  t.more().dispatch("command", { target: openMore() });
+  assert.equal(t.h.gBrowser.selectedTab, shared);
+  t.h.select(start);
+  await flushMicrotasks();
+  const stale = openMore();
+  await t.replace([t.alpha({ shared_sites: { hosts: ["github.com"], confirmed: false } }), t.beta]);
+  assert.equal(t.more().state, "closed");
+  t.more().dispatch("command", { target: stale });
+  await flushMicrotasks();
+  nothingHappened(t, start);
+  // A menu shown now decides by the current record: Alpha's own container, a new routed tab.
+  t.more().dispatch("command", { target: openMore() });
+  await flushMicrotasks();
+  assert.equal(t.h.gBrowser.selectedTab, start, "the space's tab is not reused");
+  assert.deepEqual(t.services.calls.openProjectUrl.map(call => [call.projectId, call.url]), [[ALPHA_ID, "https://github.com/acme/alpha/actions"]]);
+  t.loop.dispose();
+});
+
+test("P2 menus: deletion or a new container mapping makes a shown More menu stale", async () => {
+  for (const change of [t => [t.beta], t => [t.alpha({ container: { user_context_id: 42 } }), t.beta]]) {
+    const t = alphaBeta();
+    t.h.addTab({ url: "https://github.com/acme/alpha/actions/runs/1", userContextId: 0, select: false });
+    const start = t.h.addTab({ url: "http://localhost:5101/a", userContextId: 40 });
+    await flushMicrotasks();
+    rowsOf(blockFor(t.h, ALPHA_ID)).find(button => button.getAttribute("data-kind") === "more").click();
+    const surface = t.item(t.more(), item => item.getAttribute("data-url"));
+    const remove = t.item(t.more(), item => item.getAttribute("data-action") === "remove");
+    await t.replace(change(t));
+    t.more().dispatch("command", { target: surface });
+    t.more().dispatch("command", { target: remove });
+    await flushMicrotasks();
+    nothingHappened(t, start);
+    assert.deepEqual(t.services.calls.updateProject, [], "no stale removal from the space");
+    t.loop.dispose();
+  }
+});
+
+test("P2: a project row kept from before a model change decides by the current record", async () => {
+  const t = alphaBeta();
+  const shared = t.h.addTab({ url: "https://github.com/acme/alpha/issues", userContextId: 0, select: false });
+  const start = t.h.addTab({ url: "http://localhost:5101/a", userContextId: 40 });
+  await flushMicrotasks();
+  const repository = () => rowsOf(blockFor(t.h, ALPHA_ID)).find(button => button.getAttribute("aria-label").startsWith("Repository,"));
+  const old = repository();
+  old.click();
+  assert.equal(t.h.gBrowser.selectedTab, shared, "control: sharing confirmed, the space's tab fits");
+  t.h.select(start);
+  await t.replace([t.alpha({ shared_sites: { hosts: ["github.com"], confirmed: false } }), t.beta]);
+  assert.notEqual(repository(), old, "the block was rendered again");
+  old.click();
+  await flushMicrotasks();
+  assert.equal(t.h.gBrowser.selectedTab, start, "the default-container tab is not reused after sharing was revoked");
+  assert.deepEqual(t.services.calls.openProjectUrl.map(call => call.url), ["https://github.com/acme/alpha"]);
+  await t.replace([t.beta]);
+  old.click();
+  await flushMicrotasks();
+  assert.equal(t.services.calls.openProjectUrl.length, 1, "a deleted project's row does nothing");
+  t.loop.dispose();
 });
 
 test("editing a project's environments re-links open tabs at once", async () => {

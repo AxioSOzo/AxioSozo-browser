@@ -40,8 +40,9 @@ export const DEFAULT_SHARED_SITES = Object.freeze([
 ]);
 export const BRIEF_APP_KINDS = Object.freeze(['web', 'desktop', 'mobile', 'api', 'docs', 'cli', 'library', 'other']);
 export const UNDERSTAND_CLIS = Object.freeze(['claude-code', 'codex']);
-// Gecko userContextId is an unsigned 32-bit integer; 0 is the default (no container).
-export const MAX_USER_CONTEXT_ID = 4294967295;
+// Public Gecko userContextIds are 1..UINT32_MAX-1; UINT32_MAX is reserved
+// for extension storage. Routing also permits 0 for the default container.
+export const MAX_USER_CONTEXT_ID = 4294967294;
 
 const UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
 const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;

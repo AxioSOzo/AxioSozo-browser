@@ -11,6 +11,7 @@ const { AxioSozoServices, processSingleton, PROBE_MIN_INTERVAL_MS, LEDGER_FLUSH_
 const { createNativeProjectArrivalSubprocess, arrivalSubprocessPaths, ARRIVAL_LSOF_SHA256, ARRIVAL_LSOF_PYTHON } = skip ? {}
   : await import("../chrome/ProjectArrivalSubprocess.sys.mjs");
 const { ZenWorkspaceAdapter } = await import("../chrome/ZenWorkspaceAdapter.sys.mjs");
+const { createGeckoIdentityAdapter } = await import("../chrome/ProjectContainers.sys.mjs");
 
 const HOME = "11111111-1111-4111-8111-111111111111";
 const BV = "22222222-2222-4222-8222-222222222222";
@@ -157,7 +158,7 @@ function secureReader(fs, hooks = {}) {
 // from `listeners` (port → { pid, cwd, uid }). No real process is started.
 function fakeArrivalRuntime(listeners = {}) {
   const calls = [];
-  const pipe = text => { let done = false; return { async readString() { if (done) return ""; done = true; return text; }, async close() {} }; };
+  const pipe = text => { let done = false; return { async read() { if (done) return new ArrayBuffer(0); done = true; return new TextEncoder().encode(text).buffer; }, async close() {} }; };
   const reply = text => ({ stdout: pipe(text), stderr: pipe(""), stdin: { async close() {} },
     async wait() { return { exitCode: 0 }; }, async kill() {} });
   return { calls, async call({ command, arguments: args }) {
@@ -1339,7 +1340,7 @@ test("arrival runtime: the trusted adapter is built on the first call only, shar
 // adapter's tests use): it answers only the helper's two operations and id.
 function trustedArrivalFixture(listeners, { digest = () => ARRIVAL_LSOF_SHA256 } = {}) {
   const spawned = [];
-  const pipe = text => { let done = false; return { async readString() { if (done) return ""; done = true; return text; }, async close() {} }; };
+  const pipe = text => { let done = false; return { async read() { if (done) return new ArrayBuffer(0); done = true; return new TextEncoder().encode(text).buffer; }, async close() {} }; };
   const reply = text => ({ stdout: pipe(text), stderr: pipe(""), stdin: { async close() {} }, async wait() { return { exitCode: 0 }; }, async kill() {} });
   const runtime = { env: name => (name === "AXIOSOZO_STATIC_READER_ROOT" ? "/Volumes/AxioSozoBuild/workstation" : ""),
     verifyFile: async () => true, sha256: async () => digest(), timers: globalThis,
@@ -1395,4 +1396,471 @@ test("arrival through an untrusted adapter: nothing starts, no offer, and a late
   const offer = await h.services.offerArrival({ window: h.window, tab });
   assert.deepEqual([offer.kind, offer.root], ["new", "/work/shop"]);
   assert.equal(trusted.builds, 2, "the failed build was retried by the later discovery");
+});
+
+// ── P2: accounts per project ─────────────────────────────────────────────
+// A synthetic ContextualIdentityService (the pinned method signatures) behind
+// the real createGeckoIdentityAdapter, and Zen's gBrowser.addTab. Only routing
+// identities are modelled: no cookie, account name or profile is read, and
+// this is not the GUI cookie proof (two projects on one origin in the real app).
+const GECKO_COLORS = ["gray", "yellow", "orange", "red", "pink", "purple", "violet", "blue", "cyan", "green"];
+const SHARED_ORIGIN = "https://shared-fixture.example/login";
+const BLOG = { version: 1, name: "Blog", kind: "web",
+  environments: [{ name: "local", base_url: "http://localhost:5175" }, { name: "preview", base_url: "https://shared-fixture.example" }],
+  services: [], surfaces: [] };
+const TWO_PROJECTS = { ...VITE_TREE, "/work/blog": { dir: true },
+  "/work/blog/package.json": { file: JSON.stringify({ name: "blog", scripts: { dev: "vite --port 5175" }, devDependencies: { vite: "^5" } }) } };
+const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
+async function quietly(run) {
+  const original = console.error; console.error = () => {};
+  try { return await run(); } finally { console.error = original; }
+}
+
+function fakeIdentityService() {
+  const identities = new Map([[1, { userContextId: 1, public: true, name: "Personal", icon: "fingerprint", color: "blue" }],
+    [2, { userContextId: 2, public: true, name: "Work", icon: "briefcase", color: "orange" }]]);
+  const calls = [];
+  const state = { next: 40, onCreate: null };
+  const service = {
+    getPublicIdentityFromId(id) { const value = identities.get(id); return value?.public ? structuredClone(value) : undefined; },
+    create(name, icon, color) {
+      calls.push(["create", name, icon, color]);
+      const value = { userContextId: state.next++, public: true, name, icon, color };
+      identities.set(value.userContextId, value);
+      state.onCreate?.(value);
+      return structuredClone(value);
+    },
+    update(id, name, icon, color) {
+      calls.push(["update", id, name, icon, color]);
+      const value = identities.get(id);
+      if (!value?.public) return false;
+      Object.assign(value, { name, icon, color });
+      return true;
+    },
+    remove() { throw new Error("project flows never clear container data"); },
+  };
+  return { service, identities, calls, state, creates: () => calls.filter(call => call[0] === "create").length,
+    // Firefox turning containers off: every project identity is gone and numbering restarts.
+    reset() { for (const id of [...identities.keys()]) if (id > 2) identities.delete(id); state.next = 40; } };
+}
+
+function p2Harness({ enabled = true, tree = TWO_PROJECTS } = {}) {
+  const gecko = fakeIdentityService();
+  const observed = {};
+  const state = { enabled, veto: false };
+  const files = new Map();
+  const writes = { fail: false, gate: null };
+  const h = harness({ tree, deps: {
+    storageFor: name => ({ read: async () => files.get(name) ?? null, async write(text) {
+      if (name === "contexts.json") await writes.gate;
+      if (writes.fail && name === "contexts.json") throw new Error("disk full");
+      files.set(name, text);
+    } }),
+    containerIdentities: () => createGeckoIdentityAdapter({ service: gecko.service, allowedColors: GECKO_COLORS, allowedIcons: ["briefcase"] }),
+    containersEnabled: () => state.enabled,
+    observeContainers: callbacks => { Object.assign(observed, callbacks); return () => {}; },
+  } });
+  // Pinned Tabbrowser.addTab: a non-lazy tab gets its browser (and its browsing
+  // context's origin attributes) synchronously, and a foreground tab is
+  // selected unless gBrowser.setSelectedTab vetoes it.
+  const tabs = [];
+  const gBrowser = h.zen.window.gBrowser;
+  gBrowser.addTab = (url, options) => {
+    const tab = { url, options, userContextId: options.userContextId,
+      linkedBrowser: { browsingContext: { originAttributes: { userContextId: options.userContextId } } } };
+    tabs.push(tab);
+    if (!options.inBackground && !state.veto) gBrowser.selectedTab = tab;
+    return tab;
+  };
+  gBrowser.removeTab = () => assert.fail("no tab is closed by these flows");
+  const open = (project, url, window = h.zen.window) => h.services.openProjectUrl({ window, projectId: project.id, url });
+  const stored = () => JSON.parse(files.get("contexts.json")).projects;
+  // Holds Zen's workspace switch inside openTab until release().
+  function pauseSwitch() {
+    let entered, release;
+    const started = new Promise(resolve => { entered = resolve; });
+    const blocked = new Promise(resolve => { release = resolve; });
+    const original = h.zen.zen.changeWorkspaceWithID.bind(h.zen.zen);
+    h.zen.zen.changeWorkspaceWithID = async (...args) => {
+      h.zen.zen.changeWorkspaceWithID = original;
+      entered();
+      await blocked;
+      return original(...args);
+    };
+    return { started, release };
+  }
+  return { ...h, gecko, observed, state, files, writes, tabs, open, stored, pauseSwitch };
+}
+const shopIn = (h, space = APP) => h.services.confirmProject({ root: "/work/shop", manifest: MANIFEST, contextUuid: space });
+const blogIn = (h, space = APP) => h.services.confirmProject({ root: "/work/blog", manifest: BLOG, contextUuid: space });
+
+test("P2: a new project gets its own container before any link; links open there with an explicit container", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  assert.equal(shop.container.user_context_id, 40, "created and saved when the project was added");
+  assert.equal(h.stored()[0].container.user_context_id, 40);
+  const [[, name, icon, color]] = h.gecko.calls;
+  assert.deepEqual([name, icon], ["Shop", "briefcase"]);
+  assert.ok(GECKO_COLORS.includes(color) && color !== "turquoise", color);
+  assert.equal(h.zen.zen.activeWorkspace, HOME);
+  assert.deepEqual(await h.open(shop, "https://vercel.com/team/shop"), { opened: true, container: "project", selected: true });
+  assert.equal(h.tabs.length, 1);
+  assert.equal(h.zen.window.gBrowser.selectedTab, h.tabs[0], "Firefox selected the new tab");
+  const { url, options } = h.tabs[0];
+  assert.equal(url, "https://vercel.com/team/shop");
+  assert.deepEqual([options.userContextId, options.fromExternal, options.zenWorkspaceId, options.skipRoute], [40, false, APP, true]);
+  assert.deepEqual([options.triggeringPrincipal.isSystemPrincipal, options.triggeringPrincipal.isNullPrincipal, options.triggeringPrincipal.originAttributes],
+    [false, true, { userContextId: 40 }]);
+  assert.equal(h.zen.zen.activeWorkspace, APP, "the project's space");
+  // A known project URL opened from anywhere (an attention item, the page) is routed too.
+  await h.services.openUrl({ url: "http://localhost:5174/cart", window: h.zen.window });
+  assert.equal(h.tabs.at(-1).options.userContextId, 40);
+  // Unrelated addresses keep the plain web-link path in the space's container.
+  await h.services.openUrl({ url: "https://unrelated.example/", contextUuid: HOME, window: h.zen.window });
+  assert.equal(h.tabs.length, 2);
+  assert.deepEqual(h.zen.opened.at(-1).principal.originAttributes, { userContextId: 0 });
+  assert.equal(h.gecko.creates(), 1, "no second identity for the same project");
+  for (const url of ["javascript:alert(1)", "file:///etc/passwd", "https://user:pw@vercel.com/", "about:config"]) {
+    await assert.rejects(h.open(shop, url), { code: "INVALID_URL" });
+  }
+  await assert.rejects(h.services.openProjectUrl({ window: { foreign: true }, projectId: shop.id, url: "https://vercel.com/" }), { code: "NO_WINDOW" });
+  await assert.rejects(h.services.openProjectUrl({ window: h.zen.window, projectId: "p_unknown1", url: "https://vercel.com/" }), { code: "UNKNOWN_PROJECT" });
+  assert.equal(h.tabs.length, 2);
+});
+
+test("P2: two projects on one origin get two containers; parallel opens assign exactly one identity each, persisted", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  const blog = await blogIn(h);
+  assert.deepEqual([shop.container.user_context_id, blog.container.user_context_id], [null, null], "containers were off when they were added");
+  assert.equal(h.gecko.creates(), 0);
+  h.state.enabled = true;
+  const order = [shop, blog, shop, blog];
+  const results = await Promise.all(order.map(project => h.open(project, SHARED_ORIGIN)));
+  assert.ok(results.every(result => result.container === "project"));
+  assert.equal(h.gecko.creates(), 2);
+  const idsOf = project => [...new Set(h.tabs.filter((_, i) => order[i] === project).map(tab => tab.options.userContextId))];
+  assert.deepEqual([idsOf(shop).length, idsOf(blog).length], [1, 1]);
+  const [shopId] = idsOf(shop); const [blogId] = idsOf(blog);
+  assert.notEqual(shopId, blogId, "the same origin, two cookie jars");
+  assert.deepEqual(h.stored().map(project => project.container.user_context_id), [shopId, blogId]);
+  // A restarted service reads the saved mapping and creates nothing.
+  const restarted = h.make();
+  restarted.registerWindow(h.zen.window, h.adapter);
+  await restarted.openProjectUrl({ window: h.zen.window, projectId: shop.id, url: SHARED_ORIGIN });
+  assert.equal(h.tabs.at(-1).options.userContextId, shopId);
+  assert.equal(h.gecko.creates(), 2);
+});
+
+test("P2: a failed save never routes; the retry reuses the identity it already made", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  h.state.enabled = true;
+  h.writes.fail = true;
+  await quietly(() => assert.rejects(h.open(shop, SHARED_ORIGIN), /disk full/));
+  assert.equal(h.tabs.length, 0, "no tab with an unsaved container");
+  assert.equal(h.gecko.creates(), 1);
+  assert.ok(h.gecko.identities.has(40), "the made identity is kept, never removed");
+  h.writes.fail = false;
+  await h.open(shop, SHARED_ORIGIN);
+  assert.equal(h.tabs[0].options.userContextId, 40);
+  assert.equal(h.gecko.creates(), 1, "the retry hint reused it");
+  assert.equal(h.stored()[0].container.user_context_id, 40);
+});
+
+test("P2: compare-and-set: a project removed while its container is made gets no tab", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  h.state.enabled = true;
+  h.gecko.state.onCreate = () => { h.services.removeProject(shop.id); };
+  await assert.rejects(h.open(shop, SHARED_ORIGIN), error => ["PROJECT_CHANGED", "UNKNOWN_PROJECT"].includes(error.code));
+  assert.equal(h.tabs.length, 0);
+  assert.deepEqual(h.stored(), []);
+  assert.ok(h.gecko.identities.has(40), "removal never clears a container");
+});
+
+test("P2: account labels are typed by the user, validated, replaceable and removable; every other field stays", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  // A project that also has a brief: rewrite the profile store, then restart.
+  const document = JSON.parse(h.files.get("contexts.json"));
+  document.projects[0].brief = { version: 1, cli: "codex", generated_at: NOON, accepted: false, document: { version: 1,
+    product: "A synthetic shop.", apps: [], domains: [], services: [], start: [], risks: [] } };
+  h.files.set("contexts.json", JSON.stringify(document));
+  const services = h.make();
+  services.registerWindow(h.zen.window, h.adapter);
+  const before = await services.getProject(shop.id);
+  assert.ok(before.detected && before.brief && before.container.user_context_id === 40);
+  const strip = ({ accounts, updated_at, ...rest }) => rest;
+  const saved = await services.setAccountLabel(shop.id, { key: "vercel", label: "  work Google  " });
+  assert.deepEqual(saved.accounts, [{ key: "vercel", label: "work Google" }]);
+  assert.deepEqual(strip(saved), strip(before), "detected, brief, manifest, trust, container and shared sites are kept");
+  await services.setAccountLabel(shop.id, { key: "*.Atlassian.net", label: "Work Microsoft" });
+  await services.setAccountLabel(shop.id, { key: "vercel", label: "personal Google" });
+  assert.deepEqual((await services.getProject(shop.id)).accounts,
+    [{ key: "*.atlassian.net", label: "Work Microsoft" }, { key: "vercel", label: "personal Google" }]);
+  await services.setAccountLabel(shop.id, { key: "vercel", label: null });
+  assert.deepEqual((await services.getProject(shop.id)).accounts, [{ key: "*.atlassian.net", label: "Work Microsoft" }]);
+  const file = h.files.get("contexts.json");
+  for (const account of [{ key: "vercel", label: "" }, { key: "vercel", label: "   " }, { key: "vercel", label: "a\nb" },
+    { key: "vercel", label: "a\u009fb" }, { key: "vercel", label: "x".repeat(81) }, { key: "vercel", label: 7 }, { key: "vercel" }]) {
+    await assert.rejects(services.setAccountLabel(shop.id, account), { code: "INVALID_INPUT" }, JSON.stringify(account));
+  }
+  for (const key of ["https://vercel.com", "*.com", "", "a b.example", 12]) {
+    await assert.rejects(services.setAccountLabel(shop.id, { key, label: "x" }), { code: "INVALID_HOST_PATTERN" }, String(key));
+  }
+  assert.equal(h.files.get("contexts.json"), file, "a refused label writes nothing");
+  for (let i = 0; i < 31; i++) await services.setAccountLabel(shop.id, { key: `site${i}.example`, label: `Account ${i}` });
+  const full = h.files.get("contexts.json");
+  await assert.rejects(services.setAccountLabel(shop.id, { key: "one-more.example", label: "x" }), { code: "INVALID_PROJECT" });
+  assert.equal(h.files.get("contexts.json"), full);
+  await assert.rejects(services.setAccountLabel("p_unknown1", { key: "vercel", label: "x" }), { code: "UNKNOWN_PROJECT" });
+  assert.equal(h.gecko.creates(), 1, "labels never touch containers");
+});
+
+test("P2: suggested shared sites stay in the project's container; only confirmed ones use the space's sign-ins", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h); // in APP, whose default container is 2
+  assert.equal(shop.shared_sites.confirmed, false);
+  assert.ok(shop.shared_sites.hosts.includes("github.com"), "the default is offered");
+  assert.deepEqual(await h.open(shop, "https://github.com/acme/shop"), { opened: true, container: "project", selected: true });
+  assert.equal(h.tabs.at(-1).options.userContextId, 40, "an unconfirmed suggestion shares nothing");
+  const confirmed = await h.services.setSharedSites(shop.id, { hosts: ["github.com", "*.github.com"], confirmed: true });
+  assert.deepEqual(confirmed.shared_sites, { hosts: ["github.com", "*.github.com"], confirmed: true });
+  assert.equal(confirmed.container.user_context_id, 40);
+  assert.deepEqual(await h.open(shop, "https://gist.github.com/x"), { opened: true, container: "shared_site", selected: true });
+  assert.deepEqual([h.tabs.at(-1).options.userContextId, h.tabs.at(-1).options.triggeringPrincipal.originAttributes.userContextId], [2, 2]);
+  await h.open(shop, "https://evilgithub.com/x");
+  assert.equal(h.tabs.at(-1).options.userContextId, 40);
+  const file = h.files.get("contexts.json");
+  for (const sites of [{ hosts: ["https://github.com"], confirmed: true }, { hosts: ["github.com", "github.com"], confirmed: true },
+    { hosts: Array.from({ length: 33 }, (_, i) => `s${i}.example`), confirmed: true }, { hosts: ["github.com"], confirmed: "yes" }]) {
+    await assert.rejects(h.services.setSharedSites(shop.id, sites), { code: "INVALID_PROJECT" }, JSON.stringify(sites).slice(0, 60));
+  }
+  await assert.rejects(h.services.setSharedSites(shop.id, { hosts: ["github.com"] }), { code: "INVALID_PROJECT" });
+  await assert.rejects(h.services.setSharedSites("p_unknown1", { hosts: [], confirmed: true }), { code: "UNKNOWN_PROJECT" });
+  assert.equal(h.files.get("contexts.json"), file);
+  await h.services.setSharedSites(shop.id, { hosts: ["github.com"], confirmed: false });
+  await h.open(shop, "https://github.com/acme/shop");
+  assert.equal(h.tabs.at(-1).options.userContextId, 40, "turning sharing off takes effect on the next link");
+});
+
+test("P2: private and unknown-privacy windows open plain tabs and never create or use a project container", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  h.state.enabled = true;
+  const priv = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }], isPrivate: true });
+  priv.window.gBrowser.addTab = () => assert.fail("no container tab in a private window");
+  h.services.registerWindow(priv.window, new ZenWorkspaceAdapter(priv.window));
+  assert.deepEqual(await h.open(shop, SHARED_ORIGIN, priv.window), { opened: true, container: "private" });
+  assert.deepEqual(priv.opened.map(entry => [entry.url, entry.principal.isSystemPrincipal, entry.principal.originAttributes.userContextId]),
+    [[SHARED_ORIGIN, false, 0]]);
+  const unknown = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }] });
+  delete unknown.window.PrivateBrowsingUtils;
+  unknown.window.gBrowser.addTab = () => assert.fail("unknown privacy counts as private");
+  h.services.registerWindow(unknown.window, new ZenWorkspaceAdapter(unknown.window));
+  assert.equal((await h.open(shop, SHARED_ORIGIN, unknown.window)).container, "private");
+  assert.equal(h.gecko.creates(), 0);
+  assert.equal(h.tabs.length, 0);
+  assert.equal(h.stored()[0].container.user_context_id, null);
+});
+
+test("P2: Firefox deleting a container or turning containers off clears mappings; reused IDs are never adopted", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  const blog = await blogIn(h);
+  assert.deepEqual(h.stored().map(project => project.container.user_context_id), [40, 41]);
+  // The user deletes Shop's container in Firefox's settings.
+  h.gecko.identities.delete(40);
+  h.observed.identityDeleted(40);
+  await settle();
+  assert.deepEqual(h.stored().map(project => [project.id, project.container.user_context_id]), [[shop.id, null], [blog.id, 41]],
+    "the project stays; only its mapping goes");
+  await h.open(shop, SHARED_ORIGIN);
+  assert.equal(h.tabs.at(-1).options.userContextId, 42, "a new container, never the deleted one");
+  h.observed.identityDeleted("not an id");
+  h.observed.identityDeleted(undefined);
+  // Containers turned off: Firefox resets every identity without per-ID notifications.
+  h.state.enabled = false;
+  h.gecko.reset();
+  h.observed.containersDisabled();
+  assert.deepEqual(await h.open(blog, SHARED_ORIGIN), { opened: true, container: "off" }, "links open like before, in the space's own container");
+  assert.equal(h.zen.opened.at(-1).url, SHARED_ORIGIN);
+  await settle();
+  assert.deepEqual(h.stored().map(project => project.container.user_context_id), [null, null]);
+  // Turned on again: numbering restarted, and 40 now names an unrelated identity.
+  h.state.enabled = true;
+  h.gecko.identities.set(40, { userContextId: 40, public: true, name: "Unrelated", icon: "cart", color: "red" });
+  h.gecko.state.next = 41;
+  const tabsBefore = h.tabs.length;
+  await h.open(shop, SHARED_ORIGIN);
+  assert.equal(h.tabs.length, tabsBefore + 1);
+  assert.equal(h.tabs.at(-1).options.userContextId, 41, "a freshly made container named after the project");
+  assert.equal(h.gecko.identities.get(41).name, "Shop");
+  assert.equal(h.gecko.identities.get(40).name, "Unrelated", "the reused number was not adopted or restyled");
+});
+
+test("P2: a failed reset or deletion cleanup blocks project links until a retry succeeds; startup with containers off resets", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  await quietly(async () => {
+    h.writes.fail = true;
+    h.state.enabled = false;
+    h.observed.containersDisabled();
+    await settle();
+    h.state.enabled = true;
+    await assert.rejects(h.open(shop, SHARED_ORIGIN), /disk full/, "the retry fails as well: nothing is routed on stale mappings");
+    assert.equal(h.tabs.length, 0);
+    h.writes.fail = false;
+    await h.open(shop, SHARED_ORIGIN);
+    assert.equal(h.stored()[0].container.user_context_id, 41, "after the cleanup a new container is made");
+    h.writes.fail = true;
+    h.observed.identityDeleted(41);
+    await settle();
+    await assert.rejects(h.open(shop, SHARED_ORIGIN), /disk full/);
+    h.writes.fail = false;
+    await h.open(shop, SHARED_ORIGIN);
+    assert.equal(h.tabs.at(-1).options.userContextId, 42);
+  });
+  assert.equal(h.tabs.length, 2);
+  // Containers turned off while the browser was closed: the next start clears the mappings first.
+  h.state.enabled = false;
+  const restarted = h.make();
+  await settle();
+  assert.equal((await restarted.getProject(shop.id)).container.user_context_id, null);
+});
+
+test("P2: an opening stops when Firefox deletes the container while the space switches", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  let once = true;
+  h.zen.zen.addChangeListeners(() => {
+    if (!once) return;
+    once = false;
+    h.gecko.identities.delete(40);
+    h.observed.identityDeleted(40);
+  });
+  await assert.rejects(h.open(shop, SHARED_ORIGIN), { code: "PROJECT_CHANGED" });
+  assert.equal(h.tabs.length, 0, "checked again right before the tab would exist");
+});
+
+// The project shares github.com with its space (APP, default container 2); the
+// window shows HOME, so opening the link switches spaces first. Each change
+// below lands while that switch is held; the route must be refused before a
+// tab exists, never opened in the old (shared) or any other container.
+const RACES = [
+  ["the shared host is removed while sharing stays confirmed", h => h.services.setSharedSites(h.shop.id, { hosts: [], confirmed: true }),
+    h => assert.deepEqual(h.stored()[0].shared_sites, { hosts: [], confirmed: true })],
+  ["sharing is revoked", h => h.services.setSharedSites(h.shop.id, { hosts: ["github.com"], confirmed: false })],
+  ["the project is deleted", h => h.services.removeProject(h.shop.id), h => assert.deepEqual(h.stored(), [])],
+  ["the project is renamed", h => h.services.updateProject(h.shop.id, { manifest: { ...MANIFEST, name: "Shop Renamed" } })],
+  ["the project moves to another space", h => h.services.updateProject(h.shop.id, { context_uuid: HOME })],
+  ["an account label is saved", h => h.services.setAccountLabel(h.shop.id, { key: "vercel", label: "work Google" })],
+  ["a mutation of the project fails", h => assert.rejects(h.services.setSharedSites(h.shop.id, { hosts: ["not a host"], confirmed: true }), { code: "INVALID_PROJECT" }),
+    h => assert.deepEqual(h.stored()[0].shared_sites, { hosts: ["github.com"], confirmed: true }), "state unchanged, still refused"],
+  ["containers are turned off and reset", h => { h.state.enabled = false; h.observed.containersDisabled(); return settle(); }],
+  ["Firefox deletes the project's container", h => { h.gecko.identities.delete(40); h.observed.identityDeleted(40); return settle(); }],
+];
+for (const [name, change, check] of RACES) {
+  test(`P2: a link in flight is refused when ${name} during the space switch`, { skip }, async () => {
+    const h = p2Harness();
+    h.shop = await shopIn(h);
+    await h.services.setSharedSites(h.shop.id, { hosts: ["github.com"], confirmed: true });
+    const held = h.pauseSwitch();
+    const pending = h.open(h.shop, "https://github.com/acme/shop");
+    await held.started;
+    await quietly(() => change(h));
+    held.release();
+    await assert.rejects(pending, { code: "PROJECT_CHANGED" });
+    assert.equal(h.tabs.length, 0, "no tab exists in the old jar or any other");
+    await check?.(h);
+  });
+}
+
+test("P2: a mutation still in flight when the tab would open refuses it; after the change the link opens by the new policy", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  await h.services.setSharedSites(shop.id, { hosts: ["github.com"], confirmed: true });
+  const held = h.pauseSwitch();
+  const pending = h.open(shop, "https://github.com/acme/shop");
+  await held.started;
+  let unblock;
+  h.writes.gate = new Promise(resolve => { unblock = resolve; });
+  const saving = h.services.setSharedSites(shop.id, { hosts: [], confirmed: true });
+  held.release();
+  await assert.rejects(pending, { code: "PROJECT_CHANGED" }, "not yet written, already decided by the user");
+  assert.equal(h.tabs.length, 0);
+  unblock();
+  h.writes.gate = null;
+  await saving;
+  assert.deepEqual(await h.open(shop, "https://github.com/acme/shop"), { opened: true, container: "project", selected: true });
+  assert.equal(h.tabs[0].options.userContextId, 40, "the project's own container, never the space's");
+});
+
+test("P2: another project's change does not stop a link in flight; the guard is per project", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  const blog = await blogIn(h);
+  await h.services.setSharedSites(shop.id, { hosts: ["github.com"], confirmed: true });
+  const held = h.pauseSwitch();
+  const pending = h.open(shop, "https://github.com/acme/shop");
+  await held.started;
+  await h.services.setAccountLabel(blog.id, { key: "vercel", label: "personal Google" });
+  held.release();
+  assert.deepEqual(await pending, { opened: true, container: "shared_site", selected: true });
+  assert.deepEqual(h.tabs.map(tab => tab.options.userContextId), [2]);
+});
+
+test("P2: a vetoed selection leaves the owned tab open and says so; a modal window is refused before any tab", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  const before = { id: "an unrelated tab" };
+  h.zen.window.gBrowser.selectedTab = before;
+  h.state.veto = true;
+  assert.deepEqual(await h.open(shop, "https://vercel.com/team/shop"), { opened: true, container: "project", selected: false });
+  assert.equal(h.tabs.length, 1, "the new tab is kept, in its container");
+  assert.equal(h.zen.window.gBrowser.selectedTab, before, "the other tab was not touched");
+  h.state.veto = false;
+  h.zen.window.document.documentElement = { hasAttribute: name => name === "window-modal-open" };
+  await assert.rejects(h.open(shop, "https://vercel.com/team/shop"), { code: "WINDOW_BUSY" });
+  assert.equal(h.tabs.length, 1);
+});
+
+test("P2: renaming renames only the project's own container; removing a project keeps its container", { skip }, async () => {
+  const h = p2Harness();
+  const shop = await shopIn(h);
+  await h.services.updateProject(shop.id, { manifest: { ...MANIFEST, name: "Shop Renamed" } });
+  assert.deepEqual(h.gecko.calls.filter(call => call[0] === "update").map(call => call.slice(0, 3)), [["update", 40, "Shop Renamed"]]);
+  assert.equal(h.gecko.identities.get(40).name, "Shop Renamed");
+  await h.services.updateProject(shop.id, { context_uuid: HOME });
+  assert.equal(h.gecko.calls.filter(call => call[0] === "update").length, 1, "only a rename restyles the container");
+  await h.services.removeProject(shop.id);
+  assert.ok(h.gecko.identities.has(40), "the container and its sign-ins stay");
+  assert.deepEqual(h.stored(), []);
+});
+
+test("P2: the Overview reads each project's container without IDs; nothing is created by reading", { skip }, async () => {
+  const h = p2Harness({ enabled: false });
+  const shop = await shopIn(h);
+  const blog = await blogIn(h);
+  assert.deepEqual(await h.services.listProjectContainers(), [{ project_id: shop.id, state: "off" }, { project_id: blog.id, state: "off" }]);
+  h.state.enabled = true;
+  assert.deepEqual(await h.services.listProjectContainers(), [{ project_id: shop.id, state: "pending" }, { project_id: blog.id, state: "pending" }]);
+  assert.equal(h.gecko.creates(), 0);
+  await h.open(shop, SHARED_ORIGIN);
+  const [own, pending] = await h.services.listProjectContainers();
+  assert.deepEqual(Object.keys(own), ["project_id", "state", "name", "color"]);
+  assert.deepEqual([own.state, own.name], ["own", "Shop"]);
+  assert.ok(GECKO_COLORS.includes(own.color));
+  assert.equal(pending.state, "pending");
+  assert.doesNotMatch(JSON.stringify(await h.services.listProjectContainers()), /user_?context|:40\b/iu);
+});
+
+test("P2: a configured but broken identity service fails closed instead of opening in a shared jar", { skip }, async () => {
+  const h = await quietly(() => harness({ tree: VITE_TREE, deps: {
+    containerIdentities: () => { throw new Error("ContextualIdentityService unavailable"); }, containersEnabled: () => true } }));
+  const shop = await shopIn(h);
+  await assert.rejects(h.services.openProjectUrl({ window: h.zen.window, projectId: shop.id, url: "https://vercel.com/" }), { code: "CONTAINERS_UNAVAILABLE" });
+  assert.equal(h.zen.opened.length, 0);
+  assert.deepEqual(await h.services.listProjectContainers(), [{ project_id: shop.id, state: "unavailable" }]);
 });

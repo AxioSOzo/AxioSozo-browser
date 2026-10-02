@@ -198,19 +198,22 @@ test("project cards show the detected snapshot; services open their dashboards; 
   let refreshed = null;
   const page = await loadPage({ projects: [project, legacy], handlers: {
     refreshProjectDetection: params => { refreshed = params; return project; },
-    openUrl: () => ({ opened: true }) } });
+    openProjectUrl: () => ({ opened: true, container: "project", selected: true }) } });
   const card = page.document.getElementById("project-p_harbor1");
   const facts = factsOf(card);
-  assert.deepEqual(Object.keys(facts), ["Space", "Services", "Apps", "Domains", "From docs", "Agents"]);
+  // Step 2: every project has sign-ins (its own container) and shared sites.
+  assert.deepEqual(Object.keys(facts), ["Space", "Sign-ins", "Shared sites", "Services", "Apps", "Domains", "From docs", "Agents"]);
   const convex = facts.Services.querySelectorAll("button.chip").find(chip => chip.textContent.startsWith("Convex"));
   assert.equal(convex.getAttribute("aria-label"), "Open the Convex dashboard");
   convex.click();
   await flush();
-  assert.deepEqual(page.calls.filter(([name]) => name === "openUrl").at(-1), ["openUrl", { url: "https://dashboard.convex.dev/", contextUuid: HOME }]);
+  // A project's dashboard link goes through the container router, never a plain openUrl.
+  assert.deepEqual(page.calls.filter(([name]) => name === "openProjectUrl" || name === "openUrl"),
+    [["openProjectUrl", { projectId: "p_harbor1", url: "https://dashboard.convex.dev/" }]]);
   assert.match(facts["From docs"].textContent, /^status\.harborsuite\.appunconfirmed$/u);
 
   const legacyCard = page.document.getElementById("project-p_legacy1");
-  assert.deepEqual(Object.keys(factsOf(legacyCard)), ["Space"], "no snapshot, no rows");
+  assert.deepEqual(Object.keys(factsOf(legacyCard)), ["Space", "Sign-ins", "Shared sites"], "no snapshot, no detection rows");
   assert.ok(legacyCard.querySelectorAll(".menu-items button").some(button => button.textContent === "Read folder"));
 
   const menu = card.querySelectorAll(".menu-items button").find(button => button.textContent === "Read folder again");

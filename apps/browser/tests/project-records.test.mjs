@@ -143,12 +143,12 @@ test("container assignment comes only from the injected browser owner and stays 
   assert.deepEqual(h.assigned, ["p_abcd"]);
   assert.equal(updated.container.user_context_id, 12);
   assert.equal(original.container.user_context_id, null);
-  for (const assigned of [0, -1, 4294967296, "12", undefined]) {
+  for (const assigned of [0, -1, 4294967295, 4294967296, "12", undefined]) {
     const bad = harness({ browserContainerFor: () => assigned });
     await assert.rejects(bad.model.withBrowserContainer(bad.record()));
   }
-  const max = harness({ browserContainerFor: () => 4294967295 });
-  assert.equal((await max.model.withBrowserContainer(max.record())).container.user_context_id, 4294967295);
+  const max = harness({ browserContainerFor: () => 4294967294 });
+  assert.equal((await max.model.withBrowserContainer(max.record())).container.user_context_id, 4294967294);
 });
 
 test("proposal tokens bind canonical root, exact tab URL and window identity and consume once", () => {
@@ -210,10 +210,25 @@ test("privileged browser assignment compares the currently stored identity befor
   assert.equal(h.model.withBrowserAssignedContainer(assigned, 99, { expectedUserContextId: null }), null);
   assert.equal(h.model.withBrowserAssignedContainer(assigned, 99, { expectedUserContextId: 13 }), null);
   assert.equal(h.model.withBrowserAssignedContainer(assigned, 99, { expectedUserContextId: 12 }).container.user_context_id, 99);
-  assert.throws(() => h.model.withBrowserAssignedContainer(assigned, 4294967296, { expectedUserContextId: 12 }));
+  for (const id of [0, -1, 4294967295, 4294967296, "12"]) {
+    assert.throws(() => h.model.withBrowserAssignedContainer(assigned, id, { expectedUserContextId: 12 }), code("INVALID_PROJECT"));
+  }
+  assert.throws(() => h.model.withBrowserAssignedContainer(assigned, 99, { expectedUserContextId: 4294967295 }), code("INVALID_INPUT"));
+  const lastPublic = h.model.withBrowserAssignedContainer(assigned, 4294967294, { expectedUserContextId: 12 });
+  assert.equal(lastPublic.container.user_context_id, 4294967294);
+  assert.equal(h.model.withBrowserAssignedContainer(lastPublic, null, { expectedUserContextId: 4294967294 }).container.user_context_id, null);
   assert.throws(() => h.model.withBrowserAssignedContainer(assigned, 99, { expectedUserContextId: 12, actorAssigned: true }), code("INVALID_INPUT"));
   assert.equal(assigned.container.user_context_id, 12);
   const cleared = h.model.withBrowserAssignedContainer(assigned, null, { expectedUserContextId: 12 });
   assert.equal(cleared.container.user_context_id, null);
   assert.equal(h.model.withBrowserAssignedContainer(cleared, null, { expectedUserContextId: 12 }), null);
+});
+
+
+test("a stored reserved identity is rejected before browser assignment rather than silently repaired", async () => {
+  const h = harness();
+  const invalid = { ...h.record(), container: { user_context_id: 4294967295 } };
+  await assert.rejects(h.model.withBrowserContainer(invalid), code("INVALID_PROJECT"));
+  assert.deepEqual(h.assigned, []);
+  assert.throws(() => h.model.withBrowserAssignedContainer(invalid, null, { expectedUserContextId: 4294967295 }), code("INVALID_PROJECT"));
 });

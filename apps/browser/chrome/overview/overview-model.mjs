@@ -404,6 +404,16 @@ export const ERROR_TEXT = Object.freeze({
   PROJECT_EXISTS: "This folder is already a project.",
   UNKNOWN_PROJECT: "That project no longer exists.",
   ROOT_NOT_PICKED: "Choose the folder with the folder picker first.",
+  // P2: project containers, account labels and shared sites.
+  PROJECT_CHANGED: "The project or its container changed meanwhile. Nothing was opened; try again.",
+  IDENTITY_UNAVAILABLE: "The project's container is not available right now. Nothing was opened; try again.",
+  IDENTITY_RESET_PENDING: "Containers were just reset and are still being cleaned up. Nothing was opened; try again shortly.",
+  CONTAINERS_UNAVAILABLE: "Project containers are not available in this build, so the link was not opened.",
+  BUSY: "Too many project containers are being prepared. Try again in a moment.",
+  NO_WINDOW: "Open this page in a browser window first.",
+  INVALID_INPUT: "Check the account label: 1 to 80 characters on one line.",
+  INVALID_HOST_PATTERN: "That is not a site such as example.com or *.example.com.",
+  INVALID_PROJECT: "That would not fit the project: at most 32 sites and 32 account labels, each listed once.",
 });
 export function errorMessage(code) {
   return typeof code === "string" && Object.hasOwn(ERROR_TEXT, code) ? ERROR_TEXT[code] : null;
@@ -570,6 +580,122 @@ export const REFUSAL_TEXT = Object.freeze({
   unreadable: "could not be read",
   invalid_utf8: "not valid text",
 });
+
+// ---------------------------------------------------------------- accounts per project (workstation-v1 §2–§3)
+
+// Same lists as the contexts core (DEFAULT_SHARED_SITES, INTEGRATIONS); the page
+// does not load the core. overview-model.test.mjs keeps them equal.
+export const DEFAULT_SHARED_SITES = Object.freeze(["github.com", "*.github.com", "gitlab.com", "bitbucket.org",
+  "npmjs.com", "*.npmjs.com", "stackoverflow.com", "developer.mozilla.org"]);
+export const INTEGRATION_NAMES = Object.freeze({ vercel: "Vercel", convex: "Convex", clerk: "Clerk", stripe: "Stripe",
+  supabase: "Supabase", firebase: "Firebase", cloudflare: "Cloudflare", netlify: "Netlify", fly: "Fly.io", sentry: "Sentry" });
+// Firefox's canonical container colours (usercontext.css .identity-color-*).
+export const CONTAINER_COLORS = Object.freeze(["gray", "yellow", "orange", "red", "pink", "purple", "violet", "blue", "cyan", "green"]);
+export const MAX_ACCOUNTS = 32;
+export const MAX_SHARED_SITES = 32;
+export const ACCOUNT_LABEL_MAX = 80;
+export const ACCOUNTS_NOTE = "Only you type these labels. AxioSozo never reads accounts, cookies or passwords from pages.";
+export const SHARED_SITES_NOTE = "These sites use the space's own sign-ins instead of the project's container, for example GitHub with one account everywhere. Nothing is shared until you turn sharing on.";
+export const CHROMIUM_SIGN_INS_NOTE = "Firefox tabs only. Chromium tabs do not have per-project sign-ins yet.";
+
+/** The Sign-ins line of a project card, from listProjectContainers(); null
+ * when nothing is known (the row is left out). */
+export function containerSummary(info) {
+  const quiet = text => ({ state: info.state, text, name: null, color: null });
+  switch (info?.state) {
+    case "own": return { state: "own", text: "Own container", name: textOr(info.name) || null,
+      color: CONTAINER_COLORS.includes(info.color) ? info.color : null };
+    case "pending": return quiet("Own container, made when you first open one of its links");
+    case "off": return quiet("Containers are off in this browser, so links use the space's sign-ins");
+    case "unavailable": return quiet("Containers are being reset; project links open again shortly");
+    default: return null;
+  }
+}
+
+const hostList = (hosts, shown = 3) => (hosts.length <= shown ? hosts.join(", ")
+  : `${hosts.slice(0, shown).join(", ")} and ${hosts.length - shown} more`);
+
+/** A project's shared sites: stored hosts (a record without them has the
+ * unconfirmed defaults), whether the user turned sharing on, and a line. */
+export function sharedSites(project) {
+  const stored = project?.shared_sites;
+  const hosts = stored ? listOf(stored.hosts).filter(host => typeof host === "string") : [...DEFAULT_SHARED_SITES];
+  const confirmed = stored?.confirmed === true;
+  const text = !hosts.length ? "None: every site uses the project's container"
+    : confirmed ? `Shared with the space: ${hostList(hosts)}` : `Not shared yet. Suggested: ${hostList(hosts)}`;
+  return { hosts, confirmed, text };
+}
+
+export function sharedSitesForm(project) {
+  const { hosts, confirmed } = sharedSites(project);
+  return { hostsText: hosts.join("\n"), confirmed };
+}
+
+/** → { sites: { hosts, confirmed }, errors }; sites is null when errors exist.
+ * An empty list is fine (nothing shared). */
+export function formToSharedSites(form) {
+  const hosts = []; const errors = [];
+  for (const part of String(form?.hostsText ?? "").split(/[\s,]+/)) {
+    if (!part) continue;
+    const host = normalizeHost(part);
+    if (!host) errors.push(`"${part}" is not a site such as github.com or *.github.com.`);
+    else if (!hosts.includes(host)) hosts.push(host);
+  }
+  if (hosts.length > MAX_SHARED_SITES) errors.push(`Share at most ${MAX_SHARED_SITES} sites.`);
+  return errors.length ? { sites: null, errors } : { sites: { hosts, confirmed: form?.confirmed === true }, errors };
+}
+
+/** Rows of the account editor: services found in the folder or already
+ * labelled (in the core's order), then labelled sites. */
+export function accountRows(project) {
+  const accounts = listOf(project?.accounts).filter(item => typeof item?.key === "string" && typeof item?.label === "string");
+  const detected = listOf(project?.detected?.integrations).map(item => item?.id);
+  const labelOf = key => accounts.find(item => item.key === key)?.label ?? "";
+  const services = Object.keys(INTEGRATION_NAMES).filter(id => detected.includes(id) || accounts.some(item => item.key === id))
+    .map(id => ({ key: id, name: INTEGRATION_NAMES[id], label: labelOf(id), kind: "service", added: false }));
+  const sites = accounts.filter(item => !Object.hasOwn(INTEGRATION_NAMES, item.key))
+    .map(item => ({ key: item.key, name: item.key, label: item.label, kind: "site", added: false }));
+  return [...services, ...sites];
+}
+
+/** Editor rows → the label changes to save ({ key, label | null }, null
+ * removes) or errors. Added rows name a site (a host with a dot); an empty
+ * added row is ignored. */
+export function accountChanges(rows, project) {
+  const before = new Map(listOf(project?.accounts).filter(item => typeof item?.key === "string").map(item => [item.key, item.label]));
+  const errors = []; const next = new Map();
+  for (const row of rows ?? []) {
+    const label = String(row.label ?? "").trim();
+    let key = row.key;
+    if (row.added) {
+      const typed = String(row.key ?? "").trim();
+      if (!typed && !label) continue;
+      key = normalizeHost(typed);
+      if (!key || !key.includes(".")) { errors.push(`"${typed}" is not a site such as example.com or *.example.com.`); continue; }
+      if (!label) { errors.push(`Type the account you use on ${key}.`); continue; }
+    }
+    if (label && ([...label].length > ACCOUNT_LABEL_MAX || /[\u0000-\u001f\u007f-\u009f]/u.test(label))) {
+      errors.push(`${row.name || key}: use at most ${ACCOUNT_LABEL_MAX} characters on one line.`);
+      continue;
+    }
+    if (next.has(key)) { errors.push(`${key} is listed twice.`); continue; }
+    next.set(key, label || null);
+  }
+  const changes = [...next].filter(([key, label]) => (before.get(key) ?? null) !== label).map(([key, label]) => ({ key, label }));
+  const after = new Set(before.keys());
+  for (const { key, label } of changes) { if (label === null) after.delete(key); else after.add(key); }
+  if (after.size > MAX_ACCOUNTS) errors.push(`Keep at most ${MAX_ACCOUNTS} account labels per project.`);
+  return errors.length ? { changes: null, errors } : { changes, errors };
+}
+
+/** A note after a project link opened, when it did not get the project's
+ * container or Firefox kept the current tab in front. */
+export function openedNote(result) {
+  if (result?.container === "off") return "Opened without a project container: containers are off in this browser.";
+  if (result?.container === "private") return "Opened in this private window, without a project container.";
+  if (result?.selected === false) return "Opened in a new tab behind this one: the browser kept the current tab in front.";
+  return null;
+}
 
 // ---------------------------------------------------------------- spaces
 

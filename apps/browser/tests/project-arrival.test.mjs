@@ -30,15 +30,15 @@ function runtimeFor(specs = []) {
         const pending = new Set();
         let closed = false;
         return { reads: 0, closes: [], eof: false,
-          async readString() {
+          async read() {
             this.reads++;
-            if (closed) { this.eof = true; return ""; }
+            if (closed) { this.eof = true; return new ArrayBuffer(0); }
             const value = values.length ? values.shift() : "";
-            if (value === "HOLD") { const item = deferred(); pending.add(item); await item.promise; pending.delete(item); this.eof = true; return ""; }
+            if (value === "HOLD") { const item = deferred(); pending.add(item); await item.promise; pending.delete(item); this.eof = true; return new ArrayBuffer(0); }
             if (value === "READ_ERROR") throw new Error("pipe failed");
             if (spec.readHook) await spec.readHook(this, value);
             if (value === "") this.eof = true;
-            return value;
+            return new TextEncoder().encode(value).buffer;
           },
           async close(force) { this.closes.push(force); if (spec.hangCleanup) await new Promise(() => {}); closed = true; for (const item of pending) item.resolve(); } };
       };

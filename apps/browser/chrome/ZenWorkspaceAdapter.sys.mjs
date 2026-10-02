@@ -8,6 +8,7 @@
 // The adapter never writes Zen's workspace store.
 
 const SPACES = "src/zen/spaces/ZenSpaceManager.mjs";
+const TABBROWSER = "src/browser/components/tabbrowser/Tabbrowser-sys-mjs.patch";
 const POPUPS = "src/browser/base/content/zen-panels/popups.inc";
 const ICONS = "src/browser/base/content/zen-sidebar-icons.inc.xhtml";
 const SPACE = "src/zen/spaces/ZenSpace.mjs";
@@ -51,7 +52,21 @@ export const ZEN_ADAPTER_CONTRACT = Object.freeze([
   { name: "emoji picker anchor [zen-emoji-open]", source: "src/zen/common/emojis/ZenEmojiPicker.mjs", needle: "this.#anchor.setAttribute(\"zen-emoji-open\", \"true\");" },
   { name: "root attribute zen-sidebar-expanded", source: UI, needle: "document.documentElement.setAttribute(\"zen-sidebar-expanded\", \"true\");" },
   { name: "menu item create space", source: POPUPS, needle: "<menuitem data-l10n-id=\"zen-panel-ui-workspaces-create\" command=\"cmd_zenOpenWorkspaceCreation\"/>" },
+  // Project-container tabs (openTab with an explicit userContextId): gBrowser.addTab
+  // takes the workspace and skips space routing, and an explicit container that
+  // is not from an external caller is kept instead of the workspace default.
+  { name: "gBrowser.addTab option zenWorkspaceId", source: TABBROWSER, needle: "+      zenWorkspaceId,\n+      skipRoute = false," },
+  { name: "gBrowser.addTab keeps an explicit non-external userContextId", source: TABBROWSER,
+    needle: "+    if (beforeRouteResult.isRouteFound && (typeof userContextId === \"undefined\" || fromExternal)) {" },
+  { name: "gZenWorkspaces.getContextIdIfNeeded keeps an explicit container", source: SPACES,
+    needle: "      fromExternal !== true &&\n      typeof userContextId !== \"undefined\" &&\n      userContextId !== activeWorkspaceUserContextId\n    ) {\n      return [userContextId, false, undefined];" },
+  // Selecting the new tab can still be refused (openTab reports { selected }).
+  { name: "gBrowser.setSelectedTab can be vetoed by Zen", source: TABBROWSER, needle: "+    if (this.documentGlobal.gZenWorkspaces.onBeforeTabSelect(val)) {" },
 ]);
+
+// Public Gecko userContextIds; UINT32_MAX is reserved for extension storage.
+const MAX_PUBLIC_USER_CONTEXT_ID = 4294967294;
+const adapterError = code => Object.assign(new Error(code), { code });
 
 /** Zen sidebar element ids/selectors, in one place (also used by space-switcher.css). */
 export const ZEN_SIDEBAR = Object.freeze({
@@ -149,6 +164,33 @@ export class ZenWorkspaceAdapter {
     } catch { return null; }
   }
 
+  /** A public container as Firefox shows it: { userContextId, name, color, icon };
+   * null for the default container (0), private or unknown identities. */
+  containerIdentity(userContextId) {
+    if (!Number.isSafeInteger(userContextId) || userContextId < 1 || userContextId > MAX_PUBLIC_USER_CONTEXT_ID) return null;
+    const service = this.#window.ContextualIdentityService;
+    let identity = null;
+    try { identity = service?.getPublicIdentityFromId?.(userContextId) ?? null; } catch { identity = null; }
+    if (!identity || identity.public !== true || identity.userContextId !== userContextId) return null;
+    let name = "";
+    try { name = service.getUserContextLabel(userContextId) || ""; } catch { name = ""; }
+    return { userContextId, name: typeof name === "string" ? name : "",
+      color: typeof identity.color === "string" ? identity.color : null, icon: typeof identity.icon === "string" ? identity.icon : null };
+  }
+
+  /** The container a tab's document is loaded in (0 = default), only when the
+   * tab's userContextId and its live browsing context's origin attributes
+   * agree. Null otherwise: a lazy, unattached or destroyed browser has no
+   * browsing context (the browser getter returns null without a frame loader),
+   * and the tab attribute alone is never trusted. Never changes for a tab. */
+  tabUserContextId(tab) {
+    const id = tab?.userContextId;
+    if (!Number.isSafeInteger(id) || id < 0 || id > MAX_PUBLIC_USER_CONTEXT_ID) return null;
+    let live;
+    try { live = tab.linkedBrowser?.browsingContext?.originAttributes?.userContextId; } catch { return null; }
+    return Number.isSafeInteger(live) && live === id ? id : null;
+  }
+
   isPrivateWindow() {
     const window = this.#window;
     try {
@@ -171,20 +213,58 @@ export class ZenWorkspaceAdapter {
 
   /** Opens an http(s) URL in a new foreground tab of the given (or active) workspace.
    * The URL comes from a page or a repository manifest, so it loads like an
-   * untrusted web link: openWebLinkIn with a null triggering principal (never
-   * the system principal), carrying the workspace's container. */
-  async openTab(url, { workspaceUuid = null } = {}) {
+   * untrusted web link with a null triggering principal (never the system
+   * principal). Without `userContextId` the tab takes the workspace's default
+   * container through openWebLinkIn. With one (a route resolved by the
+   * service's container controller) the tab is created through gBrowser.addTab
+   * in exactly that container: matching null principal, fromExternal false,
+   * the explicit Zen workspace and no space routing; normal windows only.
+   * A window with a modal dialog open is refused before anything happens
+   * (WINDOW_BUSY). `verify()` runs synchronously right before the tab exists
+   * and throws to cancel. The new tab must report that container through its
+   * live browsing context; otherwise this tab (and only this tab) is closed
+   * and CONTAINER_MISMATCH is reported. Returns { selected }: whether Firefox
+   * actually brought the new tab to the front (gBrowser.setSelectedTab may
+   * keep the current tab, e.g. for a shared-screen warning); the tab stays
+   * open either way and no other tab is touched. */
+  async openTab(url, { workspaceUuid = null, userContextId, verify = null } = {}) {
     const parsed = URL.parse(String(url));
     if (!parsed || !["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password)
-      throw new Error("INVALID_URL");
+      throw adapterError("INVALID_URL");
+    if (userContextId === undefined) return this.#openInWorkspaceContainer(parsed.href, workspaceUuid);
+    if (!Number.isSafeInteger(userContextId) || userContextId < 0 || userContextId > MAX_PUBLIC_USER_CONTEXT_ID) throw adapterError("INVALID_CONTAINER");
+    if (this.isPrivateWindow() !== false) throw adapterError("PRIVATE_WINDOW");
+    const gBrowser = this.#window.gBrowser;
+    if (typeof gBrowser?.addTab !== "function") throw adapterError("NO_TABBROWSER");
+    const idle = () => { if (this.#window.document?.documentElement?.hasAttribute?.("window-modal-open")) throw adapterError("WINDOW_BUSY"); };
+    idle();
+    if (workspaceUuid && this.activeWorkspaceUuid() !== workspaceUuid) await this.switchTo(workspaceUuid);
+    const space = this.activeWorkspaceUuid();
+    if (workspaceUuid && space !== workspaceUuid) throw adapterError("WORKSPACE_UNAVAILABLE");
+    const triggeringPrincipal = this.#window.Services.scriptSecurityManager.createNullPrincipal({ userContextId });
+    if (!triggeringPrincipal || triggeringPrincipal.isSystemPrincipal !== false || triggeringPrincipal.isNullPrincipal !== true
+      || triggeringPrincipal.originAttributes?.userContextId !== userContextId) throw adapterError("UNSAFE_PRINCIPAL");
+    idle();
+    if (typeof verify === "function") verify();
+    const tab = gBrowser.addTab(parsed.href, { triggeringPrincipal, userContextId, fromExternal: false, inBackground: false,
+      skipRoute: true, ...(space ? { zenWorkspaceId: space } : {}) });
+    if (!tab) throw adapterError("TAB_NOT_OPENED");
+    if (this.tabUserContextId(tab) !== userContextId) {
+      try { gBrowser.removeTab(tab); } catch {}
+      throw adapterError("CONTAINER_MISMATCH");
+    }
+    return { selected: gBrowser.selectedTab === tab };
+  }
+
+  async #openInWorkspaceContainer(href, workspaceUuid) {
     if (workspaceUuid && this.activeWorkspaceUuid() !== workspaceUuid) await this.switchTo(workspaceUuid);
     // Zen assigns the workspace and its default container to new tabs itself
     // (gZenWorkspaces.getContextIdIfNeeded); the principal carries the same container.
     const space = this.activeWorkspaceUuid();
     const userContextId = space ? this.containerForWorkspace(space) : 0;
     const triggeringPrincipal = this.#window.Services.scriptSecurityManager.createNullPrincipal({ userContextId });
-    if (!triggeringPrincipal || triggeringPrincipal.isSystemPrincipal) throw new Error("UNSAFE_PRINCIPAL");
-    this.#window.openWebLinkIn(parsed.href, "tab", { triggeringPrincipal });
+    if (!triggeringPrincipal || triggeringPrincipal.isSystemPrincipal) throw adapterError("UNSAFE_PRINCIPAL");
+    this.#window.openWebLinkIn(href, "tab", { triggeringPrincipal });
     return true;
   }
 

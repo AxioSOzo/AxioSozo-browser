@@ -98,6 +98,11 @@ const T = {
   url: value => typeof value === "string" && value.length > 0 && value.length <= 2048,
   days: value => Number.isInteger(value) && value >= 1 && value <= 365,
   uuidList: value => Array.isArray(value) && value.length >= 1 && value.length <= 512 && value.every(T.uuid),
+  boolean: value => typeof value === "boolean",
+  // Shapes only; the contexts core validates host patterns and labels again.
+  hostText: value => typeof value === "string" && value.length >= 1 && value.length <= 253 && !/[\s\u0000-\u001f\u007f]/u.test(value),
+  hostList: value => Array.isArray(value) && value.length <= 32 && value.every(T.hostText),
+  accountLabelOrNull: value => value === null || (typeof value === "string" && value.length <= 200),
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -162,10 +167,13 @@ function requirePickedRoot(ctx, name, root) {
 
 // The closed method list: every §3.3 service method (pickFolder is called
 // with the requesting tab's window), refreshProjectDetection (workstation-v1
-// §1, by project id) plus openContext, openUrl, the read-only
-// getOverviewFlags and the provider status / Jev key methods
-// (contracts/provider-v1.md). Nothing else is callable. Arrival offers are
-// accepted in the native notification only; no page method takes a token.
+// §1, by project id), the P2 account methods (workstation-v1 §3: read-only
+// container presentation, the user's own account labels and shared sites,
+// and project links opened through the container router) plus openContext,
+// openUrl, the read-only getOverviewFlags and the provider status / Jev key
+// methods (contracts/provider-v1.md). Nothing else is callable. Arrival offers
+// are accepted in the native notification only; no page method takes a token.
+// No page method names, assigns or clears a container ID.
 export const METHODS = Object.freeze({
   // contexts
   listContexts: { params: {}, run: ({ services }) => services.listContexts() },
@@ -220,6 +228,12 @@ export const METHODS = Object.freeze({
   removeProject: { params: { id: T.projectId }, run: ({ services }, p) => services.removeProject(p.id) },
   projectForUrl: { params: { url: T.url, contextUuid: optional(T.uuidOrNull) },
     run: ({ services }, p) => services.projectForUrl(p.url, p.contextUuid ?? undefined) },
+  // accounts per project (P2)
+  listProjectContainers: { params: {}, run: ({ services }) => services.listProjectContainers() },
+  setAccountLabel: { params: { projectId: T.projectId, key: T.hostText, label: T.accountLabelOrNull },
+    run: ({ services }, p) => services.setAccountLabel(p.projectId, { key: p.key, label: p.label }) },
+  setSharedSites: { params: { projectId: T.projectId, hosts: T.hostList, confirmed: T.boolean },
+    run: ({ services }, p) => services.setSharedSites(p.projectId, { hosts: [...p.hosts], confirmed: p.confirmed }) },
   // services
   serviceStatus: { params: { projectId: T.projectId }, run: ({ services }, p) => services.serviceStatus(p.projectId) },
   // rules
@@ -269,6 +283,15 @@ export const METHODS = Object.freeze({
     }
     window.openWebLinkIn(url, "tab", { userContextId, relatedToCurrent: true });
     return true;
+  } },
+  // A link of one project: the service resolves its container route before
+  // the tab exists, in the requesting window only.
+  openProjectUrl: { params: { projectId: T.projectId, url: T.url }, run: (ctx, p) => {
+    const url = checkWebUrl(p.url);
+    const window = ctx.window();
+    if (!window) fail("NO_WINDOW", "openProjectUrl: the requesting tab has no browser window");
+    if (typeof ctx.services.openProjectUrl !== "function") fail("UNSUPPORTED", "openProjectUrl is not available yet");
+    return ctx.services.openProjectUrl({ window, projectId: p.projectId, url });
   } },
   getOverviewFlags: { params: {}, run: ({ flags }) => flags() },
 });

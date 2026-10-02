@@ -212,6 +212,121 @@ test("add project: review sheet with the current space, environments per app, pr
   assert.ok(document.getElementById("project-p_domo1"), "the new project card is listed under its space");
 });
 
+// P2: one synthetic v2 project with its own container, a detected service and
+// an account label the user typed earlier.
+const HARBOR = { version: 2, id: "p_harbor1", root: "/synthetic/harbor", manifest_state: "none", context_uuid: HOME, trusted: false,
+  created_at: 1, updated_at: 1,
+  manifest: { version: 1, name: "Harbor", kind: "web", environments: [{ name: "local", base_url: "http://localhost:5101" }], services: [], surfaces: [] },
+  detected: { at: 1, integrations: [{ id: "vercel", name: "Vercel", dashboard_url: "https://vercel.com/dashboard", sources: ["vercel.json"] }],
+    platforms: [], domains: [], agents: { files: [], dirs: [], worktrees: 0 } },
+  container: { user_context_id: 40 }, shared_sites: { hosts: ["github.com", "*.github.com"], confirmed: false },
+  accounts: [{ key: "vercel", label: "work Google" }], brief: null };
+
+function harborPage(extra = {}) {
+  let state;
+  const update = (id, change) => { state.projects = state.projects.map(project => (project.id === id ? change(project) : project)); return state.projects.find(p => p.id === id); };
+  const pagePromise = loadPage({ projects: [structuredClone(HARBOR)], handlers: {
+    listProjectContainers: () => [{ project_id: "p_harbor1", state: "own", name: "Harbor", color: "cyan" }],
+    openProjectUrl: () => ({ opened: true, container: "project" }),
+    setAccountLabel: ({ projectId, key, label }) => update(projectId, project => ({ ...project,
+      accounts: [...project.accounts.filter(account => account.key !== key), ...(label === null ? [] : [{ key, label }])] })),
+    setSharedSites: ({ projectId, hosts, confirmed }) => update(projectId, project => ({ ...project, shared_sites: { hosts, confirmed } })),
+    ...extra } });
+  return pagePromise.then(page => { state = page.state; return page; });
+}
+
+test("P2: the card shows the own container in Firefox's colour, typed account labels and unconfirmed shared sites", async () => {
+  const page = await harborPage();
+  const card = page.document.getElementById("project-p_harbor1");
+  const facts = Object.fromEntries(card.querySelectorAll("dt").map(dt => [dt.textContent, dt]));
+  assert.ok(facts["Sign-ins"] && facts["Shared sites"]);
+  const line = card.querySelector(".container-line");
+  assert.equal(line.textContent, "Own container");
+  assert.equal(line.getAttribute("data-state"), "own");
+  assert.match(line.getAttribute("title"), /Chromium tabs do not have per-project sign-ins yet/u);
+  assert.deepEqual(line.querySelector(".container-mark").className.split(" "), ["container-mark", "identity-color-cyan"]);
+  assert.equal(line.querySelector(".container-mark").getAttribute("aria-hidden"), "true");
+  assert.deepEqual(card.querySelectorAll(".tag.account").map(tag => tag.textContent), ["Vercel · work Google"]);
+  assert.equal(card.querySelector(".fact-text").textContent, "Not shared yet. Suggested: github.com, *.github.com");
+  assert.equal(card.querySelector('[data-focus-key="project:p_harbor1:accounts"]').getAttribute("aria-label"), "Accounts for Harbor");
+  assert.doesNotMatch(card.textContent, /\b40\b|user_context/u, "no container ID is shown");
+  assert.ok(page.document.querySelector('link[href="chrome://browser/content/usercontext/usercontext.css"]'), "Firefox's own colours");
+});
+
+test("P2: every project link on the card goes through the container router, never a plain openUrl", async () => {
+  const page = await harborPage({ openProjectUrl: ({ url }) => ({ opened: true, container: url.includes("vercel") ? "off" : "project" }) });
+  const card = page.document.getElementById("project-p_harbor1");
+  const chip = label => card.querySelectorAll(".chip").find(node => node.getAttribute("aria-label") === label);
+  chip("Open local environment http://localhost:5101").click();
+  await flush();
+  chip("Open the Vercel dashboard").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "openProjectUrl" || name === "openUrl"), [
+    ["openProjectUrl", { projectId: "p_harbor1", url: "http://localhost:5101" }],
+    ["openProjectUrl", { projectId: "p_harbor1", url: "https://vercel.com/dashboard" }]]);
+  assert.match(page.document.getElementById("status").textContent, /containers are off/u, "a link without its container says so");
+});
+
+test("P2: account editor: labels the user types per service or site, sent one by one; bad sites are refused locally", async () => {
+  const page = await harborPage();
+  const { document } = page;
+  byText(document.getElementById("project-p_harbor1"), "button", "Edit accounts…").click();
+  await flush();
+  const sheet = document.getElementById("sheet-body");
+  assert.equal(sheet.querySelector("h2").textContent, "Accounts for Harbor");
+  assert.match(sheet.textContent, /never reads accounts, cookies or passwords from pages/u);
+  const [vercel] = sheet.querySelectorAll("input.account-label");
+  assert.deepEqual([vercel.value, vercel.getAttribute("aria-label"), vercel.getAttribute("maxlength")], ["work Google", "Account for Vercel", "80"]);
+  vercel.value = "personal Google"; vercel.dispatchEvent(makeEvent("input"));
+  byText(sheet, "button", "Add a site").click();
+  const site = sheet.querySelector("input.account-site");
+  assert.equal(document.activeElement, site, "focus moves to the new row");
+  site.value = "not a site!"; site.dispatchEvent(makeEvent("input"));
+  const label = sheet.querySelectorAll("input.account-label").at(-1);
+  label.value = "Work Microsoft"; label.dispatchEvent(makeEvent("input"));
+  byText(document.getElementById("sheet"), "button", "Save").click();
+  await flush();
+  assert.match(sheet.querySelector(".errors").textContent, /is not a site/u);
+  assert.equal(page.calls.filter(([name]) => name === "setAccountLabel").length, 0, "nothing is sent while a row is invalid");
+  site.value = "Linear.app"; site.dispatchEvent(makeEvent("input"));
+  byText(document.getElementById("sheet"), "button", "Save").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "setAccountLabel"), [
+    ["setAccountLabel", { projectId: "p_harbor1", key: "vercel", label: "personal Google" }],
+    ["setAccountLabel", { projectId: "p_harbor1", key: "linear.app", label: "Work Microsoft" }]]);
+  assert.equal(document.getElementById("sheet").open, false);
+  assert.deepEqual(document.getElementById("project-p_harbor1").querySelectorAll(".tag.account").map(tag => tag.textContent),
+    ["Vercel · personal Google", "linear.app · Work Microsoft"]);
+});
+
+test("P2: shared-sites editor offers the suggestions and shares only after the user turns sharing on", async () => {
+  const page = await harborPage();
+  const { document } = page;
+  byText(document.getElementById("project-p_harbor1"), "button", "Review…").click();
+  await flush();
+  const sheet = document.getElementById("sheet-body");
+  assert.equal(sheet.querySelector("h2").textContent, "Shared sites for Harbor");
+  const hosts = sheet.querySelector("textarea");
+  assert.equal(hosts.value, "github.com\n*.github.com");
+  const share = sheet.querySelector('input[name="share-sites"]');
+  assert.equal(share.checked, false, "suggestions are not shared yet");
+  byText(sheet, "button", "Use the suggested sites").click();
+  assert.equal(hosts.value.split("\n").length, 8);
+  byText(document.getElementById("sheet"), "button", "Save").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "setSharedSites").at(-1)[1].confirmed, false, "saving the list alone shares nothing");
+  byText(document.getElementById("project-p_harbor1"), "button", "Review…").click();
+  await flush();
+  document.getElementById("sheet-body").querySelector('input[name="share-sites"]').click();
+  byText(document.getElementById("sheet"), "button", "Save").click();
+  await flush();
+  const [, params] = page.calls.filter(([name]) => name === "setSharedSites").at(-1);
+  assert.equal(params.confirmed, true);
+  assert.equal(params.hosts.length, 8);
+  assert.match(document.getElementById("project-p_harbor1").querySelector(".fact-text").textContent, /^Shared with the space: github\.com/u);
+  assert.equal(byText(document.getElementById("project-p_harbor1"), "button", "Edit…").getAttribute("aria-label"), "Shared sites of Harbor");
+});
+
 test("#add-project=<space> from the space menu preselects that space; #edit-project opens the editor", async () => {
   const page = await loadPage({ hash: `#add-project=${BV}` });
   await flush();

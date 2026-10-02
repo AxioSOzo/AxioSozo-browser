@@ -121,16 +121,19 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, openContext, openUrl and flags", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, openContext, openUrl and flags", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "activeContext", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger", "getJevKeyStatus", "getJevSettings",
     "getOverviewFlags", "getProject", "getProviderStatus", "linkOrganization", "linkProject", "listContexts",
-    "listOrphans", "listProjects", "listRules", "needsAttention", "openContext", "openUrl", "pickFolder",
+    "listOrphans", "listProjectContainers", "listProjects", "listRules", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
     "projectForUrl", "refreshProjectDetection", "removeJevKey", "removeOrphans", "removeProject", "saveRule", "serviceStatus",
-    "setContextType", "setEnginePreference", "setJevSettings", "storeJevKey", "updateProject", "usageSummary", "writeManifest",
+    "setAccountLabel", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeJevKey", "updateProject",
+    "usageSummary", "writeManifest",
   ]);
   // Arrival is accepted in the native notification only (ProjectArrivalRuntime).
   assert.ok(!Object.keys(METHODS).some(name => /arrival/iu.test(name)));
+  // Containers are assigned, cleared and observed by the browser only.
+  assert.ok(!Object.keys(METHODS).some(name => /assign|ensure|identit|reset|forget|route|userContext/iu.test(name)));
 });
 
 test("unknown methods, prototype names and malformed params are rejected at the parent boundary", async () => {
@@ -287,6 +290,60 @@ test("openUrl accepts only http(s) without credentials and opens in the requesti
     assert.deepEqual(withService, [{ window, url: "https://example.test/", contextUuid: UUID_B }]);
   } finally { restore2(); }
   assert.ok(calls.every(([name]) => name !== "openUrl"));
+});
+
+test("P2 account methods: closed shapes, no container IDs, project links in the requesting window only", async () => {
+  const { services, calls } = fakeServices();
+  const restore = withProviders(services);
+  try {
+    const window = { name: "requesting-window" };
+    const actor = fakeActor({ window });
+    assert.equal((await request(actor, "listProjectContainers")).ok, true);
+    await request(actor, "setAccountLabel", { projectId: "p_abcd", key: "vercel", label: "work Google" });
+    await request(actor, "setAccountLabel", { projectId: "p_abcd", key: "*.atlassian.net", label: null });
+    await request(actor, "setSharedSites", { projectId: "p_abcd", hosts: ["github.com", "*.github.com"], confirmed: true });
+    await request(actor, "setSharedSites", { projectId: "p_abcd", hosts: [], confirmed: false });
+    await request(actor, "openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/team/x" });
+    assert.deepEqual(calls, [
+      ["listProjectContainers"],
+      ["setAccountLabel", "p_abcd", { key: "vercel", label: "work Google" }],
+      ["setAccountLabel", "p_abcd", { key: "*.atlassian.net", label: null }],
+      ["setSharedSites", "p_abcd", { hosts: ["github.com", "*.github.com"], confirmed: true }],
+      ["setSharedSites", "p_abcd", { hosts: [], confirmed: false }],
+      ["openProjectUrl", { window, projectId: "p_abcd", url: "https://vercel.com/team/x" }],
+    ]);
+    calls.length = 0;
+    const refused = [
+      ["listProjectContainers", { projectId: "p_abcd" }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "vercel" }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "vercel", label: "x", userContextId: 40 }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "a b", label: "x" }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "", label: "x" }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "x".repeat(254), label: "x" }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "vercel", label: "x".repeat(201) }],
+      ["setAccountLabel", { projectId: "p_abcd", key: "vercel", label: 5 }],
+      ["setAccountLabel", { projectId: "../p", key: "vercel", label: "x" }],
+      ["setSharedSites", { projectId: "p_abcd", hosts: ["github.com"], confirmed: "true" }],
+      ["setSharedSites", { projectId: "p_abcd", hosts: "github.com", confirmed: true }],
+      ["setSharedSites", { projectId: "p_abcd", hosts: Array.from({ length: 33 }, (_, i) => `s${i}.example`), confirmed: true }],
+      ["setSharedSites", { projectId: "p_abcd", hosts: ["github.com"], confirmed: true, container: { user_context_id: 1 } }],
+      ["openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/", userContextId: 0 }],
+      ["openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/", contextUuid: UUID_A }],
+      ["openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/", window: "other" }],
+      ["openProjectUrl", { url: "https://vercel.com/" }],
+      ["updateProject", { id: "p_abcd", patch: { container: { user_context_id: 40 } } }],
+      ["updateProject", { id: "p_abcd", patch: { accounts: [] } }],
+      ["updateProject", { id: "p_abcd", patch: { shared_sites: { hosts: [], confirmed: true } } }],
+    ];
+    for (const [name, params] of refused) {
+      assert.equal((await request(actor, name, params)).error.code, "INVALID_PARAMS", `${name} ${JSON.stringify(params).slice(0, 80)}`);
+    }
+    for (const url of ["javascript:alert(1)", "file:///etc/passwd", "https://u:p@vercel.com/", "about:config"]) {
+      assert.equal((await request(actor, "openProjectUrl", { projectId: "p_abcd", url })).error.code, "INVALID_URL");
+    }
+    assert.equal((await request(fakeActor({ window: null }), "openProjectUrl", { projectId: "p_abcd", url: "https://vercel.com/" })).error.code, "NO_WINDOW");
+    assert.deepEqual(calls, [], "nothing reached the services");
+  } finally { restore(); }
 });
 
 test("openContext goes through services with the requesting window and reports when unsupported", async () => {

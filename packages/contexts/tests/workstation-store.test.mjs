@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  ContextsError, CONTEXT_STORE_VERSION, DEFAULT_CONTEXT_STORE, DEFAULT_SHARED_SITES, INTEGRATION_IDS, PLATFORM_KINDS, DOMAIN_ORIGINS,
+  ContextsError, CONTEXT_STORE_VERSION, DEFAULT_CONTEXT_STORE, DEFAULT_SHARED_SITES, MAX_USER_CONTEXT_ID, INTEGRATION_IDS, PLATFORM_KINDS, DOMAIN_ORIGINS,
   migrateContextStore, projectsInContext, upgradeProject, validateBriefRecord, validateContextStore, validateProject, validateDetectionDraft,
 } from '../src/index.mjs';
 import { UUID_A, UUID_B, manifest } from './samples.mjs';
@@ -58,7 +58,9 @@ test('project record v2: validated, normalized, frozen; v1 still validates', () 
   throwsCode(() => validateProject(missing), 'INVALID_PROJECT', '$.brief');
   throwsCode(() => validateProject(v2('p_abcd', { version: 3 })), 'INVALID_PROJECT');
   throwsCode(() => validateProject(v2('p_abcd', { extra: 1 })), 'INVALID_PROJECT', '$.extra');
-  for (const id of [0, -1, 1.5, 4294967296, '12']) throwsCode(() => validateProject(v2('p_abcd', { container: { user_context_id: id } })), 'INVALID_PROJECT', '$.container.user_context_id');
+  assert.equal(MAX_USER_CONTEXT_ID, 4294967294);
+  assert.equal(validateProject(v2('p_abcd', { container: { user_context_id: MAX_USER_CONTEXT_ID } })).container.user_context_id, MAX_USER_CONTEXT_ID);
+  for (const id of [0, -1, 1.5, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, '12']) throwsCode(() => validateProject(v2('p_abcd', { container: { user_context_id: id } })), 'INVALID_PROJECT', '$.container.user_context_id');
   throwsCode(() => validateProject(v2('p_abcd', { container: {} })), 'INVALID_PROJECT', '$.container.user_context_id');
   throwsCode(() => validateProject(v2('p_abcd', { shared_sites: { hosts: ['github.com', 'github.com'], confirmed: false } })), 'INVALID_PROJECT', '$.shared_sites.hosts[1]');
   throwsCode(() => validateProject(v2('p_abcd', { shared_sites: { hosts: ['https://github.com'], confirmed: false } })), 'INVALID_PROJECT', '$.shared_sites.hosts[0]');
@@ -209,7 +211,15 @@ test('contracts/context-v2.schema.json agrees with the validators', async () => 
   ok('detectionDraft', JSON.parse(JSON.stringify(validateDetectionDraft({ ...draftV1, version: 1 }))));
   ok('project', JSON.parse(JSON.stringify(validateProject(v2('p_abcd')))));
   ok('project', v1('p_abcd'));
-  bad('project', { ...v2('p_abcd'), container: { user_context_id: 0 } });
+  ok('container', { user_context_id: null });
+  ok('container', { user_context_id: 1 });
+  ok('container', { user_context_id: MAX_USER_CONTEXT_ID });
+  const normalizedProject = JSON.parse(JSON.stringify(validateProject(v2('p_abcd'))));
+  ok('project', { ...normalizedProject, container: { user_context_id: MAX_USER_CONTEXT_ID } });
+  for (const id of [0, -1, 1.5, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER, '12']) {
+    bad('container', { user_context_id: id });
+    bad('project', { ...normalizedProject, container: { user_context_id: id } });
+  }
   bad('project', { ...v1('p_abcd'), brief: null });
   ok('contextStore', JSON.parse(JSON.stringify(migrateContextStore({ version: 1, contexts: [context(UUID_A, { project_id: 'p_one1' })], projects: [v1('p_one1')] }))));
   ok('contextStore', { version: 2, contexts: [], projects: [v1('p_one1')] });

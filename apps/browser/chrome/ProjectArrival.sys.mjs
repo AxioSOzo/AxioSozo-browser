@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
+import { createSubprocessUtf8Reader } from "./SubprocessUtf8.sys.mjs";
+
 // Process/filesystem arrival adapter only. The core, Subprocess.call-shaped
 // runtime and metadata-only filesystem are injected by the privileged owner.
 export const ARRIVAL_LIMITS = Object.freeze({ timeoutMs: 3000, stdoutBytes: 1048576,
@@ -15,18 +17,6 @@ const within = (path, base) => path === base || path.startsWith(`${base}/`);
 const directory = stat => stat?.type === "directory";
 const gitKind = stat => stat?.type === "directory" ? "dir" : stat?.type === "regular" ? "file" : null;
 const bounded = (value, fallback, maximum) => Number.isSafeInteger(value) && value > 0 ? Math.min(value, maximum) : fallback;
-// Count UTF-8 bytes without allocating a second copy of an untrusted chunk.
-function byteLength(text) {
-  let size = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code < 128) size++;
-    else if (code < 2048) size += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length && text.charCodeAt(i + 1) >= 0xdc00 && text.charCodeAt(i + 1) <= 0xdfff) { size += 4; i++; }
-    else size += 3;
-  }
-  return size;
-}
 const defaultsDenied = home => home ? ["Library", ".mozilla", ".thunderbird", ".cache", ".config", ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".codex", ".claude"].map(part => `${home}/${part}`) : [];
 const SYSTEM_DENIED = ["/System", "/Library", "/private", "/dev", "/proc", "/var", "/tmp"];
 
@@ -50,7 +40,8 @@ function createSession({ signal, clock, timers, timeoutMs }) {
 
 /**
  * runtime.call(options) is Gecko Subprocess.call: a child exposes
- * stdout/stderr.readString(), wait(), kill(timeout), optional stdin.close().
+ * stdout/stderr.read() returning raw ArrayBuffer chunks, wait(), kill(timeout),
+ * optional stdin.close(). Only a zero-length raw chunk is EOF.
  * fs exposes realpath(path), stat(path), lstat(path); it opens no file content.
  * core is the contexts package. projects or getProjects() supplies validated
  * profile records. roots is privileged configuration (e.g. /Volumes/T9/Code).
@@ -130,16 +121,15 @@ export function createProjectArrival({ runtime, fs, core, home, roots = [], deni
       try {
         session.check();
         const drain = async (pipe, stderr) => {
-          if (typeof pipe?.readString !== "function") throw EXIT;
+          const reader = createSubprocessUtf8Reader(pipe, { maxBytes: stderr ? limits.stderr : localStdoutCap });
           let localBytes = 0;
           const chunks = [];
           for (;;) {
             session.check();
-            const chunk = await pipe.readString();
-            if (chunk === "" || chunk === null) break;
-            if (typeof chunk !== "string") throw EXIT;
+            const chunk = await reader.read();
+            if (chunk === null) break;
             session.check();
-            const size = byteLength(chunk);
+            const size = chunk.byteLength;
             localBytes += size;
             if (stderr) {
               stderrBytes += size;
@@ -147,7 +137,7 @@ export function createProjectArrival({ runtime, fs, core, home, roots = [], deni
             } else {
               stdoutBytes += size;
               if (stdoutBytes > limits.stdout || localBytes > localStdoutCap) throw EXIT;
-              chunks.push(chunk);
+              chunks.push(chunk.text);
             }
           }
           return stderr ? null : chunks.join("");

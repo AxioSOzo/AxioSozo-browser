@@ -2,7 +2,7 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { ContextsError } from './errors.mjs';
 import { hostMatches } from './rules.mjs';
-import { INTEGRATION_IDS, deepFreeze, isPlainObject, isProjectId, own, validateAccountLabel } from './schema.mjs';
+import { INTEGRATION_IDS, MAX_USER_CONTEXT_ID, deepFreeze, isPlainObject, isProjectId, own, validateAccountLabel } from './schema.mjs';
 
 // Containers and routing (workstation-v1 §3). Each project gets its own Gecko
 // contextual identity; shared sites keep the space's default container. The
@@ -25,7 +25,9 @@ export function projectContainerStyle(projectId) {
 
 const normHost = h => (typeof h === 'string' ? h.trim().replace(/[A-Z]/g, c => c.toLowerCase()).replace(/\.$/, '') : '');
 const hostsOf = project => {
-  const hosts = own(own(project, 'shared_sites'), 'hosts');
+  const shared = own(project, 'shared_sites');
+  if (own(shared, 'confirmed') !== true) return [];
+  const hosts = own(shared, 'hosts');
   return Array.isArray(hosts) ? hosts.filter(h => typeof h === 'string') : [];
 };
 
@@ -43,13 +45,13 @@ const webUrl = url => {
 };
 const containerOf = project => {
   const id = own(own(project, 'container'), 'user_context_id');
-  return Number.isSafeInteger(id) && id >= 1 ? id : null;
+  return Number.isSafeInteger(id) && id >= 1 && id <= MAX_USER_CONTEXT_ID ? id : null;
 };
 
 // Which container a URL opened for `project` belongs in. Non-web URLs and
 // projects without a container yet keep the default; shared sites use it too.
 export function routeForUrl({ project, url, defaultUserContextId } = {}) {
-  if (!Number.isSafeInteger(defaultUserContextId) || defaultUserContextId < 0) {
+  if (!Number.isSafeInteger(defaultUserContextId) || defaultUserContextId < 0 || defaultUserContextId > MAX_USER_CONTEXT_ID) {
     throw new ContextsError('INVALID_INPUT', '$.defaultUserContextId: expected an integer ≥ 0', '$.defaultUserContextId');
   }
   const out = (userContextId, reason) => Object.freeze({ userContextId, reason });

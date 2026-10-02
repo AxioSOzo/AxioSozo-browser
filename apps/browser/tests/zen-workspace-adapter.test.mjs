@@ -104,6 +104,138 @@ test("switching and opening tabs go through Zen; only http(s) without credential
   assert.equal(f.opened.length, 2);
 });
 
+// gBrowser.addTab as pinned Zen applies it to an explicit, non-external
+// container (Tabbrowser patch + getContextIdIfNeeded): the tab keeps it, its
+// non-lazy browser has a browsing context with those origin attributes at
+// once, and a foreground tab is selected unless setSelectedTab vetoes it.
+// `browser` replaces the new tab's browser (e.g. an unattached one).
+function tabbrowser(f, { override = null, veto = false, browser = null } = {}) {
+  const added = [], removed = [];
+  f.window.gBrowser.addTab = (url, options) => {
+    added.push({ url, options, active: f.zen.activeWorkspace });
+    const id = override ?? options.userContextId;
+    const tab = { url, userContextId: id, linkedBrowser: browser ?? { browsingContext: { originAttributes: { userContextId: id } } } };
+    if (!options.inBackground && !veto) f.window.gBrowser.selectedTab = tab;
+    return tab;
+  };
+  f.window.gBrowser.removeTab = tab => removed.push(tab);
+  return { added, removed };
+}
+
+test("project-container tabs: explicit container, matching null principal, not external, in the explicit Zen space", async () => {
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }, { uuid: B, name: "BV", containerTabId: 2 }] });
+  const tb = tabbrowser(f);
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  assert.deepEqual(await adapter.openTab("https://vercel.com/team/harbor", { workspaceUuid: B, userContextId: 40 }), { selected: true });
+  assert.equal(tb.added.length, 1);
+  assert.equal(f.window.gBrowser.selectedTab.url, "https://vercel.com/team/harbor");
+  const [{ url, options, active }] = tb.added;
+  assert.equal(url, "https://vercel.com/team/harbor");
+  assert.equal(active, B, "switched to the project's space first");
+  assert.deepEqual(Object.keys(options).sort(), ["fromExternal", "inBackground", "skipRoute", "triggeringPrincipal", "userContextId", "zenWorkspaceId"]);
+  assert.equal(options.userContextId, 40);
+  assert.equal(options.fromExternal, false);
+  assert.equal(options.inBackground, false);
+  assert.equal(options.skipRoute, true, "Zen space routing cannot move it elsewhere");
+  assert.equal(options.zenWorkspaceId, B);
+  assert.deepEqual([options.triggeringPrincipal.kind, options.triggeringPrincipal.isSystemPrincipal, options.triggeringPrincipal.originAttributes],
+    ["null", false, { userContextId: 40 }]);
+  assert.equal(f.opened.length, 0, "no openWebLinkIn and no DOM attribute writes");
+  // The space default (a shared site) is explicit too.
+  await adapter.openTab("https://github.com/acme/harbor", { workspaceUuid: B, userContextId: 2 });
+  assert.equal(tb.added[1].options.userContextId, 2);
+  assert.deepEqual(tb.added[1].options.triggeringPrincipal.originAttributes, { userContextId: 2 });
+});
+
+test("project-container tabs refuse private windows, bad IDs, unsafe principals and a space that did not open", async () => {
+  const priv = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }], isPrivate: true });
+  const privTb = tabbrowser(priv);
+  await assert.rejects(new ZenWorkspaceAdapter(priv.window).openTab("https://example.test/", { userContextId: 40 }), { code: "PRIVATE_WINDOW" });
+  assert.equal(privTb.added.length, 0);
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }, { uuid: B, name: "BV" }] });
+  const tb = tabbrowser(f);
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  for (const id of [-1, 1.5, "40", null, 4294967295, 4294967296]) {
+    await assert.rejects(adapter.openTab("https://example.test/", { userContextId: id }), { code: "INVALID_CONTAINER" }, String(id));
+  }
+  for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "https://u:p@example.test/"]) {
+    await assert.rejects(adapter.openTab(bad, { userContextId: 40 }), { code: "INVALID_URL" });
+  }
+  const manager = f.window.Services.scriptSecurityManager;
+  const original = manager.createNullPrincipal;
+  for (const fake of [() => ({ isSystemPrincipal: true, isNullPrincipal: false, originAttributes: { userContextId: 40 } }),
+    () => ({ isSystemPrincipal: false, isNullPrincipal: true, originAttributes: { userContextId: 0 } }),
+    () => ({ isSystemPrincipal: false, isNullPrincipal: false, originAttributes: { userContextId: 40 } }), () => null]) {
+    manager.createNullPrincipal = fake;
+    await assert.rejects(adapter.openTab("https://example.test/", { userContextId: 40 }), { code: "UNSAFE_PRINCIPAL" });
+  }
+  manager.createNullPrincipal = original;
+  await assert.rejects(adapter.openTab("https://example.test/", { workspaceUuid: "33333333-3333-4333-8333-333333333333", userContextId: 40 }),
+    { code: "WORKSPACE_UNAVAILABLE" });
+  await assert.rejects(adapter.openTab("https://example.test/", { userContextId: 40, verify: () => { throw Object.assign(new Error("PROJECT_CHANGED"), { code: "PROJECT_CHANGED" }); } }),
+    { code: "PROJECT_CHANGED" });
+  assert.equal(tb.added.length, 0, "every refusal happens before a tab exists");
+  delete f.window.gBrowser.addTab;
+  await assert.rejects(adapter.openTab("https://example.test/", { userContextId: 40 }), { code: "NO_TABBROWSER" });
+});
+
+test("a tab that did not get its container, or has no live browsing context, is closed and reported; nothing else is touched", async () => {
+  for (const [options, label] of [[{ override: 0 }, "default instead of 40"], [{ browser: {} }, "no browsing context"],
+    [{ browser: { browsingContext: null } }, "destroyed browser"], [{ browser: { browsingContext: { originAttributes: {} } } }, "no userContextId"],
+    [{ browser: { browsingContext: { originAttributes: { userContextId: 0 } } } }, "live context in another container"]]) {
+    const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }] });
+    const other = { url: "https://other.example/" };
+    f.window.gBrowser.selectedTab = other;
+    const tb = tabbrowser(f, options);
+    const adapter = new ZenWorkspaceAdapter(f.window);
+    await assert.rejects(adapter.openTab("https://example.test/", { userContextId: 40 }), { code: "CONTAINER_MISMATCH" }, label);
+    assert.equal(tb.removed.length, 1, label);
+    assert.equal(tb.removed[0].url, "https://example.test/", "only the tab it opened");
+  }
+});
+
+test("Firefox may keep the current tab in front: the owned tab stays open and is reported unselected", async () => {
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }] });
+  const other = { url: "https://other.example/" };
+  f.window.gBrowser.selectedTab = other;
+  const tb = tabbrowser(f, { veto: true });
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  assert.deepEqual(await adapter.openTab("https://example.test/", { userContextId: 40 }), { selected: false });
+  assert.equal(tb.added.length, 1);
+  assert.deepEqual(tb.removed, [], "neither the new tab nor any other is closed");
+  assert.equal(f.window.gBrowser.selectedTab, other, "and the selection is not forced");
+  // A window with a modal dialog is refused before any tab exists.
+  f.window.document.documentElement = { hasAttribute: name => name === "window-modal-open" };
+  await assert.rejects(adapter.openTab("https://example.test/", { userContextId: 40 }), { code: "WINDOW_BUSY" });
+  assert.equal(tb.added.length, 1);
+});
+
+test("tab and identity readers report Firefox's own state and nothing they cannot confirm", () => {
+  const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }] });
+  const identities = { 40: { userContextId: 40, public: true, name: "Harbor Suite", icon: "briefcase", color: "cyan" },
+    41: { userContextId: 41, public: false, name: "userContextIdInternal.thumbnail", icon: "", color: "" },
+    42: { userContextId: 7, public: true, name: "Mismatch", icon: "briefcase", color: "blue" } };
+  f.window.ContextualIdentityService = {
+    getPublicIdentityFromId: id => identities[id],
+    getUserContextLabel: id => identities[id]?.name ?? "",
+  };
+  const adapter = new ZenWorkspaceAdapter(f.window);
+  assert.deepEqual(adapter.containerIdentity(40), { userContextId: 40, name: "Harbor Suite", color: "cyan", icon: "briefcase" });
+  for (const id of [0, 41, 42, 99, -1, 4294967295, "40"]) assert.equal(adapter.containerIdentity(id), null, String(id));
+  const tab = (id, live) => ({ userContextId: id, linkedBrowser: live === undefined ? {} : { browsingContext: { originAttributes: { userContextId: live } } } });
+  assert.equal(adapter.tabUserContextId(tab(40, 40)), 40);
+  assert.equal(adapter.tabUserContextId(tab(0, 0)), 0, "the default container of a loaded tab");
+  assert.equal(adapter.tabUserContextId(tab(0)), null, "a lazy or unattached browser: the attribute alone is not trusted");
+  assert.equal(adapter.tabUserContextId({ userContextId: 0, linkedBrowser: { browsingContext: null } }), null, "a destroyed browser");
+  assert.equal(adapter.tabUserContextId({ userContextId: 40 }), null, "no browser at all");
+  assert.equal(adapter.tabUserContextId(tab(40, 0)), null, "disagreement is unknown, never guessed");
+  assert.equal(adapter.tabUserContextId(tab(40, "40")), null);
+  const throwing = { userContextId: 40, linkedBrowser: { get browsingContext() { throw new Error("dead object"); } } };
+  assert.equal(adapter.tabUserContextId(throwing), null);
+  for (const id of [undefined, -1, 1.5, 4294967295]) assert.equal(adapter.tabUserContextId(tab(id, id)), null);
+  assert.equal(adapter.tabUserContextId(null), null);
+});
+
 test("menu target mirrors Zen: clicked space icon, else the active space", () => {
   const f = fakeZenWindow({ spaces: [{ uuid: A, name: "Home" }, { uuid: B, name: "BV" }], active: A });
   f.window.elements.zenWorkspaceMoreActions = { id: "zenWorkspaceMoreActions" };

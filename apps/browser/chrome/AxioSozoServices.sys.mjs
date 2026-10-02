@@ -7,8 +7,9 @@
 // containment reader (ProjectDetection), port-to-folder arrival offers
 // (ProjectArrival, ProjectRecords), on-request status checks of loopback
 // services (TCP connect only; remote services are never contacted), the
-// no-follow manifest write and events. Every Zen call goes through
-// ZenWorkspaceAdapter.
+// no-follow manifest write, project containers (ProjectContainers: one Gecko
+// contextual identity per project, routed before any project tab exists) and
+// events. Every Zen call goes through ZenWorkspaceAdapter.
 // All methods except on()/registerWindow() return promises of JSON data.
 
 // Relative specifiers resolve to chrome://browser/content/axiosozo/… in the JAR;
@@ -22,6 +23,8 @@ import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
 import { createProjectArrival } from "./ProjectArrival.sys.mjs";
 import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
 import { createNativeProjectArrivalSubprocess } from "./ProjectArrivalSubprocess.sys.mjs";
+import { createProjectContainers, createGeckoIdentityAdapter } from "./ProjectContainers.sys.mjs";
+import { canonicalContainerColor, projectContainerPresentation, PROJECT_CONTAINER_ICON } from "./ProjectAccountRuntime.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention"]);
@@ -49,6 +52,10 @@ const LOOPBACK_ADDRESSES = Object.freeze({ "localhost": ["127.0.0.1", "::1"], "1
 const LEDGER_HOST = /^[a-z0-9.-]{1,253}$/u;
 const WORKSPACE_UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/u;
 const MAX_DENIED_ROOTS = 32;
+// Gecko's switch for contextual identities. Turning it off closes container
+// tabs, clears their data and restarts identity numbering without one
+// deletion notification per identity.
+export const CONTAINERS_PREF = "privacy.userContext.enabled";
 
 export class ServicesError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "ServicesError"; this.code = code; }
@@ -149,6 +156,18 @@ export class AxioSozoServices {
   #records; #arrival;
   // Arrival acceptances between token consumption and the store append.
   #acceptances = new Set();
+  // Project containers: one controller per process (assignment is serialized),
+  // the identity API it was built with, whether the dependency was configured
+  // at all, the reset in flight or failed (routing stays blocked until a retry
+  // succeeds), deletions whose mapping cleanup failed, and a generation that
+  // every deletion or reset observation bumps so an opening in progress stops.
+  #containers = null; #identities = null; #containersConfigured = false;
+  #containerReset = null; #containerResetFailed = false; #failedDeletions = new Set(); #containerGeneration = 0;
+  // Routing marks: a monotonic value per project (and one for every project)
+  // that changes synchronously when a store mutation that can change a
+  // project's route starts and again when it settles, failed or not, plus the
+  // mutations still in flight. Service memory only; never stored or sent.
+  #routingSequence = 0; #routingAll = 0; #routingMarks = new Map(); #routingPending = new Map(); #routingPendingAll = 0;
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -169,6 +188,12 @@ export class AxioSozoServices {
    * chrome the lazily built ProjectArrivalSubprocess adapter, see
    * lazyArrivalSubprocess),
    * home, profileDir, arrivalRoots, newToken() (browser UUID, see browserToken).
+   * Containers: containerIdentities (an identity API { get, create, update },
+   * or a function building it, see createGeckoIdentityAdapter; absent = not
+   * configured, project links open in the space's own container as before),
+   * containersEnabled() → boolean (the privacy.userContext.enabled pref) and
+   * observeContainers({ identityDeleted(id), containersDisabled() }) →
+   * unobserve.
    */
   constructor(deps = {}) {
     this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId,
@@ -193,6 +218,7 @@ export class AxioSozoServices {
     };
     try { this.#deps.onShutdown?.(() => this.flushLedger()); }
     catch (error) { console.error("AxioSozo: ledger shutdown flush not registered", error); }
+    this.#setUpContainers();
   }
 
   // ── events ────────────────────────────────────────────────────────────
@@ -388,7 +414,7 @@ export class AxioSozoServices {
    * projects may share a space. projectId null takes every project out of it. */
   async linkProject(uuid, projectId) {
     this.#requireLive(uuid);
-    await this.#updateContexts(doc => {
+    await this.#routingMutation(projectId === null ? null : [projectId], () => this.#updateContexts(doc => {
       if (projectId === null) {
         let next = doc;
         for (const project of doc.projects) if (project.context_uuid === uuid) next = this.#placeProject(next, project.id, null);
@@ -396,7 +422,7 @@ export class AxioSozoServices {
       }
       if (!doc.projects.some(project => project.id === projectId)) fail("UNKNOWN_PROJECT");
       return this.#placeProject(doc, projectId, uuid);
-    }, ["contexts", "projects"]);
+    }, ["contexts", "projects"]));
     return this.getContext(uuid);
   }
 
@@ -422,7 +448,7 @@ export class AxioSozoServices {
     const live = this.#liveWorkspaces();
     const doomed = new Set(uuids.filter(uuid => typeof uuid === "string" && !live.has(uuid)));
     let removed = 0;
-    await this.#updateContexts(doc => {
+    await this.#routingMutation(null, () => this.#updateContexts(doc => {
       const now = this.#deps.clock();
       const contexts = doc.contexts.filter(meta => !doomed.has(meta.workspace_uuid));
       removed = doc.contexts.length - contexts.length;
@@ -434,7 +460,7 @@ export class AxioSozoServices {
         projects: doc.projects.map(project => (doomed.has(project.context_uuid)
           ? { ...project, context_uuid: null, updated_at: now } : project)),
       };
-    }, ["contexts", "projects"]);
+    }, ["contexts", "projects"]));
     return { removed };
   }
 
@@ -545,14 +571,16 @@ export class AxioSozoServices {
   async #addProject({ root, canonicalRoot, manifest, contextUuid, guard = null }) {
     const id = this.#deps.randomId("p_");
     const record = this.#records.createRecord({ id, root, canonicalRoot, manifest, contextUuid: null });
-    await this.#updateContexts(doc => {
+    await this.#routingMutation([id], () => this.#updateContexts(doc => {
       guard?.();
       if (doc.projects.some(item => item.root === record.root || item.root === root)) fail("PROJECT_EXISTS");
       if (doc.projects.some(item => item.id === id)) fail("DUPLICATE_PROJECT_ID");
       // Any space may hold the project; its type (a label) is left as it is.
       const next = { ...doc, projects: [...doc.projects, record] };
       return contextUuid !== null ? this.#placeProject(next, id, contextUuid) : next;
-    }, ["projects", "contexts"]);
+    }, ["projects", "contexts"]));
+    // Its own container exists (and is saved) before any of its links opens.
+    await this.#ensureContainer(id);
     return this.getProject(id);
   }
 
@@ -565,12 +593,12 @@ export class AxioSozoServices {
     // The registered root is canonical; a folder that now resolves elsewhere is not opened.
     const result = await this.#detectSecurely(project.root, { expectedCanonicalRoot: project.root });
     this.#records.rememberDetection(result);
-    await this.#updateContexts(doc => {
+    await this.#routingMutation([id], () => this.#updateContexts(doc => {
       const current = doc.projects.find(item => item.id === id);
       if (!current) fail("UNKNOWN_PROJECT");
       const next = this.#records.refreshedRecord(current, { root: project.root, canonicalRoot: result.canonicalRoot });
       return { ...doc, projects: doc.projects.map(item => (item.id === id ? next : item)) };
-    }, ["projects"]);
+    }, ["projects"]));
     return this.getProject(id);
   }
 
@@ -584,8 +612,8 @@ export class AxioSozoServices {
     core.assertNoSecrets(manifest);
     const path = await writeManifestFile(this.#fs(), project.root, core.MANIFEST_PATH, core.serializeManifest(manifest),
       this.#deps.randomId("tmp_"));
-    await this.#updateContexts(doc => ({ ...doc, projects: doc.projects.map(item => (item.id === projectId
-      ? { ...item, manifest_state: "written", updated_at: this.#deps.clock() } : item)) }), ["projects"]);
+    await this.#routingMutation([projectId], () => this.#updateContexts(doc => ({ ...doc, projects: doc.projects.map(item => (item.id === projectId
+      ? { ...item, manifest_state: "written", updated_at: this.#deps.clock() } : item)) }), ["projects"]));
     return { path };
   }
 
@@ -596,9 +624,11 @@ export class AxioSozoServices {
     let manifest;
     if ("manifest" in patch) { manifest = core.validateManifest(patch.manifest); core.assertNoSecrets(manifest); }
     if ("context_uuid" in patch && patch.context_uuid !== null) this.#requireLive(patch.context_uuid);
-    await this.#updateContexts(doc => {
+    let renamed = false;
+    await this.#routingMutation([id], () => this.#updateContexts(doc => {
       const existing = doc.projects.find(item => item.id === id);
       if (!existing) fail("UNKNOWN_PROJECT");
+      renamed = !!manifest && existing.manifest.name !== manifest.name;
       let next = doc;
       if (manifest) {
         next = { ...next, projects: next.projects.map(item => (item.id === id
@@ -608,20 +638,305 @@ export class AxioSozoServices {
         next = this.#placeProject(next, id, patch.context_uuid);
       }
       return next;
-    }, ["projects", "contexts"]);
+    }, ["projects", "contexts"]));
     this.#serviceStatus.delete(id);
+    if (renamed) await this.#renameContainer(id);
     return this.getProject(id);
   }
 
+  /** Forgets the project. Its container, open tabs and their sign-ins stay as
+   * they are (removing a container clears its data; that would be a separate,
+   * explicit choice). Only the container controller's retry hint is dropped. */
   async removeProject(id) {
-    await this.#updateContexts(doc => {
+    await this.#routingMutation([id], () => this.#updateContexts(doc => {
       if (!doc.projects.some(item => item.id === id)) fail("UNKNOWN_PROJECT");
       const now = this.#deps.clock();
       return { ...doc, projects: doc.projects.filter(item => item.id !== id),
         contexts: doc.contexts.map(meta => (meta.project_id === id ? { ...meta, project_id: null, updated_at: now } : meta)) };
-    }, ["projects", "contexts", "attention"]);
+    }, ["projects", "contexts", "attention"]));
     this.#serviceStatus.delete(id);
+    if (this.#containers && core.isProjectId(id)) await this.#containers.forget(id).catch(() => {});
     return { removed: true };
+  }
+
+  // ── accounts per project (P2; manual profile metadata only) ───────────
+  /** The account the user signs in with for one service or site of a project:
+   * `key` is an integration id (vercel, convex, …) or a host pattern, `label`
+   * the text the user typed (1–80 characters) or null to remove it. Nothing is
+   * read from pages, cookies or the Keychain; every other field of the record
+   * is kept (ProjectRecords.withAccountLabel, inside the serialized write). */
+  async setAccountLabel(projectId, { key, label } = {}) {
+    await this.#routingMutation([projectId], () => this.#updateContexts(doc => {
+      const current = doc.projects.find(item => item.id === projectId);
+      if (!current) fail("UNKNOWN_PROJECT");
+      const next = this.#records.withAccountLabel(current, { key, label });
+      return { ...doc, projects: doc.projects.map(item => (item.id === projectId ? next : item)) };
+    }, ["projects"]));
+    return this.getProject(projectId);
+  }
+
+  /** Sites that use the space's own container instead of the project's, e.g.
+   * GitHub with one account everywhere. Suggestions share nothing until the
+   * user confirms them (`confirmed: true`); only hosts and confirmation change. */
+  async setSharedSites(projectId, { hosts, confirmed } = {}) {
+    await this.#routingMutation([projectId], () => this.#updateContexts(doc => {
+      const current = doc.projects.find(item => item.id === projectId);
+      if (!current) fail("UNKNOWN_PROJECT");
+      const next = this.#records.withSharedSites(current, { hosts, confirmed });
+      return { ...doc, projects: doc.projects.map(item => (item.id === projectId ? next : item)) };
+    }, ["projects"]));
+    return this.getProject(projectId);
+  }
+
+  // ── routing marks (P2) ────────────────────────────────────────────────
+  #markRouting(projectIds, delta) {
+    const mark = ++this.#routingSequence;
+    if (projectIds === null) { this.#routingAll = mark; this.#routingPendingAll += delta; return; }
+    for (const id of projectIds) {
+      this.#routingMarks.set(id, mark);
+      const pending = (this.#routingPending.get(id) ?? 0) + delta;
+      if (pending > 0) this.#routingPending.set(id, pending); else this.#routingPending.delete(id);
+    }
+  }
+
+  /** Runs a profile-store mutation that can change how `projectIds` (null:
+   * every project) route: space, sharing, account labels, container mapping,
+   * existence or stored record. Their mark changes synchronously when it starts
+   * and again when it settles, so an opening of those projects in flight stops. */
+  async #routingMutation(projectIds, run) {
+    this.#markRouting(projectIds, 1);
+    try { return await run(); } finally { this.#markRouting(projectIds, -1); }
+  }
+
+  /** The project's current routing mark; null while a mutation of it is in flight. */
+  #routingMark(projectId) {
+    if (this.#routingPendingAll > 0 || this.#routingPending.has(projectId)) return null;
+    return `${this.#routingAll}:${this.#routingMarks.get(projectId) ?? 0}`;
+  }
+
+  // ── project containers (P2) ───────────────────────────────────────────
+  #setUpContainers() {
+    const { containerIdentities } = this.#deps;
+    if (containerIdentities === undefined) return;
+    this.#containersConfigured = true;
+    try {
+      const identities = typeof containerIdentities === "function" ? containerIdentities() : containerIdentities;
+      this.#containers = createProjectContainers({ core, identities,
+        // Browser-owned model callbacks: always read the store again.
+        getProject: id => this.getProject(id),
+        listProjects: async () => (await this.#loadContexts()).projects,
+        assignContainer: (id, userContextId, assignment) => this.#assignContainer(id, userContextId, assignment),
+        presentationForProject: project => projectContainerPresentation(core, project),
+        enabled: () => this.#containersEnabled() });
+      this.#identities = identities;
+    } catch (error) {
+      console.error("AxioSozo: project containers unavailable", error);
+      this.#containers = null;
+      return;
+    }
+    try {
+      this.#deps.observeContainers?.({ identityDeleted: id => this.#identityDeleted(id), containersDisabled: () => { this.#resetContainers(); } });
+    } catch (error) { console.error("AxioSozo: container observers not registered", error); }
+    // Turned off while the browser was closed: Gecko has already reset its
+    // identities, so stored mappings may name reused IDs.
+    if (!this.#containersEnabled()) this.#resetContainers();
+  }
+
+  #containersEnabled() {
+    try { return this.#deps.containersEnabled?.() === true; } catch { return false; }
+  }
+
+  /** Compare-and-set of a project's container inside the serialized store
+   * write; null when the project is gone or its mapping changed meanwhile. */
+  async #assignContainer(projectId, userContextId, assignment) {
+    let assigned = null;
+    await this.#loadContexts();
+    await this.#routingMutation([projectId], () => this.#stores.contexts.update(doc => {
+      assigned = null;
+      const current = doc.projects.find(item => item.id === projectId);
+      if (!current) return doc;
+      const next = this.#records.withBrowserAssignedContainer(current, userContextId, assignment);
+      if (!next) return doc;
+      assigned = next;
+      return { ...doc, projects: doc.projects.map(item => (item.id === projectId ? next : item)) };
+    }));
+    if (!assigned) return null;
+    this.#emit("projects");
+    return clone(assigned);
+  }
+
+  /** Observer: Firefox deleted a container. In-flight routes stop at once; the
+   * projects that named it lose the mapping (never the project or its data). */
+  #identityDeleted(userContextId) {
+    if (!this.#containers) return;
+    let cleanup;
+    try { cleanup = this.#containers.identityDeleted(userContextId); } catch { return; }
+    this.#containerGeneration++;
+    this.#failedDeletions.delete(userContextId);
+    cleanup.catch(error => {
+      this.#failedDeletions.add(userContextId);
+      console.error("AxioSozo: deleted container still mapped; project links wait for a retry", error?.code ?? error);
+    });
+  }
+
+  /** Observer and startup: containers were turned off. Every route stops at
+   * once and every mapping is cleared; a failed cleanup blocks routing until a
+   * retry succeeds (#containersReady). */
+  #resetContainers() {
+    if (!this.#containers) return Promise.resolve(0);
+    this.#containerGeneration++;
+    const run = this.#containers.identitiesReset();
+    this.#containerReset = run;
+    this.#containerResetFailed = false;
+    run.then(() => {
+      if (this.#containerReset === run) this.#containerReset = null;
+      this.#emit("projects"); // views re-read availability once the cleanup is saved
+    }, error => {
+      if (this.#containerReset === run) { this.#containerReset = null; this.#containerResetFailed = true; }
+      console.error("AxioSozo: container reset not saved; project links wait for a retry", error?.code ?? error);
+    });
+    return run;
+  }
+
+  /** Waits for a reset in flight and retries failed cleanups first; rejects
+   * while they still fail, so nothing is routed against stale mappings. */
+  async #containersReady() {
+    if (this.#containerReset) await this.#containerReset.catch(() => {});
+    if (this.#containerResetFailed) await this.#resetContainers();
+    for (const id of [...this.#failedDeletions]) {
+      this.#containerGeneration++;
+      await this.#containers.identityDeleted(id);
+      this.#failedDeletions.delete(id);
+    }
+  }
+
+  async #ensureContainer(projectId) {
+    if (!this.#containers || !this.#containersEnabled()) return;
+    try {
+      await this.#containersReady();
+      await this.#containers.ensure(projectId, { isPrivate: false });
+    } catch (error) { console.error("AxioSozo: project container not created yet", error?.code ?? error); }
+  }
+
+  /** A renamed project renames its own container; only an identity the browser
+   * already assigned to it is touched, and only its name and style. */
+  async #renameContainer(projectId) {
+    if (!this.#containers || !this.#containersEnabled()) return;
+    try {
+      const project = await this.getProject(projectId);
+      const id = project ? core.upgradeProject(project).container.user_context_id : null;
+      if (id === null || !(await this.#identities.get(id))) return;
+      await this.#containersReady();
+      await this.#containers.refreshPresentation(projectId, { isPrivate: false });
+      this.#emit("projects");
+    } catch (error) { console.error("AxioSozo: project container not renamed", error?.code ?? error); }
+  }
+
+  #containerAvailability() {
+    if (!this.#containersConfigured || (this.#containers && !this.#containersEnabled())) return "off";
+    if (!this.#containers || this.#containerReset || this.#containerResetFailed) return "unavailable";
+    return "on";
+  }
+
+  /** Per project, what its own container looks like, for the Overview:
+   * { project_id, state: "own", name, color } (the actual Firefox container),
+   * "pending" (made when one of its links first opens), "off" or
+   * "unavailable". Read only: nothing is created here, and no ID is returned. */
+  async listProjectContainers() {
+    const { projects } = await this.#loadContexts();
+    const availability = this.#containerAvailability();
+    const out = [];
+    for (const stored of projects) {
+      const project = core.upgradeProject(stored);
+      if (availability !== "on") { out.push({ project_id: project.id, state: availability }); continue; }
+      const id = project.container.user_context_id;
+      const shared = id !== null && projects.some(other => other.id !== project.id && other.container?.user_context_id === id);
+      let identity = null;
+      if (id !== null && !shared) { try { identity = await this.#identities.get(id); } catch { identity = null; } }
+      out.push(identity?.userContextId === id
+        ? { project_id: project.id, state: "own", name: typeof identity.name === "string" ? identity.name : "", color: canonicalContainerColor(identity.color) }
+        : { project_id: project.id, state: "pending" });
+    }
+    return out;
+  }
+
+  /** The space a project link opens in: the caller's (live) space, else the
+   * project's own live space, else the window's active one. */
+  #linkSpace(adapter, project, contextUuid) {
+    if (contextUuid !== null) return contextUuid;
+    const live = this.#liveWorkspaces();
+    if (project.context_uuid && live.has(project.context_uuid)) return project.context_uuid;
+    let active = null;
+    try { active = adapter.activeWorkspaceUuid(); } catch { active = null; }
+    return active && live.has(active) ? active : null;
+  }
+
+  #normalWindow(window, adapter) {
+    try { return this.#windows.get(window) === adapter && adapter.isPrivateWindow() === false; } catch { return false; }
+  }
+
+  /**
+   * Opens a project link (project home, card, environment pill, project block
+   * or a known matching URL) in a new tab of `window`, after its route is
+   * resolved: the project's own container, or the space's default container
+   * for a confirmed shared site. Its identity is created and saved first if
+   * needed. The project's routing mark is then taken and its record read and
+   * routed again (sharing, host and mapping); synchronously right before the
+   * tab exists, the mark, the deletion/reset generation, the window, its
+   * privacy, the space and its default container must all be unchanged. Any
+   * change refuses the stale route (PROJECT_CHANGED) before a tab exists; it is
+   * never opened in another container instead. A private (or unknown-privacy)
+   * window opens a plain tab without any project container; with containers
+   * turned off the link opens in the space's own container as before.
+   * Returns { opened: true, container: "project" | "shared_site", selected }
+   * (selected: Firefox brought the new tab to the front), or { opened: true,
+   * container: "off" | "private" }.
+   */
+  async openProjectUrl({ window, projectId, url, contextUuid = null } = {}) {
+    const parsed = typeof url === "string" && url.length <= 65536 ? URL.parse(url) : null;
+    if (!parsed || !["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) fail("INVALID_URL");
+    if (!core.isProjectId(projectId)) fail("UNKNOWN_PROJECT");
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (!adapter) fail("NO_WINDOW");
+    if (contextUuid !== null) this.#requireLive(contextUuid);
+    const project = await this.getProject(projectId);
+    if (!project) fail("UNKNOWN_PROJECT");
+    if (!this.#normalWindow(window, adapter)) {
+      await adapter.openTab(parsed.href, { workspaceUuid: null });
+      return { opened: true, container: "private" };
+    }
+    const space = this.#linkSpace(adapter, project, contextUuid);
+    const sameSpace = () => space === null || this.#liveWorkspaces().has(space);
+    if (!this.#containersConfigured || (this.#containers && !this.#containersEnabled())) {
+      await adapter.openTab(parsed.href, { workspaceUuid: space });
+      return { opened: true, container: "off" };
+    }
+    if (!this.#containers) fail("CONTAINERS_UNAVAILABLE");
+    const defaultUserContextId = space ? adapter.containerForWorkspace(space) : 0;
+    await this.#containersReady();
+    const generation = this.#containerGeneration;
+    let route;
+    try { route = await this.#containers.route(projectId, parsed.href, { isPrivate: false, defaultUserContextId }); }
+    catch (error) {
+      if (error?.code !== "CONTAINERS_DISABLED") throw error;
+      await adapter.openTab(parsed.href, { workspaceUuid: space });
+      return { opened: true, container: "off" };
+    }
+    // Every later change of this project's route, mapping or existence moves
+    // its mark, so the mark is taken before the record is read again.
+    const mark = this.#routingMark(projectId);
+    if (mark === null) fail("PROJECT_CHANGED");
+    const current = await this.getProject(projectId);
+    if (!current) fail("PROJECT_CHANGED");
+    const again = core.routeForUrl({ project: core.upgradeProject(current), url: route.url, defaultUserContextId });
+    if (again.reason !== route.reason || again.userContextId !== route.userContextId) fail("PROJECT_CHANGED");
+    const verify = () => {
+      if (this.#routingMark(projectId) !== mark || this.#containerGeneration !== generation || !this.#normalWindow(window, adapter)
+        || !sameSpace() || (space ? adapter.containerForWorkspace(space) : 0) !== defaultUserContextId) fail("PROJECT_CHANGED");
+    };
+    verify();
+    const { selected } = await adapter.openTab(route.url, { workspaceUuid: space, userContextId: route.userContextId, verify });
+    return { opened: true, container: route.reason, selected };
   }
 
   // ── arrival (P1; privileged chrome callers only, never the Overview actor) ──
@@ -1017,7 +1332,9 @@ export class AxioSozoServices {
   }
 
   /** http(s) only; new tab in contextUuid, else the matching project's context, else the
-   * current one. openUrl(url, { contextUuid, window }) or openUrl({ url, contextUuid, window }). */
+   * current one. A URL of a known project opens as that project's link
+   * (openProjectUrl: its own container). openUrl(url, { contextUuid, window })
+   * or openUrl({ url, contextUuid, window }). */
   async openUrl(urlOrOptions, options = {}) {
     const { url, contextUuid = null, window } = typeof urlOrOptions === "object" && urlOrOptions !== null
       ? urlOrOptions : { ...options, url: urlOrOptions };
@@ -1026,14 +1343,28 @@ export class AxioSozoServices {
       fail("INVALID_URL");
     let target = contextUuid;
     if (target !== null) this.#requireLive(target);
-    else {
-      const owner = (await this.projectForUrl(parsed.href))?.project.context_uuid ?? null;
+    const match = await this.projectForUrl(parsed.href, target ?? undefined);
+    const routed = this.#registeredWindow(window);
+    if (match && routed) return this.openProjectUrl({ window: routed, projectId: match.project.id, url: parsed.href, contextUuid: target });
+    if (target === null) {
+      const owner = match?.project.context_uuid ?? null;
       if (owner && this.#liveWorkspaces().has(owner)) target = owner;
     }
     const adapter = this.#adapterFor(window);
     if (!adapter) fail("NO_WINDOW");
     await adapter.openTab(parsed.href, { workspaceUuid: target });
     return { opened: true };
+  }
+
+  /** The registered window behind #adapterFor(window): the given one, the most
+   * recent one, else the first authoritative one. */
+  #registeredWindow(window) {
+    if (window && this.#windows.has(window)) return window;
+    const recent = this.#deps.mostRecentWindow?.();
+    if (recent && this.#windows.has(recent)) return recent;
+    const adapter = this.#authoritativeAdapters()[0];
+    for (const [key, value] of this.#windows) if (value === adapter) return key;
+    return null;
   }
 }
 
@@ -1140,6 +1471,33 @@ function chromeDependencies() {
     // first actual discovery. Unavailable means no discovery; there is no
     // direct-lsof fallback.
     arrivalRuntime: lazyArrivalSubprocess(() => createNativeProjectArrivalSubprocess()),
+    // Project containers through the pinned ContextualIdentityService: its
+    // canonical colours, the briefcase icon, no data-clearing removal.
+    containerIdentities: () => {
+      const { ContextualIdentityService, CONTAINER_COLORS } = ChromeUtils.importESModule("resource://gre/modules/ContextualIdentityService.sys.mjs");
+      const colors = Array.isArray(CONTAINER_COLORS) ? CONTAINER_COLORS.map(entry => entry.name) : ContextualIdentityService.containerColors;
+      return createGeckoIdentityAdapter({ service: ContextualIdentityService, allowedColors: colors, allowedIcons: [PROJECT_CONTAINER_ICON] });
+    },
+    containersEnabled: () => Services.prefs.getBoolPref(CONTAINERS_PREF, false),
+    observeContainers: observeChromeContainers,
+  };
+}
+
+/** Firefox's container deletion notification (its trusted payload carries the
+ * userContextId) and the containers pref turned off. Never per-ID events for
+ * the pref: Gecko resets every identity at once without them. */
+function observeChromeContainers({ identityDeleted, containersDisabled }) {
+  const deleted = { observe(subject) {
+    let id;
+    try { id = subject?.wrappedJSObject?.userContextId; } catch { id = undefined; }
+    identityDeleted(id);
+  } };
+  const pref = { observe() { if (!Services.prefs.getBoolPref(CONTAINERS_PREF, false)) containersDisabled(); } };
+  Services.obs.addObserver(deleted, "contextual-identity-deleted");
+  Services.prefs.addObserver(CONTAINERS_PREF, pref);
+  return () => {
+    Services.obs.removeObserver(deleted, "contextual-identity-deleted");
+    Services.prefs.removeObserver(CONTAINERS_PREF, pref);
   };
 }
 

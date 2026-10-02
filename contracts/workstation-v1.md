@@ -130,7 +130,12 @@ manifest):
 - `accounts[].key` is an integration id or a host pattern; `label` is free
   text typed by the user, 1–80 chars after trim, no control characters. The
   browser never reads cookies, tokens or page content to fill it.
-- `shared_sites.hosts` ≤ 32 host patterns (`validateHostPattern`).
+- `container.user_context_id` is null or a public Gecko identity integer
+  in 1–4294967294 (`MAX_USER_CONTEXT_ID`). Zero means the default routing
+  context, and 4294967295 is reserved for extension storage; neither is a
+  project container. Only the browser assigns project identity IDs.
+- `shared_sites.hosts` ≤ 32 host patterns (`validateHostPattern`). Suggestions
+  do not share a site until `shared_sites.confirmed === true`.
 - Context store **version 3** = version 2 whose `projects[]` are records of
   version 2. `CONTEXT_STORE_VERSION = 3`. `migrateContextStore` takes v1, v2
   or v3 and returns v3: project records are upgraded with `detected: null`,
@@ -148,10 +153,14 @@ manifest):
 - `CONTAINER_COLORS` = Firefox's `blue turquoise green yellow orange red pink purple`.
 - `projectContainerStyle(projectId) → { color, icon: "briefcase" }`
   (deterministic hash of the id).
-- `isSharedSite(project, host) → boolean` (pattern-aware, `hostMatches`).
+- `isSharedSite(project, host) → boolean` (pattern-aware, `hostMatches`);
+  only explicitly confirmed shared-site patterns take effect.
 - `routeForUrl({ project, url, defaultUserContextId }) → { userContextId, reason: "project" | "shared_site" | "no_container" | "not_web" }`.
-  Non-http(s) URLs → `not_web` with `defaultUserContextId`. No project
-  container yet → `no_container` with the default.
+  `defaultUserContextId` must be an integer in 0–4294967294; a reserved,
+  out-of-range or noninteger default raises `INVALID_INPUT`. Non-http(s)
+  URLs → `not_web` with the default. No valid public project container
+  yet → `no_container` with the default. Unconfirmed shared-site patterns
+  keep a web URL in the project container.
 - `INTEGRATION_HOSTS` (fixed): `vercel.com`, `dashboard.convex.dev`,
   `dashboard.clerk.com`, `dashboard.stripe.com`, `supabase.com`,
   `console.firebase.google.com`, `dash.cloudflare.com`, `app.netlify.com`,
@@ -159,6 +168,19 @@ manifest):
   `accountKeyForHost(project, host) → string | null` returns the integration
   id whose host matches, else an `accounts[].key` host pattern that matches.
 - `validateAccountLabel(s) → string` (trimmed) or `INVALID_INPUT`.
+
+The DOM-free browser controller owns one assignment queue for the service
+process. Container IDs are persisted by compare-and-set inside the profile
+store before any new-tab route is returned. Identity deletion or container-pref
+reset revokes in-flight routes immediately; failed mapping cleanup blocks retry.
+Project removal retains the identity and its browsing data. Account labels are
+manual profile metadata only, and no page cookie or account name is read.
+
+Chromium requires a separate CEF request context per Gecko project container,
+with no fallback to a shared jar; confirmed shared sites use the space default
+context. The CEF workstream owns creation, lifetime, privacy and storage mapping.
+This worktree does not implement that engine path. Until native request-context
+isolation is verified, project account routing to Chromium is unavailable.
 
 ## 4. Arrival (P1, new `packages/contexts/src/arrival.mjs`)
 

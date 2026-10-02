@@ -96,7 +96,8 @@ Claude Opus 5.5 CLI developer readiness: **PASS**, session
 no changes. No frontend code was created or edited by Codex; actual frontend
 integration remains delegated to Claude in later steps.
 
-Step 1 integration is in progress below. Steps 2–9 remain unintegrated; their
+Steps 1 and 2 have integrated source and verified builds below. Interactive
+arrival and cookie gates remain BLOCKED_HUMAN. Steps 3–9 remain unintegrated;
 ignored pure-logic preparation and fake tests do not establish GUI gate passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
@@ -178,7 +179,7 @@ Current logs: `.local/logs/plan4-step1-lead-test-supervisor.log`,
 `plan4-step1-lead-check-supervisor.log`, `plan4-step1-build-supervisor.log`.
 Evidence: `docs/evidence/plan4-1/cua-observer-20261002-d/`, including
 `lead-observations.json` and `startup-startup-window.png`. No interactive arrival
-pass is claimed. Step 1 is locally committed with this record; its hash is recorded in the next step.
+pass is claimed. Step 1 local commit: `108c107`. Interactive gates remain as recorded above.
 
 ## Follow-ups handled in current source
 
@@ -250,3 +251,77 @@ See the sub-agent choices recorded in `packages/contexts/README.md` and
 - After a denial there is a 30 s quiet period.
 - iOS vs macOS platform naming follows a folder-name heuristic.
 - Documented domains are "found in docs, unconfirmed".
+- Forgetting a project retains its native container and sign-in data; Firefox
+  container removal remains a separate explicit action.
+- A new tab whose selection is vetoed stays open and is reported unselected.
+
+## Step 2 — integrated source; cookie GUI BLOCKED_HUMAN
+
+Codex integrated the DOM-free process-wide container controller, public-ID and
+confirmed-sharing boundaries, contracts and pure tests. Claude Opus 5.5, session
+`eb1dce1b-2e3c-4206-8fda-851e4aa1c8ef`, owns every service, actor, tab-opening,
+manual account/shared-site editor, native indicator and frontend test change.
+Codex created or edited no frontend code.
+
+Each project obtains its own public Gecko identity before a project link opens;
+assignment is serialized and saved with compare-and-set. Shared sites use the
+space's default container only after explicit confirmation. Manual account labels
+never read pages, cookies or account names. Firefox deletion/reset clears mappings
+and stops in-flight routing; failed cleanup blocks until retried. Renaming changes
+only the identity presentation. Forgetting a project retains its native container
+and sign-in data; removing those remains a separate Firefox action. Chromium
+request contexts remain a requirement for the CEF workstream, unimplemented here.
+
+Independent fake reproductions found and Claude corrected stale routing during an
+awaited workspace switch, missing live tab container identity, selection veto
+reporting, stale project menus and same-document URL changes. Routing now checks
+per-project mutation marks and current hostname policy at dispatch, rejecting
+changed or pending records before any tab exists. Commands bind to the live
+originating tab, address and model generation. A created tab that Firefox leaves
+in the background is reported honestly; it is retained. No unrelated tab is closed.
+The exact three race probes and fresh-route controls passed after the fixes.
+
+A Step 1 transport follow-up is included: Codex integrated a DOM-free shared raw
+UTF-8 reader and arrival drain. Pinned Gecko readString may return an empty string
+for a partial code point before EOF. Only a zero-byte raw ArrayBuffer now ends
+arrival output; split Unicode, malformed/incomplete UTF-8 and exact raw byte caps
+have meaningful regression coverage. Native supervisor/helper pins are unchanged.
+
+Actual verification on 2 October 2026:
+
+- Final `./dev test` and `./dev check`: exit 0. Browser 751/751, contexts 143,
+  provider-host 122, containment reader Python 22, arrival supervisor Python 18;
+  all other repository suites passed. CEF native/check/stream gates remained
+  `SKIPPED_ENGINE_WORKSTREAM`. Focused integrated arrival/service/raw-reader suite
+  passed 125/125; independent final menu regressions passed 6/6.
+- Warm `./dev setup`: exit 0; 65 chrome files and 9 sandbox-readable Zen content
+  resources verified. Native source fingerprint
+  `9f35c040d85c8afe2e3cd5a948e6381c29635a775309fe78c0cdc7191992ab01`.
+- Fresh owned real app profile, PID/executable/UID and two fixture listeners/CWDs
+  admitted. Overview actor/runtime and Projects rendering passed. TLS checks
+  remained on; provider hosts, key-entry prefs, endpoint and engine switching
+  stayed off. The actual CUA call reported the Mac locked and unable to unlock.
+  Arrival Keep, actual project-link tab creation and same-origin cookie isolation
+  are **BLOCKED_HUMAN / NOT_VERIFIED**; no UI acceptance or cookie observation was
+  fabricated. The explicitly requested cookie observer exits 1 for missing proof;
+  this is recorded separately from native app exit 0 and successful cleanup.
+- Read-only native raw-pipe arrival diagnostic passed: id plus three supervised
+  lsof operations exited 0, raw EOF observed, all four children waited once with
+  zero kills; exact owned Harbor folder found in 277 ms. No UI token, profile or
+  fixture write occurred. This proves backend discovery, not native UI admission.
+- Owned app and both fixtures reaped, both listeners closed, metadata hashes
+  unchanged. The inspected overview screenshot still clips/fades lower content;
+  Claude's Step 3 redesign must resolve that layout.
+
+Evidence (ignored): `docs/evidence/plan4-2/raw-cookie-20261002-a/`, including
+`observer-report.json`, `lead-observations.json`,
+`33601efb670b5aad-arrival_diagnostics.json` and
+`741c52d40cf3b29e-overview-window.png`. Logs:
+`.local/logs/plan4-step2-lead-test-final.log`,
+`plan4-step2-lead-check-final.log`, `plan4-step2-build.log`,
+`plan4-step2-arrival-utf8-test.log` and `plan4-step2-raw-cookie-gui.log`.
+Independent closure proof: `.local/plan4-prepared/contexts/step2-final-closure.md`.
+
+Step 2 local commit is recorded by the lead after this status update. The plan's
+human gate permits proceeding to Step 3. E1/E2 are NOT_VERIFIED, product AI calls
+are NOT_AUTHORIZED, and the app is not READY.

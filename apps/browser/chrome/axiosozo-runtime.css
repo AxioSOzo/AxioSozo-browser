@@ -36,6 +36,13 @@
   background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
 }
 #axiosozo-env-pill .axiosozo-env-pill-alert { display: none; }
+/* The tab's container (P2): the status dot in Firefox's own container colour
+ * (usercontext.css .identity-color-*); a ring when the tab has no container. */
+#axiosozo-env-pill .axiosozo-env-pill-container[hidden] { display: none; }
+#axiosozo-env-pill .axiosozo-env-pill-container[class*="identity-color-"] {
+  background: var(--identity-icon-color);
+  border-color: transparent;
+}
 #axiosozo-env-pill[data-services="down"] .axiosozo-env-pill-alert {
   display: inline-block;
   width: 6px;
@@ -177,6 +184,8 @@
   fill-opacity: 0.7;
 }
 .axiosozo-project-glyph { background: url("chrome://global/skin/icons/folder.svg") center / 14px no-repeat; }
+/* The project's own container colour, as on its tabs (usercontext.css). */
+.axiosozo-project-glyph[class*="identity-color-"] { fill: var(--identity-icon-color); fill-opacity: 1; }
 .axiosozo-project-chevron {
   width: 12px;
   background: url("chrome://global/skin/icons/arrow-down-12.svg") center / 10px no-repeat;
