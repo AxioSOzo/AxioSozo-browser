@@ -18,6 +18,10 @@
 //   checkpoint waits for the committed document's load to finish so the title is
 //   that document's own (never the tab label of the previous page). Revoking
 //   consent aborts calls in flight. M1 sends `address` only (see OUTLINE_SUPPORTED).
+// - Rules that choose OpenAI (site-rule-v1 `provider`) are never dispatched from
+//   here: OpenAI has no native admission or consent yet, and Jev's key, consent
+//   and outcome provenance are never reused for it. Screen rules send nothing:
+//   no native capture exists (SCREEN_SUPPORTED).
 import * as defaultCore from "./contexts/index.mjs";
 import { WPL, webURL, defaultTimers, prefEnabled, ensureRuntimeStylesheet, addTabsProgressListener,
   element, browserStackOf } from "./DevLoop.sys.mjs";
@@ -31,6 +35,16 @@ export const OVERVIEW_URL = "about:axiosozo";
 // Outline collection needs a read-only child actor that this workstream does not
 // own yet; until it exists every request is capped at `address`.
 export const OUTLINE_SUPPORTED = false;
+// No native capture of the visible tab exists yet: a screen rule is never
+// relabelled as another level, and the request builder is never told a
+// screenshot is available.
+export const SCREEN_SUPPORTED = false;
+// Decision providers this runtime may dispatch. A rule without a provider is Jev.
+export const NATIVE_DECISION_PROVIDERS = Object.freeze(["jev"]);
+const PROVIDER_NAMES = Object.freeze({ jev: "Jev", openai: "OpenAI", other: "Judgement" });
+// Anything but an absent or explicit Jev is never treated as Jev.
+const providerOf = rule => (rule?.provider === undefined || rule.provider === "jev" ? "jev"
+  : rule.provider === "openai" ? "openai" : "other");
 const LEDGER_HOST = /^[a-z0-9.-]{1,253}$/u;
 const RANK = Object.freeze({ none: 0, nudge: 1, suggest_leave: 2, pause_site: 3 });
 const INERT = Object.freeze({ dispose() {} });
@@ -150,7 +164,28 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   const jevTabs = new WeakMap(); // tab → { lastAt, controller }
   const controllers = new Set(); // every in-flight decide() controller, for consent revocation
   const pendingCommits = new Map(); // tab → { spec } until that document's top-level load stops
-  const diagnostics = { decideCalls: 0, dataSent: 0, budgetSkipped: 0, outlineCapped: 0, indicatorSkipped: 0, effects: [], flushed: 0 };
+  const documentEpochs = new WeakMap(); // tab → count of its committed top-level documents
+  const documentOf = tab => documentEpochs.get(tab) ?? 0;
+  const diagnostics = { decideCalls: 0, dataSent: 0, budgetSkipped: 0, outlineCapped: 0, indicatorSkipped: 0,
+    providerUnavailable: 0, screenUnavailable: 0, policyUnsettled: 0, effects: [], flushed: 0 };
+
+  // Optional decisions follow one settled policy snapshot: the rules with the Jev
+  // settings, and the contexts. Starting a reload of either makes decisions
+  // unavailable at once, before its first await, and revokes decision work under
+  // the old snapshot (policyEpoch). Only the latest reload of that source, read
+  // completely and successfully, makes them available again: a superseded (late)
+  // or failed read never restores them. Deterministic limits keep using the last
+  // installed rules and contexts.
+  let policyEpoch = 0;
+  const policyLoads = { rules: { latest: 0, settled: false }, contexts: { latest: 0, settled: false } };
+  const policySettled = () => !disposed && policyLoads.rules.settled && policyLoads.contexts.settled;
+  function beginPolicyLoad(source) {
+    const load = policyLoads[source];
+    load.settled = false;
+    policyEpoch++;
+    for (const controller of [...controllers]) controller.abort(); // answers under the old snapshot are dropped
+    return ++load.latest;
+  }
   shared.budget ??= core.createBudget();
 
   const today = now => core.localDay(localTime(now));
@@ -347,9 +382,14 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
       }
       fact("Effects", rule.effects.length ? rule.effects.map(e => e.replace("_", " ")).join(", ") : "none");
       const level = observationOf(rule, target.host);
-      const jevActive = jev.consent && level !== "none" && rule.effects.length > 0;
+      const provider = providerOf(rule);
+      const asked = level !== "none" && rule.effects.length > 0;
+      const jevActive = provider === "jev" && jev.consent && asked && (level !== "screen" || SCREEN_SUPPORTED);
       const sent = jevActive ? (OUTLINE_SUPPORTED ? level : "address") : null;
-      fact("Jev", sent ? `may see the page ${sent === "address" ? "address and title" : "outline"}` : "off; nothing leaves this Mac");
+      fact(PROVIDER_NAMES[provider], sent ? `may see the page ${sent === "address" ? "address and title" : "outline"}`
+        : asked && !NATIVE_DECISION_PROVIDERS.includes(provider) ? "not available in this build; nothing leaves this Mac"
+          : asked && level === "screen" ? "screenshots are not available in this build; nothing leaves this Mac"
+            : "off; nothing leaves this Mac");
       if (lastJev && jevActive) {
         fact("Last Jev check", `${lastJev.dataSent ? "sent" : "not sent"} at ${new Date(lastJev.at).toLocaleTimeString()}`);
       }
@@ -555,21 +595,56 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   }
 
   // ---- Optional Jev layer ------------------------------------------------------------------
+  /** A rule that may be sent at all: enabled, with effects and a level above none. */
+  const askable = (rule, host) => rule.enabled !== false && rule.effects.length > 0 && observationOf(rule, host) !== "none";
+  /** Only a Jev rule this runtime can serve: never an OpenAI rule, never a screenshot. */
+  const servable = (rule, host) => NATIVE_DECISION_PROVIDERS.includes(providerOf(rule))
+    && (SCREEN_SUPPORTED || observationOf(rule, host) !== "screen");
   function jevRule(target) {
-    if (!jev.consent || jevKeyMissing || !(jev.hourly_budget > 0) || typeof decide !== "function") return null;
-    return target.rules.find(rule => rule.enabled !== false && rule.effects.length > 0
-      && observationOf(rule, target.host) !== "none") ?? null;
+    if (!policySettled() || !jev.consent || jevKeyMissing || !(jev.hourly_budget > 0) || typeof decide !== "function") return null;
+    return target.rules.find(rule => askable(rule, target.host) && servable(rule, target.host)) ?? null;
+  }
+  /** Local, truthful refusal: no key probe, budget, indicator or decide() for these. */
+  function countUnservable(target) {
+    for (const rule of target.rules) {
+      if (!askable(rule, target.host) || servable(rule, target.host)) continue;
+      if (!NATIVE_DECISION_PROVIDERS.includes(providerOf(rule))) diagnostics.providerUnavailable++;
+      else diagnostics.screenUnavailable++;
+    }
   }
 
   async function checkpoint(tab, kind) {
     if (disposed || tab !== gBrowser.selectedTab || !foreground()) return; // background tabs never call
-    const target = targetFor(tab);
-    const rule = target && jevRule(target);
+    // Only a settled policy snapshot may admit a decision; while rules, Jev
+    // settings or contexts reload (or after a failed read) nothing is sent.
+    if (!policySettled()) { diagnostics.policyUnsettled++; return; }
+    const epoch = policyEpoch;
+    let target = targetFor(tab);
+    if (!target) return;
+    countUnservable(target);
+    let rule = jevRule(target);
     if (!rule) return;
     if (typeof hasJevKey === "function") {
+      const probedDocument = documentOf(tab);
       if (!(await hasJevKey())) return;
-      if (disposed || tab !== gBrowser.selectedTab || !foreground() || !jevRule(target)) return;
+      // The probe awaited: rules, Jev settings, the tab's document or its space may
+      // have changed meanwhile. A reload that started meanwhile voids this
+      // checkpoint, even if it already settled (a fresh checkpoint follows the new
+      // snapshot). Otherwise only the policy in force now may be sent, for the
+      // same document: the target and the rule are resolved again from current
+      // state (provider, effective observation, enabled, effects, space, consent and
+      // budget settings). A rule that now chooses OpenAI or a screenshot, or no
+      // longer asks at all, sends nothing; it is never reinterpreted as Jev/address.
+      if (policyEpoch !== epoch || !policySettled()) { diagnostics.policyUnsettled++; return; }
+      if (disposed || tab !== gBrowser.selectedTab || !foreground() || documentOf(tab) !== probedDocument) return;
+      const current = targetFor(tab);
+      if (!current || current.host !== target.host) return;
+      target = current;
+      rule = jevRule(target);
+      if (!rule) return;
     }
+    // From here to decide() nothing is awaited: the request, the budget and the
+    // outgoing-data indicator all use this current target and rule.
     const now = clock();
     const state = jevTabs.get(tab) ?? { lastAt: null, controller: null };
     jevTabs.set(tab, state);
@@ -577,7 +652,8 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
       now, foreground: true, isPrivate: false })) return;
     // M1 observation: address (origin, path, title) only. An `outline` rule is
     // capped by building the request from a copy whose level is `address`, so
-    // the request never claims an outline it does not carry.
+    // the request never claims an outline it does not carry. The builder is never
+    // given screenAvailable or an image: no screenshot is taken here.
     const level = observationOf(rule, target.host);
     const capped = level === "outline" && !OUTLINE_SUPPORTED;
     const day = today(now);
@@ -626,13 +702,21 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
     if (state.controller === controller) state.controller = null;
     if (result?.reason === "disabled") { jevKeyMissing = true; return; } // no key: stop until settings change
     if (disposed || controller.signal.aborted || !jev.consent || !result || result.request_id !== request.request_id) return;
-    applyJevResult(tab, rule.id, target, result);
+    // Jev provenance only: an answer naming another provider never applies a Jev outcome.
+    if (result.provider !== undefined && result.provider !== "jev") return;
+    applyJevResult(tab, rule.id, target, result, epoch);
   }
 
-  function applyJevResult(tab, ruleId, target, result) {
-    // Re-validate at apply time (decision-v1 §Result).
+  function applyJevResult(tab, ruleId, target, result, epoch) {
+    // Re-validate at apply time (decision-v1 §Result): the snapshot the request was
+    // sent under must still be the settled one (a reload meanwhile, pending or
+    // done, drops the answer even if the rule ID remains), and the rule must still
+    // be one this runtime would ask Jev about. A switch to OpenAI, a screenshot,
+    // level none or no effects meanwhile drops the answer too.
+    if (epoch !== policyEpoch || !policySettled()) return;
     const rule = rules.find(r => r.id === ruleId);
-    if (!rule || rule.enabled === false || tab !== gBrowser.selectedTab || !foreground()) return;
+    if (!rule || tab !== gBrowser.selectedTab || !foreground()
+      || !askable(rule, target.host) || !servable(rule, target.host)) return;
     const now = targetFor(tab);
     if (!now || now.host !== target.host || now.contextUuid !== target.contextUuid || !now.rules.some(r => r.id === ruleId)) return;
     let evaluation = null;
@@ -647,6 +731,7 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
       if (!webProgress?.isTopLevel || (flags & WPL.LOCATION_CHANGE_SAME_DOCUMENT)) return;
       const tab = gBrowser.getTabForBrowser(browser);
       if (!tab) return;
+      documentEpochs.set(tab, documentOf(tab) + 1); // a checkpoint awaiting for the previous document is void
       jevTabs.get(tab)?.controller?.abort();
       pendingCommits.delete(tab); // a new document replaces any commit still waiting
       if (tab === gBrowser.selectedTab) syncSegment();
@@ -707,15 +792,30 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   cleanups.push(idle.subscribe(IDLE_SECONDS, value => { userIdle = value; syncSegment(); }));
   cleanups.push(adapter.onChange(() => { syncSegment(); evaluate(gBrowser.selectedTab); }));
 
+  // Each load is the latest of its source only until another starts; a superseded
+  // (late) answer publishes nothing, and a failed or incomplete read keeps the
+  // decision layer unavailable (deterministic limits keep the last installed data).
   async function loadRules() {
-    try { const list = await services.listRules(); rules = Array.isArray(list) ? list : []; } catch {}
-    try { const settings = await services.getJevSettings(); if (settings) jev = { ...jev, ...settings }; } catch {}
+    const id = beginPolicyLoad("rules");
+    let list = null, settings = null, listRead = false, settingsRead = false;
+    try { list = await services.listRules(); listRead = true; } catch {}
+    try { settings = await services.getJevSettings(); settingsRead = true; } catch {}
+    if (disposed || id !== policyLoads.rules.latest) return;
+    const validSettings = settingsRead && !!settings && typeof settings === "object";
+    if (listRead) rules = Array.isArray(list) ? list : [];
+    if (validSettings) jev = { ...jev, ...settings };
     jevKeyMissing = false;
+    policyLoads.rules.settled = listRead && Array.isArray(list) && validSettings;
     // Consent revoked: calls already in flight are cancelled and their answers dropped.
     if (!jev.consent) for (const controller of [...controllers]) controller.abort();
   }
   async function loadContexts() {
-    try { const list = await services.listContexts(); contexts = Array.isArray(list) ? list : []; } catch {}
+    const id = beginPolicyLoad("contexts");
+    let list = null, listRead = false;
+    try { list = await services.listContexts(); listRead = true; } catch {}
+    if (disposed || id !== policyLoads.contexts.latest) return;
+    if (listRead) contexts = Array.isArray(list) ? list : [];
+    policyLoads.contexts.settled = listRead && Array.isArray(list);
   }
   const reevaluate = () => { if (!disposed) for (const tab of new Set([gBrowser.selectedTab, ...displayed.keys()])) evaluate(tab); };
   cleanups.push(services.on("rules", () => { loadRules().then(reevaluate); }));

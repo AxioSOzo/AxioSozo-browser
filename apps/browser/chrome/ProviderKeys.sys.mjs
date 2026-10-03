@@ -14,6 +14,9 @@ const VOLUME = "/Volumes/AxioSozoBuild";
 const RESERVED_ROOTS = Object.freeze(["zen", "toolchains", "cargo-home", "cargo-target", "caches", "runtime", "tmp",
   "cef", "providers", "logs", "release", "diag", "diagnostics", "gui-fixtures"]);
 const CONTROL = /[\u0000-\u001f\u007f]/u;
+const BUFFER_BYTES = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get;
+// Pinned Gecko SubprocessConstants.ERROR_END_OF_FILE.
+const NATIVE_END_OF_FILE = 0xff7a0001;
 
 export class ProviderKeyError extends Error {
   constructor(code) { super(code); this.name = "ProviderKeyError"; this.code = code; }
@@ -32,14 +35,29 @@ export function validateDecisionKey(secret) {
   const bytes = new TextEncoder().encode(secret).length;
   return bytes >= DECISION_KEY_LIMITS.minBytes && bytes <= DECISION_KEY_LIMITS.maxBytes;
 }
+// Privileged synchronous authority only. A page cannot supply this callback.
+function surfaceCurrent(signal, isActive) {
+  try { return !signal?.aborted && (isActive === undefined || typeof isActive === "function" && isActive() === true); }
+  catch { return false; }
+}
+function requireCurrent(signal, isActive) {
+  requireValue(surfaceCurrent(signal, isActive), "SETTINGS_CLOSED");
+}
 function helperPath(runtime) {
-  const root = runtime.env("AXIOSOZO_BUILD_ROOT");
+  const staticRoot = runtime.env("AXIOSOZO_STATIC_READER_ROOT");
+  // Native env values are strings. Any explicit malformed test/runtime value
+  // also fails validation rather than falling back to another namespace.
+  const root = staticRoot === undefined || staticRoot === null || staticRoot === ""
+    ? runtime.env("AXIOSOZO_BUILD_ROOT") : staticRoot;
   const suffix = typeof root === "string" && root.startsWith(`${VOLUME}/`) ? root.slice(VOLUME.length + 1) : null;
   requireValue(root === VOLUME || suffix !== null && /^[a-z0-9][a-z0-9-]{0,39}$/u.test(suffix)
     && !RESERVED_ROOTS.includes(suffix), "KEYCHAIN_HELPER_UNAVAILABLE");
   return `${root}/providers/keychain`;
 }
 function nativeRuntime() {
+  // Synthetic native launches must supply an admitted fake runtime explicitly.
+  // Scrubbing BUILD_ROOT alone is insufficient when STATIC_READER_ROOT exists.
+  requireValue(Services.env.get("AXIOSOZO_SYNTHETIC_TEST") !== "1", "KEYCHAIN_HELPER_UNAVAILABLE");
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   return { spawn: options => Subprocess.call(options),
     timers: ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs"),
@@ -53,11 +71,15 @@ function nativeRuntime() {
     } };
 }
 
-async function keychainOperation(provider, operation, { runtime, signal, input = "" } = {}) {
+async function keychainOperation(provider, operation, { runtime, signal, isActive, input = "" } = {}) {
   validProvider(provider);
-  requireValue(!signal?.aborted, "SETTINGS_CLOSED");
-  let command;
-  try { runtime ??= nativeRuntime(); command = helperPath(runtime); }
+  requireCurrent(signal, isActive);
+  let command, nativeOutput;
+  try {
+    // Only trusted runtime dependencies may select their native raw pipe contract.
+    nativeOutput = runtime === undefined || runtime === null || runtime.outputPipeMode === "raw";
+    runtime ??= nativeRuntime(); command = helperPath(runtime);
+  }
   catch { throw new ProviderKeyError("KEYCHAIN_HELPER_UNAVAILABLE"); }
   const args = provider === "jev" ? [operation] : [operation, provider];
   let child = null, failure = null, finished = false, cleanupTask = null, timer = null, rejectStop;
@@ -86,9 +108,20 @@ async function keychainOperation(provider, operation, { runtime, signal, input =
   async function discard(pipe, size) {
     if (!pipe) return;
     for (;;) {
-      const chunk = await pipe.readString();
-      if (!chunk) return;
-      size.bytes += new TextEncoder().encode(chunk).length;
+      let bytes;
+      if (nativeOutput) {
+        // Gecko readString can return "" for an incomplete UTF-8 sequence.
+        // Discard native output without decoding; only an empty buffer is EOF.
+        const chunk = await pipe.read();
+        bytes = BUFFER_BYTES.call(chunk);
+        if (bytes === 0) return;
+      } else {
+        // Explicit test runtimes retain their existing string-pipe contract.
+        const chunk = await pipe.readString();
+        if (!chunk) return;
+        bytes = new TextEncoder().encode(chunk).length;
+      }
+      size.bytes += bytes;
       requireValue(size.bytes <= DECISION_KEY_LIMITS.outputBytes, "HELPER_OUTPUT_LIMIT");
     }
   }
@@ -97,22 +130,31 @@ async function keychainOperation(provider, operation, { runtime, signal, input =
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted) onAbort();
     const operationTask = (async () => {
+      requireCurrent(signal, isActive);
       requireValue(typeof runtime.verifyHelper === "function" && await runtime.verifyHelper(command) === true,
         "KEYCHAIN_HELPER_UNAVAILABLE");
       if (failure || finished) throw new ProviderKeyError(failure ?? "SETTINGS_CLOSED");
+      requireCurrent(signal, isActive);
       child = await runtime.spawn({ command, arguments: args, environmentAppend: false,
         environment: { PATH: "/usr/bin:/bin", LANG: "C" }, stderr: "pipe" });
-      if (failure || finished || signal?.aborted) {
+      if (failure || finished || !surfaceCurrent(signal, isActive)) {
         await cleanup(child); throw new ProviderKeyError(failure ?? "SETTINGS_CLOSED");
       }
       const write = async () => {
+        requireCurrent(signal, isActive);
         if (operation === "store") await child.stdin.write(input);
         input = "";
-        await child.stdin.close();
+        // Successful writes remain mandatory. Gecko may close stdin itself on
+        // exit before our close request arrives; only its EOF code is benign.
+        // The surrounding wait, genuine output EOF, deadline and authority
+        // checks still decide whether this operation succeeded.
+        try { await child.stdin.close(); }
+        catch (error) { if (!nativeOutput || error?.errorCode !== NATIVE_END_OF_FILE) throw error; }
       };
       const size = { bytes: 0 };
       const [, , result] = await Promise.all([discard(child.stdout, size), discard(child.stderr, size), child.wait(), write()]);
       if (failure) throw new ProviderKeyError(failure);
+      requireCurrent(signal, isActive);
       requireValue(result?.exitCode === 0 || operation !== "store" && result?.exitCode === 44, "KEYCHAIN_REFUSED");
       return result.exitCode;
     })();
@@ -127,28 +169,28 @@ async function keychainOperation(provider, operation, { runtime, signal, input =
 }
 
 /** The caller must provide its trusted user-action/private-window admission. */
-export async function storeDecisionKey(provider, secret, { runtime, signal, prefs = globalThis.Services?.prefs } = {}) {
+export async function storeDecisionKey(provider, secret, { runtime, signal, isActive, prefs = globalThis.Services?.prefs } = {}) {
   validProvider(provider);
   requireValue(decisionKeyEntryEnabled(provider, prefs), "KEY_ENTRY_DISABLED");
   requireValue(validateDecisionKey(secret), "INVALID_KEY");
-  try { await keychainOperation(provider, "store", { runtime, signal, input: secret }); }
+  try { await keychainOperation(provider, "store", { runtime, signal, isActive, input: secret }); }
   finally { secret = ""; }
 }
 
 /** Removing an item stays possible while new key entry is disabled. */
-export async function removeDecisionKey(provider, { runtime, signal } = {}) {
-  await keychainOperation(provider, "remove", { runtime, signal });
+export async function removeDecisionKey(provider, { runtime, signal, isActive } = {}) {
+  await keychainOperation(provider, "remove", { runtime, signal, isActive });
 }
 
 /** Presence only. A missing item has helper exit 44; no item is ever read. */
-export async function decisionKeyPresence(provider, { runtime, signal } = {}) {
-  return await keychainOperation(provider, "exists", { runtime, signal }) === 0 ? "stored" : "missing";
+export async function decisionKeyPresence(provider, { runtime, signal, isActive } = {}) {
+  return await keychainOperation(provider, "exists", { runtime, signal, isActive }) === 0 ? "stored" : "missing";
 }
 
 /** Fixed data only; presentation and private-window admission belong to Claude. */
-export async function decisionKeyStatus(provider, { runtime, signal, prefs = globalThis.Services?.prefs } = {}) {
+export async function decisionKeyStatus(provider, { runtime, signal, isActive, prefs = globalThis.Services?.prefs } = {}) {
   const key_entry_enabled = decisionKeyEntryEnabled(provider, prefs);
-  try { return Object.freeze({ provider, key_entry_enabled, key: await decisionKeyPresence(provider, { runtime, signal }), error: null }); }
+  try { return Object.freeze({ provider, key_entry_enabled, key: await decisionKeyPresence(provider, { runtime, signal, isActive }), error: null }); }
   catch (error) { return Object.freeze({ provider, key_entry_enabled, key: "unknown",
     error: error instanceof ProviderKeyError ? error.code : "KEYCHAIN_HELPER_UNAVAILABLE" }); }
 }

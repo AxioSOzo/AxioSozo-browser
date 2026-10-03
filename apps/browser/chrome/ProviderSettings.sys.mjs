@@ -1,18 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
-import { clientStatus, getJevKeyStatus, keychainErrorText } from "./ProviderStatus.sys.mjs";
+import { clientStatus, getDecisionKeyStatus, keychainErrorText, removeDecisionKeyAndReport,
+  storeDecisionKeyAndReport } from "./ProviderStatus.sys.mjs";
+import { DECISION_KEY_PROVIDERS, validateDecisionKey } from "./ProviderKeys.sys.mjs";
 const SETTINGS_URI = "chrome://browser/content/axiosozo/providers-settings.xhtml";
 const PREF = "axiosozo.providers.instances.v1";
 const DRIVERS = Object.freeze(["codex", "claude-code", "antigravity"]);
 const LABELS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code", antigravity: "Antigravity" });
+const KEY_LABELS = Object.freeze({ jev: "Jev", openai: "OpenAI" });
+const KEY_WORKING = Object.freeze({ check: "Checking…", store: "Storing…", remove: "Removing…" });
+// The outcome of these failures is uncertain, so presence is read again.
+const KEY_RECHECK = new Set(["KEYCHAIN_HELPER_UNAVAILABLE", "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "HELPER_OUTPUT_LIMIT"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-// Open decision 4 is decided (Wout, 28 Sep 2026): Jev key entry ships and is on by
-// default. The pref stays as a kill switch; an unreadable pref service fails closed.
-export const JEV_KEY_ENTRY_PREF = "axiosozo.jev.keyEntry.enabled";
-export function jevKeyEntryEnabled(prefs = globalThis.Services?.prefs) {
-  try { return prefs?.getBoolPref(JEV_KEY_ENTRY_PREF, true) === true; } catch { return false; }
-}
-const dialogs = new WeakMap();
+const dialogs = new WeakMap(); // browser window → its settings dialog
+const owners = new WeakMap(); // settings dialog → the browser window that opened it
 const authorizedWindows = new WeakSet();
 function requireValue(condition, code) { if (!condition) throw new Error(code); }
 function text(value, maximum = 4096) {
@@ -143,7 +144,9 @@ function nativeRuntime() {
   return { spawn: options => Subprocess.call(options), timers, env: name => Services.env.get(name) };
 }
 
-async function runOwned(runtime, command, args, { input = "", signal, keep = true, exitCodes = [0], withStatus = false } = {}) {
+// Metadata only: no stdin input, and only a zero exit is accepted. Key operations
+// run through ProviderKeys, never here.
+async function runOwned(runtime, command, args, { signal } = {}) {
   requireValue(text(command) && command.startsWith("/"), "INVALID_HELPER_PATH");
   if (signal?.aborted) throw new Error("SETTINGS_CLOSED");
   const child = await runtime.spawn({ command, arguments: args, environmentAppend: false,
@@ -165,11 +168,10 @@ async function runOwned(runtime, command, args, { input = "", signal, keep = tru
   }
   try {
     if (signal?.aborted) onAbort();
-    const write = async () => { if (input) await child.stdin.write(input); await child.stdin.close(); };
-    const [stdout, , result] = await Promise.all([collect(child.stdout, keep), collect(child.stderr, false), child.wait(), write()]);
+    const [stdout, , result] = await Promise.all([collect(child.stdout, true), collect(child.stderr, false), child.wait(), child.stdin.close()]);
     requireValue(!cancelled, "SETTINGS_CLOSED"); requireValue(!timeout, "HELPER_TIMEOUT");
-    requireValue(exitCodes.includes(result.exitCode), "HELPER_FAILED");
-    return withStatus ? { stdout, exitCode: result.exitCode } : stdout;
+    requireValue(result.exitCode === 0, "HELPER_FAILED");
+    return stdout;
   } finally {
     runtime.timers.clearTimeout(timer); signal?.removeEventListener("abort", onAbort);
     await child.stdin.close().catch(() => {});
@@ -184,56 +186,6 @@ export async function discoverForSettings(runtime = nativeRuntime(), signal) {
   return validateDiscovery(JSON.parse(await runOwned(runtime, node, [host, "discover"], { signal })));
 }
 
-// Fixed Keychain result codes. None of them carries helper output, paths or key material.
-export const KEYCHAIN_CODES = Object.freeze(["INVALID_KEY", "JEV_KEY_ENTRY_DISABLED", "KEYCHAIN_HELPER_UNAVAILABLE",
-  "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "SETTINGS_CLOSED"]);
-function keychainHelper(runtime) {
-  const root = runtime.env("AXIOSOZO_BUILD_ROOT");
-  requireValue(text(root) && root.startsWith("/Volumes/") && !/(^|\/)\.\.(\/|$)/u.test(root), "KEYCHAIN_HELPER_UNAVAILABLE");
-  return `${root}/providers/keychain`;
-}
-/** Runs one fixed helper operation. Spawn failure (helper not built) is KEYCHAIN_HELPER_UNAVAILABLE;
- * any other nonzero exit is KEYCHAIN_REFUSED. Helper stdout/stderr are never kept or reported. */
-async function keychainOperation(runtime, operation, { input = "", signal, exitCodes = [0] } = {}) {
-  const command = keychainHelper(runtime);
-  let child;
-  try { child = await runOwned(runtime, command, [operation], { input, signal, keep: false, exitCodes, withStatus: true }); }
-  catch (error) {
-    const code = error?.message;
-    if (code === "HELPER_FAILED") throw new Error("KEYCHAIN_REFUSED");
-    if (code === "HELPER_TIMEOUT" || code === "SETTINGS_CLOSED") throw new Error(code);
-    throw new Error("KEYCHAIN_HELPER_UNAVAILABLE");
-  }
-  return child.exitCode;
-}
-
-/**
- * Explicit user action only (Settings window or about:axiosozo "AI & keys"); the pref is a kill switch.
- * The key goes only to the reviewed native helper's stdin: never argv, environment, disk, logs,
- * prefs or a reply. Nothing is returned; the helper's stdout is not kept. No Jev call is made.
- */
-export async function storeJevKey(secret, runtime, signal, prefs = globalThis.Services?.prefs) {
-  requireValue(jevKeyEntryEnabled(prefs), "JEV_KEY_ENTRY_DISABLED");
-  const bytes = typeof secret === "string" ? new TextEncoder().encode(secret).length : 0;
-  requireValue(text(secret) && bytes >= 8 && bytes <= 4096, "INVALID_KEY");
-  runtime ??= nativeRuntime();
-  await keychainOperation(runtime, "store", { input: secret, signal });
-}
-
-/** Deletes the stored Jev key. Always allowed (also with the kill switch on): removing a secret
- * is never unsafe. A missing item counts as removed. */
-export async function removeJevKey(runtime, signal) {
-  runtime ??= nativeRuntime();
-  await keychainOperation(runtime, "remove", { signal, exitCodes: [0, 44] });
-}
-
-/** Presence only: "stored" | "missing". The helper's `exists` operation returns an exit status
- * and never the secret; chrome never runs the helper's `read`. Throws a KEYCHAIN_CODES code. */
-export async function jevKeyPresence(runtime, signal) {
-  runtime ??= nativeRuntime();
-  return await keychainOperation(runtime, "exists", { signal, exitCodes: [0, 44] }) === 0 ? "stored" : "missing";
-}
-
 function addText(document, parent, tag, value, className) {
   const node = document.createElementNS("http://www.w3.org/1999/xhtml", tag);
   node.textContent = value; if (className) node.className = className; parent.append(node); return node;
@@ -246,12 +198,34 @@ function addBadge(document, parent, code) {
 
 export function initializeProviderSettings(win) {
   const document = win.document;
-  requireValue(authorizedWindows.has(win) && document.documentURI === SETTINGS_URI
+  const owner = owners.get(win);
+  requireValue(authorizedWindows.has(win) && owner && document.documentURI === SETTINGS_URI
     && document.nodePrincipal.isSystemPrincipal, "UNTRUSTED_SETTINGS_SURFACE");
   const controller = new win.AbortController(); const runtime = nativeRuntime();
+  const { PrivateBrowsingUtils } = ChromeUtils.importESModule("resource://gre/modules/PrivateBrowsingUtils.sys.mjs");
   const store = new ProviderInstances(Services.prefs, () => Services.uuid.generateUUID().toString().replace(/[{}]/gu, ""));
   const byId = id => document.getElementById(id); let busy = false;
-  win.addEventListener("unload", () => { controller.abort(); byId("jev-key").value = ""; }, { once: true });
+  win.addEventListener("unload", () => {
+    controller.abort();
+    authorizedWindows.delete(win); owners.delete(win);
+    for (const provider of DECISION_KEY_PROVIDERS) byId(`${provider}-key`).value = "";
+  }, { once: true });
+  // Key authority of this dialog, read live: still this registered, open settings
+  // document with the system principal, opened by the same browser window that is
+  // still open, still this dialog's owner and explicitly not private. ProviderStatus,
+  // the fixture factory and ProviderKeys check it before every helper step and
+  // immediately before a key is written. Once false it stays false.
+  let keysRevoked = false;
+  const keysActive = () => {
+    if (keysRevoked) return false;
+    try {
+      keysRevoked = !(!controller.signal.aborted && authorizedWindows.has(win) && owners.get(win) === owner
+        && dialogs.get(owner) === win && win.closed === false && win.document === document
+        && document.documentURI === SETTINGS_URI && document.nodePrincipal?.isSystemPrincipal === true
+        && owner.closed === false && PrivateBrowsingUtils.isWindowPrivate(owner) === false);
+    } catch { keysRevoked = true; }
+    return !keysRevoked;
+  };
   const status = message => { byId("settings-status").textContent = message; };
   function renderInstances() {
     const policy = store.state();
@@ -370,40 +344,85 @@ export function initializeProviderSettings(win) {
     try { store.add(byId("driver").value, byId("instance-name").value); byId("instance-name").value = ""; renderInstances(); status("Local configuration saved. Authentication remains unknown."); }
     catch { status("Configuration was not saved. Use a name of 1–64 characters; at most 12 configurations are supported."); }
   });
-  // Jev: presence only. The key is never read back, shown or kept after the helper call.
-  let jevBusy = false;
-  async function renderJev(message) {
-    const jev = await getJevKeyStatus({ runtime, signal: controller.signal });
-    if (controller.signal.aborted) return;
-    const badge = byId("jev-state"); badge.textContent = jev.state_label;
-    badge.className = `badge ${jev.state === "key-stored" || jev.state === "needs-key" ? "neutral" : "warning"}`;
-    byId("jev-detail").textContent = jev.detail;
-    const helperUsable = jev.key !== "unavailable";
-    byId("jev-key").disabled = jevBusy || !jev.key_entry_enabled || !helperUsable;
-    byId("jev-store").disabled = byId("jev-key").disabled;
-    byId("jev-store").textContent = jev.key === "stored" ? "Replace key" : "Store key";
-    byId("jev-remove").disabled = jevBusy || !helperUsable || jev.key === "missing";
-    if (message) status(message);
+  // Decision keys, per provider: presence only. A typed key is read once, cleared at
+  // once and goes only to the Keychain helper's stdin. Every operation admits its own
+  // runtime under this dialog's signal and keysActive (ProviderStatus); the metadata
+  // runtime above is never used for keys. Storing never turns on consent or calls a provider.
+  const keys = new Map(DECISION_KEY_PROVIDERS.map(provider => [provider, { entry: null, busy: null }]));
+  const keyNode = (provider, part) => byId(`${provider}-${part}`);
+  const keyOptions = () => ({ signal: controller.signal, isActive: keysActive, prefs: Services.prefs });
+  function renderKey(provider) {
+    const { entry, busy } = keys.get(provider);
+    const label = KEY_LABELS[provider]; const stored = entry?.key === "stored";
+    const badge = keyNode(provider, "state");
+    badge.textContent = busy ? KEY_WORKING[busy] : entry?.state_label ?? KEY_WORKING.check;
+    badge.className = `badge ${!busy && (entry?.state === "unavailable" || entry?.state === "unknown") ? "warning" : "neutral"}`;
+    keyNode(provider, "detail").textContent = entry?.detail ?? "";
+    keyNode(provider, "section").setAttribute("aria-busy", busy ? "true" : "false");
+    keyNode(provider, "label").textContent = stored ? `Replace the ${label} key` : `${label} API key`;
+    // Storing follows the provider's key-entry pref; removal never does. While an
+    // operation runs the controls keep focus (aria-disabled) and ignore presses.
+    const input = keyNode(provider, "key"), store = keyNode(provider, "store"), remove = keyNode(provider, "remove");
+    input.disabled = !entry?.can_store; input.readOnly = !!busy;
+    store.disabled = !entry?.can_store; remove.disabled = !entry?.can_remove;
+    store.textContent = stored ? "Replace key" : "Store key";
+    store.setAttribute("aria-label", `${stored ? "Replace" : "Store"} key for ${label}`);
+    remove.setAttribute("aria-label", `Remove key for ${label}`);
+    for (const button of [store, remove]) {
+      if (busy) button.setAttribute("aria-disabled", "true"); else button.removeAttribute("aria-disabled");
+    }
   }
-  byId("jev-form").addEventListener("submit", async event => {
-    event.preventDefault(); if (jevBusy) return;
-    const input = byId("jev-key"); let secret = input.value; input.value = ""; jevBusy = true;
-    byId("jev-store").disabled = true; byId("jev-remove").disabled = true;
-    let message;
-    try { await storeJevKey(secret, runtime, controller.signal); message = "Jev key stored in the macOS Keychain. It will not be shown again. No Jev call was made."; }
-    catch (error) { message = keychainErrorText(error?.message); }
-    finally { secret = ""; jevBusy = false; }
-    await renderJev(message);
-  });
-  byId("jev-remove").addEventListener("click", async () => {
-    if (jevBusy) return; jevBusy = true; let message;
-    byId("jev-store").disabled = true; byId("jev-remove").disabled = true;
-    try { await removeJevKey(runtime, controller.signal); message = "Jev key removed from the macOS Keychain."; }
-    catch (error) { message = keychainErrorText(error?.message); }
-    finally { jevBusy = false; }
-    await renderJev(message);
-  });
-  renderJev().catch(() => {});
+  async function checkKey(provider) {
+    const slot = keys.get(provider);
+    slot.busy = "check"; renderKey(provider);
+    try { slot.entry = await getDecisionKeyStatus(provider, keyOptions()); } catch { /* entry stays as it was */ }
+    finally { slot.busy = null; }
+    if (!controller.signal.aborted) renderKey(provider);
+  }
+  /** Keeps keyboard focus in the provider's form when the focused control becomes unavailable. */
+  function keepKeyFocus(provider, focused) {
+    if (!focused?.disabled) return;
+    const next = [keyNode(provider, "key"), keyNode(provider, "store"), keyNode(provider, "remove")].find(node => !node.disabled);
+    (next ?? keyNode(provider, "title")).focus();
+  }
+  async function keyAction(provider, kind, run) {
+    const slot = keys.get(provider); const error = keyNode(provider, "error");
+    const focused = document.activeElement;
+    error.textContent = ""; slot.busy = kind; renderKey(provider);
+    let code = null;
+    try { slot.entry = await run(); } catch (failure) { code = failure?.message ?? null; }
+    finally { slot.busy = null; }
+    if (controller.signal.aborted) return;
+    const label = KEY_LABELS[provider];
+    if (code) { error.textContent = keychainErrorText(code); status(error.textContent); }
+    else status(kind === "store"
+      ? `${label} key stored in the macOS Keychain. It will not be shown again. Nothing was sent and consent did not change.`
+      : `${label} key removed from the macOS Keychain.`);
+    renderKey(provider);
+    keepKeyFocus(provider, focused);
+    if (KEY_RECHECK.has(code)) await checkKey(provider);
+  }
+  for (const provider of DECISION_KEY_PROVIDERS) {
+    keyNode(provider, "form").addEventListener("submit", event => {
+      event.preventDefault();
+      const slot = keys.get(provider);
+      if (slot.busy || controller.signal.aborted) return;
+      const input = keyNode(provider, "key"); let secret = input.value; input.value = "";
+      if (!slot.entry?.can_store || !keysActive()) { secret = ""; return; }
+      if (!validateDecisionKey(secret)) {
+        secret = ""; keyNode(provider, "error").textContent = keychainErrorText("INVALID_KEY"); return;
+      }
+      keyAction(provider, "store", async () => {
+        try { return await storeDecisionKeyAndReport(provider, secret, keyOptions()); } finally { secret = ""; }
+      }).catch(() => {});
+    });
+    keyNode(provider, "remove").addEventListener("click", () => {
+      const slot = keys.get(provider);
+      if (slot.busy || !slot.entry?.can_remove || !keysActive()) return;
+      keyAction(provider, "remove", () => removeDecisionKeyAndReport(provider, keyOptions())).catch(() => {});
+    });
+    checkKey(provider).catch(() => {});
+  }
   byId("close").addEventListener("click", () => win.close());
   try { renderInstances(); } catch {
     const invalid = byId("instances-empty"); invalid.className = "placeholder error";
@@ -424,6 +443,7 @@ export function openProviderSettings(browserWindow) {
   if (previous && !previous.closed) { previous.focus(); return previous; }
   const win = browserWindow.openDialog(SETTINGS_URI, "axiosozo-provider-settings", "chrome,centerscreen,resizable,width=720,height=760");
   authorizedWindows.add(win);
+  owners.set(win, browserWindow);
   dialogs.set(browserWindow, win);
   const closeWithParent = () => { if (!win.closed) win.close(); };
   browserWindow.addEventListener("unload", closeWithParent, { once: true });

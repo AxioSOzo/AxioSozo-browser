@@ -8,20 +8,20 @@ const choices = Object.freeze({ no_op: 'No follow-up is needed', inspect_engine:
  * OpenAI Decisions adapter — UNVERIFIED_SHAPE, fixture-only.
  *
  * OpenAI announced the Decisions API (GPT-6 Luna, text or image context, a fixed set of
- * answers) at DevDay on 29 September 2026 as a limited preview. On 2 October 2026 no
- * official request/response schema was published. Checked (documentation pages only, no
- * API call, no key):
+ * answers) at DevDay on 29 September 2026 as a limited preview. The sources checked on
+ * 2 October supplied no request/response schema. Guide/resource URLs and announcement
+ * were rechecked on 3 October 2026. Documentation pages only; no API call or key:
  *   - https://developers.openai.com/api/docs/guides/decisions        → 404
  *   - https://platform.openai.com/docs/guides/decisions              → 301 to the 404 above
  *   - https://developers.openai.com/api/reference/resources/decisions → 404
  *   - https://developers.openai.com/api/reference/overview           → no Decisions resource
  *   - https://developers.openai.com/api/docs/changelog               → no Decisions entry
- *   - https://openai.com/index/introducing-gpt-6-sol-and-luna/       → announcement only (limited preview)
+ *   - https://openai.com/index/devday-2026-recap/       → announcement only (limited preview)
  * Therefore the endpoint, model id, request body and response body below are a
  * conservative ASSUMPTION modelled on the documented Jev choice shape. They are never
- * used against the network by the product: DecisionProvider refuses `openai` with reason
- * `UNVERIFIED_SHAPE` (no Keychain read, no fetch) unless the explicit test-only option
- * `unverifiedOpenAIFixture: true` is passed together with a fake fetch.
+ * used against the network by the product, whose live-authorization gate first returns
+ * NOT_AUTHORIZED. An authorized adapter still refuses openai with UNVERIFIED_SHAPE
+ * before key access unless tests explicitly set unverifiedOpenAIFixture with fake fetch.
  */
 export const UNVERIFIED_SHAPE = 'UNVERIFIED_SHAPE';
 export const OPENAI_DECISIONS = Object.freeze({

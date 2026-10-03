@@ -828,10 +828,22 @@ button.small { min-height: var(--button-min-height-small); padding-inline: var(-
 .tag.state[data-tone="warn"] { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn-ink); }
 .tag.state[data-tone="bad"] { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad-ink); }
 .tag.state[data-tone="info"] { background: var(--accent-soft); color: var(--accent); }
-.jev-state { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-small); }
-.key-row { display: flex; flex-wrap: wrap; gap: var(--space-small); }
+/* Settings panels in AI & keys are padded but never scroll containers (the
+ * sheet's body is one), so focus rings and field edges are never cut off. */
+.settings-panel { display: flex; flex-direction: column; gap: var(--space-large); padding: var(--space-large); }
+/* Decision keys: one quiet section per provider in a single panel. */
+.keys-panel { display: flex; flex-direction: column; padding-inline: var(--space-large); }
+.key-panel { display: flex; flex-direction: column; gap: var(--space-small); min-width: 0; padding-block: var(--space-large); }
+.key-panel + .key-panel { box-shadow: 0 -1px 0 var(--hairline); }
+.key-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); }
+.key-head h4 { color: var(--ink); font-size: var(--font-size-small); font-weight: var(--font-weight-semibold); }
+.key-panel .help { max-width: 38rem; }
+.key-panel .field { margin-top: var(--space-xsmall); }
+.key-panel button[aria-disabled="true"] { opacity: 0.45; }
+.key-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); min-width: 0; }
 .key-row input[type="password"] {
-  flex: 1 1 16rem;
+  flex: 1 1 14rem;
+  min-width: 0;
   min-height: 28px;
   padding: 0 var(--space-small);
   border: 0;

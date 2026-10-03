@@ -39,11 +39,12 @@
       ]
     },
     "observation": {
-      "description": "none: nothing leaves the machine. address: origin, path, page title. outline: address plus headings, link texts and form labels with opaque IDs. Default for new rules: none.",
+      "description": "none: nothing leaves the machine. address: origin, path, page title. outline: address plus headings, link texts and form labels with opaque IDs. Default for new rules: none. screen: address plus a PNG of the visible tab under decision-v1 image limits, only after explicit rule permission and runtime capture admission. Sensitive hosts always cap screen to address, regardless of observation_raised_hosts. Native capture unavailable means no screen request.",
       "enum": [
         "none",
         "address",
-        "outline"
+        "outline",
+        "screen"
       ]
     },
     "timeOfDay": {
@@ -214,7 +215,7 @@
           "$ref": "#/$defs/observation"
         },
         "observation_raised_hosts": {
-          "description": "Hosts in a sensitive category (banking, government, health, identity, password managers) for which the user explicitly raised the level above address. Every entry must also appear in match.hosts.",
+          "description": "Hosts in a sensitive category (banking, government, health, identity, password managers) for which the user explicitly raised the level above address. Every entry must also appear in match.hosts. This raises outline only; it never allows screen on a sensitive host.",
           "type": "array",
           "maxItems": 32,
           "uniqueItems": true,
@@ -265,6 +266,14 @@
         },
         "updated_at": {
           "$ref": "#/$defs/timestamp"
+        },
+        "provider": {
+          "description": "Optional per-call decision provider. Omitted means jev for existing v1 rules. Selection grants neither provider consent nor live authorization.",
+          "enum": [
+            "jev",
+            "openai"
+          ],
+          "default": "jev"
         }
       }
     },

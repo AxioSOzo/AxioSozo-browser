@@ -14,7 +14,10 @@ export const SURFACE_KINDS = Object.freeze(["repository", "issues", "ci", "relea
   "analytics", "payments", "package", "docs", "dashboard", "store", "crash_reports", "other"]);
 export const EFFECTS = Object.freeze(["nudge", "suggest_leave", "pause_site"]);
 export const OVERRIDES = Object.freeze(["none", "confirm", "delay_10s"]);
-export const OBSERVATIONS = Object.freeze(["none", "address", "outline"]);
+export const OBSERVATIONS = Object.freeze(["none", "address", "outline", "screen"]);
+// site-rule-v1 `provider`; a rule without one is judged by Jev.
+export const DECISION_PROVIDERS = Object.freeze(["jev", "openai"]);
+export const PROVIDER_LABELS = Object.freeze({ jev: "Jev", openai: "OpenAI" });
 export const AGENT_ACCESS = Object.freeze(["none", "read", "act_with_confirmation"]);
 export const WEEKDAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
 export const LEDGER_RETENTION_DAYS = 90;
@@ -22,12 +25,24 @@ export const MAX_HOSTS = 32;
 export const MAX_WINDOWS = 8;
 export const MAX_INSTRUCTION = 2000;
 
+export const OBSERVATION_LABELS = Object.freeze({
+  none: "Nothing", address: "The address", outline: "An outline of the page", screen: "A screenshot of the tab",
+});
 export const OBSERVATION_TEXT = Object.freeze({
   none: "Nothing leaves this machine. Only the local limits and allowed hours apply.",
   address: "When Jev is consulted: the site origin, the path (never the query or fragment) and the page title, with this rule's instruction and effects.",
   outline: "Reserved for page outlines (headings, link texts and form labels with opaque IDs; never form values, passwords, cross-origin frames, selections or private windows). This build sends the Address level only.",
+  screen: "For OpenAI only: the address plus a screenshot of the visible tab. Not available in this build: no screenshot is taken and nothing is sent for this level.",
 });
 export const SENSITIVE_CAP_TEXT = "Banking, government, health, identity and password-manager sites are capped at Address unless you raise the level for that host below.";
+export const SCREEN_CAP_TEXT = "A screenshot is never taken on banking, government, health, identity and password-manager sites: at most the address is used there, even where Outline was raised.";
+export const PROVIDER_TEXT = Object.freeze({
+  jev: "Uses your Jev key and the Jev consent under AI & keys.",
+  openai: "Not available in this build: OpenAI has no consent setting yet and its decision format is not verified, so this rule sends nothing to OpenAI.",
+});
+// Product decision calls are NOT_AUTHORIZED in this build (decision-v1).
+export const DECISIONS_UNAVAILABLE = "Decision calls are not available in this build, so nothing leaves this Mac for judgement yet.";
+export const RULE_DATA_TEXT = `Data can only leave this Mac for Jev when Jev consent is on in AI & keys, a Jev key is stored in the macOS Keychain, and this rule has a level above Nothing and at least one effect; every call shows the outgoing-data indicator in the address bar. ${DECISIONS_UNAVAILABLE}`;
 export const EFFECT_TEXT = Object.freeze({
   nudge: "Nudge: a small notice you can dismiss.",
   suggest_leave: "Suggest leaving: offers to save the page and close the tab.",
@@ -137,7 +152,7 @@ export function emptyRuleForm() {
     id: null, enabled: true, hostsText: "", contextsMode: "all", contextTypes: [], contextWorkspaces: [],
     instruction: "", dailyMinutes: "", windows: [], observation: "none", raisedHosts: [],
     effects: ["nudge"], override: "confirm", agents: { access: "none", instruction: "" },
-    createdAt: null,
+    provider: "jev", savedProvider: null, createdAt: null,
   };
 }
 
@@ -160,6 +175,9 @@ export function ruleToForm(rule) {
     effects: [...(rule.effects ?? [])],
     override: rule.override ?? "confirm",
     agents: { access: rule.agents?.access ?? "none", instruction: rule.agents?.instruction ?? "" },
+    // Shown as chosen; a rule saved without a provider (Jev) stays without one.
+    provider: rule.provider === "openai" ? "openai" : "jev",
+    savedProvider: DECISION_PROVIDERS.includes(rule.provider) ? rule.provider : null,
     createdAt: rule.created_at ?? null,
   };
 }
@@ -220,8 +238,11 @@ export function formToRule(form, { now, id }) {
   if (!OBSERVATIONS.includes(form.observation)) add("observation", "Choose what may leave the machine.");
   const effects = EFFECTS.filter(effect => (form.effects ?? []).includes(effect));
   if (!OVERRIDES.includes(form.override)) add("override", "Choose how continuing works.");
+  // Raising a sensitive host is for Outline only; it never allows a screenshot.
   const raised = form.observation === "outline"
     ? [...new Set(form.raisedHosts ?? [])].filter(host => hosts.includes(host)) : [];
+  const provider = form.provider ?? "jev";
+  if (!DECISION_PROVIDERS.includes(provider)) add("provider", "Choose Jev or OpenAI.");
 
   const access = AGENT_ACCESS.includes(form.agents?.access) ? form.agents.access : "none";
   const agentInstruction = String(form.agents?.instruction ?? "");
@@ -248,6 +269,9 @@ export function formToRule(form, { now, id }) {
       agents: { access, instruction: agentInstruction },
       created_at: form.createdAt ?? now,
       updated_at: now,
+      // Written only when chosen or already saved: an omitted provider would be
+      // kept from the stored rule, and a legacy rule keeps its exact v1 shape.
+      ...(provider !== "jev" || form.savedProvider ? { provider } : {}),
     },
   };
 }
@@ -257,7 +281,7 @@ export function describeRule(rule) {
   parts.push(rule.limits?.daily_minutes ? `${rule.limits.daily_minutes} min per day` : "no daily limit");
   const windows = rule.limits?.allowed_hours;
   if (windows?.length) parts.push("allowed " + windows.map(describeWindow).join(", "));
-  parts.push(`observation: ${rule.observation}`);
+  parts.push(`observation: ${rule.observation}${rule.provider === "openai" && rule.observation !== "none" ? " (OpenAI)" : ""}`);
   parts.push(rule.effects?.length ? "effects: " + rule.effects.join(", ").replaceAll("_", " ") : "no effects");
   if (rule.contexts !== "all") {
     const scope = [...(rule.contexts?.types ?? [])];
@@ -1108,6 +1132,22 @@ export function homeProblem(code) {
   }
 }
 
+// ---------------------------------------------------------------- page admission
+
+/** Waits (ms) before asking again when the actor did not admit this page as a
+ * sender. While the browser is still attaching a new tab it can refuse the first
+ * messages; the read-only check is asked at most this many more times while the
+ * page is shown, then the page stays not connected. */
+export const ADMISSION_RETRY_MS = Object.freeze([100, 200, 400, 800, 1600]);
+
+/** What a failed admission read means. Only a successful answer admits a page.
+ * A sender refusal or a missing actor is "retry" (not admitted, maybe not yet:
+ * a new tab can still be attaching). Any other failure, known or not, is
+ * "refused": the page stays not connected and asks nothing more. */
+export function admissionFailure(code) {
+  return code === "SENDER_REJECTED" || code === "ACTOR_ERROR" ? "retry" : "refused";
+}
+
 // ---------------------------------------------------------------- AI & keys
 
 const PROVIDER_TONES = Object.freeze({ ready: "ok", "key-stored": "ok", unverified: "info", "not-installed": "off",
@@ -1147,25 +1187,104 @@ export function jevKeyForm(jev, { isPrivate = false } = {}) {
   return { enabled: true, reason: null, canRemove: jev.key === "stored" || jev.key === "unknown" };
 }
 
-/** Same sentences as ProviderStatus.keychainErrorText (the page cannot load chrome modules). */
+/** Same sentences as ProviderStatus.keychainErrorText (the page cannot load chrome
+ * modules). Only refusals before any helper work say nothing changed; anything
+ * that can follow the dispatch says the change could not be confirmed. */
 export function keychainErrorText(code) {
   switch (code) {
-    case "INVALID_KEY": return "Key not stored. Enter a key of 8–4096 characters on one line.";
-    case "JEV_KEY_ENTRY_DISABLED": return "Jev key entry is turned off in this build.";
-    case "KEYCHAIN_HELPER_UNAVAILABLE": return "Keychain helper not available in this build. Nothing was stored.";
+    case "INVALID_KEY": return "Key not stored. Paste the whole key on one line: 8 to 4096 bytes.";
+    case "KEY_ENTRY_DISABLED":
+    case "JEV_KEY_ENTRY_DISABLED": return "Key not stored. Adding a key is turned off in this build.";
+    case "INVALID_PROVIDER": return "That provider is not supported. Nothing was changed.";
+    case "KEYCHAIN_HELPER_UNAVAILABLE": return "The Keychain helper was not available or did not finish, so the change could not be confirmed.";
     case "KEYCHAIN_REFUSED": return "The macOS Keychain refused the change. Unlock the Keychain and try again.";
-    case "HELPER_TIMEOUT": return "The macOS Keychain did not respond in time. Nothing was confirmed.";
-    case "PRIVATE_WINDOW": return "Keys cannot be changed from a private window.";
-    default: return "The Keychain change did not complete.";
+    case "HELPER_TIMEOUT": return "The macOS Keychain did not respond in time, so the change could not be confirmed.";
+    case "HELPER_OUTPUT_LIMIT": return "The Keychain helper answered unexpectedly, so the change could not be confirmed.";
+    case "SETTINGS_CLOSED": return "Cancelled before it finished, so the change could not be confirmed.";
+    case "BUSY": return "A change to this key is still running. Wait for it to finish.";
+    case "PRIVATE_WINDOW": return "Keys are managed from a normal window, never a private one.";
+    case "NO_WINDOW": return "Open this page in a browser window first.";
+    case "DOCUMENT_GONE": return "This page changed before the Keychain answered, so the change could not be confirmed. Check again.";
+    default: return "The Keychain change could not be confirmed.";
   }
 }
 
-/** A key typed by the user, checked like the actor does before anything is sent. */
-export function checkJevKey(text) {
-  const key = String(text ?? "");
-  if (key.length < 8 || key.length > 4096 || /[\u0000-\u001f\u007f]/u.test(key)) return { ok: false, code: "INVALID_KEY" };
-  return { ok: true };
+/** A key typed by the user, checked like ProviderKeys does (8–4096 UTF-8 bytes,
+ * no control characters) before anything is sent. */
+export function checkDecisionKey(text) {
+  if (typeof text !== "string" || CONTROL.test(text)) return { ok: false, code: "INVALID_KEY" };
+  const bytes = new TextEncoder().encode(text).length;
+  return bytes >= 8 && bytes <= 4096 ? { ok: true } : { ok: false, code: "INVALID_KEY" };
 }
+export const checkJevKey = checkDecisionKey;
+
+// A stored key is not a working provider: decision calls stay unavailable.
+const KEY_TONES = Object.freeze({ "key-stored": "info", "needs-key": "off", disabled: "off", unavailable: "warn", unknown: "unknown" });
+const KEY_PREFS = Object.freeze({ jev: "axiosozo.jev.keyEntry.enabled", openai: "axiosozo.openai.keyEntry.enabled" });
+const KEY_WORKING = Object.freeze({ check: "Checking…", store: "Storing…", remove: "Removing…" });
+const KEY_CODE = /^[A-Z][A-Z0-9_]{2,63}$/u;
+
+/** One getDecisionKeyStatus answer as the page shows it, or null when it is not one. */
+export function decisionKeyCard(entry) {
+  if (!entry || !DECISION_PROVIDERS.includes(entry.id)) return null;
+  const state = Object.hasOwn(KEY_TONES, entry.state) ? entry.state : "unknown";
+  return {
+    provider: entry.id,
+    label: PROVIDER_LABELS[entry.id],
+    state,
+    stateLabel: String(entry.state_label ?? "Status unknown"),
+    detail: String(entry.detail ?? ""),
+    tone: KEY_TONES[state],
+    key: ["stored", "missing"].includes(entry.key) ? entry.key : "unknown",
+    error: typeof entry.error === "string" && KEY_CODE.test(entry.error) ? entry.error : null,
+    keyEntryEnabled: entry.key_entry_enabled === true,
+    canStore: entry.can_store === true,
+    canRemove: entry.can_remove === true,
+  };
+}
+
+/** Why a provider's key cannot be checked from this page at all. */
+export function keyRefusalText(code) {
+  if (code === "PRIVATE_WINDOW" || code === "NO_WINDOW" || code === "DOCUMENT_GONE") return keychainErrorText(code);
+  if (code === "NOT_CONNECTED" || code === "SENDER_REJECTED" || code === "ACTOR_ERROR") return "This page is not connected to AxioSozo.";
+  return "The macOS Keychain could not be checked from this page. Use Check again.";
+}
+
+/** What one provider's key form shows and allows. Storing follows the
+ * provider's key-entry pref; removal never does. While an operation runs the
+ * controls stay focusable and the page ignores further presses. */
+export function decisionKeyView(provider, card, { busy = null, refused = null } = {}) {
+  const label = PROVIDER_LABELS[provider];
+  const stored = card?.key === "stored";
+  const canStore = !refused && card?.canStore === true;
+  const canRemove = !refused && card?.canRemove === true;
+  let help = `Stored only in the macOS Keychain; this page never shows it again. Storing sends nothing to ${label} and does not turn on consent.`;
+  if (refused) help = "";
+  else if (!card) help = "Checking the macOS Keychain…";
+  else if (card.state === "unavailable") help = "The Keychain helper is not available in this build.";
+  else if (!card.keyEntryEnabled) help = `Adding ${provider === "openai" ? "an" : "a"} ${label} key is turned off in this build (${KEY_PREFS[provider]}).${canRemove ? " You can still remove the stored key." : ""}`;
+  return {
+    tagLabel: busy ? KEY_WORKING[busy] : refused ? "Not available here" : card?.stateLabel ?? KEY_WORKING.check,
+    tone: busy || refused ? "unknown" : card?.tone ?? "unknown",
+    detail: refused ? keyRefusalText(refused) : card?.detail ?? "",
+    note: !busy && !refused && card?.error ? `Detail: ${card.error}` : null,
+    inputLabel: stored ? `Replace the ${label} key` : `${label} API key`,
+    placeholder: stored ? "Paste a new key to replace it" : `Paste your ${label} key`,
+    storeLabel: stored ? "Replace key" : "Store key",
+    storeName: `${stored ? "Replace" : "Store"} key for ${label}`,
+    removeName: `Remove key for ${label}`,
+    canStore, canRemove, help, busy: !!busy,
+  };
+}
+
+export function keyChangedText(provider, change) {
+  const label = PROVIDER_LABELS[provider];
+  return change === "stored"
+    ? `${label} key stored in the macOS Keychain. Nothing was sent and consent did not change.`
+    : `${label} key removed from the macOS Keychain.`;
+}
+// These failures leave the outcome unknown, so presence is read again.
+export const KEY_RECHECK = Object.freeze(["KEYCHAIN_HELPER_UNAVAILABLE", "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "HELPER_OUTPUT_LIMIT"]);
 
 // ---------------------------------------------------------------- ledger
 

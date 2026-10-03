@@ -107,7 +107,7 @@ Implementation: `packages/provider-host/src/decision.mjs`; spec: decision-v1
   announcement says Decisions accepts text or images; the encoding is unverified).
 - **Screen level.** `observation.level: "screen"` requires
   `observation.screen = { mime: "image/png", width, height, data_base64 }`
-  (exact keys; width/height integers 1–1280; canonical base64 without
+  (exact keys; width/height integers 1–1280; standard-alphabet base64 without
   whitespace; decoded ≤ 1 MiB; PNG signature; the IHDR chunk's width/height must
   equal the declared values) and may carry an `outline` (same rules as the
   outline level). The serialized-state cap is 1.5 MiB for `screen` only; every
@@ -136,16 +136,17 @@ Implementation: `packages/provider-host/src/decision.mjs`; spec: decision-v1
 ### OpenAI Decisions adapter: `UNVERIFIED_SHAPE`, fixture-only
 
 OpenAI announced the Decisions API (GPT-6 Luna, text or image context, a fixed
-answer set) at DevDay on 29 September 2026 as a limited preview. On 2 October
-2026 no official request/response documentation existed. Checked, documentation
-pages only (no API call, no key):
+answer set) at DevDay on 29 September 2026 as a limited preview. The sources
+checked on 2 October 2026 provided no official request/response schema. The
+guide/resource URLs and announcement were checked again on 3 October with the
+same result. These were documentation requests only, with no API call or key:
 
 - `https://developers.openai.com/api/docs/guides/decisions` — 404
 - `https://platform.openai.com/docs/guides/decisions` — 301 to the 404 above
 - `https://developers.openai.com/api/reference/resources/decisions` — 404
 - `https://developers.openai.com/api/reference/overview` — no Decisions resource
 - `https://developers.openai.com/api/docs/changelog` — no Decisions entry
-- `https://openai.com/index/introducing-gpt-6-sol-and-luna/` — announcement only
+- `https://openai.com/index/devday-2026-recap/` — announcement only
 
 The adapter is therefore marked `UNVERIFIED_SHAPE` (`OPENAI_DECISIONS` in
 `decision.mjs`). Its endpoint (`https://api.openai.com/v1/decisions`), model id
@@ -153,9 +154,10 @@ The adapter is therefore marked `UNVERIFIED_SHAPE` (`OPENAI_DECISIONS` in
 screen image moved to `images: [{ mime_type, data_base64 }]`) and response
 parsing (`{ model?, answers: { <question>: { type?, choice, confidence, probabilities? } } }`,
 strict choice/confidence checks) are assumptions. The product host never reads
-the OpenAI key or fetches for it: every `openai` request ends with reason
-`UNVERIFIED_SHAPE`. Only tests pass the test-only `unverifiedOpenAIFixture`
-option with a fake fetch. Live OpenAI calls are **NOT_AUTHORIZED**. Replace the
+the OpenAI key or fetches for it: valid requests first meet the disabled live
+authorization gate and return `NOT_AUTHORIZED`. An adapter with live authorization
+explicitly enabled still refuses OpenAI with `UNVERIFIED_SHAPE` before key access.
+Only tests pass the test-only `unverifiedOpenAIFixture` option with a fake fetch. Live OpenAI calls are **NOT_AUTHORIZED**. Replace the
 assumed shape and drop the label only once official documentation exists.
 
 ## Decision provider key entry (Jev and OpenAI)
@@ -185,11 +187,28 @@ helper's stdin; it is never logged, echoed, stored elsewhere or returned, and
 storing makes no provider call (there is no "test connection"). The Keychain is
 never read by these methods. **Kill switch:** the host cannot read prefs, so
 chrome enforces it exactly as for Jev: it refuses `keys/store` for a provider
-whose `axiosozo.<provider>.keyEntry.enabled` pref is false or unreadable
-(`axiosozo.jev.keyEntry.enabled` exists; `axiosozo.openai.keyEntry.enabled` is
-the proposed OpenAI pref), and allows `keys/remove` always. Chrome may instead
-keep calling the helper directly (`keychain store openai` on stdin), as
-`storeJevKey` does today; both paths address the same items.
+whose `axiosozo.<provider>.keyEntry.enabled` pref is false, missing or unreadable,
+and allows removal independently of entry. Both provider entry prefs default
+to true in this build; entry does not grant decision consent or live authority.
+The DOM-free chrome APIs are `storeDecisionKey`, `removeDecisionKey`,
+`decisionKeyPresence` and `decisionKeyStatus`. They call the fixed helper
+directly using argument arrays, with key input only on stdin.
+
+Owned synthetic browser runs must use a fresh admitted fixture runtime for each
+operation. `createNativeDecisionKeyFixtureRuntime({signal,isActive})` admits only a fixed
+workstation root, matching owned profile, interpreter and checksum-pinned helper.
+Synthetic runs reject an absent or invalid fixture without falling back to the
+production Keychain. The fixture stores only provider presence markers and
+accepts fixed invented inputs; it establishes no OS Keychain or authentication
+claim. The same privileged settings-surface signal and synchronous `isActive`
+callback cover admission and operation. Frontend owners supply this callback;
+it is never an actor/page parameter. It must return literal true only for the
+original live document and registered normal window. Unknown facts, exceptions
+and asynchronous/truthy results refuse. ProviderKeys checks before resolution,
+after verification, before dispatch/input and before reporting success. The
+fixture repeats it inside asynchronous admission immediately before fixed helper
+dispatch, including removal. An operation already dispatched may still commit;
+late cancellation/errors establish no rollback and must report uncertainty.
 
 ## Understand tier (`understand/*`)
 

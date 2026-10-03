@@ -356,3 +356,96 @@ test("error codes from detection, refresh and the actor read as sentences; unkno
   assert.equal(M.errorMessage("toString"), null);
   assert.equal(M.errorMessage(undefined), null);
 });
+
+test("page admission: a bounded, growing retry schedule; only a sender refusal or a missing actor is asked again", () => {
+  assert.ok(Object.isFrozen(M.ADMISSION_RETRY_MS));
+  assert.ok(M.ADMISSION_RETRY_MS.length >= 1 && M.ADMISSION_RETRY_MS.length <= 6, "a few asks, never a poll");
+  assert.ok(M.ADMISSION_RETRY_MS.every((ms, i, all) => Number.isInteger(ms) && ms > 0 && (i === 0 || ms > all[i - 1])));
+  assert.ok(M.ADMISSION_RETRY_MS.reduce((sum, ms) => sum + ms, 0) <= 5000, "gives up within seconds");
+  for (const code of ["SENDER_REJECTED", "ACTOR_ERROR"]) assert.equal(M.admissionFailure(code), "retry", code);
+  // Only a successful answer admits: every other failure, known or not, refuses.
+  for (const code of ["SERVICE_ERROR", "PRIVATE_WINDOW", "DOCUMENT_GONE", "INVALID_PARAMS", "NOT_CONNECTED",
+    "SOMETHING_NEW", "", undefined, null, 42]) {
+    assert.equal(M.admissionFailure(code), "refused", String(code));
+  }
+});
+
+// ---------------------------------------------------------------- Step 5: decision keys and rule policy
+
+test("site rules: provider round-trips with the exact legacy shape; screen stays policy only; raising a host is Outline only", async () => {
+  const { validateSiteRule } = await import("../../../packages/contexts/src/schema.mjs");
+  const base = { version: 1, id: "r_abcd", enabled: true, match: { hosts: ["bank.example", "x.com"] }, contexts: "all", instruction: "",
+    limits: { daily_minutes: null, allowed_hours: null }, observation: "address", observation_raised_hosts: [], effects: ["nudge"],
+    override: "confirm", agents: { access: "none", instruction: "" }, created_at: 1, updated_at: 1 };
+  const now = 5;
+  const legacy = M.formToRule(M.ruleToForm(base), { now, id: "r_unused" }).rule;
+  assert.equal(Object.hasOwn(legacy, "provider"), false, "a legacy rule stays without a provider");
+  assert.deepEqual(validateSiteRule(legacy), validateSiteRule({ ...base, updated_at: now }));
+  assert.equal(Object.hasOwn(M.formToRule({ ...M.emptyRuleForm(), hostsText: "x.com" }, { now, id: "r_abcd" }).rule, "provider"), false,
+    "a new rule left on Jev is the same as core.newRule");
+  for (const provider of ["jev", "openai"]) {
+    const form = M.ruleToForm({ ...base, provider });
+    assert.deepEqual([form.provider, form.savedProvider], [provider, provider]);
+    assert.equal(M.formToRule({ ...form, dailyMinutes: "30" }, { now, id: "r_unused" }).rule.provider, provider, "kept through unrelated edits");
+    validateSiteRule(M.formToRule(form, { now, id: "r_unused" }).rule);
+  }
+  assert.equal(M.formToRule({ ...M.ruleToForm({ ...base, provider: "openai" }), provider: "jev" }, { now, id: "r_unused" }).rule.provider, "jev");
+  assert.equal(M.formToRule({ ...M.ruleToForm(base), provider: "anthropic" }, { now, id: "r_unused" }).errors[0].field, "provider");
+  // Screen: the level is stored as policy; raised hosts never carry over to it; no image is ever part of a rule.
+  const screen = M.formToRule({ ...M.ruleToForm({ ...base, provider: "openai", observation: "screen" }), raisedHosts: ["bank.example"] },
+    { now, id: "r_unused" }).rule;
+  assert.deepEqual([screen.observation, screen.observation_raised_hosts, screen.provider], ["screen", [], "openai"]);
+  validateSiteRule(screen);
+  assert.deepEqual(M.formToRule({ ...M.ruleToForm(base), observation: "outline", raisedHosts: ["bank.example"] }, { now, id: "r_unused" }).rule
+    .observation_raised_hosts, ["bank.example"]);
+  assert.equal(M.describeRule({ ...base, provider: "openai" }), "no daily limit · observation: address (OpenAI) · effects: nudge");
+  assert.equal(M.describeRule(base), "no daily limit · observation: address · effects: nudge");
+  assert.match(M.OBSERVATION_TEXT.screen, /Not available in this build/u);
+  assert.match(M.PROVIDER_TEXT.openai, /Not available in this build/u);
+  assert.match(M.SCREEN_CAP_TEXT, /even where Outline was raised/u);
+});
+
+test("decision keys: the page checks keys like ProviderKeys (UTF-8 bytes, no controls) and shows the same fixed sentences", async () => {
+  const { keychainErrorText, decisionKeyEntry } = await import("../chrome/ProviderStatus.sys.mjs");
+  const { DECISION_KEY_CODES, validateDecisionKey } = await import("../chrome/ProviderKeys.sys.mjs");
+  for (const value of ["12345678", "é".repeat(2048), "x".repeat(4096), "short", "1234567", "é".repeat(2049), "x".repeat(4097),
+    "tab\there-key", "del\u007fkey-123", "line\nbreak-key", 12345678, null]) {
+    assert.equal(M.checkDecisionKey(value).ok, validateDecisionKey(value), String(value).slice(0, 20));
+  }
+  assert.equal(M.checkJevKey, M.checkDecisionKey);
+  for (const code of [...DECISION_KEY_CODES, "JEV_KEY_ENTRY_DISABLED", "BUSY", "PRIVATE_WINDOW", "NO_WINDOW", "DOCUMENT_GONE", "OTHER"]) {
+    assert.equal(M.keychainErrorText(code), keychainErrorText(code), code);
+  }
+  // The card is read from ProviderStatus' entry; only fixed fields survive.
+  const card = M.decisionKeyCard({ ...decisionKeyEntry({ provider: "openai", key_entry_enabled: false, key: "stored" }), extra: "<b>x</b>" });
+  assert.deepEqual(card, { provider: "openai", label: "OpenAI", state: "key-stored", stateLabel: "Key stored", detail: card.detail, tone: "info",
+    key: "stored", error: null, keyEntryEnabled: false, canStore: false, canRemove: true });
+  for (const bad of [null, {}, { id: "anthropic" }, { id: "codex", state: "ready" }]) assert.equal(M.decisionKeyCard(bad), null);
+  assert.equal(M.decisionKeyCard({ id: "jev", state: "ready" }).state, "unknown", "never ready");
+  assert.equal(M.decisionKeyCard({ id: "jev", state: "unknown", error: "bad code /path" }).error, null);
+});
+
+test("decision keys: what each form allows — store follows its own pref, removal never does; busy and refused states", () => {
+  const card = (provider, fields) => M.decisionKeyCard({ id: provider, state: "needs-key", state_label: "No key stored", detail: "d.",
+    key: "missing", key_entry_enabled: true, can_store: true, can_remove: false, ...fields });
+  const checking = M.decisionKeyView("jev", null);
+  assert.deepEqual([checking.tagLabel, checking.canStore, checking.canRemove, checking.help], ["Checking…", false, false, "Checking the macOS Keychain…"]);
+  const missing = M.decisionKeyView("jev", card("jev"));
+  assert.deepEqual([missing.storeLabel, missing.inputLabel, missing.canStore, missing.canRemove, missing.storeName],
+    ["Store key", "Jev API key", true, false, "Store key for Jev"]);
+  assert.match(missing.help, /Storing sends nothing to Jev and does not turn on consent\./u);
+  const offStored = M.decisionKeyView("openai", card("openai", { state: "key-stored", key: "stored", key_entry_enabled: false, can_store: false, can_remove: true }));
+  assert.deepEqual([offStored.storeLabel, offStored.inputLabel, offStored.canStore, offStored.canRemove, offStored.removeName],
+    ["Replace key", "Replace the OpenAI key", false, true, "Remove key for OpenAI"]);
+  assert.match(offStored.help, /^Adding an OpenAI key is turned off in this build \(axiosozo\.openai\.keyEntry\.enabled\)\. You can still remove the stored key\.$/u);
+  const helper = M.decisionKeyView("jev", card("jev", { state: "unavailable", key: "unknown", error: "KEYCHAIN_HELPER_UNAVAILABLE", can_store: false, can_remove: false }));
+  assert.deepEqual([helper.canStore, helper.canRemove, helper.note, helper.help],
+    [false, false, "Detail: KEYCHAIN_HELPER_UNAVAILABLE", "The Keychain helper is not available in this build."]);
+  const busy = M.decisionKeyView("jev", card("jev"), { busy: "store" });
+  assert.deepEqual([busy.tagLabel, busy.busy, busy.canStore, busy.note], ["Storing…", true, true, null]);
+  const refused = M.decisionKeyView("openai", card("openai"), { refused: "PRIVATE_WINDOW" });
+  assert.deepEqual([refused.tagLabel, refused.canStore, refused.canRemove, refused.detail],
+    ["Not available here", false, false, "Keys are managed from a normal window, never a private one."]);
+  assert.equal(M.keyRefusalText("SENDER_REJECTED"), "This page is not connected to AxioSozo.");
+  assert.equal(M.keyChangedText("openai", "stored"), "OpenAI key stored in the macOS Keychain. Nothing was sent and consent did not change.");
+});

@@ -98,8 +98,9 @@ integration remains delegated to Claude in later steps.
 
 Steps 1–3 have integrated source and verified builds below. Interactive arrival,
 cookie isolation and reference-home admission remain unverified behind the
-recorded human gates. Step 3 synthetic light/dark rendering is verified. Steps
-5–9 remain unintegrated; Step 4 source/build and status GUI are verified below.
+recorded human gates. Step 3 synthetic light/dark rendering is verified. Step 5 source/build and light initial key presence are verified below; dark
+startup and interactive key flows remain limited. Steps 6–9 remain unintegrated. Step 4
+source/build and status GUI are verified below.
 Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
 
@@ -505,3 +506,178 @@ Decisions taken for Step 4:
 
 Continue to Step 5 under the explicit human gate. E1/E2 remain NOT_VERIFIED and
 this app is not READY. No push, tag or release.
+
+
+Step 4 local commit: `5017c4c5749e07bd03059f40d5991aa403ac06a5`.
+
+## Step 5 — integrated; light key presence verified; interaction BLOCKED_HUMAN
+
+Codex integrated provider-qualified DOM-free key APIs, fixed synthetic presence
+fixture/native admission, additive per-rule provider/screen policy, contracts,
+tests and the owned GUI observer. Claude Opus 5.5 CLI, session
+`4f494ba6-bdea-411e-8ad2-dc257b598ee6`, owns every frontend change: both key-entry
+surfaces, actor/dialog lifetime wiring, rule choices, presentation and native
+site-rule runtime changes. Codex created or edited no frontend code.
+
+Product AI remains **NOT_AUTHORIZED**. OpenAI stays **UNVERIFIED_SHAPE**: the
+official Decisions guide/resource URLs returned 404 on 3 October 2026; the
+[DevDay announcement](https://openai.com/index/devday-2026-recap/) gives no wire
+schema. Native screenshot observation remains unavailable until Step 8 privacy
+admission is implemented and proved. No provider API call was made.
+
+Final verification after bounded startup, native stdin EOF and fixture reader-lock corrections:
+
+- `./dev test` and `./dev check`: exit 0. Browser 1290/1290, contexts165,
+  root Python182, bootstrap33, containment reader22, arrival supervisor18,
+  socket11, coordinator4, probe14 and Cargo10 passed; provider-host118 and provider checks passed.
+  CEF native/check/stream gates remain SKIPPED_ENGINE_WORKSTREAM.
+- `./dev setup` and `zen.py describe`: PASS, 87 packaged chrome files and
+  9 sandbox-readable Zen resources. Workstation fingerprint
+  `22d9d2cdd1b2377d6ab8bb34e1161124e48266e45cced75acd68dff6cc034918`.
+- Focused key/raw suites90/90 and Python presence fixture14/14 plus actual
+  POSIX lock cases3/3 passed.
+  Selected contexts checkpoint/rule/image policy cases28/28 passed.
+- Final native backend gate15/15 passed. Revocation during an actual metadata
+  read started zero key-operation children. All310 direct runtime children
+  exited/reaped,619 waits completed, and all pipes closed. Natural raw EOF:
+  stdout307/stderr309; deliberately stalled/late cleanup cases are separately
+  recorded. Both final presence markers were absent. Root independently matched
+  the active source hashes and asserted the lifecycle receipts. This proves
+  the DOM-free native boundary, not Gecko UI or production Keychain behavior.
+- Source review and20 new injected regressions reproduced a Gecko stdin-close
+  race (13 failed/7 passed before repair). Gecko closes stdin on process exit;
+  only its numeric EOF close error is now tolerated. Successful writes, genuine
+  output EOF, accepted wait results, deadlines and authority remain mandatory.
+  Other close errors and incomplete children still refuse. Independent review
+  is clear. Native15-case reruns after the EOF and later fixture change each
+  used fresh owned fixtures and passed; final gate is the lock-check receipt.
+- Three actual POSIX tests reproduced exclusive-lock contention between two
+  presence readers. The synthetic helper now uses shared nonblocking locks for
+  presence and exclusive nonblocking locks for mutations. Busy mutations still
+  refuse with unchanged markers. Helper SHA256
+  `82e11f794ab48cd0b29a28e65a560e876dca88406c3fc8d96fc851c300365d71`;
+  installer, runtime and observer pins were updated and verified. No production
+  Keychain helper or frontend code changed in these two backend corrections.
+- Independent authority reproductions now reject lost/unknown actor and dialog
+  authority before dispatch. The browser-owned synchronous `isActive` callback
+  is checked through async fixture admission and immediately before input or
+  removal dispatch. Unknown late mutation outcomes no longer claim rollback.
+- Four immutable decision-race reproductions now measure zero requests, budget
+  calls and sending indicators. A rule/settings/context reload closes admission
+  synchronously; changed epochs, superseded reads, failed reads and stale
+  completions cannot restore it. Fresh checkpoints require settled policy.
+
+Actual native GUI attempts:
+
+- RunA used a new owned light profile but Zen selected its empty startup tab.
+  Initial AI readiness timed out, no screenshots or key operations; no pass.
+- RunB used another new profile with source-verified native homepage startup
+  preferences. Selected/current/normal AI document, strict native identity,
+  fixture, TLS defaults, theme, two key-panel structures and provider cards all
+  passed. Both key forms remained disabled with unknown/refused status. Startup
+  logged two `not a top-level tab` actor refusals. The inferred page connection
+  latch is under Claude review; no sender check has been weakened. Initial
+  usable-key readiness timed out and no screenshot was accepted.
+- Both attempts reaped their owned app/installer children, closed the owned
+  Marionette listener, preserved source/build/profile/fixture identities and
+  left both presence markers absent. Graceful native exit0 was not observed;
+  these are failed GUI gates, not successful clean interactive runs.
+- Claude added a bounded, cancellable initial flags handshake. Only an actual
+  successful response admits the page; sender/actor failures retry on a fixed
+  schedule, while other failures stay disconnected. Existing sender checks
+  remain intact. Full tests/check/build above cover this correction.
+- RunC on the rebuilt source still failed strict functional readiness: both
+  key forms remained disabled, without sender refusals in its log. Exact
+  native/source/build/fixture binding passed; no key operation or PNG was
+  accepted. Its owned child/listener cleanup passed, graceful exit0 unobserved.
+- Separate diagnostic-only runs D light and E dark captured native window and
+  full-content PNGs. Root inspected all four: both providers show
+  KEYCHAIN_HELPER_UNAVAILABLE. Existing actor lookup proved exact selected
+  current/top-level/normal privileged-about identity and embedder; it created
+  no actor, sent no message and called no service. All diagnostic lifecycle
+  checks passed, including native exit0, owned child reaping, closed listener,
+  unchanged identities, absent endpoint and both markers absent. These are
+  **DIAGNOSTIC_RENDER_ONLY**, explicitly **NOT_PASSED** functional key gates.
+  Root is isolating native fixture admission; Claude reviews screenshots and
+  frontend wiring separately. No authorization check has been relaxed.
+- Diagnostic runF light added a single metadata-only native factory probe with
+  an instrumented native-equivalent runtime. Admission resolved in69ms, with
+  eight metadata children/eight completed waits and genuine stdout/stderr EOF.
+  Pipe close after EOF rejected; natural EOF and completed waits establish
+  those children's completion. The probe called no returned runtime/key method.
+  Its PNGs and full receipt show a partial improvement: Jev reached missing-key
+  status with an enabled form; OpenAI remained unavailable. The fixture lock
+  existed, so the UI did reach the synthetic helper; observer execution counts
+  of zero must not be read as a global no-helper claim. Both presence markers
+  remained absent, all final lifecycle checks passed, and native exit0 was
+  observed. This diagnostic is not a functional key gate. Root inspected both
+  PNGs and is distinguishing startup/default runtime and downstream failures.
+- Claude separately reviewed D light and E dark without source edits. Content
+  layout is contained and readable; dark native sidebar/vibrancy contrast is
+  unverified by the WebDriver snapshot. Keyboard/focus remain unverified.
+- Claude's ninth Step5 CLI round reviewed final lightI PNGs, historical darkE
+  PNGs and final darkJ report without edits. It found no concrete frontend
+  wiring flaw and accepted the light layout. Unknown presence deliberately
+  leaves Store enabled and offers Remove; that is not missing-key success.
+  Minor copy polish and native dialog evidence remain follow-ups, not passes.
+- Final light runI on the final build: both provider status reads reached
+  missing, both forms enabled, all fixed structure/label/native/source/build
+  checks passed. Root inspected the native window and full-content PNGs; layout
+  is contained and readable. Native exit0, direct owned app/installer reaping,
+  listener closure, unchanged identities and absent markers/endpoint all passed.
+  This is **INITIAL_PRESENCE_RENDER_PASS**, not store/remove interaction. The
+  browser exposes no direct helper wait receipt; the separate native backend
+  gate remains the child-process lifecycle evidence.
+- Dark runsH (after EOF repair) andJ (final helper) failed strict initial
+  readiness with one provider missing/ready and the other status unresolved.
+  Both native forms had enabled inputs; the unknown-status remove control did
+  not match the missing-key capture gate. Their exact reason was not read, so
+  neither earlier race is claimed as the proved cause. No PNG was accepted.
+  Their owned children were reaped/listeners closed/identities preserved and
+  markers absent; graceful native exit0 was not observed. Final dark initial
+  presence remains **NOT_VERIFIED**. Historical dark E verifies only its stated
+  diagnostic rendering on the same frontend source, before backend corrections.
+- Bounded dark runK added a read-only allowlisted status-code observation.
+  Jev reported `KEYCHAIN_REFUSED`; OpenAI reached missing/ready. The final
+  source already includes both backend repairs, so neither is claimed as this
+  failure's cause. The 60-second owned-app deadline ended the strict capture
+  attempt; no PNG was accepted. Owned reaping/listener closure/identity and
+  absent-marker checks passed; graceful native exit0 was not observed.
+- A fresh CUA `getState` reported the Mac locked and automatic unlock
+  unavailable. Per the plan, Check again/store/remove/native Settings dialog/
+  keyboard GUI are **BLOCKED_HUMAN**; no bypass was attempted. The unresolved
+  dark startup remains a separate failed gate, not a human-gate pass. Actual
+  macOS Keychain behavior and VoiceOver remain **NOT_VERIFIED**. Continue to
+  Step6 under the explicit interaction gate; preserve these follow-ups.
+
+Evidence (ignored):
+`.local/logs/plan4-step5-lock-{test,check,build}.log`,
+`.local/logs/plan4-step5-lock-build-identity.json`,
+`.local/logs/plan4-step5-{stdin,lock}-{before,focused}.log`,
+`.local/logs/plan4-step5-cua-blocked-20261003.json`,
+`.local/plan4-prepared/step5-key-native-lock-check/` (final),
+`.local/plan4-prepared/step5-key-native-authority-check/` (receipt SHA256
+`d2ef4961497f7f8c998def5cc128695c08188fadaa924400163137565641ef5d`),
+`.local/plan4-prepared/step5-review-bidi/final-rule-review-receipt.json`, and
+`docs/evidence/plan4-5/keys-light-20261003-{a,b,c}/`,
+`docs/evidence/plan4-5/keys-diagnostic-light-20261003-d/`, and
+`docs/evidence/plan4-5/keys-diagnostic-dark-20261003-e/`, and
+`docs/evidence/plan4-5/keys-admission-light-20261003-f/`. Final useful light PNGs:
+`docs/evidence/plan4-5/keys-light-20261003-i/both_missing-light-window.png` and
+`both_missing-light-full-content.png`. G is the earlier passing EOF-only light
+run; H/J/K retain failed dark reports. The final light lead review records scope.
+The earlier14-case/301-child receipt remains historical evidence for its
+pre-guard source snapshot, not the final backend or frontend boundary.
+
+Decisions taken for Step5: keep Jev entry default true; give OpenAI its own entry
+pref default true. Entry never grants consent or live calls; unknown prefs refuse
+entry and removal remains available. Preserve omitted legacy provider and stored
+screen policy. During policy reload/failure, deterministic local limits retain
+last installed rules while optional decisions remain unavailable. Native capture
+stays off until the later privacy gate. Fresh synthetic GUI profiles use only
+public invented key strings and presence markers; they never access real keys.
+
+Step5 source, final tests/check/build and scoped real GUI review are complete for
+local commit under the stated interaction gate. Dark initial key presence,
+store/remove and dialog/keyboard tests remain follow-ups. Steps6–9 preparations
+remain ignored until this commit; they establish no native or GUI pass. Not READY.

@@ -97,7 +97,8 @@
         </div>
       </section>
 
-      <!-- AI & keys: which assistants are installed, the Jev key and Jev settings, other settings. -->
+      <!-- AI & keys: which assistants are installed, agent status, the decision keys
+           (Jev and OpenAI, presence only), Jev settings, other settings. -->
       <section id="view-ai" class="view" data-view="ai" aria-labelledby="ai-heading" hidden>
         <div class="view-head">
           <div>
@@ -115,6 +116,14 @@
             <p id="agents-help" class="block-help">Your coding agents can tell AxioSozo when they start, need you, finish or fail. It shows on the project's home and as a quiet notice. Nothing is installed for you.</p>
           </div>
           <div id="agent-settings-body" class="panel agent-panel" aria-busy="true"></div>
+        </div>
+        <!-- Decision keys (Plan 4 step 5): read only while this view shows; decision calls stay unavailable. -->
+        <div id="decision-keys" class="block" aria-labelledby="keys-heading">
+          <div class="block-head">
+            <h3 id="keys-heading">Decision keys</h3>
+            <p id="keys-help" class="block-help">Optional keys for site-rule judgement, kept only in the macOS Keychain and never shown again. Decision calls are not available in this build: storing a key sends nothing and does not turn on consent.</p>
+          </div>
+          <div id="decision-keys-body" class="panel keys-panel"></div>
         </div>
         <div id="jev-card" class="block" aria-labelledby="jev-heading"></div>
         <div id="engine-settings" class="block"></div>

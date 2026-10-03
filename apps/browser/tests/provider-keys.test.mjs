@@ -28,7 +28,8 @@ function fixture({ exitCode = 0, stdout = [], stderr = [], hanging = false, spaw
     wait: () => { waited++; return exit; },
   };
   const runtime = {
-    env: name => name === 'AXIOSOZO_BUILD_ROOT' ? '/Volumes/AxioSozoBuild/workstation' : 'synthetic-env-must-not-propagate',
+    env: name => name === 'AXIOSOZO_BUILD_ROOT' ? '/Volumes/AxioSozoBuild/workstation'
+      : name === 'AXIOSOZO_STATIC_READER_ROOT' ? '' : 'synthetic-env-must-not-propagate',
     verifyHelper: async command => { checks.push(command); return helperValid; },
     spawn: async options => {
       calls.push(options); if (spawnFailure) throw new Error('synthetic-secret-in-spawn-error');
@@ -180,13 +181,15 @@ test('spawn deadline is bounded and a child returned after timeout is reaped wit
 
 
 test('native runtime initialization failures are normalized before reaching direct callers', async () => {
-  const previous = globalThis.ChromeUtils;
-  globalThis.ChromeUtils = { importESModule: () => { throw new Error('synthetic-private-initialization-error'); } };
+  const f = fixture(); const native = fakeGecko(f, { importFailure: true });
   try {
     for (const operation of [() => storeDecisionKey('jev', 'synthetic-key-12345', { prefs: enabled }),
       () => removeDecisionKey('jev'), () => decisionKeyPresence('openai')])
       await assert.rejects(operation(), code('KEYCHAIN_HELPER_UNAVAILABLE'));
-  } finally { if (previous === undefined) delete globalThis.ChromeUtils; else globalThis.ChromeUtils = previous; }
+    assert.equal(native.imports.length, 3);
+    assert(native.imports.every(uri => uri === 'resource://gre/modules/Subprocess.sys.mjs'));
+    assert.equal(native.fileChecks.length + f.calls.length + f.input.length, 0);
+  } finally { native.restore(); }
 });
 
 test('every cleanup action starts even when APIs fail and cleanup waiting has its own bound', async () => {
@@ -235,4 +238,260 @@ test('output-cap and reader failures force-close every pipe even when killing re
     for (const name of ['stdin', 'stdout', 'stderr']) assert(f.pipeCloses.some(([pipe, force]) => pipe === name && force === true));
     assert.equal(f.timers.size, 0);
   }
+});
+
+
+test('static reader root takes precedence with the same fixed namespace and no build-root lookup', async () => {
+  for (const root of ['/Volumes/AxioSozoBuild', '/Volumes/AxioSozoBuild/workstation']) {
+    for (const provider of ['jev','openai']) {
+      const f=fixture();const lookups=[];
+      f.runtime.env=name=>{
+        lookups.push(name);
+        if(name==='AXIOSOZO_STATIC_READER_ROOT')return root;
+        assert.fail('valid explicit static root must not read fallback root');
+      };
+      assert.equal(await decisionKeyPresence(provider,{runtime:f.runtime}), 'stored');
+      assert.equal(f.calls[0].command,root+'/providers/keychain');
+      assert.deepEqual(lookups,['AXIOSOZO_STATIC_READER_ROOT']);
+      assert.deepEqual(f.input,[]);
+    }
+  }
+});
+
+test('absent or empty static reader root keeps the existing build-root fallback', async () => {
+  for(const value of [undefined,null,'']) {
+    const f=fixture();const lookups=[];
+    f.runtime.env=name=>{
+      lookups.push(name);
+      return name==='AXIOSOZO_STATIC_READER_ROOT'?value:'/Volumes/AxioSozoBuild/workstation';
+    };
+    await removeDecisionKey('openai',{runtime:f.runtime});
+    assert.equal(f.calls[0].command,'/Volumes/AxioSozoBuild/workstation/providers/keychain');
+    assert.deepEqual(lookups,['AXIOSOZO_STATIC_READER_ROOT','AXIOSOZO_BUILD_ROOT']);
+  }
+});
+
+test('malformed explicit static root never falls back or verifies or spawns', async () => {
+  for(const root of ['/tmp/build','/Volumes/DevStorage/workstation','/Volumes/AxioSozoBuild/../other',
+    '/Volumes/AxioSozoBuild/workstation/../other','/Volumes/AxioSozoBuild/workstation/nested',
+    '/Volumes/AxioSozoBuild//workstation','/Volumes/AxioSozoBuild/workstation/',
+    '/Volumes/AxioSozoBuild/providers','/Volumes/AxioSozoBuild/toolchains',
+    '/Volumes/AxioSozoBuild/Workstation','/Volumes/AxioSozoBuild/workstation\n','relative',' ',0,false,true,NaN,{},[]]) {
+    const f=fixture();const lookups=[];f.runtime.env=name=>{
+      lookups.push(name);
+      return name==='AXIOSOZO_STATIC_READER_ROOT'?root:'/Volumes/AxioSozoBuild/workstation';
+    };
+    await assert.rejects(decisionKeyPresence('jev',{runtime:f.runtime}),code('KEYCHAIN_HELPER_UNAVAILABLE'));
+    assert.deepEqual(lookups,['AXIOSOZO_STATIC_READER_ROOT']);
+    assert.equal(f.calls.length+f.checks.length+f.input.length,0);
+  }
+});
+
+test('static environment lookup failure is a fixed refusal with no fallback or helper', async () => {
+  const f=fixture();f.runtime.env=name=>{
+    assert.equal(name,'AXIOSOZO_STATIC_READER_ROOT');throw new Error('invented-private-environment-error');
+  };
+  await assert.rejects(removeDecisionKey('openai',{runtime:f.runtime}),code('KEYCHAIN_HELPER_UNAVAILABLE'));
+  assert.equal(f.calls.length+f.checks.length+f.input.length,0);
+});
+
+function fakeGecko(f,{synthetic='',staticRoot='/Volumes/AxioSozoBuild/workstation',buildRoot='',
+  importFailure=false,rawStdout=[],rawStderr=[],rawHanging=false,rawReadFailure=false}={}) {
+  const saved=new Map(['Services','ChromeUtils','Cc','Ci'].map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
+  const imports=[],envReads=[],fileChecks=[],rawReads=[],stringReads=[];
+  const rawPipe=(original,values,name)=>{
+    const pending=[];
+    return {
+      close:async force=>{while(pending.length)pending.shift()(new ArrayBuffer(0));await original.close(force);},
+      read:async()=>{
+        rawReads.push(name);
+        if(rawReadFailure&&name==='stdout')throw new Error('invented-private-native-reader-error');
+        if(values.length)return values.shift();
+        if(!rawHanging)return new ArrayBuffer(0);
+        return await new Promise(resolve=>pending.push(resolve));
+      },
+      readString:async()=>{stringReads.push(name);throw new Error('native must not decode helper output');},
+    };
+  };
+  globalThis.Services={env:{get:name=>{
+    envReads.push(name);
+    return name==='AXIOSOZO_SYNTHETIC_TEST'?synthetic:name==='AXIOSOZO_STATIC_READER_ROOT'?staticRoot:
+      name==='AXIOSOZO_BUILD_ROOT'?buildRoot:'';
+  }}};
+  globalThis.ChromeUtils={importESModule:uri=>{
+    imports.push(uri);
+    if(importFailure)throw new Error('synthetic-private-initialization-error');
+    if(uri==='resource://gre/modules/Subprocess.sys.mjs')return {Subprocess:{call:async options=>{
+      const child=await f.runtime.spawn(options);
+      child.stdout=rawPipe(child.stdout,[...rawStdout],'stdout');
+      child.stderr=rawPipe(child.stderr,[...rawStderr],'stderr');
+      return child;
+    }}};
+    if(uri==='resource://gre/modules/Timer.sys.mjs')return f.runtime.timers;
+    assert.fail('unexpected native module import');
+  }};
+  globalThis.Ci={nsIFile:{}};
+  globalThis.Cc={'@mozilla.org/file/local;1':{createInstance:()=>({path:'',
+    initWithPath(path){this.path=path;fileChecks.push(path);},exists:()=>true,isSymlink:()=>false,
+    normalize(){},isFile:()=>true})}};
+  return {imports,envReads,fileChecks,rawReads,stringReads,restore(){
+    for(const [name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}
+  }};
+}
+
+test('synthetic omitted runtime refuses all native key operations before subprocess import or file checks', async () => {
+  const f=fixture();const native=fakeGecko(f,{synthetic:'1'});
+  try {
+    for(const operation of [()=>storeDecisionKey('jev','synthetic-key-12345',{prefs:enabled}),
+      ()=>removeDecisionKey('openai'),()=>decisionKeyPresence('jev')]) {
+      await assert.rejects(operation(),code('KEYCHAIN_HELPER_UNAVAILABLE'));
+    }
+    const status=await decisionKeyStatus('openai',{prefs:prefs({})});
+    assert.deepEqual(status,{provider:'openai',key_entry_enabled:false,key:'unknown',error:'KEYCHAIN_HELPER_UNAVAILABLE'});
+    assert.equal(native.imports.length+native.fileChecks.length+f.calls.length+f.input.length,0);
+    assert(native.envReads.every(name=>name==='AXIOSOZO_SYNTHETIC_TEST'));
+  } finally {native.restore();}
+});
+
+test('production omitted runtime keeps fixed default paths and provider selector', async () => {
+  for(const synthetic of ['', '0']) {
+    const f=fixture();const native=fakeGecko(f,{synthetic,buildRoot:'/tmp/unused-invalid-fallback'});
+    try {
+      assert.equal(await decisionKeyPresence('openai'),'stored');
+      assert.equal(f.calls[0].command,'/Volumes/AxioSozoBuild/workstation/providers/keychain');
+      assert.deepEqual(f.calls[0].arguments,['exists','openai']);
+      assert.deepEqual(native.imports,['resource://gre/modules/Subprocess.sys.mjs','resource://gre/modules/Timer.sys.mjs']);
+      assert.equal(native.envReads.includes('AXIOSOZO_BUILD_ROOT'),false);
+    } finally {native.restore();}
+  }
+});
+
+test('explicit fake runtime remains usable in a synthetic process with no native lookup or imports', async () => {
+  const f=fixture();const native=fakeGecko(f,{synthetic:'1'});
+  try {
+    await storeDecisionKey('openai','synthetic-key-12345',{runtime:f.runtime,prefs:enabled});
+    assert.equal(await decisionKeyPresence('openai',{runtime:f.runtime}),'stored');
+    await removeDecisionKey('openai',{runtime:f.runtime});
+    assert.equal(native.imports.length+native.envReads.length+native.fileChecks.length,0);
+    assert.equal(f.calls.length,3);assert.deepEqual(f.input,['synthetic-key-12345']);
+  } finally {native.restore();}
+});
+
+
+test('native split UTF-8 output continues through empty decoded prefixes and counts exact raw bytes', async () => {
+  const decoder=new TextDecoder();
+  assert.equal(decoder.decode(Uint8Array.of(0xe2),{stream:true}),'');
+  for(const provider of ['jev','openai']) {
+    const f=fixture({exitCode:44});const native=fakeGecko(f,{
+      rawStdout:[Uint8Array.of(0xe2).buffer,Uint8Array.of(0x82,0xac).buffer,
+        new ArrayBuffer(DECISION_KEY_LIMITS.outputBytes-3)],
+    });
+    try {
+      assert.equal(await decisionKeyPresence(provider),'missing');
+      assert.equal(native.rawReads.filter(name=>name==='stdout').length,4);
+      assert.equal(native.rawReads.filter(name=>name==='stderr').length,1);
+      assert.deepEqual(native.stringReads,[]);
+      assert.deepEqual(f.input,[]);
+      assert.equal(f.timers.size,0);assert(f.killed()>=1&&f.waited()>=2);
+    } finally {native.restore();}
+  }
+});
+
+test('native raw bytes enforce the shared stdout stderr cap even after split or invalid UTF-8', async () => {
+  for(const output of [
+    {rawStdout:[Uint8Array.of(0xe2).buffer,new ArrayBuffer(DECISION_KEY_LIMITS.outputBytes)]},
+    {rawStdout:[Uint8Array.of(0xff).buffer,new ArrayBuffer(8191)],rawStderr:[new ArrayBuffer(8193)]},
+  ]) {
+    const f=fixture();const native=fakeGecko(f,output);
+    try {
+      await assert.rejects(decisionKeyPresence('jev'),code('HELPER_OUTPUT_LIMIT'));
+      assert.deepEqual(native.stringReads,[]);
+      for(const name of ['stdin','stdout','stderr'])assert(f.pipeCloses.some(([pipe,force])=>pipe===name&&force===true));
+      assert.equal(f.timers.size,0);assert(f.killed()>=1&&f.waited()>=2);
+    } finally {native.restore();}
+  }
+});
+
+test('native EOF requires a genuine zero-byte ArrayBuffer rather than null strings or views', async () => {
+  for(const value of [null,undefined,'',new Uint8Array(0),{byteLength:0},
+    {[Symbol.toStringTag]:'ArrayBuffer',byteLength:0}]) {
+    const f=fixture();const native=fakeGecko(f,{rawStdout:[value]});
+    try {
+      await assert.rejects(removeDecisionKey('openai'),code('KEYCHAIN_HELPER_UNAVAILABLE'));
+      assert.equal(native.rawReads.filter(name=>name==='stdout').length,1);
+      assert.deepEqual(native.stringReads,[]);
+      for(const name of ['stdin','stdout','stderr'])assert(f.pipeCloses.some(([pipe,force])=>pipe===name&&force===true));
+      assert.equal(f.timers.size,0);assert(f.killed()>=1&&f.waited()>=2);
+    } finally {native.restore();}
+  }
+});
+
+test('native raw reader failures still force-close pipes and wait when kill rejects', async () => {
+  const f=fixture();const spawn=f.runtime.spawn;
+  f.runtime.spawn=async options=>{const child=await spawn(options);child.kill=async()=>{throw new Error('invented-private-kill-error');};return child;};
+  const native=fakeGecko(f,{rawReadFailure:true});
+  try {
+    await assert.rejects(decisionKeyPresence('jev'),code('KEYCHAIN_HELPER_UNAVAILABLE'));
+    for(const name of ['stdin','stdout','stderr'])assert(f.pipeCloses.some(([pipe,force])=>pipe===name&&force===true));
+    assert.deepEqual(native.stringReads,[]);assert(f.waited()>=2);assert.equal(f.timers.size,0);
+  } finally {native.restore();}
+});
+
+test('native raw reader timeout and abort settle bounded cleanup and reap owned child', async () => {
+  for(const reason of ['timeout','abort']) {
+    const f=fixture({hanging:true});const native=fakeGecko(f,{rawStdout:[Uint8Array.of(0xe2).buffer],rawHanging:true});
+    const controller=new AbortController();
+    try {
+      const pending=decisionKeyPresence('openai',{signal:controller.signal});await tick();
+      assert.equal(native.rawReads.filter(name=>name==='stdout').length,2);
+      if(reason==='abort')controller.abort();else [...f.timers.values()].find(timer=>timer.ms===DECISION_KEY_LIMITS.operationMs).fn();
+      await assert.rejects(pending,code(reason==='abort'?'SETTINGS_CLOSED':'HELPER_TIMEOUT'));
+      assert.deepEqual(native.stringReads,[]);
+      for(const name of ['stdin','stdout','stderr'])assert(f.pipeCloses.some(([pipe,force])=>pipe===name&&force===true));
+      assert.equal(f.timers.size,0);assert(f.killed()>=1&&f.waited()>=2);
+    } finally {native.restore();}
+  }
+});
+
+test('privileged surface authority fails closed before helper resolution', async () => {
+  for (const isActive of [null, false, () => false, () => 'true', async () => true,
+    () => { throw new Error('invented-private-authority-error'); }]) {
+    for (const operation of ['store', 'remove', 'presence']) {
+      const f = fixture(); f.runtime.env = () => assert.fail('revoked surface resolves no helper');
+      const options = { runtime: f.runtime, prefs: enabled, isActive };
+      const pending = operation === 'store' ? storeDecisionKey('openai', 'synthetic-key-12345', options)
+        : operation === 'remove' ? removeDecisionKey('openai', options) : decisionKeyPresence('openai', options);
+      await assert.rejects(pending, code('SETTINGS_CLOSED'));
+      assert.equal(f.calls.length + f.checks.length + f.input.length, 0);
+    }
+  }
+});
+
+test('surface revocation during helper verification prevents dispatch', async () => {
+  const f = fixture(); let active = true, resolveVerification;
+  f.runtime.verifyHelper = () => new Promise(resolve => { resolveVerification = resolve; });
+  const pending = storeDecisionKey('jev', 'synthetic-key-12345', { runtime: f.runtime, prefs: enabled, isActive: () => active });
+  await tick(); active = false; resolveVerification(true);
+  await assert.rejects(pending, code('SETTINGS_CLOSED'));
+  assert.deepEqual(f.calls, []); assert.deepEqual(f.input, []); assert.equal(f.timers.size, 0);
+});
+
+test('a child arriving for a revoked surface is cleaned without writing its key', async () => {
+  const f = fixture({ deferredSpawn: true }); let active = true;
+  const pending = storeDecisionKey('openai', 'synthetic-key-12345', { runtime: f.runtime, prefs: enabled, isActive: () => active });
+  await tick(); active = false; f.release();
+  await assert.rejects(pending, code('SETTINGS_CLOSED'));
+  assert.deepEqual(f.input, []); assert(f.killed() >= 1 && f.waited() >= 1); assert.equal(f.timers.size, 0);
+});
+
+test('revocation after input dispatch cannot report success or promise rollback', async () => {
+  const f = fixture(); let active = true; const spawn = f.runtime.spawn;
+  f.runtime.spawn = async options => {
+    const child = await spawn(options); const write = child.stdin.write;
+    child.stdin.write = async value => { await write(value); active = false; };
+    return child;
+  };
+  await assert.rejects(storeDecisionKey('jev', 'synthetic-key-12345', { runtime: f.runtime, prefs: enabled, isActive: () => active }), code('SETTINGS_CLOSED'));
+  assert.equal(f.input.length, 1, 'the committed outcome remains uncertain after dispatch');
+  assert.equal(f.timers.size, 0); assert(f.killed() >= 1 && f.waited() >= 1);
 });

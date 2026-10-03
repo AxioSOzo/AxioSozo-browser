@@ -514,6 +514,399 @@ test("outline rules are capped to address in M1 and the request says so", async 
   await t.runtime.dispose();
 });
 
+test("OpenAI rules are refused natively: no key probe, budget, indicator or decide(); a Jev rule beside them still runs", async () => {
+  let probes = 0;
+  const t = await setup({ jev: JEV_ON, rules: [observed({ provider: "openai" })], hasJevKey: async () => { probes++; return true; } });
+  const budget = JSON.stringify(t.shared.budget);
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await t.clock.advance(30 * 60000);
+  assert.equal(t.requests.length, 0);
+  assert.equal(probes, 0, "Jev's key is never consulted for OpenAI");
+  assert.equal(JSON.stringify(t.shared.budget), budget, "no budget is used");
+  assert.equal(t.outgoing().hidden, true, "no pre-send indicator");
+  const diagnostics = t.runtime.diagnostics();
+  assert.deepEqual([diagnostics.decideCalls, diagnostics.budgetSkipped, diagnostics.indicatorSkipped], [0, 0, 0]);
+  assert.ok(diagnostics.providerUnavailable >= 1);
+  t.indicator().click();
+  assert.match(t.panel().textContent, /OpenAInot available in this build; nothing leaves this Mac/u);
+  assert.doesNotMatch(t.panel().textContent, /Jevmay see/u);
+  await t.runtime.dispose();
+
+  const both = await setup({ jev: JEV_ON, rules: [observed({ provider: "openai" }), observed({ id: "r_xcom2", provider: "jev" })] });
+  const other = both.h.addTab({ url: "about:blank" });
+  both.h.commit(other, "https://x.com/");
+  await flushMicrotasks();
+  assert.deepEqual(both.requests.map(request => [request.state.rule.id, request.provider]), [["r_xcom2", "jev"]]);
+  await both.runtime.dispose();
+});
+
+test("screen rules send nothing natively and are never relabelled; on a sensitive host the core caps them to the address", async () => {
+  for (const extra of [{ provider: "openai" }, {}]) {
+    const t = await setup({ jev: JEV_ON, rules: [observed({ observation: "screen", ...extra })] });
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/");
+    await t.clock.advance(30 * 60000);
+    assert.equal(t.requests.length, 0, JSON.stringify(extra));
+    const diagnostics = t.runtime.diagnostics();
+    assert.ok(extra.provider ? diagnostics.providerUnavailable >= 1 : diagnostics.screenUnavailable >= 1);
+    t.indicator().click();
+    assert.match(t.panel().textContent, extra.provider ? /OpenAInot available in this build/u
+      : /Jevscreenshots are not available in this build; nothing leaves this Mac/u);
+    await t.runtime.dispose();
+  }
+  // Root policy (contexts core): a sensitive host never gets a screenshot, at most its address.
+  const t = await setup({ jev: JEV_ON, rules: [observed({ match: { hosts: ["paypal.com"] }, observation: "screen" })] });
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://paypal.com/");
+  await flushMicrotasks();
+  assert.deepEqual(t.requests.map(request => request.state.observation.level), ["address"]);
+  assert.equal("screen" in t.requests[0].state.observation, false);
+  await t.runtime.dispose();
+});
+
+test("a Jev outcome applies only with Jev provenance and only while the rule still chooses Jev", async () => {
+  let t = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })],
+    decide: async request => ({ ...result(request, "pause_site"), provider: "openai" }) });
+  let tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/");
+  await flushMicrotasks();
+  assert.equal(t.pause(tab), null, "an answer naming another provider is dropped");
+  await t.runtime.dispose();
+
+  const gate = deferred();
+  t = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })],
+    decide: async request => { await gate.promise; return { ...result(request, "pause_site"), provider: "jev" }; } });
+  tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/");
+  await flushMicrotasks();
+  t.services.rules = [observed({ effects: ["pause_site"], override: "none", provider: "openai" })];
+  t.services.emit("rules");
+  await flushMicrotasks();
+  gate.resolve();
+  await flushMicrotasks();
+  assert.equal(t.pause(tab), null, "switched to OpenAI meanwhile: the Jev answer is not applied");
+  await t.runtime.dispose();
+});
+
+// ---- Current policy after the asynchronous key probe -----------------------------------
+/** A key probe held until released; it answers "a key is stored". */
+function heldProbe() {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const probe = { calls: 0, release: () => release(), hasJevKey: async () => { probe.calls++; await gate; return true; } };
+  return probe;
+}
+/** setup() with a held probe; decide() records whether the outgoing-data indicator showed "sending" at dispatch. */
+async function probing(options = {}) {
+  const probe = heldProbe();
+  const seen = { sendingAtDispatch: 0 };
+  let t;
+  t = await setup({ jev: JEV_ON, rules: [observed()], hasJevKey: probe.hasJevKey, ...options,
+    decide: async request => {
+      t.requests.push(request);
+      if (!t.outgoing().hidden && t.outgoing().getAttribute("data-state") === "sending") seen.sendingAtDispatch++;
+      return result(request, "none");
+    } });
+  return Object.assign(t, { probe, seen, budgetCalls: () => t.shared.budget.calls.length });
+}
+
+test("a rule changed while the key probe is pending: nothing of the old policy is sent", async () => {
+  const changes = [
+    ["Jev/address to OpenAI/address", t => { t.services.rules = [observed({ provider: "openai" })]; }],
+    ["Jev/address to Jev/screen", t => { t.services.rules = [observed({ observation: "screen" })]; }],
+    ["rule turned off", t => { t.services.rules = [observed({ enabled: false })]; }],
+    ["level none", t => { t.services.rules = [observed({ observation: "none" })]; }],
+    ["no effects left", t => { t.services.rules = [observed({ effects: [] })]; }],
+    ["rule deleted", t => { t.services.rules = []; }],
+    ["Jev consent revoked", t => { t.services.jev = { ...JEV_ON, consent: false }; }],
+  ];
+  for (const [label, change] of changes) {
+    const t = await probing();
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/home");
+    await flushMicrotasks();
+    assert.deepEqual([t.probe.calls, t.requests.length, t.budgetCalls()], [1, 0, 0], `${label}: probing, nothing sent yet`);
+    assert.equal(t.outgoing().hidden, true);
+    change(t);
+    t.services.emit("rules");
+    await flushMicrotasks();
+    assert.equal(t.services.calls.listRules, 2, `${label}: the new policy is loaded while the probe waits`);
+    t.probe.release();
+    await flushMicrotasks();
+    assert.deepEqual([t.runtime.diagnostics().decideCalls, t.requests.length, t.budgetCalls(), t.seen.sendingAtDispatch], [0, 0, 0, 0],
+      `${label}: no decide(), no request, no budget, no indicator`);
+    assert.equal(t.outgoing().hidden, true);
+    assert.equal(t.outgoing().getAttribute("data-state"), null, `${label}: the indicator never said "sending"`);
+    // Later checkpoints follow the new policy too.
+    await t.clock.advance(30 * 60000);
+    assert.equal(t.requests.length, 0, label);
+    await t.runtime.dispose();
+  }
+});
+
+test("control: a rule still current after the key probe is sent once, with the indicator before dispatch; after an edit, the next checkpoint sends the edited rule", async () => {
+  const t = await probing();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  t.probe.release();
+  await flushMicrotasks();
+  assert.deepEqual([t.probe.calls, t.runtime.diagnostics().decideCalls, t.requests.length, t.budgetCalls(), t.seen.sendingAtDispatch], [1, 1, 1, 1, 1]);
+  const [request] = t.requests;
+  assert.equal(Object.hasOwn(request, "provider"), false, "a rule without a provider stays the legacy Jev request");
+  assert.equal(request.state.observation.level, "address");
+  assert.equal(request.state.checkpoint, "commit");
+  await t.runtime.dispose();
+
+  // An allowed edit while probing (still Jev, still the address): that probe sends
+  // nothing (it began under the old snapshot); the next checkpoint sends the edited rule.
+  const u = await probing();
+  const other = u.h.addTab({ url: "about:blank" });
+  u.h.commit(other, "https://x.com/home");
+  await flushMicrotasks();
+  u.services.rules = [observed({ instruction: "Only answer mentions." })];
+  u.services.emit("rules");
+  await flushMicrotasks();
+  u.probe.release();
+  await flushMicrotasks();
+  assert.equal(u.requests.length, 0, "the probe that began under the old snapshot sends nothing");
+  u.h.commit(other, "https://x.com/mentions");
+  await flushMicrotasks();
+  assert.deepEqual(u.requests.map(r => [r.state.rule.instruction, r.state.observation.address.path]), [["Only answer mentions.", "/mentions"]]);
+  assert.equal(u.seen.sendingAtDispatch, 1);
+  await u.runtime.dispose();
+});
+
+test("a new document while the key probe is pending voids the old checkpoint; the new document's own check runs", async () => {
+  const t = await probing();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/first");
+  await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/second");
+  await flushMicrotasks();
+  assert.equal(t.probe.calls, 2);
+  t.probe.release();
+  await flushMicrotasks();
+  assert.deepEqual(t.requests.map(request => request.state.observation.address.path), ["/second"]);
+  assert.equal(t.budgetCalls(), 1);
+  // Moved to a host without a matching rule while probing: nothing at all.
+  const u = await probing();
+  const other = u.h.addTab({ url: "about:blank" });
+  u.h.commit(other, "https://x.com/home");
+  await flushMicrotasks();
+  u.h.commit(other, "https://news.example/");
+  await flushMicrotasks();
+  u.probe.release();
+  await flushMicrotasks();
+  assert.deepEqual([u.requests.length, u.budgetCalls()], [0, 0]);
+  await t.runtime.dispose();
+  await u.runtime.dispose();
+});
+
+test("an answer arriving after the rule stopped asking Jev (screenshot, level none, no effects) is not applied", async () => {
+  for (const change of [{ observation: "screen" }, { observation: "none" }, { effects: [] }]) {
+    const gate = deferred();
+    const t = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })],
+      decide: async request => { await gate.promise; return { ...result(request, "pause_site"), provider: "jev" }; } });
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/");
+    await flushMicrotasks();
+    t.services.rules = [observed({ effects: ["pause_site"], override: "none", ...change })];
+    t.services.emit("rules");
+    await flushMicrotasks();
+    gate.resolve();
+    await flushMicrotasks();
+    assert.equal(t.pause(tab), null, JSON.stringify(change));
+    await t.runtime.dispose();
+  }
+});
+
+// ---- Settled policy snapshot: reloads of rules, Jev settings and contexts ------------------
+/** Holds every call of one services read until the test answers or fails it, in any order. */
+function holdRead(services, name) {
+  const original = services[name];
+  const pending = [];
+  services[name] = (...args) => new Promise((resolve, reject) => {
+    pending.push({ resolve, reject, now: () => original.apply(services, args) });
+  });
+  return { pending,
+    // Answers held call `index` with `value`, or with what the fake service would answer now.
+    answer: (index, value) => (value === undefined ? pending[index].now().then(pending[index].resolve) : pending[index].resolve(value)),
+    fail: index => pending[index].reject(new Error("synthetic read failure")),
+    restore: () => { services[name] = original; } };
+}
+const nothingSent = (t, label) => {
+  assert.deepEqual([t.runtime.diagnostics().decideCalls, t.requests.length, t.budgetCalls(), t.seen.sendingAtDispatch], [0, 0, 0, 0], label);
+  assert.equal(t.outgoing().getAttribute("data-state"), null, `${label}: the indicator never said "sending"`);
+};
+
+test("a policy reload holds decisions from its start: a probe already pending sends nothing, during and after the reload", async () => {
+  for (const [label, read, change] of [
+    ["rule switched to OpenAI while listRules is pending", "listRules", t => { t.services.rules = [observed({ provider: "openai" })]; }],
+    ["consent revoked while getJevSettings is pending", "getJevSettings", t => { t.services.jev = { ...JEV_ON, consent: false }; }],
+  ]) {
+    const t = await probing();
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/home");
+    await flushMicrotasks();
+    assert.deepEqual([t.probe.calls, t.requests.length], [1, 0]);
+    change(t);
+    const held = holdRead(t.services, read);
+    t.services.emit("rules");
+    await flushMicrotasks();
+    assert.equal(held.pending.length, 1, `${label}: the reload is still reading`);
+    t.probe.release();
+    await flushMicrotasks();
+    nothingSent(t, `${label}: the pending probe`);
+    assert.ok(t.runtime.diagnostics().policyUnsettled >= 1);
+    // New checkpoints while the reload is pending are refused too.
+    t.h.commit(tab, "https://x.com/second");
+    await t.clock.advance(30 * 60000);
+    nothingSent(t, `${label}: new checkpoints during the reload`);
+    held.answer(0);
+    await flushMicrotasks();
+    // Settled: the new policy (OpenAI, or no consent) still sends nothing.
+    t.h.commit(tab, "https://x.com/third");
+    await t.clock.advance(30 * 60000);
+    nothingSent(t, `${label}: after the reload`);
+    held.restore();
+    await t.runtime.dispose();
+  }
+});
+
+test("during a reload new checkpoints are refused; once the latest valid snapshot settles a fresh checkpoint is sent", async () => {
+  const t = await probing({ hasJevKey: null });
+  const held = holdRead(t.services, "listRules");
+  t.services.emit("rules");
+  await flushMicrotasks();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  await t.clock.advance(30 * 60000);
+  nothingSent(t, "while listRules is pending");
+  assert.ok(t.indicator().hidden === false, "the rule itself still shows and limits locally");
+  held.answer(0);
+  await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/again");
+  await flushMicrotasks();
+  assert.deepEqual([t.requests.length, t.budgetCalls(), t.seen.sendingAtDispatch], [1, 1, 1], "recovered with the current allowed snapshot");
+  assert.equal(t.requests[0].state.observation.address.path, "/again");
+  held.restore();
+  await t.runtime.dispose();
+});
+
+test("overlapping reloads: a late, older answer never replaces the newer snapshot, either way", async () => {
+  // Newer: OpenAI. Older, answered late: the allowed Jev rule. The older one must not come back.
+  const t = await probing({ hasJevKey: null });
+  const held = holdRead(t.services, "listRules");
+  t.services.emit("rules"); await flushMicrotasks();
+  t.services.emit("rules"); await flushMicrotasks();
+  assert.equal(held.pending.length, 2);
+  held.answer(1, [observed({ provider: "openai" })]); await flushMicrotasks();
+  held.answer(0, [observed()]); await flushMicrotasks();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await t.clock.advance(30 * 60000);
+  nothingSent(t, "the newer OpenAI snapshot stands");
+  assert.ok(t.runtime.diagnostics().providerUnavailable >= 1);
+  t.indicator().click();
+  assert.match(t.panel().textContent, /OpenAInot available in this build/u);
+  held.restore();
+  await t.runtime.dispose();
+
+  // Newer: an allowed edit. Older, answered late: OpenAI. The newer edit is what is sent.
+  const u = await probing({ hasJevKey: null });
+  const late = holdRead(u.services, "listRules");
+  u.services.emit("rules"); await flushMicrotasks();
+  u.services.emit("rules"); await flushMicrotasks();
+  late.answer(1, [observed({ instruction: "Newest." })]); await flushMicrotasks();
+  late.answer(0, [observed({ provider: "openai" })]); await flushMicrotasks();
+  const other = u.h.addTab({ url: "about:blank" });
+  u.h.commit(other, "https://x.com/home");
+  await flushMicrotasks();
+  assert.deepEqual(u.requests.map(request => request.state.rule.instruction), ["Newest."]);
+  // Disposed while a reload reads: its late answer publishes nothing and nothing is sent.
+  const after = holdRead(u.services, "listRules");
+  u.services.emit("rules"); await flushMicrotasks();
+  await u.runtime.dispose();
+  after.answer(0, [observed()]); await flushMicrotasks();
+  await u.runtime.checkpoint("commit", other);
+  assert.equal(u.requests.length, 1);
+});
+
+test("a failed reload keeps decisions unavailable while the cached rule still limits locally; a later good reload recovers", async () => {
+  for (const read of ["listRules", "getJevSettings"]) {
+    const t = await probing({ hasJevKey: null,
+      rules: [observed({ effects: ["pause_site"], override: "none", limits: { daily_minutes: 1, allowed_hours: null } })],
+      preload: [{ day: DAY, host: "x.com", contextUuid: WORKSPACE_A, ms: 2 * 60000 }] });
+    const held = holdRead(t.services, read);
+    t.services.emit("rules"); await flushMicrotasks();
+    held.fail(0); await flushMicrotasks();
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/home");
+    await t.clock.advance(30 * 60000);
+    nothingSent(t, `${read} failed`);
+    assert.ok(t.pause(tab), `${read} failed: the deterministic daily limit still pauses from the cached rule`);
+    held.restore();
+    t.services.emit("rules"); await flushMicrotasks();
+    t.h.commit(tab, "https://x.com/again");
+    await flushMicrotasks();
+    assert.equal(t.requests.length, 1, `${read}: a successful reload makes decisions available again`);
+    await t.runtime.dispose();
+  }
+});
+
+test("a contexts reload holds decisions the same way: pending, failed and recovered", async () => {
+  const t = await probing();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  const held = holdRead(t.services, "listContexts");
+  t.services.emit("contexts");
+  await flushMicrotasks();
+  t.probe.release();
+  await flushMicrotasks();
+  nothingSent(t, "the probe pending when contexts began to reload");
+  t.h.commit(tab, "https://x.com/second");
+  await flushMicrotasks();
+  nothingSent(t, "a new checkpoint while contexts reload");
+  held.answer(0);
+  await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/third");
+  await flushMicrotasks();
+  assert.deepEqual(t.requests.map(request => [request.state.observation.address.path, request.state.context_type]), [["/third", "project"]]);
+  held.restore();
+  const failing = holdRead(t.services, "listContexts");
+  t.services.emit("contexts"); await flushMicrotasks();
+  failing.fail(0); await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/fourth");
+  await t.clock.advance(30 * 60000);
+  assert.equal(t.requests.length, 1, "a failed contexts read keeps decisions unavailable");
+  failing.restore();
+  await t.runtime.dispose();
+});
+
+test("an answer to a request sent before a reload is not applied, even when the rule ID and policy are unchanged", async () => {
+  for (const event of ["rules", "contexts"]) {
+    const gate = deferred();
+    let signal = null;
+    const t = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })],
+      decide: async (request, options) => { signal = options.signal; await gate.promise; return result(request, "pause_site"); } });
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/");
+    await flushMicrotasks();
+    assert.equal(t.runtime.diagnostics().decideCalls, 1);
+    t.services.emit(event); // the same rule and settings are read again and settle at once
+    await flushMicrotasks();
+    assert.equal(signal.aborted, true, `${event}: the request under the old snapshot is revoked`);
+    gate.resolve();
+    await flushMicrotasks();
+    assert.equal(t.pause(tab), null, `${event}: its answer is not applied`);
+    await t.runtime.dispose();
+  }
+});
+
 test("interval checkpoints run only while the tab is foreground; background tabs never call", async () => {
   const t = await setup({ jev: JEV_ON, rules: [observed()] });
   const tab = t.h.addTab({ url: "about:blank" });

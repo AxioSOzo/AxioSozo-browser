@@ -14,7 +14,7 @@ export const JEV_REASON_CODES = Object.freeze(['drift', 'on_task', 'off_context'
 export const CONTEXT_TYPES = Object.freeze(['personal', 'organization', 'project']);
 export const PROJECT_KINDS = Object.freeze(['web', 'desktop', 'library', 'cli', 'mobile']);
 export const SURFACE_KINDS = Object.freeze(['repository', 'issues', 'ci', 'releases', 'hosting', 'analytics', 'payments', 'package', 'docs', 'dashboard', 'store', 'crash_reports', 'other']);
-export const OBSERVATIONS = Object.freeze(['none', 'address', 'outline']);
+export const OBSERVATIONS = Object.freeze(['none', 'address', 'outline', 'screen']);
 export const OVERRIDES = Object.freeze(['none', 'confirm', 'delay_10s']);
 export const AGENT_ACCESS = Object.freeze(['none', 'read', 'act_with_confirmation']);
 export const REFUSAL_REASONS = Object.freeze(['not_allowlisted', 'too_large', 'symlink_outside_root', 'not_regular_file', 'unreadable', 'invalid_utf8']);
@@ -580,7 +580,7 @@ function ruleContexts(v, code, path) {
   return out;
 }
 function siteRule(v, code, path) {
-  keys(v, code, path, ['version', 'id', 'enabled', 'match', 'contexts', 'instruction', 'limits', 'observation', 'observation_raised_hosts', 'effects', 'override', 'agents', 'created_at', 'updated_at']);
+  keys(v, code, path, ['version', 'id', 'enabled', 'match', 'contexts', 'instruction', 'limits', 'observation', 'observation_raised_hosts', 'effects', 'override', 'agents', 'created_at', 'updated_at'], ['provider']);
   if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
   keys(v.match, code, `${path}.match`, ['hosts']);
   const hosts = unique(arr(v.match.hosts, code, `${path}.match.hosts`, { min: 1, max: 32 }).map((h, i) => hostPattern(h, code, `${path}.match.hosts[${i}]`)), h => h, code, `${path}.match.hosts`);
@@ -599,6 +599,8 @@ function siteRule(v, code, path) {
       daily_minutes: nullable(v.limits.daily_minutes, x => int(x, code, `${path}.limits.daily_minutes`, 1, 1440)),
       allowed_hours: nullable(v.limits.allowed_hours, x => arr(x, code, `${path}.limits.allowed_hours`, { min: 1, max: 8 }).map((w, i) => allowedWindow(w, code, `${path}.limits.allowed_hours[${i}]`))),
     },
+    // Omission preserves existing v1 rules and the decision host's Jev default.
+    ...(Object.prototype.hasOwnProperty.call(v, 'provider') ? { provider: oneOf(v.provider, ['jev', 'openai'], code, `${path}.provider`) } : {}),
     observation: oneOf(v.observation, OBSERVATIONS, code, `${path}.observation`),
     observation_raised_hosts: raised,
     effects: unique(arr(v.effects, code, `${path}.effects`, { max: 3 }).map((e, i) => oneOf(e, EFFECTS, code, `${path}.effects[${i}]`)), e => e, code, `${path}.effects`),

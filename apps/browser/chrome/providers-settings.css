@@ -110,6 +110,25 @@ input:disabled { background: repeating-linear-gradient(-45deg, transparent 0 6px
 input:focus-visible, select:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .unavailable .field label { opacity: .75; }
 
+/* Decision keys: one quiet section per provider. Every row may shrink and wrap
+ * (min-width: 0, no fixed widths), so no control or focus ring is cut at the
+ * card edge in either colour scheme or at narrow window widths. */
+.key-provider { min-width: 0; padding: 14px 0 4px; border-top: 1px solid var(--border); }
+.key-provider:last-child { padding-bottom: 0; }
+.key-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; justify-content: space-between; min-height: 24px; }
+.key-head h3:focus { outline: none; }
+.key-provider .section-note { margin: 4px 0 0; overflow-wrap: anywhere; }
+.key-provider .section-note:empty { display: none; }
+.key-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-top: 12px; }
+.key-form .field { flex: 1 1 220px; min-width: 0; }
+.key-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.key-error { margin-top: 8px; color: var(--bad); font-size: 12.5px; }
+.key-error:empty { display: none; }
+.key-provider[aria-busy="true"] .key-head .badge { opacity: .8; }
+/* Busy: still focusable, but visibly inactive and ignoring presses. */
+button[aria-disabled="true"] { opacity: .5; cursor: default; }
+input:read-only:not(:disabled) { color: var(--muted); }
+
 /* Status line: sticky footer with reserved space, so messages never shift the layout or cover content at rest. */
 #settings-status { position: sticky; bottom: 0; min-height: 1.45em; margin: 8px -24px 0; padding: 9px 24px 10px;
   border-top: 1px solid var(--border); background: var(--page); font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
@@ -126,6 +145,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; border-color: var
   .instance { grid-template-columns: minmax(0, 1fr) auto; }
   .instance-controls { grid-column: 1 / -1; justify-content: flex-start; grid-row: 2; }
   .field, .field.grow, select { flex: 1 1 100%; min-width: 0; }
+  .key-actions { flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) { *, ::before { animation: none !important; transition: none !important; } }
 @media (forced-colors: active) {
@@ -134,7 +154,8 @@ input:focus-visible, select:focus-visible { outline-offset: 0; border-color: var
   #settings-status::before { forced-color-adjust: none; background: CanvasText; }
   button { border-color: ButtonText; }
   button.primary { border-width: 2px; }
-  button:disabled { color: GrayText; border-color: GrayText; opacity: 1; }
+  button:disabled, button[aria-disabled="true"] { color: GrayText; border-color: GrayText; opacity: 1; }
+  .key-error { color: CanvasText; }
   button.current:disabled { color: CanvasText; }
   .instance-toggle input { appearance: auto; width: auto; height: auto; }
   .install-state::before { background: CanvasText; forced-color-adjust: none; }

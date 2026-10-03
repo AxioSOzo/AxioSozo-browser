@@ -19,14 +19,23 @@ const newId = prefix => `${prefix}-${++idCounter}`;
 const TYPE_LABELS = M.TYPE_LABELS;
 
 const state = {
+  // connected: not known to be refused (false once the actor refused this page
+  // for good, or without the actor). admitted: the actor actually answered this
+  // shown page; nothing is read before it (see admit()).
   connected: !!api,
+  admitted: false,
   view: "projects",
-  flags: { contexts: true, enginePreferences: false, jevKeyEntry: true },
+  flags: { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false },
   contexts: [], projects: [], rules: [], orphans: [], attention: [], jev: null,
   // project id → its own container as the browser reports it (listProjectContainers)
   containers: new Map(),
   serviceStatus: new Map(), ledgerSummary: [], usageToday: [], usageWeek: [],
-  activeSpace: null, providers: null, providersLoading: false, jevKey: null, placement: null,
+  activeSpace: null, providers: null, providersLoading: false, placement: null,
+  // Decision keys (AI & keys), per provider: the browser's last answer, the
+  // operation on its way, the last fixed code to show and why the page cannot
+  // check at all. A typed key is never kept here.
+  keys: Object.fromEntries(M.DECISION_PROVIDERS.map(provider =>
+    [provider, { card: null, busy: null, notice: null, refused: null, ticket: 0 }])),
   // Project home (#project=<id>): the id from the route, the actor's answer for
   // it ({ id, data } or { id, problem }), projects whose local servers are being
   // checked, and whether the first load finished (nothing renders half-loaded).
@@ -48,7 +57,7 @@ const state = {
 // counter for all), so clearing them cannot let an old answer match a new one.
 let ticketSerial = 0;
 const nextTicket = () => ++ticketSerial;
-const latest = { home: 0, projects: 0, contexts: 0, agents: 0 };
+const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0 };
 const statusTickets = new Map(); // project id → its latest local-server check
 /** Voids any home answer still on its way (and a retry it would schedule). */
 const invalidateHome = () => { latest.home = nextTicket(); };
@@ -285,16 +294,23 @@ const dateText = ms => (Number.isSafeInteger(ms) && ms > 0
 // ---------------------------------------------------------------- views
 
 function showView(view) {
+  const previous = state.view;
   state.view = view;
   for (const section of document.querySelectorAll("section.view")) section.hidden = section.dataset.view !== view;
   for (const link of document.querySelectorAll(".views a")) {
     if (link.dataset.view === view) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  // Provider discovery reads installation metadata only, and only when this view is opened.
-  if (view === "ai" && !state.providers && !state.providersLoading && state.connected) loadProviders();
+  // Leaving AI & keys ends this page's key work there: typed keys are cleared
+  // and anything still on its way is cancelled.
+  if (previous === "ai" && view !== "ai") leaveDecisionKeys();
+  // Provider discovery reads installation metadata only, and only when this view is
+  // opened by an admitted page.
+  if (view === "ai" && !state.providers && !state.providersLoading && state.admitted) loadProviders();
   // Reading the agent status starts nothing; it is read whenever the view shows.
   if (view === "ai" && state.connected && state.loaded) loadAgentSettings();
+  // Key presence is read when AI & keys opens, never on the other views.
+  if (view === "ai" && previous !== "ai" && state.connected && state.loaded) loadDecisionKeys();
 }
 
 function renderViewCounts() {
@@ -1390,8 +1406,10 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
 
   const raisedBox = h("div", {});
   function renderRaised() {
-    raisedBox.hidden = form.observation !== "outline";
+    // Raising a host is for Outline only; a screenshot is never raised.
+    raisedBox.hidden = form.observation !== "outline" && form.observation !== "screen";
     if (raisedBox.hidden) { raisedBox.replaceChildren(); return; }
+    if (form.observation === "screen") { fill(raisedBox, h("p", { class: "help" }, M.SCREEN_CAP_TEXT)); return; }
     const { hosts } = M.parseHosts(form.hostsText);
     fill(raisedBox, h("p", { class: "help" }, M.SENSITIVE_CAP_TEXT),
       hosts.length ? h("div", { role: "group", "aria-label": "Raise the level for sensitive sites" },
@@ -1399,13 +1417,21 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
           label: `Allow Outline on ${host} even if it is a sensitive site`,
           onchange: event => toggle(form.raisedHosts, host, event.target.checked) }))) : null);
   }
-  const observationField = h("fieldset", {}, h("legend", {}, "What may leave this Mac (for optional Jev judgement)"),
+  // No screenshot can be taken in this build, so Screenshot is not offered for a
+  // new choice. A rule that already has it keeps it (and can keep it) unchanged.
+  const savedScreen = form.observation === "screen";
+  const observationField = h("fieldset", {}, h("legend", {}, "What may leave this Mac (for optional judgement)"),
     M.OBSERVATIONS.map(level => choice({ type: "radio", name: "observation", value: level, checked: form.observation === level,
-      label: { none: "Nothing", address: "The address", outline: "An outline of the page" }[level], help: M.OBSERVATION_TEXT[level],
+      disabled: level === "screen" && !savedScreen,
+      label: M.OBSERVATION_LABELS[level], help: M.OBSERVATION_TEXT[level],
       onchange: () => { form.observation = level; renderRaised(); } })),
-    h("p", { class: "help" }, "Data only leaves this Mac when Jev consent is on in AI & keys, a Jev key is stored in the macOS Keychain, and this rule has a level above Nothing and at least one effect. Every call shows the outgoing-data indicator in the address bar."),
+    h("p", { class: "help" }, M.RULE_DATA_TEXT),
     raisedBox);
   renderRaised();
+  const providerField = h("fieldset", {}, h("legend", {}, "Who may judge this rule"),
+    M.DECISION_PROVIDERS.map(provider => choice({ type: "radio", name: "provider", value: provider, checked: form.provider === provider,
+      label: M.PROVIDER_LABELS[provider], help: M.PROVIDER_TEXT[provider],
+      onchange: () => { form.provider = provider; } })));
 
   const effectsField = h("fieldset", {}, h("legend", {}, "What the browser may do"),
     M.EFFECTS.map(effect => choice({ type: "checkbox", name: "effect", value: effect, checked: form.effects.includes(effect),
@@ -1447,12 +1473,12 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
       field({ label: "What is this site for?", control: h("textarea", { rows: "3", maxlength: String(M.MAX_INSTRUCTION), value: form.instruction,
         placeholder: "I come here to post and answer mentions. If I drift into the feed, nudge me.",
         oninput: event => { form.instruction = event.target.value; } }),
-      help: "Your words. Shown back to you as written; only used as text for optional Jev judgement." }),
+      help: "Your words. Shown back to you as written; only used as text for optional judgement." }),
       h("fieldset", {}, h("legend", {}, "Limits (checked on this Mac)"),
         field({ label: "Minutes per day", control: minutesInput, help: "Empty means no daily limit. Counts time the site is in front, in the spaces this rule covers." }),
         h("h4", {}, "Allowed hours"),
         windowsBox, h("div", {}, addWindowButton)),
-      effectsField, overrideField, contextsField, observationField, agentsField, errorsList],
+      effectsField, overrideField, contextsField, observationField, providerField, agentsField, errorsList],
     footer: [
       h("div", { class: "setting" }, enabledSwitch, h("label", { for: enabledSwitch.id }, "Rule is on")),
       h("span", { class: "spacer" }),
@@ -1471,11 +1497,11 @@ function toggle(list, value, on) {
 // ---------------------------------------------------------------- AI & keys
 
 async function loadProviders() {
+  if (!state.admitted || !state.active) return;
   state.providersLoading = true;
   renderProviders();
   try {
     state.providers = await call("getProviderStatus");
-    state.jevKey = M.providerCards(state.providers).find(card => card.isJev) ?? null;
   } catch (error) {
     state.providers = { version: 1, discovery: "unavailable", providers: [] };
     setStatus("Could not check assistants. " + errorText(error), "error");
@@ -1483,15 +1509,6 @@ async function loadProviders() {
     state.providersLoading = false;
   }
   renderProviders();
-  renderJevCard();
-}
-
-async function loadJevKey() {
-  try {
-    const entry = await call("getJevKeyStatus");
-    state.jevKey = M.providerCards({ providers: [entry] })[0] ?? null;
-  } catch { state.jevKey = null; }
-  renderJevCard();
 }
 
 function providerCard(card) {
@@ -1508,7 +1525,7 @@ function renderProviders() {
   $("providers-summary").textContent = state.providersLoading && !state.providers ? "Checking which assistants are installed…" : M.providerSummary(state.providers);
   const cards = M.providerCards(state.providers).filter(card => !card.isJev);
   $("provider-list").replaceChildren(...cards.map(providerCard));
-  $("providers-refresh").disabled = state.providersLoading || !state.connected;
+  $("providers-refresh").disabled = state.providersLoading || !state.admitted;
 }
 
 async function loadJev() {
@@ -1520,51 +1537,188 @@ async function loadJev() {
   renderJevCard();
 }
 
-/** The Jev card: key presence and entry (explicit Store/Remove only; the typed
- * key is cleared at once and never shown), then consent and budget. */
+// ---------------------------------------------------------------- decision keys (inside AI & keys)
+
+// One form per provider, built once and then updated in place, so a key being
+// typed and keyboard focus survive every refresh of either provider.
+const keyPanels = new Map();
+
+function keyPanel(provider) {
+  const label = M.PROVIDER_LABELS[provider];
+  const id = part => `${provider}-key${part}`;
+  const panel = {
+    tag: h("span", { class: "tag state", "data-tone": "unknown" }),
+    detail: h("p", { class: "help", id: id("-detail") }),
+    note: h("span", { class: "fact-note", hidden: true }),
+    inputLabel: h("label", { for: id("") }),
+    input: h("input", { type: "password", id: id(""), autocomplete: "off", spellcheck: "false", maxlength: "4096", disabled: true,
+      "aria-describedby": `${id("-detail")} ${id("-help")} ${id("-error")}`, "data-focus-key": `keys:${provider}:input` }),
+    store: h("button", { type: "button", class: "primary", disabled: true, "data-focus-key": `keys:${provider}:store`,
+      onclick: () => storeDecisionKeyFlow(provider) }),
+    remove: h("button", { type: "button", class: "ghost destructive", hidden: true, "data-focus-key": `keys:${provider}:remove`,
+      onclick: () => removeDecisionKeyFlow(provider) }, "Remove key…"),
+    help: h("span", { class: "help", id: id("-help") }),
+    error: h("p", { class: "errors", role: "alert", id: id("-error") }),
+    heading: h("h4", { id: id("-heading"), tabindex: "-1" }, label),
+  };
+  panel.input.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); storeDecisionKeyFlow(provider); }
+  });
+  panel.root = h("section", { class: "key-panel", "data-provider": provider, "aria-labelledby": id("-heading") },
+    h("div", { class: "key-head" }, panel.heading, panel.tag),
+    panel.detail, panel.note,
+    h("div", { class: "field" }, panel.inputLabel,
+      h("div", { class: "key-row" }, panel.input, panel.store, panel.remove),
+      panel.help, panel.error));
+  return panel;
+}
+
+function renderKeyPanel(provider) {
+  const panel = keyPanels.get(provider);
+  if (!panel) return;
+  const slot = state.keys[provider];
+  const view = M.decisionKeyView(provider, slot.card, { busy: slot.busy, refused: slot.refused });
+  panel.tag.textContent = view.tagLabel;
+  panel.tag.setAttribute("data-tone", view.tone);
+  panel.detail.textContent = view.detail;
+  panel.note.textContent = view.note ?? "";
+  panel.note.hidden = !view.note;
+  panel.inputLabel.textContent = view.inputLabel;
+  panel.input.setAttribute("placeholder", view.placeholder);
+  panel.input.disabled = !view.canStore;
+  panel.store.textContent = view.storeLabel;
+  panel.store.setAttribute("aria-label", view.storeName);
+  panel.store.disabled = !view.canStore;
+  panel.remove.setAttribute("aria-label", view.removeName);
+  panel.remove.hidden = !view.canRemove;
+  // While an operation runs the buttons keep focus but are inactive (aria-disabled).
+  for (const button of [panel.store, panel.remove]) {
+    if (view.busy) button.setAttribute("aria-disabled", "true"); else button.removeAttribute("aria-disabled");
+  }
+  panel.help.textContent = view.help;
+  panel.error.textContent = slot.notice ? M.keychainErrorText(slot.notice) : "";
+  if (view.busy) panel.root.setAttribute("aria-busy", "true"); else panel.root.removeAttribute("aria-busy");
+}
+
+function renderDecisionKeys() {
+  const body = $("decision-keys-body");
+  if (!body) return;
+  if (!keyPanels.size) {
+    for (const provider of M.DECISION_PROVIDERS) keyPanels.set(provider, keyPanel(provider));
+    body.replaceChildren(...[...keyPanels.values()].map(panel => panel.root));
+  }
+  if (!state.connected) for (const provider of M.DECISION_PROVIDERS) state.keys[provider].refused ??= "NOT_CONNECTED";
+  for (const provider of M.DECISION_PROVIDERS) renderKeyPanel(provider);
+}
+
+/** Presence of one provider's key. Only the latest read publishes, and never while hidden. */
+async function loadDecisionKey(provider) {
+  const slot = state.keys[provider];
+  if (!state.active || !state.connected || !state.admitted || slot.busy) return;
+  const ticket = slot.ticket = nextTicket();
+  slot.busy = "check";
+  renderKeyPanel(provider);
+  let card = null, refused = null;
+  try { card = M.decisionKeyCard(await call("getDecisionKeyStatus", { provider })); }
+  catch (error) { refused = error?.code ?? "ERROR"; }
+  if (slot.ticket !== ticket) return;
+  slot.busy = null;
+  slot.card = card;
+  slot.refused = card ? null : refused ?? "ERROR";
+  renderKeyPanel(provider);
+}
+
+function loadDecisionKeys() {
+  renderDecisionKeys();
+  return Promise.all(M.DECISION_PROVIDERS.map(loadDecisionKey));
+}
+
+/** Moves focus to the provider's form when the focused control went away. */
+function keepKeyFocus(provider, focused) {
+  const panel = keyPanels.get(provider);
+  if (!panel || !focused || !(focused.disabled || focused.hidden)) return;
+  const next = [panel.input, panel.store, panel.remove].find(node => !node.disabled && !node.hidden);
+  (next ?? panel.heading).focus();
+}
+
+async function keyChange(provider, kind, request) {
+  const slot = state.keys[provider];
+  const ticket = slot.ticket = nextTicket();
+  slot.busy = kind;
+  slot.notice = null;
+  renderKeyPanel(provider);
+  let entry = null, code = null;
+  try { entry = await request(); } catch (error) { code = error?.code ?? "ERROR"; }
+  // Left AI & keys or hidden meanwhile: this answer is not shown.
+  if (slot.ticket !== ticket) return;
+  slot.busy = null;
+  const card = M.decisionKeyCard(entry);
+  const focused = document.activeElement;
+  if (card) {
+    slot.card = card;
+    setStatus(M.keyChangedText(provider, kind === "store" ? "stored" : "removed"));
+  } else slot.notice = code ?? "ERROR";
+  renderKeyPanel(provider);
+  keepKeyFocus(provider, focused);
+  if (!card && M.KEY_RECHECK.includes(code)) loadDecisionKey(provider);
+}
+
+/** Explicit Store (button or Enter). The field is read once and cleared at once;
+ * the key crosses the actor exactly once and is never shown, kept or logged. */
+function storeDecisionKeyFlow(provider) {
+  const panel = keyPanels.get(provider);
+  const slot = state.keys[provider];
+  if (!panel || slot.busy || !state.active) return;
+  let key = panel.input.value;
+  panel.input.value = "";
+  if (!M.decisionKeyView(provider, slot.card, { refused: slot.refused }).canStore) { key = ""; return; }
+  const check = M.checkDecisionKey(key);
+  if (!check.ok) {
+    key = "";
+    slot.notice = check.code;
+    renderKeyPanel(provider);
+    return;
+  }
+  keyChange(provider, "store", async () => {
+    try { return await call("storeDecisionKey", { provider, key }); } finally { key = ""; }
+  }).catch(console.error);
+}
+
+async function removeDecisionKeyFlow(provider) {
+  const slot = state.keys[provider];
+  if (slot.busy || !state.active) return;
+  const label = M.PROVIDER_LABELS[provider];
+  const ok = await confirmDialog({ title: `Remove the ${label} key?`,
+    message: `The key is deleted from the macOS Keychain. Site rules keep working on this Mac without ${label}.`,
+    accept: "Remove key", destructive: true });
+  if (!ok || slot.busy || !state.active) return;
+  await keyChange(provider, "remove", () => call("removeDecisionKey", { provider }));
+}
+
+/** Leaving AI & keys (or hiding the page): typed keys are cleared, no late answer
+ * is shown, and this page's key operations still on their way are cancelled. */
+function leaveDecisionKeys() {
+  let pending = false;
+  for (const provider of M.DECISION_PROVIDERS) {
+    const slot = state.keys[provider];
+    // Only a change cancelled just now is reported when the view shows again.
+    slot.notice = slot.busy === "store" || slot.busy === "remove" ? "SETTINGS_CLOSED" : null;
+    pending ||= !!slot.busy;
+    slot.ticket = nextTicket();
+    slot.busy = null;
+    const panel = keyPanels.get(provider);
+    if (panel) panel.input.value = "";
+    renderKeyPanel(provider);
+  }
+  if (pending && api && state.connected) call("cancelDecisionKeyOperations").catch(() => {});
+}
+
+// ---------------------------------------------------------------- Jev settings (inside AI & keys)
+
+/** The Jev card: consent, check interval and budget. Keys are in their own block. */
 function renderJevCard() {
   const box = $("jev-card");
-  const jev = state.jevKey;
   const form = M.jevToForm(state.jev);
-  const keyState = M.jevKeyForm(jev);
-  const keyErrors = h("p", { class: "errors", role: "alert", id: "jev-key-error" });
-  const keyInput = h("input", { type: "password", id: "jev-key", autocomplete: "off", spellcheck: "false",
-    placeholder: jev?.key === "stored" ? "Replace the stored key" : "Paste your Jev key", disabled: !keyState.enabled,
-    "aria-describedby": "jev-key-help jev-key-error" });
-  const store = async () => {
-    // Read once, clear the field at once; the key crosses the actor exactly once.
-    let key = keyInput.value;
-    keyInput.value = "";
-    const check = M.checkJevKey(key);
-    if (!check.ok) { key = ""; keyErrors.textContent = M.keychainErrorText(check.code); return; }
-    storeButton.disabled = true;
-    try {
-      const entry = await call("storeJevKey", { key });
-      key = "";
-      state.jevKey = M.providerCards({ providers: [entry] })[0] ?? state.jevKey;
-      setStatus("Jev key stored in the macOS Keychain.");
-      renderJevCard();
-      $("jev-key")?.focus();
-    } catch (error) {
-      key = "";
-      keyErrors.textContent = M.keychainErrorText(error?.code);
-      storeButton.disabled = false;
-    }
-  };
-  const storeButton = h("button", { type: "button", class: "primary", disabled: !keyState.enabled, onclick: store }, "Store key");
-  keyInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); store(); } });
-  const removeButton = keyState.enabled && keyState.canRemove ? h("button", { type: "button", class: "ghost destructive", onclick: async () => {
-    const ok = await confirmDialog({ title: "Remove the Jev key?", message: "The key is deleted from the macOS Keychain. Site rules keep working on this Mac without Jev.",
-      accept: "Remove key", destructive: true });
-    if (!ok) return;
-    try {
-      const entry = await call("removeJevKey");
-      state.jevKey = M.providerCards({ providers: [entry] })[0] ?? state.jevKey;
-      setStatus("Jev key removed from the macOS Keychain.");
-      renderJevCard();
-    } catch (error) { setStatus(M.keychainErrorText(error?.code), "error"); }
-  } }, "Remove key…") : null;
-
   const errorsList = h("ul", { class: "errors", role: "alert" });
   const consent = choice({ type: "checkbox", name: "jev-consent", checked: form.consent,
     label: "Allow Jev to judge pages for rules that permit it",
@@ -1576,19 +1730,11 @@ function renderJevCard() {
     oninput: event => { form.hourlyBudget = event.target.value; } });
 
   box.replaceChildren(
-    h("div", { class: "block-head" }, h("h3", { id: "jev-heading" }, "Jev"),
-      h("p", { class: "block-help" }, "Optional judgement for site rules. Site rules work fully without it.")),
-    h("div", { class: "panel sheet-body" },
-      h("div", { class: "jev-state" },
-        h("span", { class: "tag state", "data-tone": jev?.tone ?? "unknown" }, jev?.stateLabel ?? "Checking…"),
-        h("p", { class: "help" }, jev?.detail ?? M.jevKeyNote({ keyEntryEnabled: state.flags.jevKeyEntry === true }))),
-      h("div", { class: "field" },
-        h("label", { for: "jev-key" }, jev?.key === "stored" ? "Replace the Jev key" : "Jev API key"),
-        h("div", { class: "key-row" }, keyInput, storeButton, removeButton),
-        h("span", { class: "help", id: "jev-key-help" }, keyState.reason
-          ?? "Stored only in the macOS Keychain; this page never shows it again. Storing makes no call to Jev."),
-        keyErrors),
+    h("div", { class: "block-head" }, h("h3", { id: "jev-heading" }, "Jev judgement"),
+      h("p", { class: "block-help" }, "Optional judgement for site rules that choose Jev. Site rules work fully without it.")),
+    h("div", { class: "panel settings-panel" },
       h("p", { class: "notice", id: "jev-statement" }, M.JEV_STATEMENT),
+      h("p", { class: "help" }, M.DECISIONS_UNAVAILABLE),
       consent,
       h("div", { class: "form-row" },
         field({ label: "Check every (minutes)", control: interval, help: "1 to 30. Only for the tab in front; never background tabs or private windows." }),
@@ -1628,7 +1774,7 @@ function renderEngineSettings() {
 /** Reads the endpoint's own state (and, while it listens, both hook settings).
  * Reading starts nothing. Only the latest read publishes, never while hidden. */
 async function loadAgentSettings() {
-  if (!state.active || !state.connected) return;
+  if (!state.active || !state.connected || !state.admitted) return;
   const ticket = latest.agents = nextTicket();
   const current = () => ticket === latest.agents && state.active;
   let endpoint = null, error = null;
@@ -1816,11 +1962,74 @@ function onServicesEvent(event) {
 // ---------------------------------------------------------------- page lifetime
 
 let unsubscribe = null;
+
+// ---------------------------------------------------------------- admission
+
+// A wait between admission attempts that a pagehide ends at once.
+let admissionWait = null;
+function waitForAdmissionRetry(ms) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { admissionWait = null; resolve(); }, ms);
+    admissionWait = () => { clearTimeout(timer); admissionWait = null; resolve(); };
+  });
+}
+
+/**
+ * The actor's own answer that it admits this shown page as a sender, read with
+ * the read-only flags. While the browser still attaches a new tab it can refuse
+ * the first messages, so a refusal is asked again a bounded number of times
+ * (M.ADMISSION_RETRY_MS), only while this page is shown and this attempt is the
+ * latest. Only a successful answer admits the page. Any other failure, and the
+ * last refusal, leave it not connected. Nothing else is requested before
+ * admission. Resolves true when admitted; false when refused for good or
+ * superseded/hidden.
+ */
+async function admit() {
+  const ticket = latest.admission = nextTicket();
+  const current = () => ticket === latest.admission && state.active;
+  for (let attempt = 0; ; attempt++) {
+    let failure = null;
+    try {
+      const flags = await call("getOverviewFlags");
+      if (!current()) return false;
+      state.flags = flags;
+      state.admitted = true;
+      return true;
+    } catch (error) {
+      if (!current()) return false;
+      failure = M.admissionFailure(error?.code);
+    }
+    if (failure !== "retry" || attempt >= M.ADMISSION_RETRY_MS.length) {
+      state.connected = false;
+      return false;
+    }
+    await waitForAdmissionRetry(M.ADMISSION_RETRY_MS[attempt]);
+    if (!current()) return false;
+  }
+}
+
+/** Refused for good, or without the actor: every part says so, and the controls
+ * that would only ask the actor are off. */
+function renderDisconnected() {
+  renderAttention();
+  renderProjects();
+  renderProviders();
+  renderJevCard();
+  renderAgentSettings();
+  renderDecisionKeys();
+  for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
+}
+
 /** pagehide: nothing queued runs, no late answer publishes and no new request
- * starts until the page is shown again; events stop arriving. */
+ * starts until the page is shown again; events stop arriving. An admission still
+ * being asked stops, and a restored page is admitted afresh. */
 function deactivate() {
   if (!state.active) return;
+  leaveDecisionKeys();
   state.active = false;
+  state.admitted = false;
+  latest.admission = nextTicket();
+  admissionWait?.();
   for (const timer of pending.values()) clearTimeout(timer);
   pending.clear();
   clearTimeout(homeRetry);
@@ -1847,8 +2056,12 @@ function reactivate(event) {
 /** Subscribes and loads the page; run at start and again after a restore. A
  * hide while it runs stops it at the next step; the restore picks it up. */
 async function boot() {
-  try { state.flags = await call("getOverviewFlags"); } catch (error) { if (error?.code === "SENDER_REJECTED") state.connected = false; }
+  if (!(await admit())) {
+    if (state.active && !state.connected) renderDisconnected();
+    return;
+  }
   if (!state.active) return;
+  // Subscribed only once admitted: a refused subscription is never sent again by the child.
   unsubscribe ??= api.subscribe(onServicesEvent);
   await loadActiveSpace();
   if (!state.active) return;
@@ -1865,13 +2078,13 @@ async function boot() {
     else renderHome();
     if (!state.active) return;
     renderJevCard();
-    if (state.view === "ai") { if (!state.providers) await loadProviders(); }
-    else loadJevKey(); // Keychain presence only (no discovery until AI & keys is opened)
+    // No discovery and no Keychain check until AI & keys is opened.
+    if (state.view === "ai" && !state.providers) await loadProviders();
     if (!state.active) return;
     state.started = true;
   }
-  if (state.view === "ai") await loadAgentSettings();
-  else renderAgentSettings();
+  if (state.view === "ai") await Promise.all([loadAgentSettings(), loadDecisionKeys()]);
+  else { renderAgentSettings(); renderDecisionKeys(); }
   if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
@@ -1964,21 +2177,17 @@ async function init() {
   $("ledger-days").addEventListener("change", loadLedger);
   $("ledger-export").addEventListener("click", exportLedgerFlow);
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
-  $("providers-refresh").addEventListener("click", () => loadProviders());
+  $("providers-refresh").addEventListener("click", () => { loadProviders(); loadDecisionKeys(); });
   window.addEventListener("hashchange", onHashChange);
   // Hidden (also into the back/forward cache): inactive until shown again from it.
   window.addEventListener("pagehide", deactivate);
   window.addEventListener("pageshow", reactivate);
   if (!api) {
     state.connected = false;
-    renderAttention();
-    renderProjects();
-    renderProviders();
-    renderJevCard();
-    renderAgentSettings();
-    for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
+    renderDisconnected();
     return;
   }
+  renderProviders(); // "Checking…", its refresh off until the actor admits this page
   await boot();
 }
 

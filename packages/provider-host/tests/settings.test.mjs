@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, storeJevKey, removeJevKey, jevKeyPresence, jevKeyEntryEnabled, JEV_KEY_ENTRY_PREF, openProviderSettings } from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
+import * as Settings from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
+const { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, openProviderSettings } = Settings;
 import { discover } from '../src/discovery.mjs';
 
 const discovery = () => ({ version: 1, providers: discover({ searchPath: '' }) });
@@ -112,79 +113,19 @@ for (const trigger of ['timeout', 'abort']) test(`An active metadata subprocess 
   assert(killed >= 1);
 });
 
-test('Without a T9 build root the Keychain helper is reported unavailable and never spawned', async () => {
-  const fake = runtime(); await assert.rejects(storeJevKey('synthetic-key-not-real', fake, undefined, keyPrefs(true)), /KEYCHAIN_HELPER_UNAVAILABLE/);
-  await assert.rejects(jevKeyPresence(fake), /KEYCHAIN_HELPER_UNAVAILABLE/);
-  await assert.rejects(removeJevKey(fake), /KEYCHAIN_HELPER_UNAVAILABLE/);
-  assert.equal(fake.calls.length, 0);
-});
-
-// Fakes only: no Keychain helper runs. Open decision 4 is decided (ships): the pref defaults to true
-// and remains a kill switch.
-const keyPrefs = value => ({ getBoolPref: (name, fallback) => { assert.equal(name, JEV_KEY_ENTRY_PREF); return value === undefined ? fallback : value; } });
-function keychainRuntime(exitCode = 0) {
-  if (exitCode === 'spawn-fails') { const fake = keychainRuntime(0); fake.spawn = async options => { fake.calls.push(options); throw new Error('no such file /Volumes/AxioSozoBuild/providers/keychain'); }; return fake; }
-  const calls = [], stdin = []; let killed = 0, closed = 0;
-  const pipe = value => { let remaining = value; return { readString: async () => { const result = remaining; remaining = null; return result; } }; };
-  return { calls, stdin, killed: () => killed, closed: () => closed, timers: { setTimeout, clearTimeout },
-    env: key => ({ AXIOSOZO_BUILD_ROOT: '/Volumes/AxioSozoBuild', AXIOSOZO_DISCOVERY_PATH: '/metadata/path' })[key] ?? '',
-    spawn: async options => { calls.push(options); return { stdout: pipe('unexpected helper output'), stderr: pipe('helper diagnostics'),
-      stdin: { write: async value => { stdin.push(value); }, close: async () => { closed++; } }, kill: async () => { killed++; }, wait: async () => ({ exitCode }) }; },
-  };
-}
-test('Jev key entry is on by default; axiosozo.jev.keyEntry.enabled=false is a kill switch that fails closed', async () => {
-  assert.equal(JEV_KEY_ENTRY_PREF, 'axiosozo.jev.keyEntry.enabled');
-  assert.equal(jevKeyEntryEnabled(keyPrefs(undefined)), true); assert.equal(jevKeyEntryEnabled(keyPrefs(true)), true);
-  for (const prefs of [keyPrefs(false), { getBoolPref: () => { throw new Error('pref service failure'); } }]) {
-    const fake = keychainRuntime();
-    await assert.rejects(storeJevKey('synthetic-key-not-real', fake, undefined, prefs), /JEV_KEY_ENTRY_DISABLED/);
-    assert.equal(fake.calls.length, 0); assert.equal(jevKeyEntryEnabled(prefs), false);
+// Step 5: every key operation runs through the root-owned ProviderKeys with a
+// freshly admitted runtime (apps/browser/tests/provider-status.test.mjs and
+// provider-key-settings.test.mjs). Settings keeps no second Keychain path.
+test('Settings exports no Keychain helper of its own; its metadata runner never writes stdin', async () => {
+  for (const name of ['storeJevKey', 'removeJevKey', 'jevKeyPresence', 'jevKeyEntryEnabled', 'JEV_KEY_ENTRY_PREF', 'KEYCHAIN_CODES']) {
+    assert.equal(Object.hasOwn(Settings, name), false, name);
   }
-});
-test('Enabled Jev key entry sends the key only to the Keychain helper stdin and returns nothing', async () => {
-  const fake = keychainRuntime(); const secret = 'synthetic-key-not-real-0123';
-  assert.equal(await storeJevKey(secret, fake, undefined, keyPrefs(true)), undefined);
-  assert.deepEqual(fake.calls, [{ command: '/Volumes/AxioSozoBuild/providers/keychain', arguments: ['store'], environmentAppend: false,
-    environment: { PATH: '/metadata/path', LANG: 'C' }, stderr: 'pipe' }]);
-  assert.deepEqual(fake.stdin, [secret]); assert(!JSON.stringify(fake.calls).includes(secret));
-  assert(fake.closed() >= 1 && fake.killed() >= 1);
-  for (const invalid of ['short', 'line\nbreak', 'nul\0key', 'x'.repeat(4097), '\u00e9'.repeat(2049), 42]) {
-    const rejected = keychainRuntime();
-    await assert.rejects(storeJevKey(invalid, rejected, undefined, keyPrefs(true)), /INVALID_KEY/); assert.equal(rejected.calls.length, 0);
-  }
-  const failing = keychainRuntime(1);
-  await assert.rejects(storeJevKey(secret, failing, undefined, keyPrefs(true)), error => error.message === 'KEYCHAIN_REFUSED' && !error.message.includes(secret));
-  const missing = keychainRuntime('spawn-fails');
-  await assert.rejects(storeJevKey(secret, missing, undefined, keyPrefs(true)), error => error.message === 'KEYCHAIN_HELPER_UNAVAILABLE' && !error.message.includes(secret));
-  for (const root of ['/tmp/build', '/Volumes/../tmp', 'relative']) {
-    const fake = keychainRuntime(); fake.env = key => key === 'AXIOSOZO_BUILD_ROOT' ? root : '';
-    await assert.rejects(storeJevKey(secret, fake, undefined, keyPrefs(true)), /KEYCHAIN_HELPER_UNAVAILABLE/); assert.equal(fake.calls.length, 0);
-  }
-});
-
-test('Key presence runs only the helper exists operation, sends no input and keeps no output', async () => {
-  for (const [exitCode, expected] of [[0, 'stored'], [44, 'missing']]) {
-    const fake = keychainRuntime(exitCode);
-    assert.equal(await jevKeyPresence(fake), expected);
-    assert.deepEqual(fake.calls, [{ command: '/Volumes/AxioSozoBuild/providers/keychain', arguments: ['exists'], environmentAppend: false,
-      environment: { PATH: '/metadata/path', LANG: 'C' }, stderr: 'pipe' }]);
-    assert.deepEqual(fake.stdin, []); assert(fake.killed() >= 1);
-  }
-  // An older helper without `exists` exits 1 (errSecParam): reported as refused, never as absent.
-  await assert.rejects(jevKeyPresence(keychainRuntime(1)), /KEYCHAIN_REFUSED/);
-  await assert.rejects(jevKeyPresence(keychainRuntime('spawn-fails')), /KEYCHAIN_HELPER_UNAVAILABLE/);
-});
-
-test('Key removal runs only the helper remove operation; an absent item counts as removed', async () => {
-  for (const exitCode of [0, 44]) {
-    const fake = keychainRuntime(exitCode);
-    assert.equal(await removeJevKey(fake), undefined);
-    assert.deepEqual(fake.calls.map(call => call.arguments), [['remove']]); assert.deepEqual(fake.stdin, []);
-  }
-  await assert.rejects(removeJevKey(keychainRuntime(1)), /KEYCHAIN_REFUSED/);
-  await assert.rejects(removeJevKey(keychainRuntime('spawn-fails')), /KEYCHAIN_HELPER_UNAVAILABLE/);
-  const controller = new AbortController(); controller.abort(); const cancelled = keychainRuntime();
-  await assert.rejects(removeJevKey(cancelled, controller.signal), /SETTINGS_CLOSED/);
+  const fake = runtime();
+  fake.env = key => ({ AXIOSOZO_PROVIDER_HOST: '/project/packages/provider-host/cli.mjs', AXIOSOZO_PROVIDER_NODE: '/runtime/node',
+    AXIOSOZO_BUILD_ROOT: '/Volumes/AxioSozoBuild/workstation' })[key] ?? '';
+  await discoverForSettings(fake);
+  assert.deepEqual(fake.calls.map(call => call.arguments), [['/project/packages/provider-host/cli.mjs', 'discover']]);
+  assert(!fake.calls.some(call => /keychain/u.test(call.command)));
 });
 
 test('Web callers and private windows cannot open persistent provider settings', () => {

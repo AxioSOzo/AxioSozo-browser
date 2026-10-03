@@ -18,13 +18,14 @@ export const MESSAGES = Object.freeze({
 });
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
-// Provider status and Jev key actions are served by ProviderStatus.sys.mjs
+// Provider status and decision-key actions are served by ProviderStatus.sys.mjs
 // directly (Providers workstream), not through AxioSozoServices.
 export const PROVIDER_STATUS_URL = "chrome://browser/content/axiosozo/ProviderStatus.sys.mjs";
 export const PREFS = Object.freeze({
   contexts: "axiosozo.contexts.enabled",
   enginePreferences: "axiosozo.engine.preferences.enabled",
   jevKeyEntry: "axiosozo.jev.keyEntry.enabled",
+  openaiKeyEntry: "axiosozo.openai.keyEntry.enabled",
 });
 const MAX_PARAMS_BYTES = 512 * 1024;
 const DOCUMENT_URI = /^about:axiosozo(?:[?#].*)?$/;
@@ -36,23 +37,29 @@ const fail = (code, message) => { throw new OverviewError(code, message); };
 
 // ---------------------------------------------------------------- sender
 
-// Plain snapshot of the facts about a sender, so the check is testable.
+// A native fact, or undefined when it is missing or its getter throws.
+const fact = get => { try { return get(); } catch { return undefined; } };
+
+// Plain snapshot of the facts about a sender, so the check is testable. Facts
+// are taken literally: a missing current-global flag is not current, and a
+// missing or non-boolean privacy flag is unknown (refused), never "normal".
 export function senderSnapshot(actor) {
-  const manager = actor.manager;
-  const context = actor.browsingContext;
-  const principal = manager?.documentPrincipal;
+  const manager = fact(() => actor.manager);
+  const context = fact(() => actor.browsingContext);
+  const principal = fact(() => manager?.documentPrincipal);
+  const privacy = fact(() => context?.usePrivateBrowsing);
   return {
-    remoteType: manager?.domProcess?.remoteType ?? manager?.remoteType ?? null,
-    documentURI: manager?.documentURI?.spec ?? null,
-    isCurrentGlobal: manager?.isCurrentGlobal !== false,
-    isTopLevel: !!context && !context.parent && context.top === context,
-    hasEmbedder: !!context?.embedderElement,
-    usePrivateBrowsing: !!context?.usePrivateBrowsing,
+    remoteType: fact(() => manager?.domProcess?.remoteType ?? manager?.remoteType) ?? null,
+    documentURI: fact(() => manager?.documentURI?.spec) ?? null,
+    isCurrentGlobal: fact(() => manager?.isCurrentGlobal) === true,
+    isTopLevel: fact(() => !!context && !context.parent && context.top === context) === true,
+    hasEmbedder: fact(() => !!context?.embedderElement) === true,
+    usePrivateBrowsing: typeof privacy === "boolean" ? privacy : null,
     principal: principal ? {
-      isSystemPrincipal: !!principal.isSystemPrincipal,
-      isContentPrincipal: !!principal.isContentPrincipal,
-      originNoSuffix: principal.originNoSuffix ?? null,
-      privateBrowsingId: principal.privateBrowsingId ?? 0,
+      isSystemPrincipal: fact(() => !!principal.isSystemPrincipal) ?? true,
+      isContentPrincipal: fact(() => !!principal.isContentPrincipal) ?? false,
+      originNoSuffix: fact(() => principal.originNoSuffix) ?? null,
+      privateBrowsingId: fact(() => principal.privateBrowsingId) ?? null,
     } : null,
   };
 }
@@ -65,8 +72,13 @@ export function validateSender(sender) {
   if (principal.originNoSuffix !== OVERVIEW_ORIGIN) reject("principal is not about:axiosozo");
   if (!DOCUMENT_URI.test(sender.documentURI ?? "")) reject("document is not about:axiosozo");
   if (sender.remoteType !== PRIVILEGED_ABOUT_REMOTE_TYPE) reject("not the privileged about process");
-  if (!sender.isTopLevel || !sender.hasEmbedder) reject("not a top-level tab");
+  // Two native facts, refused alike; the reason names which one was missing.
+  if (!sender.isTopLevel) reject("not a top-level tab (browsing context is not top-level)");
+  if (!sender.hasEmbedder) reject("not a top-level tab (no embedder element)");
   if (!sender.isCurrentGlobal) reject("document is no longer current");
+  if (typeof sender.usePrivateBrowsing !== "boolean" || !Number.isInteger(principal.privateBrowsingId)) {
+    reject("private browsing state is unknown");
+  }
   if ((principal.privateBrowsingId ? 1 : 0) !== (sender.usePrivateBrowsing ? 1 : 0)) {
     reject("private browsing state does not match the principal");
   }
@@ -105,6 +117,10 @@ const T = {
   accountLabelOrNull: value => value === null || (typeof value === "string" && value.length <= 200),
   hookAgent: value => value === "claude-code" || value === "codex",
   sessionId: value => typeof value === "string" && /^s_[0-9a-f]{16}$/.test(value),
+  decisionProvider: value => value === "jev" || value === "openai",
+  // Shape only: a key is at most 4096 UTF-8 bytes, so never more UTF-16 units.
+  // ProviderStatus checks its bytes and control characters before any helper work.
+  keyText: value => typeof value === "string" && value.length <= 4096,
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -119,21 +135,6 @@ function checkParams(name, params, shape) {
     if (!check(params[key])) fail("INVALID_PARAMS", `${name}: invalid "${key}"`);
   }
   return params;
-}
-
-// A Jev key crosses the actor exactly once, for storeJevKey. It is never echoed,
-// logged, stored in prefs or returned; failures carry fixed codes only.
-const jevKey = value => typeof value === "string" && value.length >= 8 && value.length <= 4096
-  && !/[\u0000-\u001f\u007f]/u.test(value);
-const KEY_ERRORS = new Set(["INVALID_KEY", "JEV_KEY_ENTRY_DISABLED", "KEYCHAIN_HELPER_UNAVAILABLE",
-  "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "SETTINGS_CLOSED"]);
-async function keyAction(ctx, name, run) {
-  if (ctx.isPrivate?.()) fail("PRIVATE_WINDOW", `${name}: keys cannot be changed from a private window`);
-  try { return await run(ctx.providers()); }
-  catch (error) {
-    const code = KEY_ERRORS.has(error?.message) ? error.message : "KEYCHAIN_HELPER_UNAVAILABLE";
-    fail(code, `${name} failed (${code})`);
-  }
 }
 
 const JEV_KEYS = { consent: v => typeof v === "boolean",
@@ -167,16 +168,17 @@ function requirePickedRoot(ctx, name, root) {
 
 /** The requesting tab's window, only while this document is current and the
  * window is a registered normal one; unknown privacy counts as private. */
-function agentWindow(ctx, name) {
-  if (ctx.isPrivate?.() !== false) fail("PRIVATE_WINDOW", `${name}: agents are managed from a normal window`);
+function normalWindow(ctx, name, what) {
+  if (ctx.isPrivate?.() !== false) fail("PRIVATE_WINDOW", `${name}: ${what} are managed from a normal window`);
   if (ctx.current?.() !== true) fail("DOCUMENT_GONE", `${name}: this page is no longer shown`);
   const window = ctx.window();
   if (!window) fail("NO_WINDOW", `${name}: the requesting tab has no browser window`);
   if (typeof ctx.services.isNormalWindow !== "function" || ctx.services.isNormalWindow(window) !== true) {
-    fail("PRIVATE_WINDOW", `${name}: agents are managed from a normal window`);
+    fail("PRIVATE_WINDOW", `${name}: ${what} are managed from a normal window`);
   }
   return window;
 }
+const agentWindow = (ctx, name) => normalWindow(ctx, name, "agents");
 
 /** Agent methods: the window and current document are checked before the
  * service is asked anything, and again after it answered; a stale answer is
@@ -189,6 +191,43 @@ const agentMethod = (name, params, run) => ({ params, run: async (ctx, p) => {
   return value;
 } });
 
+// Fixed codes of decision-key operations (ProviderKeys). No helper output, path
+// or key material is ever part of an error.
+const KEY_ERRORS = new Set(["INVALID_PROVIDER", "KEY_ENTRY_DISABLED", "INVALID_KEY", "KEYCHAIN_HELPER_UNAVAILABLE",
+  "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "HELPER_OUTPUT_LIMIT", "SETTINGS_CLOSED"]);
+
+/** Decision-key methods: a registered normal window and this current document
+ * before any fixture admission or helper process. The actor then mints the
+ * operation's authority (ctx.keyLease): its own abort signal and one synchronous
+ * isActive() that ProviderStatus, the fixture factory and ProviderKeys check
+ * before admission, after it, before every spawn and immediately before the key
+ * is written. The answer is checked again after it arrived. The page names a
+ * provider and, to store, the key once: never a runtime, executable, path,
+ * profile, signal, callback or another surface. A key is taken out of the params
+ * at once and is never part of a reply, an error or a log line. */
+const keyMethod = (name, params, run, { mutates = false } = {}) => ({ params, run: async (ctx, p) => {
+  let secret = p.key;
+  delete p.key;
+  try {
+    const window = normalWindow(ctx, name, "keys");
+    if (typeof ctx.keyLease !== "function") fail("UNSUPPORTED", `${name} needs the page's own actor`);
+    const lease = ctx.keyLease(p.provider, { mutates, window });
+    let value = null, failure = null;
+    try { value = await run(ctx.providers(), p.provider, { signal: lease.signal, isActive: lease.isActive }, secret); }
+    catch (error) { failure = error; }
+    finally { secret = ""; lease.release(); }
+    // Whatever the Keychain answered, it is only for the same live surface.
+    if (normalWindow(ctx, name, "keys") !== window) fail("NO_WINDOW", `${name}: the window changed`);
+    if (lease.cancelled()) fail("SETTINGS_CLOSED", `${name} failed (SETTINGS_CLOSED)`);
+    if (!lease.isActive()) fail("DOCUMENT_GONE", `${name}: this page is no longer shown`);
+    if (failure) {
+      const code = KEY_ERRORS.has(failure?.message) ? failure.message : "KEYCHAIN_HELPER_UNAVAILABLE";
+      fail(code, `${name} failed (${code})`);
+    }
+    return value;
+  } finally { secret = ""; }
+} });
+
 // ---------------------------------------------------------------- methods
 
 // The closed method list: every §3.3 service method (pickFolder is called
@@ -197,7 +236,7 @@ const agentMethod = (name, params, run) => ({ params, run: async (ctx, p) => {
 // container presentation, the user's own account labels and shared sites,
 // and project links opened through the container router), the read-only
 // project home (Plan 4 step 3) plus openContext,
-// openUrl, the read-only getOverviewFlags and the provider status / Jev key
+// openUrl, the read-only getOverviewFlags, provider status and the decision-key
 // methods (contracts/provider-v1.md). Nothing else is callable. Arrival offers
 // are accepted in the native notification only; no page method takes a token.
 // No page method names, assigns or clears a container ID.
@@ -280,14 +319,18 @@ export const METHODS = Object.freeze({
   getJevSettings: { params: {}, run: ({ services }) => services.getJevSettings() },
   setJevSettings: { params: { patch: T.object },
     run: ({ services }, p) => services.setJevSettings(checkPatch("setJevSettings", p.patch, JEV_KEYS)) },
-  // providers (ProviderStatus.sys.mjs; metadata discovery and Keychain presence only)
+  // providers (ProviderStatus.sys.mjs): installation metadata, and per decision
+  // provider (jev, openai) Keychain presence, explicit store and removal only.
+  // None of them turns on consent or calls a provider.
   getProviderStatus: { params: {}, run: ctx => ctx.providers().getProviderStatus() },
-  getJevKeyStatus: { params: {}, run: ctx => ctx.providers().getJevKeyStatus() },
-  storeJevKey: { params: { key: jevKey }, run: (ctx, p) => {
-    const secret = p.key; delete p.key;
-    return keyAction(ctx, "storeJevKey", providers => providers.storeJevKeyAndReport(secret));
-  } },
-  removeJevKey: { params: {}, run: ctx => keyAction(ctx, "removeJevKey", providers => providers.removeJevKeyAndReport()) },
+  getDecisionKeyStatus: keyMethod("getDecisionKeyStatus", { provider: T.decisionProvider },
+    (providers, provider, authority) => providers.getDecisionKeyStatus(provider, authority)),
+  storeDecisionKey: keyMethod("storeDecisionKey", { provider: T.decisionProvider, key: T.keyText },
+    (providers, provider, authority, secret) => providers.storeDecisionKeyAndReport(provider, secret, authority), { mutates: true }),
+  removeDecisionKey: keyMethod("removeDecisionKey", { provider: T.decisionProvider },
+    (providers, provider, authority) => providers.removeDecisionKeyAndReport(provider, authority), { mutates: true }),
+  // Cancels this page's own key operations only (it left AI & keys or is hidden).
+  cancelDecisionKeyOperations: { params: {}, run: ctx => { ctx.cancelKeyOperations?.(); return null; } },
   // ledger
   usageSummary: { params: { days: T.days }, run: ({ services }, p) => services.usageSummary({ days: p.days }) },
   exportLedger: { params: {}, run: async ({ services }) => {
@@ -375,8 +418,10 @@ export function readFlags(prefs) {
   return {
     contexts: get(PREFS.contexts, true),
     enginePreferences: get(PREFS.enginePreferences, false),
-    // Decided (open decision 4): on by default; the kill switch fails closed like ProviderSettings.
-    jevKeyEntry: get(PREFS.jevKeyEntry, true, false),
+    // Key entry as ProviderKeys enforces it: on only when the pref says so
+    // (defaults.yaml turns both on); an absent or unreadable pref is off.
+    jevKeyEntry: get(PREFS.jevKeyEntry, false),
+    openaiKeyEntry: get(PREFS.openaiKeyEntry, false),
   };
 }
 
@@ -401,17 +446,83 @@ export class AboutAxioSozoParent extends Base {
   #pickedRoots = new Set();
   #unsubscribers = [];
   #destroyed = false;
+  // Decision-key work of this document: one abort lifetime and generation for all
+  // of it (a cancel or destroy ends both), and the providers with a store or
+  // removal on its way (one at a time per provider).
+  #keyController = null;
+  #keyGeneration = 0;
+  #keyChanges = new Set();
 
   #context() {
+    const services = servicesProvider();
     return {
-      services: servicesProvider(),
+      services,
       pickedRoots: this.#pickedRoots,
-      window: () => this.browsingContext?.topChromeWindow ?? null,
+      window: () => fact(() => this.browsingContext?.topChromeWindow) ?? null,
       flags: () => readFlags(prefsProvider()),
       providers: () => providerStatusProvider(),
-      isPrivate: () => !!this.browsingContext?.usePrivateBrowsing,
+      // Literal privacy only: missing or throwing is undefined, which the
+      // normal-window gate refuses like a private window.
+      isPrivate: () => {
+        const value = fact(() => this.browsingContext?.usePrivateBrowsing);
+        return typeof value === "boolean" ? value : undefined;
+      },
       current: () => this.#current(),
+      keyLease: (provider, options) => this.#keyLease(provider, { ...options, services }),
+      cancelKeyOperations: () => this.#cancelKeyOperations(),
     };
+  }
+
+  /** This document's own surface, read live: its current, explicitly normal
+   * top-level document and the browser window it is in. A missing, unexpected or
+   * throwing fact is null. */
+  #surface() {
+    if (this.#destroyed) return null;
+    try {
+      const manager = this.manager, context = this.browsingContext;
+      if (!manager || !context || manager.isCurrentGlobal !== true || context.usePrivateBrowsing !== false
+        || context.parent || context.top !== context) return null;
+      const window = context.topChromeWindow;
+      return window ? { manager, context, window } : null;
+    } catch { return null; }
+  }
+
+  /**
+   * The authority of one key operation, minted by the actor only. isActive() is
+   * synchronous and literally true only while this is still the same manager,
+   * browsing context and registered normal browser window it was minted for,
+   * privacy is still explicitly off, and the lease was neither cancelled nor
+   * destroyed. Once false it stays false.
+   */
+  #keyLease(provider, { mutates = false, window, services } = {}) {
+    const surface = this.#surface();
+    if (!surface) fail("DOCUMENT_GONE", "the requesting page is no longer shown");
+    if (surface.window !== window || services?.isNormalWindow?.(window) !== true) fail("NO_WINDOW", "the window changed");
+    if (mutates && this.#keyChanges.has(provider)) fail("BUSY", "a change to this key is still running");
+    this.#keyController ??= new AbortController();
+    const controller = this.#keyController, generation = this.#keyGeneration;
+    if (mutates) this.#keyChanges.add(provider);
+    const cancelled = () => this.#destroyed || generation !== this.#keyGeneration || controller.signal.aborted;
+    let revoked = false, released = false;
+    const isActive = () => {
+      if (revoked) return false;
+      try {
+        const now = cancelled() ? null : this.#surface();
+        revoked = !now || now.manager !== surface.manager || now.context !== surface.context
+          || now.window !== surface.window || services.isNormalWindow(surface.window) !== true;
+      } catch { revoked = true; }
+      return !revoked;
+    };
+    return { signal: controller.signal, isActive, cancelled, release: () => {
+      if (mutates && !released) this.#keyChanges.delete(provider);
+      released = true;
+    } };
+  }
+
+  #cancelKeyOperations() {
+    this.#keyGeneration++;
+    this.#keyController?.abort();
+    this.#keyController = null;
   }
 
   /** The sender is still this actor's live, current about:axiosozo document. */
@@ -424,6 +535,9 @@ export class AboutAxioSozoParent extends Base {
     try {
       validateSender(senderSnapshot(this));
     } catch (error) {
+      // A message this document may no longer send (stale, hidden, replaced) also
+      // ends its key work at once, before the next authority check would.
+      this.#cancelKeyOperations();
       console.error(error.message);
       return toErrorReply(error);
     }
@@ -477,6 +591,7 @@ export class AboutAxioSozoParent extends Base {
     this.#destroyed = true;
     this.#unsubscribe();
     this.#pickedRoots.clear();
+    this.#cancelKeyOperations();
   }
 }
 

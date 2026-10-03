@@ -35,15 +35,33 @@
           <button class="primary" type="submit">Add configuration</button>
         </form>
       </details>
-      <section class="card" aria-labelledby="jev-title">
-        <div class="card-header"><h2 id="jev-title">Jev</h2><span id="jev-state" class="badge neutral">Checking…</span></div>
-        <p id="jev-note" class="section-note">Optional. Site rules can ask Jev for a suggestion when you allow it. The key is stored only in the macOS Keychain and is never shown again. No key is required to browse.</p>
-        <form id="jev-form" class="inline-form" autocomplete="off">
-          <div class="field grow"><label for="jev-key">API key · macOS Keychain only</label><input id="jev-key" type="password" autocomplete="off" disabled="disabled" maxlength="4096" aria-describedby="jev-note jev-detail" /></div>
-          <button id="jev-store" type="submit" disabled="disabled">Store key</button>
-          <button id="jev-remove" class="remove" type="button" disabled="disabled">Remove key</button>
-        </form>
-        <p id="jev-detail" class="section-note" aria-live="polite"></p>
+      <section class="card" aria-labelledby="keys-title">
+        <div class="card-header"><h2 id="keys-title">Decision keys</h2></div>
+        <p id="keys-note" class="section-note">Optional. Site rules can ask Jev or OpenAI for a suggestion when you allow it. Keys are kept only in the macOS Keychain and are never shown again. Decision calls are not available in this build: storing a key sends nothing and does not turn on consent.</p>
+        <section id="jev-section" class="key-provider" aria-labelledby="jev-title" aria-busy="true">
+          <div class="key-head"><h3 id="jev-title" tabindex="-1">Jev</h3><span id="jev-state" class="badge neutral">Checking…</span></div>
+          <p id="jev-detail" class="section-note" aria-live="polite"></p>
+          <form id="jev-form" class="key-form" autocomplete="off">
+            <div class="field grow"><label id="jev-label" for="jev-key">Jev API key</label><input id="jev-key" type="password" autocomplete="off" spellcheck="false" disabled="disabled" maxlength="4096" aria-describedby="jev-detail jev-error keys-note" /></div>
+            <div class="key-actions">
+              <button id="jev-store" class="primary" type="submit" disabled="disabled">Store key</button>
+              <button id="jev-remove" class="remove" type="button" disabled="disabled">Remove key</button>
+            </div>
+          </form>
+          <p id="jev-error" class="key-error" role="alert"></p>
+        </section>
+        <section id="openai-section" class="key-provider" aria-labelledby="openai-title" aria-busy="true">
+          <div class="key-head"><h3 id="openai-title" tabindex="-1">OpenAI</h3><span id="openai-state" class="badge neutral">Checking…</span></div>
+          <p id="openai-detail" class="section-note" aria-live="polite"></p>
+          <form id="openai-form" class="key-form" autocomplete="off">
+            <div class="field grow"><label id="openai-label" for="openai-key">OpenAI API key</label><input id="openai-key" type="password" autocomplete="off" spellcheck="false" disabled="disabled" maxlength="4096" aria-describedby="openai-detail openai-error keys-note" /></div>
+            <div class="key-actions">
+              <button id="openai-store" class="primary" type="submit" disabled="disabled">Store key</button>
+              <button id="openai-remove" class="remove" type="button" disabled="disabled">Remove key</button>
+            </div>
+          </form>
+          <p id="openai-error" class="key-error" role="alert"></p>
+        </section>
       </section>
       <p id="settings-status" class="status" role="status" aria-live="polite"></p>
     </main>

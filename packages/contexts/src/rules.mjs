@@ -120,6 +120,8 @@ export function applyJevOutcome(rule, outcome, reasonCode = null) {
 export function effectiveObservation(rule, host) {
   const r = validateSiteRule(rule);
   if (!r.match.hosts.some(p => hostMatches(p, host))) return 'none';
+  // A sensitive-host outline override never permits a screenshot.
+  if (r.observation === 'screen' && isSensitiveHost(host).sensitive) return 'address';
   if (r.observation !== 'outline' || !isSensitiveHost(host).sensitive) return r.observation;
   return r.observation_raised_hosts.some(p => hostMatches(p, host)) ? 'outline' : 'address';
 }

@@ -4,12 +4,15 @@
 // Runs the real about:axiosozo page script (overview/about-axiosozo.mjs) on the
 // real page HTML inside a small Node DOM (support/mini-dom.mjs) with a fake
 // window.AxioSozoOverview. Checks the three sections, deep links, the
-// add-project review and the Jev key form. Synthetic: not evidence of Gecko
-// rendering, layout, VoiceOver or light/dark appearance.
+// add-project review, the decision-key forms and the rule editor's provider and
+// screen policy. Synthetic: not evidence of Gecko rendering, layout, VoiceOver
+// or light/dark appearance.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Node, parseHtml, makeEvent } from "./support/mini-dom.mjs";
+import { decisionKeyEntry } from "../chrome/ProviderStatus.sys.mjs";
+import * as M from "../chrome/overview/overview-model.mjs";
 
 const HTML = readFileSync(new URL("../chrome/overview/about-axiosozo.html", import.meta.url), "utf8");
 const DRAFT = JSON.parse(readFileSync(new URL("../../../packages/contexts/tests/expected/tauri-plus-web.json", import.meta.url), "utf8"));
@@ -36,13 +39,11 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
     listRules: () => [], getJevSettings: () => ({ consent: false, interval_minutes: 5, hourly_budget: 30 }),
     usageSummary: () => [], listOrphans: () => [], needsAttention: () => [],
     serviceStatus: () => [],
-    getJevKeyStatus: () => ({ id: "jev", label: "Jev", state: "needs-key", state_label: "No key stored", detail: "No Jev key is stored.",
-      key: "missing", key_entry_enabled: true }),
+    getDecisionKeyStatus: ({ provider }) => decisionKeyEntry({ provider, key_entry_enabled: true, key: "missing" }),
     getProviderStatus: () => ({ version: 1, discovery: "ok", discovery_error: null, model_turns_verified: false, providers: [
       { id: "codex", label: "Codex", state: "unverified", state_label: "Installed · not yet verified", detail: "Installed (0.157.1).", version: "0.157.1", expected_version: "0.157.1" },
       { id: "claude-code", label: "Claude Code", state: "not-installed", state_label: "Not installed", detail: "The official Claude Code client was not found." },
-      { id: "antigravity", label: "Antigravity", state: "unknown", state_label: "Status unknown", detail: "Could not read installation metadata." },
-      { id: "jev", label: "Jev", state: "needs-key", state_label: "No key stored", detail: "No Jev key is stored.", key: "missing", key_entry_enabled: true }] }),
+      { id: "antigravity", label: "Antigravity", state: "unknown", state_label: "Status unknown", detail: "Could not read installation metadata." }] }),
     // Like AxioSozoServices.projectHome: the stored record without its container mapping.
     getProjectHome: ({ id }) => {
       const stored = state.projects.find(project => project.id === id);
@@ -59,7 +60,6 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
       state.projects = [...state.projects, project];
       return project;
     },
-    storeJevKey: () => ({ id: "jev", label: "Jev", state: "key-stored", state_label: "Key stored", detail: "A Jev key is stored in the macOS Keychain.", key: "stored", key_entry_enabled: true }),
   };
   const api = {
     async request(name, params) {
@@ -84,7 +84,7 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
   // A services event as the actor delivers it (debounced by the page), and window events such as pagehide.
   const emit = async name => { for (const callback of subscribers) callback({ name }); await new Promise(resolve => setTimeout(resolve, 130)); await flush(); };
   const fire = async (type, event = {}) => { windowListeners.get(type)?.(event); await flush(); };
-  return { document, calls, state, location, navigate, emit, fire, text: () => document.body.textContent };
+  return { document, calls, state, location, navigate, emit, fire, subscribers, text: () => document.body.textContent };
 }
 
 const visibleView = document => document.querySelectorAll("section.view").filter(section => !section.hidden).map(section => section.dataset.view);
@@ -108,7 +108,7 @@ test("three sections only; the first run guide is the Projects empty state; ever
     ["Switch to Home", "Space type…", "Switch to Acme BV", "Space type…"], "switching and the space type stay reachable, behind …");
   assert.equal(document.getElementById("projects-body").hasAttribute("aria-busy"), false);
   assert.equal(page.calls.some(([name]) => name === "getProviderStatus"), false, "no provider discovery until AI & keys is opened");
-  assert.ok(page.calls.some(([name]) => name === "getJevKeyStatus"));
+  assert.equal(page.calls.some(([name]) => /DecisionKey|JevKey/u.test(name)), false, "no Keychain check until AI & keys is opened");
   for (const view of ["#rules", "#ai", "#projects"]) {
     await page.navigate(view);
     assert.doesNotMatch(document.body.textContent, /\bnull\b|\bundefined\b|\[object /u, view);
@@ -142,6 +142,10 @@ test("old hashes redirect; #ai loads provider status with honest labels", async 
   assert.deepEqual(page.document.querySelectorAll("#provider-list .card-title").map(title => title.textContent),
     ["CodexInstalled · not yet verified", "Claude CodeNot installed", "AntigravityStatus unknown"]);
   assert.match(page.document.getElementById("providers-summary").textContent, /no assistant was started/u);
+  assert.deepEqual(page.calls.filter(([name]) => name === "getDecisionKeyStatus").map(([, params]) => params),
+    [{ provider: "jev" }, { provider: "openai" }], "the page names a provider only");
+  assert.deepEqual(page.document.querySelectorAll("#decision-keys-body .key-head h4").map(h4 => h4.textContent), ["Jev", "OpenAI"]);
+  assert.doesNotMatch(page.document.getElementById("view-ai").textContent, /\bReady\b/u);
   await page.navigate("#time");
   assert.equal(page.location.hash, "#rules");
   assert.deepEqual(visibleView(page.document), ["rules"]);
@@ -149,37 +153,337 @@ test("old hashes redirect; #ai loads provider status with honest labels", async 
   assert.deepEqual(visibleView(page.document), ["projects"]);
 });
 
-test("Jev key: explicit Store clears the field at once, crosses once, is never echoed; errors show fixed text", async () => {
+// The browser's side of the decision keys, as ProviderStatus presents it.
+function keyHandlers({ entry = { jev: true, openai: true }, stored = [], storeFails = null, gate = null } = {}) {
+  const keys = new Set(stored);
+  const answer = provider => decisionKeyEntry({ provider, key_entry_enabled: entry[provider], key: keys.has(provider) ? "stored" : "missing" });
+  return { keys, handlers: {
+    getDecisionKeyStatus: ({ provider }) => answer(provider),
+    storeDecisionKey: async ({ provider }) => {
+      if (gate) await gate.promise;
+      if (storeFails) throw storeFails;
+      keys.add(provider); return answer(provider);
+    },
+    removeDecisionKey: ({ provider }) => { keys.delete(provider); return answer(provider); },
+    cancelDecisionKeyOperations: () => null,
+  } };
+}
+const panelOf = (document, provider) => document.querySelector(`#decision-keys-body [data-provider="${provider}"]`);
+const allValues = document => JSON.stringify(document.querySelectorAll("*").map(node => [...node.attributes.values(), node.value ?? ""]));
+
+test("decision keys: explicit Store clears the field at once, crosses once, per provider; never echoed; fixed error texts", async () => {
+  const { keys, handlers } = keyHandlers();
   let fail = null;
-  const page = await loadPage({ hash: "#ai", handlers: { storeJevKey: () => { if (fail) throw fail; return {
-    id: "jev", label: "Jev", state: "key-stored", state_label: "Key stored", detail: "A Jev key is stored in the macOS Keychain.", key: "stored", key_entry_enabled: true }; } } });
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers,
+    storeDecisionKey: params => { if (fail) throw fail; return handlers.storeDecisionKey(params); } } });
   const { document } = page;
   const input = document.getElementById("jev-key");
   assert.equal(input.type, "password");
   assert.equal(input.getAttribute("autocomplete"), "off");
+  assert.equal(document.querySelector('label[for="jev-key"]').textContent, "Jev API key");
+  assert.equal(document.querySelector('label[for="openai-key"]').textContent, "OpenAI API key");
+  assert.deepEqual(["jev", "openai"].map(p => panelOf(document, p).querySelector("button.primary").getAttribute("aria-label")),
+    ["Store key for Jev", "Store key for OpenAI"]);
+  assert.equal(input.getAttribute("aria-describedby"), "jev-key-detail jev-key-help jev-key-error");
   input.value = SECRET;
   input.dispatchEvent(makeEvent("input"));
   await flush();
-  assert.equal(page.calls.some(([name]) => name === "storeJevKey"), false, "typing sends nothing");
-  byText(document, "button", "Store key").click();
+  assert.equal(page.calls.some(([name]) => name === "storeDecisionKey"), false, "typing sends nothing");
+  byText(panelOf(document, "jev"), "button", "Store key").click();
   assert.equal(input.value, "", "cleared before the request completes");
   await flush();
-  assert.deepEqual(page.calls.filter(([name]) => name === "storeJevKey"), [["storeJevKey", { key: SECRET }]]);
-  assert.match(document.getElementById("jev-card").textContent, /Key stored/u);
-  assert.ok(byText(document, "button", "Remove key…"), "a stored key can be removed");
-  fail = { code: "KEYCHAIN_REFUSED", message: "storeJevKey failed (KEYCHAIN_REFUSED)" };
-  const again = document.getElementById("jev-key");
-  again.value = SECRET;
-  again.dispatchEvent(makeEvent("keydown", { key: "Enter" }));
+  assert.deepEqual(page.calls.filter(([name]) => name === "storeDecisionKey"), [["storeDecisionKey", { provider: "jev", key: SECRET }]]);
+  assert.deepEqual([...keys], ["jev"]);
+  assert.equal(panelOf(document, "jev").querySelector(".tag").textContent, "Key stored");
+  assert.equal(panelOf(document, "openai").querySelector(".tag").textContent, "No key stored", "OpenAI is untouched");
+  assert.equal(document.getElementById("status").textContent, "Jev key stored in the macOS Keychain. Nothing was sent and consent did not change.");
+  assert.equal(byText(panelOf(document, "jev"), "button", "Remove key…").hidden, false, "a stored key can be removed");
+  assert.equal(byText(panelOf(document, "openai"), "button", "Remove key…").hidden, true);
+  assert.equal(byText(panelOf(document, "jev"), "button", "Replace key").getAttribute("aria-label"), "Replace key for Jev");
+  assert.match(panelOf(document, "jev").textContent, /has not been used or checked: decision calls are not available in this build/u);
+
+  fail = { code: "KEYCHAIN_REFUSED", message: "storeDecisionKey failed (KEYCHAIN_REFUSED)" };
+  const openai = document.getElementById("openai-key");
+  openai.value = SECRET;
+  openai.dispatchEvent(makeEvent("keydown", { key: "Enter" }));
+  assert.equal(openai.value, "");
   await flush();
-  assert.match(document.getElementById("jev-key-error").textContent, /The macOS Keychain refused the change/u);
-  again.value = "short";
-  byText(document, "button", "Store key").click();
-  await flush();
-  assert.match(document.getElementById("jev-key-error").textContent, /8–4096 characters/u);
-  assert.equal(page.calls.filter(([name]) => name === "storeJevKey").length, 2, "an invalid key is never sent");
+  assert.equal(document.getElementById("openai-key-error").textContent, "The macOS Keychain refused the change. Unlock the Keychain and try again.");
+  assert.equal(document.getElementById("jev-key-error").textContent, "", "an error stays with its provider");
+  for (const invalid of ["short", "line\u0007bell-key", "é".repeat(2049)]) {
+    openai.value = invalid;
+    byText(panelOf(document, "openai"), "button", "Store key").click();
+    await flush();
+    assert.equal(document.getElementById("openai-key-error").textContent, "Key not stored. Paste the whole key on one line: 8 to 4096 bytes.");
+  }
+  assert.equal(page.calls.filter(([name]) => name === "storeDecisionKey").length, 2, "an invalid key is never sent");
   assert.doesNotMatch(document.body.textContent, new RegExp(SECRET, "u"));
-  assert.ok(document.querySelectorAll("input").every(node => node.value !== SECRET));
+  assert.ok(!allValues(document).includes(SECRET), "never in an attribute or a field");
+});
+
+test("decision keys: with entry off a stored key can still be removed, after confirming; the other provider is independent", async () => {
+  const { keys, handlers } = keyHandlers({ entry: { jev: true, openai: false }, stored: ["openai", "jev"] });
+  const page = await loadPage({ hash: "#ai", handlers });
+  const { document } = page;
+  const panel = panelOf(document, "openai");
+  assert.deepEqual([document.getElementById("openai-key").disabled, panel.querySelector("button.primary").disabled], [true, true]);
+  assert.match(document.getElementById("openai-key-help").textContent,
+    /^Adding an OpenAI key is turned off in this build \(axiosozo\.openai\.keyEntry\.enabled\)\. You can still remove the stored key\.$/u);
+  const remove = byText(panel, "button", "Remove key…");
+  assert.equal(remove.hidden, false);
+  remove.focus();
+  remove.click();
+  await flush();
+  assert.equal(document.getElementById("confirm-dialog").open, true);
+  assert.equal(document.getElementById("confirm-title").textContent, "Remove the OpenAI key?");
+  assert.equal(page.calls.some(([name]) => name === "removeDecisionKey"), false, "nothing is removed before confirming");
+  document.getElementById("confirm-accept").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "removeDecisionKey"), [["removeDecisionKey", { provider: "openai" }]]);
+  assert.deepEqual([...keys], ["jev"], "Jev's key stays");
+  assert.equal(panel.querySelector(".tag").textContent, "Turned off");
+  assert.equal(remove.hidden, true);
+  assert.equal(document.activeElement, document.getElementById("openai-key-heading"), "focus stays in the OpenAI form");
+  assert.equal(panelOf(document, "jev").querySelector(".tag").textContent, "Key stored");
+});
+
+test("decision keys: a second press while a change runs is ignored; leaving AI & keys cancels it, clears typed keys and shows no late answer", async () => {
+  let release;
+  const gate = { promise: new Promise(resolve => { release = resolve; }) };
+  const { handlers } = keyHandlers({ gate });
+  const page = await loadPage({ hash: "#ai", handlers });
+  const { document } = page;
+  const input = document.getElementById("jev-key");
+  const store = byText(panelOf(document, "jev"), "button", "Store key");
+  input.value = SECRET;
+  store.focus();
+  store.click();
+  await flush();
+  assert.equal(panelOf(document, "jev").querySelector(".tag").textContent, "Storing…");
+  assert.equal(store.getAttribute("aria-disabled"), "true");
+  assert.equal(store.disabled, false, "stays focusable while busy");
+  assert.equal(document.activeElement, store);
+  input.value = "synthetic-second-key-1";
+  input.dispatchEvent(makeEvent("keydown", { key: "Enter" }));
+  store.click();
+  await flush();
+  assert.equal(input.value, "synthetic-second-key-1", "an ignored press does not read the field");
+  assert.equal(page.calls.filter(([name]) => name === "storeDecisionKey").length, 1);
+  document.getElementById("openai-key").value = "synthetic-typed-not-stored";
+  await page.navigate("#projects");
+  assert.deepEqual(page.calls.filter(([name]) => name === "cancelDecisionKeyOperations"), [["cancelDecisionKeyOperations", {}]]);
+  assert.deepEqual([input.value, document.getElementById("openai-key").value], ["", ""], "typed keys are cleared on leaving");
+  release();
+  await flush();
+  assert.notEqual(document.getElementById("status").textContent, "Jev key stored in the macOS Keychain. Nothing was sent and consent did not change.",
+    "the late answer is not shown");
+  const reads = page.calls.filter(([name]) => name === "getDecisionKeyStatus").length;
+  await page.navigate("#ai");
+  assert.equal(page.calls.filter(([name]) => name === "getDecisionKeyStatus").length, reads + 2, "presence is read afresh");
+  assert.equal(document.getElementById("jev-key-error").textContent, "Cancelled before it finished, so the change could not be confirmed.");
+  assert.equal(panelOf(document, "jev").querySelector(".tag").textContent, "Key stored", "and the browser's answer shows what happened");
+});
+
+test("decision keys: an uncertain outcome says it could not be confirmed, reads presence once more and never retries the change", async () => {
+  const { keys, handlers } = keyHandlers();
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers,
+    storeDecisionKey: () => { keys.add("jev"); throw { code: "KEYCHAIN_HELPER_UNAVAILABLE", message: "storeDecisionKey failed (KEYCHAIN_HELPER_UNAVAILABLE)" }; } } });
+  const { document } = page;
+  const reads = page.calls.filter(([name]) => name === "getDecisionKeyStatus").length;
+  document.getElementById("jev-key").value = SECRET;
+  byText(panelOf(document, "jev"), "button", "Store key").click();
+  await flush();
+  assert.equal(document.getElementById("jev-key-error").textContent,
+    "The Keychain helper was not available or did not finish, so the change could not be confirmed.");
+  assert.doesNotMatch(document.getElementById("jev-key-error").textContent, /Nothing was changed/u);
+  assert.equal(page.calls.filter(([name]) => name === "storeDecisionKey").length, 1, "no automatic retry");
+  assert.deepEqual(page.calls.filter(([name]) => name === "getDecisionKeyStatus").slice(reads).map(([, params]) => params), [{ provider: "jev" }],
+    "presence is read once more, through the browser");
+  assert.equal(panelOf(document, "jev").querySelector(".tag").textContent, "Key stored", "and shows what the Keychain now reports");
+});
+
+// ---------------------------------------------------------------- admission at startup
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const names = page => page.calls.map(([name]) => name);
+/** Answers getOverviewFlags with the given failures first, then the flags. */
+const refusingFirst = (...codes) => {
+  let n = 0;
+  return () => {
+    const code = codes[n++];
+    if (code) throw { code, message: `about:axiosozo request rejected (${code})` };
+    return { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true };
+  };
+};
+
+test("admission: a startup sender refusal is asked again; only the actor's answer admits the page, then keys and providers load", async () => {
+  for (const code of ["SENDER_REJECTED", "ACTOR_ERROR"]) {
+    const { handlers } = keyHandlers();
+    const page = await loadPage({ hash: "#ai", handlers: { ...handlers, getOverviewFlags: refusingFirst(code) } });
+    assert.deepEqual(names(page), ["getOverviewFlags"], `${code}: nothing but the read-only check before admission`);
+    assert.equal(page.subscribers.length, 0, "no subscription before admission");
+    assert.equal(page.document.getElementById("providers-refresh").disabled, true, "refresh is off until admitted");
+    assert.doesNotMatch(page.text(), /not connected/u, "a refusal that may pass is not shown as not connected");
+    await sleep(M.ADMISSION_RETRY_MS[0] + 30);
+    await flush();
+    const order = names(page);
+    assert.deepEqual(order.slice(0, 2), ["getOverviewFlags", "getOverviewFlags"]);
+    assert.equal(page.subscribers.length, 1, "subscribed once, after admission");
+    for (const name of ["getProviderStatus", "getDecisionKeyStatus", "activeContext"]) {
+      assert.ok(order.indexOf(name) > 1, `${code}: ${name} only after the admitting answer`);
+    }
+    assert.deepEqual(["jev", "openai"].map(p => panelOf(page.document, p).querySelector(".tag").textContent), ["No key stored", "No key stored"]);
+    assert.equal(page.document.getElementById("jev-key").disabled, false, "the key form is usable");
+    assert.equal(page.document.getElementById("providers-refresh").disabled, false);
+    assert.equal(page.document.querySelectorAll("#provider-list .card").length, 3);
+  }
+});
+
+test("admission: any other failed flags read admits nothing: no retry, no other read, no subscription, key forms off", async () => {
+  const failures = {
+    "unknown code": () => { throw { code: "SOMETHING_NEW", message: "a code this page does not know" }; },
+    "service error": () => { throw { code: "SERVICE_ERROR", message: "the service failed" }; },
+    "private denial": () => { throw { code: "PRIVATE_WINDOW", message: "managed from a normal window" }; },
+    "local failure without a code": () => { throw new TypeError("local failure"); },
+    "rejected with nothing": () => Promise.reject(undefined),
+  };
+  for (const [label, getOverviewFlags] of Object.entries(failures)) {
+    const { handlers } = keyHandlers();
+    const page = await loadPage({ hash: "#ai", handlers: { ...handlers, getOverviewFlags } });
+    await sleep(M.ADMISSION_RETRY_MS[0] + 50);
+    await flush();
+    assert.deepEqual(names(page), ["getOverviewFlags"], `${label}: asked once, nothing else read`);
+    assert.equal(page.subscribers.length, 0, `${label}: no subscription`);
+    for (const provider of ["jev", "openai"]) {
+      assert.equal(panelOf(page.document, provider).querySelector(".tag").textContent, "Not available here", label);
+      assert.equal(page.document.getElementById(`${provider}-key`).disabled, true, label);
+      assert.equal(panelOf(page.document, provider).querySelector("button.primary").disabled, true, label);
+    }
+    assert.equal(page.document.getElementById("providers-refresh").disabled, true, label);
+    assert.match(page.document.getElementById("attention-list").textContent, /AxioSozo is not connected/u, label);
+  }
+});
+
+test("admission: a page the actor keeps refusing asks a bounded number of times, then stays not connected and reads nothing", async () => {
+  const { handlers } = keyHandlers();
+  const always = refusingFirst(...Array(20).fill("SENDER_REJECTED"));
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers, getOverviewFlags: always } });
+  const total = M.ADMISSION_RETRY_MS.reduce((sum, ms) => sum + ms, 0);
+  await sleep(total + 150);
+  await flush();
+  assert.deepEqual(names(page), Array(M.ADMISSION_RETRY_MS.length + 1).fill("getOverviewFlags"), "no other read, ever");
+  assert.equal(page.subscribers.length, 0);
+  assert.match(page.document.getElementById("attention-list").textContent, /AxioSozo is not connected/u);
+  for (const provider of ["jev", "openai"]) {
+    assert.equal(panelOf(page.document, provider).querySelector(".tag").textContent, "Not available here");
+    assert.equal(page.document.getElementById(`${provider}-key-detail`).textContent, "This page is not connected to AxioSozo.");
+    assert.equal(page.document.getElementById(`${provider}-key`).disabled, true);
+  }
+  assert.equal(page.document.getElementById("providers-refresh").disabled, true);
+  await sleep(300);
+  assert.equal(page.calls.length, M.ADMISSION_RETRY_MS.length + 1, "it does not keep polling");
+});
+
+test("admission: a pagehide during the retry stops asking; an answer from before the hide is not used; a restore asks afresh", async () => {
+  // Hidden while waiting to ask again: no request while hidden.
+  const { handlers } = keyHandlers();
+  const page = await loadPage({ hash: "#ai", handlers: { ...handlers, getOverviewFlags: refusingFirst("SENDER_REJECTED") } });
+  await page.fire("pagehide");
+  await sleep(M.ADMISSION_RETRY_MS[0] * 3);
+  assert.deepEqual(names(page), ["getOverviewFlags"], "a hidden page asks nothing");
+  await page.fire("pageshow", { persisted: true });
+  await flush();
+  assert.equal(names(page).filter(name => name === "getOverviewFlags").length, 2, "the restored page asks afresh");
+  assert.equal(panelOf(page.document, "jev").querySelector(".tag").textContent, "No key stored");
+
+  // Hidden while the first check was on its way: its late answer admits nothing,
+  // not even for the restored page while that page's own check is still open.
+  const FLAGS = { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true };
+  const answers = [];
+  const { handlers: second } = keyHandlers();
+  const late = await loadPage({ hash: "#ai", handlers: { ...second,
+    getOverviewFlags: () => new Promise(resolve => answers.push(resolve)) } });
+  await late.fire("pagehide");
+  answers[0](FLAGS);
+  await flush();
+  assert.deepEqual(names(late), ["getOverviewFlags"], "the answer from before the hide starts nothing");
+  assert.equal(late.subscribers.length, 0);
+  await late.fire("pageshow", { persisted: true });
+  await flush();
+  assert.equal(answers.length, 2, "the restored page asks for itself");
+  await late.navigate("#projects");
+  await late.navigate("#ai");
+  assert.deepEqual(names(late), ["getOverviewFlags", "getOverviewFlags"], "nothing is read while the restored page's own check is open");
+  answers[1](FLAGS);
+  await flush();
+  assert.ok(names(late).includes("getDecisionKeyStatus"), "admitted by the restored page's own answer");
+});
+
+test("decision keys: a private window or a refused check says why and offers nothing", async () => {
+  const page = await loadPage({ hash: "#ai", handlers: {
+    getDecisionKeyStatus: () => { throw { code: "PRIVATE_WINDOW", message: "getDecisionKeyStatus: keys are managed from a normal window" }; } } });
+  for (const provider of ["jev", "openai"]) {
+    const panel = panelOf(page.document, provider);
+    assert.equal(panel.querySelector(".tag").textContent, "Not available here");
+    assert.equal(page.document.getElementById(`${provider}-key-detail`).textContent, "Keys are managed from a normal window, never a private one.");
+    assert.equal(page.document.getElementById(`${provider}-key`).disabled, true);
+    assert.equal(byText(panel, "button", "Remove key…").hidden, true);
+  }
+  assert.equal(page.calls.some(([name]) => name === "storeDecisionKey" || name === "removeDecisionKey"), false);
+});
+
+// Rules (site-rule-v1): a provider only when chosen or already saved; screen is policy only.
+const RULE = { version: 1, id: "r_xcom1", enabled: true, match: { hosts: ["x.com"] }, contexts: "all", instruction: "Post, then leave.",
+  limits: { daily_minutes: 15, allowed_hours: null }, observation: "address", observation_raised_hosts: [], effects: ["nudge"], override: "confirm",
+  agents: { access: "none", instruction: "" }, created_at: 1, updated_at: 1 };
+async function ruleEditor(rule) {
+  const saved = [];
+  const page = await loadPage({ hash: `#rule=${rule.id}`, handlers: {
+    listRules: () => [rule], saveRule: params => { saved.push(params.rule); return params.rule; } } });
+  const sheet = page.document.getElementById("sheet");
+  assert.equal(sheet.open, true);
+  const radio = (name, value) => sheet.querySelectorAll(`input[name="${name}"]`).find(node => node.value === value);
+  const save = async () => { byText(sheet, "button", "Save rule").click(); await flush(); return saved.at(-1); };
+  return { page, sheet, radio, save, saved };
+}
+
+test("rule editor: a legacy rule keeps no provider; a chosen provider is written and kept through unrelated edits", async () => {
+  const legacy = await ruleEditor(RULE);
+  assert.equal(legacy.radio("provider", "jev").checked, true, "a rule without a provider is Jev");
+  const minutes = legacy.sheet.querySelectorAll("input").find(node => node.getAttribute("placeholder") === "No limit");
+  minutes.value = "20"; minutes.dispatchEvent(makeEvent("input"));
+  const kept = await legacy.save();
+  assert.equal(kept.limits.daily_minutes, 20);
+  assert.equal(Object.hasOwn(kept, "provider"), false, "the exact legacy shape");
+
+  const chosen = await ruleEditor(RULE);
+  chosen.radio("provider", "openai").click();
+  assert.equal((await chosen.save()).provider, "openai");
+
+  const openai = await ruleEditor({ ...RULE, provider: "openai" });
+  assert.equal(openai.radio("provider", "openai").checked, true);
+  assert.match(openai.sheet.textContent, /OpenAI has no consent setting yet and its decision format is not verified/u);
+  assert.equal((await openai.save()).provider, "openai", "kept through an unrelated save");
+  const back = await ruleEditor({ ...RULE, provider: "openai" });
+  back.radio("provider", "jev").click();
+  assert.equal((await back.save()).provider, "jev", "a switch back is written, so the stored OpenAI is not kept");
+});
+
+test("rule editor: a screenshot cannot be newly chosen; a saved screen rule keeps it; raising a host never allows it", async () => {
+  const fresh = await ruleEditor(RULE);
+  const screen = fresh.radio("observation", "screen");
+  assert.equal(screen.disabled, true, "no native capture in this build");
+  assert.match(fresh.sheet.textContent, /A screenshot of the tab/u);
+  assert.match(fresh.sheet.textContent, /Not available in this build: no screenshot is taken and nothing is sent for this level\./u);
+  assert.match(fresh.sheet.textContent, new RegExp(M.DECISIONS_UNAVAILABLE.replaceAll(".", "\\."), "u"));
+
+  const saved = await ruleEditor({ ...RULE, observation: "screen", provider: "openai", observation_raised_hosts: [] });
+  assert.deepEqual([saved.radio("observation", "screen").checked, saved.radio("observation", "screen").disabled], [true, false]);
+  assert.match(saved.sheet.textContent, /A screenshot is never taken on banking, government, health, identity and password-manager sites/u);
+  assert.equal(saved.sheet.querySelectorAll('input[name="raised-host"]').length, 0, "no host can be raised for a screenshot");
+  const kept = await saved.save();
+  assert.deepEqual([kept.observation, kept.provider, kept.observation_raised_hosts], ["screen", "openai", []]);
+  assert.equal(JSON.stringify(kept).includes("data_base64"), false, "a rule never carries an image");
 });
 
 test("add project: review sheet with the current space, environments per app, production URL, then where it lives", async () => {
