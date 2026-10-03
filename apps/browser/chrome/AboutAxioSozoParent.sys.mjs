@@ -16,7 +16,7 @@ export const MESSAGES = Object.freeze({
   UNSUBSCRIBE: "AxioSozoOverview:Unsubscribe",
   EVENT: "AxioSozoOverview:Event",
 });
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
 // Provider status and decision-key actions are served by ProviderStatus.sys.mjs
 // directly (Providers workstream), not through AxioSozoServices.
@@ -121,6 +121,12 @@ const T = {
   // Shape only: a key is at most 4096 UTF-8 bytes, so never more UTF-16 units.
   // ProviderStatus checks its bytes and control characters before any helper work.
   keyText: value => typeof value === "string" && value.length <= 4096,
+  // Understand (understand-v1): the user's own CLI, a facade request id, a
+  // one-use acceptance token and an optional run timeout.
+  understandCli: value => value === "claude-code" || value === "codex",
+  requestId: value => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}$/u.test(value),
+  acceptToken: value => typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/u.test(value),
+  understandTimeout: value => Number.isSafeInteger(value) && value >= 10000 && value <= 300000,
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -228,6 +234,125 @@ const keyMethod = (name, params, run, { mutates = false } = {}) => ({ params, ru
   } finally { secret = ""; }
 } });
 
+// Fixed codes an Understand operation may end with (UnderstandService, the
+// services' snapshot gate and the window checks). Anything else is unavailable;
+// no native output, path or diagnostic text is ever part of an error.
+const UNDERSTAND_ERRORS = new Set(["INVALID_PARAMS", "OWNER_REVOKED", "SERVICE_CLOSED", "STALE_PROJECT", "INVALID_PROJECT",
+  "PROJECT_CHANGED", "UNDERSTAND_UNAVAILABLE", "BRIEF_SAVE_FAILED", "BRIEF_UNAVAILABLE", "BUSY", "STALE_ACCEPTANCE",
+  "MANIFEST_REINSPECTION_REQUIRED", "WRITE_CONTAINMENT_UNAVAILABLE", "WRITE_CONTAINMENT_REFUSED", "WRITE_OUTCOME_UNKNOWN",
+  "WRITE_FAILED", "INVALID_MANIFEST", "MANIFEST_SECRET", "TOO_LARGE", "DIRECTORY_REFUSED", "MANIFEST_REFUSED", "IDENTITY_CHANGED",
+  "MANIFEST_CHANGED", "UNCONFIRMED_FIELDS", "SERVICE_FAILURE", "PRIVATE_WINDOW", "NO_WINDOW", "DOCUMENT_GONE"]);
+const UNDERSTAND_JOB_STATES = Object.freeze(["queued", "running", "persisting", "complete"]);
+const UNDERSTAND_STATUSES = Object.freeze(["ok", "failed", "cancelled", "timeout", "unavailable", "invalid_output", "busy"]);
+const ACCEPTANCE_STATUSES = Object.freeze(["ACCEPTED", "REFUSED", "REINSPECTION_REQUIRED", "INSPECTED", "CHANGED", "UNCHANGED"]);
+const MANIFEST_KINDS = Object.freeze(["web", "desktop", "library", "cli", "mobile"]);
+const FIXED_CODE = /^[A-Z][A-Z0-9_]{0,63}$/u;
+const codeOrNull = value => (typeof value === "string" && FIXED_CODE.test(value) ? value : null);
+const oneOf = (value, list) => (list.includes(value) ? value : null);
+const listOf = value => (Array.isArray(value) ? value : []);
+const jsonCopy = value => JSON.parse(JSON.stringify(value));
+
+// The answers, rebuilt from closed primitives: only these fields cross to the
+// page, whatever else a reply held. Authorization is always NOT_AUTHORIZED.
+const understandClis = list => listOf(list).filter(item => T.understandCli(item?.cli)).slice(0, 2).map(item => ({ cli: item.cli,
+  version: typeof item.version === "string" && item.version.length <= 80 && !/[\u0000-\u001f\u007f]/u.test(item.version) ? item.version : null }));
+const UNDERSTAND_REPLIES = Object.freeze({
+  state: value => ({ authorization: "NOT_AUTHORIZED", mode: value?.mode === "OFFLINE_FIXTURE" ? "OFFLINE_FIXTURE" : "PRODUCTION",
+    clis: understandClis(value?.clis),
+    jobs: listOf(value?.jobs).filter(job => T.requestId(job?.request_id) && UNDERSTAND_JOB_STATES.includes(job?.state)).slice(0, 16)
+      .map(job => ({ request_id: job.request_id, project_id: T.projectId(job.project_id) ? job.project_id : null, state: job.state,
+        status: oneOf(job.status, UNDERSTAND_STATUSES), reason: codeOrNull(job.reason), data_sent: job.data_sent === true })) }),
+  available: value => ({ authorization: "NOT_AUTHORIZED", clis: understandClis(value?.clis) }),
+  read: value => {
+    const status = oneOf(value?.status, UNDERSTAND_STATUSES);
+    if (!status || !T.requestId(value?.request_id)) fail("UNDERSTAND_UNAVAILABLE", "readProject failed (UNDERSTAND_UNAVAILABLE)");
+    return { version: 1, request_id: value.request_id, kind: "brief", cli: T.understandCli(value.cli) ? value.cli : null, status,
+      reason: codeOrNull(value.reason), document: status === "ok" && isPlainObject(value.document) ? jsonCopy(value.document) : null,
+      data_sent: value.data_sent === true, duration_ms: Number.isSafeInteger(value.duration_ms) && value.duration_ms >= 0 ? value.duration_ms : 0 };
+  },
+  cancel: value => ({ cancelled: value?.cancelled === true }),
+  preview: value => {
+    if (!T.acceptToken(value?.token) || !isPlainObject(value?.manifest)) fail("UNDERSTAND_UNAVAILABLE", "previewProjectBriefAcceptance failed (UNDERSTAND_UNAVAILABLE)");
+    return { token: value.token, manifest: jsonCopy(value.manifest) };
+  },
+  outcome: value => {
+    const status = oneOf(value?.status, ACCEPTANCE_STATUSES);
+    if (!status) fail("UNDERSTAND_UNAVAILABLE", "the acceptance outcome is unknown (UNDERSTAND_UNAVAILABLE)");
+    return { status, committed: value.committed === true ? true : value.committed === false ? false : null, reason: codeOrNull(value.reason) };
+  },
+});
+
+/** Understand methods (Plan 4 step 6). A registered normal window and this
+ * current document before the service is asked anything; then the actor's
+ * own owner for the named project (ctx.understandOwner): bound to this
+ * document, its selected browser and window, separate from any key lifetime,
+ * acquired afresh after a project change and never revived. The services get
+ * that private alias and params rebuilt from closed primitives, never an
+ * alias, root, revision, callback, signal or flag from the page. The answer
+ * is checked again after it arrived; failures leave as fixed codes only. */
+// `revoked` is the code (or answer → code) for an owner lost while the service
+// worked: for an acceptance that may already have reached the helper it is
+// WRITE_OUTCOME_UNKNOWN, never a claim that nothing was written.
+const understandMethod = (name, params, service, { reply, build = p => ({ projectId: p.projectId }), acquire = true, empty = null,
+  revoked = "OWNER_REVOKED" } = {}) => ({
+  params, run: async (ctx, p) => {
+    const window = normalWindow(ctx, name, "project homes");
+    if (typeof ctx.understandOwner !== "function") fail("UNSUPPORTED", `${name} needs the page's own actor`);
+    const owner = ctx.understandOwner(p.projectId, { window, acquire });
+    if (!owner) return empty;
+    let value = null, failure = null;
+    try { value = await ctx.services[service](owner.alias, build(p)); } catch (error) { failure = error; }
+    if (!owner.isActive()) {
+      fail(failure ? "OWNER_REVOKED" : typeof revoked === "function" ? revoked(value) : revoked, `${name}: this page is no longer the one that asked`);
+    }
+    if (normalWindow(ctx, name, "project homes") !== window) fail("NO_WINDOW", `${name}: the window changed`);
+    if (failure) {
+      const code = UNDERSTAND_ERRORS.has(failure?.code) ? failure.code : "UNDERSTAND_UNAVAILABLE";
+      fail(code, `${name} failed (${code})`);
+    }
+    return reply(value);
+  } });
+
+// Acceptance params: exactly these, edits naming the confirmed name and/or kind only.
+const ACCEPT_SHAPE = Object.freeze({ projectId: T.projectId, token: T.acceptToken, edits: T.object, confirmed: value => value === true });
+const manifestName = value => typeof value === "string" && [...value].length >= 1 && [...value].length <= 80 && /^[^\u0000-\u001f\u007f]+$/u.test(value);
+function checkAcceptEdits(edits) {
+  const keys = Object.keys(edits);
+  if (!keys.length || keys.some(key => key !== "name" && key !== "kind")) fail("INVALID_PARAMS", "acceptProjectBrief: edits name only the name and kind");
+  if (Object.hasOwn(edits, "name") && !manifestName(edits.name)) fail("INVALID_PARAMS", "acceptProjectBrief: invalid name");
+  if (Object.hasOwn(edits, "kind") && !MANIFEST_KINDS.includes(edits.kind)) fail("INVALID_PARAMS", "acceptProjectBrief: invalid kind");
+  return { ...(Object.hasOwn(edits, "name") ? { name: edits.name } : {}), ...(Object.hasOwn(edits, "kind") ? { kind: edits.kind } : {}) };
+}
+// Only a write the helper itself reports as not committed is told as refused.
+const acceptBrief = understandMethod("acceptProjectBrief", ACCEPT_SHAPE, "acceptProjectBrief", { reply: UNDERSTAND_REPLIES.outcome,
+  revoked: value => (value?.status === "REFUSED" && value.committed === false ? "STALE_ACCEPTANCE" : "WRITE_OUTCOME_UNKNOWN"),
+  build: p => ({ projectId: p.projectId, token: p.token, edits: checkAcceptEdits(p.edits), confirmed: true }) });
+
+/** A malformed acceptance that still carries a recognizable token spends it
+ * if it is this page's own, whatever project it named (another, a missing or
+ * invalid one): through the page's current owner, as a refusal only (no
+ * edits, not confirmed), so the facade consumes the lease before it refuses.
+ * Another owner's token is untouched, no owner is made and nothing is written. */
+async function spendOwnAcceptance(ctx, token) {
+  const held = typeof ctx.heldUnderstand === "function" ? ctx.heldUnderstand() : null;
+  if (!held) return;
+  try { await ctx.services.acceptProjectBrief(held.alias, { projectId: held.projectId, token, edits: {}, confirmed: false }); }
+  catch { /* the refusal is the point */ }
+}
+
+const PROJECT_HOME_URI = /^about:axiosozo(?:\?[^#]*)?#(.*)$/u;
+/** The project id whose home a native about:axiosozo document URI shows
+ * (#project=<id>, decoded, exactly one valid id; no suffix), else null. Same
+ * rule as the page's route; read from the WindowGlobal, never from page data. */
+export function projectHomeRoute(spec) {
+  const match = typeof spec === "string" ? PROJECT_HOME_URI.exec(spec) : null;
+  if (!match) return null;
+  let fragment;
+  try { fragment = decodeURIComponent(match[1]); } catch { return null; }
+  const id = fragment.startsWith("project=") ? fragment.slice("project=".length) : null;
+  return T.projectId(id) ? id : null;
+}
+
 // ---------------------------------------------------------------- methods
 
 // The closed method list: every §3.3 service method (pickFolder is called
@@ -236,10 +361,11 @@ const keyMethod = (name, params, run, { mutates = false } = {}) => ({ params, ru
 // container presentation, the user's own account labels and shared sites,
 // and project links opened through the container router), the read-only
 // project home (Plan 4 step 3) plus openContext,
-// openUrl, the read-only getOverviewFlags, provider status and the decision-key
-// methods (contracts/provider-v1.md). Nothing else is callable. Arrival offers
-// are accepted in the native notification only; no page method takes a token.
-// No page method names, assigns or clears a container ID.
+// openUrl, the read-only getOverviewFlags, provider status, the decision-key
+// methods (contracts/provider-v1.md) and the Understand methods (Plan 4 step 6).
+// Nothing else is callable. Arrival offers are accepted in the native
+// notification only; the only page-held token is the one-use, owner-bound brief
+// acceptance token. No page method names, assigns or clears a container ID.
 export const METHODS = Object.freeze({
   // contexts
   listContexts: { params: {}, run: ({ services }) => services.listContexts() },
@@ -388,6 +514,41 @@ export const METHODS = Object.freeze({
     ({ services }, p, window) => services.listAgentSessions({ window, projectId: p.projectId })),
   revokeAgentSession: agentMethod("revokeAgentSession", { projectId: T.projectId, sessionId: T.sessionId },
     ({ services }, p, window) => services.revokeAgentSession({ window, projectId: p.projectId, sessionId: p.sessionId })),
+  // Understand (Plan 4 step 6, understand-v1): the explicit Read of the user's
+  // own Claude Code or Codex, its state and cancellation, and the separately
+  // confirmed acceptance of a saved brief's name and kind. Product reads stay
+  // NOT_AUTHORIZED; each answer is a choice, a status or a document.
+  getUnderstandState: understandMethod("getUnderstandState", { projectId: T.projectId }, "getUnderstandState",
+    { reply: UNDERSTAND_REPLIES.state }),
+  getUnderstandAvailability: understandMethod("getUnderstandAvailability", { projectId: T.projectId }, "getUnderstandAvailability",
+    { reply: UNDERSTAND_REPLIES.available }),
+  readProject: understandMethod("readProject", { projectId: T.projectId, cli: T.understandCli, timeoutMs: optional(T.understandTimeout) },
+    "readProject", { reply: UNDERSTAND_REPLIES.read,
+      build: p => ({ projectId: p.projectId, cli: p.cli, ...(p.timeoutMs === undefined ? {} : { timeoutMs: p.timeoutMs }) }) }),
+  // One queued or running read of this page's own current owner; an
+  // acknowledgement, not its result. Never makes an owner.
+  cancelUnderstand: understandMethod("cancelUnderstand", { projectId: T.projectId, requestId: T.requestId }, "cancelUnderstand",
+    { reply: UNDERSTAND_REPLIES.cancel, acquire: false, empty: { cancelled: false },
+      build: p => ({ projectId: p.projectId, requestId: p.requestId }) }),
+  previewProjectBriefAcceptance: understandMethod("previewProjectBriefAcceptance", { projectId: T.projectId },
+    "previewProjectBriefAcceptance", { reply: UNDERSTAND_REPLIES.preview }),
+  // Validated here (not by the generic shape check) so that a malformed
+  // attempt can still spend this page's own recognizable token.
+  acceptProjectBrief: { raw: true, params: ACCEPT_SHAPE, run: async (ctx, params) => {
+    let p;
+    try { p = checkParams("acceptProjectBrief", params, ACCEPT_SHAPE); checkAcceptEdits(p.edits); }
+    catch (error) {
+      if (isPlainObject(params) && T.acceptToken(params.token)) await spendOwnAcceptance(ctx, params.token);
+      throw error;
+    }
+    return acceptBrief.run(ctx, p);
+  } },
+  // Never a write retry: inspects a write whose outcome is owed.
+  reinspectProjectBriefAcceptance: understandMethod("reinspectProjectBriefAcceptance", { projectId: T.projectId },
+    "reinspectProjectBriefAcceptance", { reply: UNDERSTAND_REPLIES.outcome }),
+  // The page left the project home: this actor's Understand owner ends (its
+  // reads and leases), nobody else's. A later operation makes a new one.
+  cancelProjectReadOperations: { params: {}, run: ctx => { ctx.releaseUnderstand?.(); return null; } },
 });
 
 export function validateRequest(data) {
@@ -397,6 +558,8 @@ export function validateRequest(data) {
   let size = 0;
   try { size = JSON.stringify(params ?? {}).length; } catch { fail("INVALID_PARAMS", `${name}: params are not JSON`); }
   if (size > MAX_PARAMS_BYTES) fail("INVALID_PARAMS", `${name}: params too large`);
+  // A raw method checks its own params, as strictly, inside its run.
+  if (METHODS[name].raw) return { name, params: params ?? {} };
   return { name, params: checkParams(name, params, METHODS[name].params) };
 }
 
@@ -452,6 +615,10 @@ export class AboutAxioSozoParent extends Base {
   #keyController = null;
   #keyGeneration = 0;
   #keyChanges = new Set();
+  // Understand work of this document: at most one owner lifetime, minted here
+  // for one project and separate from the key lifetime. Its alias stays in
+  // this actor and the services; it is never revived once it ended.
+  #understand = null;
 
   #context() {
     const services = servicesProvider();
@@ -470,6 +637,9 @@ export class AboutAxioSozoParent extends Base {
       current: () => this.#current(),
       keyLease: (provider, options) => this.#keyLease(provider, { ...options, services }),
       cancelKeyOperations: () => this.#cancelKeyOperations(),
+      understandOwner: (projectId, options) => this.#understandOwner(projectId, { ...options, services }),
+      heldUnderstand: () => this.#heldUnderstand(),
+      releaseUnderstand: () => this.#releaseUnderstand(),
     };
   }
 
@@ -525,6 +695,131 @@ export class AboutAxioSozoParent extends Base {
     this.#keyController = null;
   }
 
+  /** What an Understand lifetime is bound to, read live: this document's
+   * surface, its top-level embedder browser, that browser being its window's
+   * selected one (a current WindowGlobal alone does not prove that), and the
+   * document's own native URI: the exact object WindowGlobalParent holds (a
+   * same-document route change replaces it, even back to the same text) and
+   * the project home it names. Missing, unexpected or throwing facts are null. */
+  #understandSurface() {
+    const surface = this.#surface();
+    if (!surface) return null;
+    try {
+      const embedder = surface.context.embedderElement;
+      if (!embedder || surface.window.gBrowser?.selectedBrowser !== embedder) return null;
+      const documentURI = surface.manager.documentURI;
+      const route = projectHomeRoute(documentURI?.spec);
+      return documentURI && route ? { ...surface, embedder, documentURI, route } : null;
+    } catch { return null; }
+  }
+
+  /**
+   * This document's Understand owner for `projectId`: the current one when it
+   * is for that project and still holds, else (acquire) a new one, only while
+   * the document natively shows exactly that project's home. Its predicate is
+   * synchronous, literally true only while this is the same manager, browsing
+   * context, embedder browser and registered normal window it was minted for,
+   * that browser is still selected, the sender is still admitted, and the
+   * document's native URI is still the very object it was minted with and
+   * names this home. A route change replaces that object (A → list → A
+   * included), so it ends the lifetime even when the URI later reads the same;
+   * unknown facts refuse. Once false it stays false. Another project, a lost
+   * predicate, another tab selected, a native location change, unsubscription,
+   * a sender refusal and destruction all end it at once (abort, then release),
+   * whether or not the page sends any cleanup.
+   */
+  #understandOwner(projectId, { window, services, acquire = true } = {}) {
+    const held = this.#understand;
+    if (held && held.projectId === projectId && held.isActive()) return held;
+    if (!acquire) {
+      if (held && held.projectId === projectId) this.#releaseUnderstand();
+      return null;
+    }
+    if (held) this.#releaseUnderstand();
+    const surface = this.#understandSurface();
+    if (!surface) fail("DOCUMENT_GONE", "the requesting page is not the selected, current project home");
+    if (surface.route !== projectId) fail("DOCUMENT_GONE", "the requesting page is not this project's home");
+    if (surface.window !== window || services?.isNormalWindow?.(window) !== true) fail("NO_WINDOW", "the window changed");
+    if (typeof services.registerUnderstandOwner !== "function") fail("UNSUPPORTED", "project reads are not available yet");
+    const controller = new AbortController();
+    let revoked = false;
+    const isActive = () => {
+      if (revoked) return false;
+      try {
+        const now = this.#destroyed || controller.signal.aborted ? null : this.#understandSurface();
+        revoked = !now || now.manager !== surface.manager || now.context !== surface.context || now.embedder !== surface.embedder
+          || now.window !== surface.window || now.documentURI !== surface.documentURI || now.route !== projectId
+          || !this.#current() || services.isNormalWindow(surface.window) !== true;
+      } catch { revoked = true; }
+      return !revoked;
+    };
+    const lifetime = { projectId, isActive, controller, services, alias: null, unwatch: [] };
+    try { lifetime.alias = services.registerUnderstandOwner({ window, current: isActive, signal: controller.signal }); }
+    catch (error) {
+      controller.abort();
+      const code = UNDERSTAND_ERRORS.has(error?.code) ? error.code : "UNDERSTAND_UNAVAILABLE";
+      fail(code, `project reads are not available here (${code})`);
+    }
+    this.#understand = lifetime;
+    const end = () => { if (this.#understand === lifetime) this.#releaseUnderstand(); };
+    lifetime.unwatch = [this.#watchSelection(surface, end), this.#watchLocation(surface, end)];
+    return lifetime;
+  }
+
+  /** Selecting another tab in the window ends the lifetime at once; the
+   * predicate would refuse it anyway at the next check, but a running read is
+   * stopped now rather than when its answer arrives. */
+  #watchSelection(surface, end) {
+    let tabs = null;
+    try { tabs = surface.window.gBrowser?.tabContainer ?? null; } catch { tabs = null; }
+    if (typeof tabs?.addEventListener !== "function") return null;
+    const onSelect = () => {
+      let selected = null;
+      try { selected = surface.window.gBrowser.selectedBrowser; } catch { selected = null; }
+      if (selected !== surface.embedder) end();
+    };
+    tabs.addEventListener("TabSelect", onSelect);
+    return () => { try { tabs.removeEventListener("TabSelect", onSelect); } catch { /* window closing */ } };
+  }
+
+  /** Any native top-level location change of this browser (a same-document
+   * route change included, as tabbrowser reports it) ends the lifetime at
+   * once. The URI identity in the predicate refuses it regardless; this stops
+   * a running read now instead of at its next check. */
+  #watchLocation(surface, end) {
+    let tabbrowser = null;
+    try { tabbrowser = surface.window.gBrowser ?? null; } catch { tabbrowser = null; }
+    if (typeof tabbrowser?.addTabsProgressListener !== "function" || typeof tabbrowser.removeTabsProgressListener !== "function") return null;
+    const listener = { onLocationChange(browser, webProgress) {
+      if (browser !== surface.embedder) return;
+      let topLevel = true;
+      try { topLevel = webProgress?.isTopLevel !== false; } catch { topLevel = true; }
+      if (topLevel) end();
+    } };
+    tabbrowser.addTabsProgressListener(listener);
+    return () => { try { tabbrowser.removeTabsProgressListener(listener); } catch { /* window closing */ } };
+  }
+
+  /** This document's current owner for a refusal only (a malformed acceptance
+   * spends its own token through it); one whose predicate failed is ended,
+   * which ends its leases too. Never makes an owner. */
+  #heldUnderstand() {
+    const held = this.#understand;
+    if (!held) return null;
+    if (!held.isActive()) { this.#releaseUnderstand(); return null; }
+    return held;
+  }
+
+  /** Ends this document's Understand owner (its reads and leases only), synchronously. */
+  #releaseUnderstand() {
+    const lifetime = this.#understand;
+    if (!lifetime) return;
+    this.#understand = null;
+    for (const unwatch of lifetime.unwatch) unwatch?.();
+    lifetime.controller.abort();
+    try { lifetime.services.releaseUnderstandOwner?.(lifetime.alias); } catch (error) { console.error(error); }
+  }
+
   /** The sender is still this actor's live, current about:axiosozo document. */
   #current() {
     if (this.#destroyed) return false;
@@ -536,8 +831,9 @@ export class AboutAxioSozoParent extends Base {
       validateSender(senderSnapshot(this));
     } catch (error) {
       // A message this document may no longer send (stale, hidden, replaced) also
-      // ends its key work at once, before the next authority check would.
+      // ends its key and Understand work at once, before the next authority check would.
       this.#cancelKeyOperations();
+      this.#releaseUnderstand();
       console.error(error.message);
       return toErrorReply(error);
     }
@@ -581,10 +877,13 @@ export class AboutAxioSozoParent extends Base {
     }
   }
 
+  /** The page stopped listening (pagehide) or the actor is going away: its
+   * listeners are removed and its Understand owner ends with them. */
   #unsubscribe() {
     for (const unsubscribe of this.#unsubscribers.splice(0)) {
       try { unsubscribe(); } catch (error) { console.error(error); }
     }
+    this.#releaseUnderstand();
   }
 
   didDestroy() {

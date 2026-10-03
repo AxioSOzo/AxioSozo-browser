@@ -15,7 +15,7 @@ const MESSAGES = Object.freeze({
   UNSUBSCRIBE: "AxioSozoOverview:Unsubscribe",
   EVENT: "AxioSozoOverview:Event",
 });
-const EVENT_NAMES = new Set(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
+const EVENT_NAMES = new Set(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
 const MAX_PARAMS_BYTES = 512 * 1024;
 const DOCUMENT_URI = /^about:axiosozo(?:[?#].*)?$/;
 const METHOD_NAME = /^[A-Za-z]{1,64}$/;

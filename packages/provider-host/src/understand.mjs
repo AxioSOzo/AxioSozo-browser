@@ -214,9 +214,16 @@ export function understandEnvironment({ home = homedir() } = {}) {
   return { PATH: process.env.PATH || '/usr/bin:/bin', HOME: home, LANG: process.env.LANG || 'en_US.UTF-8', TERM: 'dumb' };
 }
 
+const runningChild = child => Number.isSafeInteger(child?.pid) && child.pid > 0
+  && child.exitCode === null && child.signalCode === null;
+const exitedChild = child => Number.isInteger(child?.exitCode)
+  || typeof child?.signalCode === 'string' && child.signalCode.length > 0;
 function killGroup(child) {
-  if (!child?.pid) return;
+  // Best effort while the retained ChildProcess still records a live leader.
+  // This is not an OS process-group ownership proof; never signal a known exit.
+  if (!runningChild(child)) return;
   try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Group already gone. */ }
+  if (!runningChild(child)) return;
   try { child.kill('SIGKILL'); } catch { /* Already exited. */ }
 }
 
@@ -285,6 +292,7 @@ export class UnderstandRunner {
     if (job.outcome) return;
     job.outcome = { status, reason };
     killGroup(job.child);
+    job.finishStopped?.(); // Known exited leader: settle without waiting for inherited pipes.
   }
   #start(job) {
     const { request } = job; const started = this.#options.now();
@@ -292,19 +300,30 @@ export class UnderstandRunner {
     if (launch.unavailable) return Promise.resolve(job.result('unavailable', launch.unavailable));
     return new Promise(finish => {
       let stdout = []; let stdoutBytes = 0; let spawned = false; let done = false; let timer;
-      const complete = value => { if (done) return; done = true; clearTimeout(timer); this.#unhookExit(); finish(value); };
+      const complete = value => { if (done) return; done = true; job.finishStopped = null; clearTimeout(timer); this.#unhookExit(); finish(value); };
       const end = (status, reason, document = null) => complete(job.result(status, reason,
         { document, data_sent: spawned, duration_ms: Math.max(0, this.#options.now() - started) }));
       let child;
       try {
-        // detached: the CLI leads its own process group so timeout/cancel/exit kill every descendant.
+        // detached: best-effort group signalling while this direct child is not known exited.
         child = spawn(launch.command, [...launch.prefix, ...understandArgs(request.cli, request.kind)], {
           cwd: request.project_root, env: understandEnvironment({ home: this.#options.home }), shell: false, detached: true,
           stdio: ['pipe', 'pipe', 'pipe'] });
       } catch { end('unavailable', 'SPAWN_FAILED'); return; }
-      job.child = child; this.#hookExit();
+      job.child = child;
+      const finishStopped = () => {
+        if (!job.outcome || !exitedChild(child)) return;
+        // Closing owned pipes bounds the request; it does not kill or reap descendants.
+        for (const pipe of [child.stdin, child.stdout, child.stderr]) {
+          try { pipe.destroy(); } catch { /* The owned stream may already be closed. */ }
+        }
+        end(job.outcome.status, job.outcome.reason);
+      };
+      job.finishStopped = finishStopped;
+      this.#hookExit();
       timer = setTimeout(() => this.#stop(job, 'timeout', 'TIMEOUT'), request.timeout_ms);
       child.once('spawn', () => { spawned = true; });
+      child.once('exit', finishStopped); // Normal successful output still drains until close.
       child.once('error', () => { if (!spawned) { job.outcome ??= { status: 'unavailable', reason: 'SPAWN_FAILED' }; end('unavailable', 'SPAWN_FAILED'); } });
       child.stdin.on('error', () => {});
       child.stdout.on('data', chunk => {
@@ -316,7 +335,6 @@ export class UnderstandRunner {
       // stderr is drained and discarded: nothing of it is kept (0 ≤ the 16 KiB cap), shown or returned.
       child.stderr.resume();
       child.once('close', code => {
-        killGroup(child); // Reap any descendant that outlived the CLI.
         if (job.outcome) { end(job.outcome.status, job.outcome.reason); return; }
         if (code !== 0) {
           // Claude reports in-run failures as a result envelope on stdout with a non-zero exit.
@@ -330,7 +348,7 @@ export class UnderstandRunner {
       child.stdin.end(understandPrompt(request.kind, request.input));
     });
   }
-  // Host exit (normal or signal-driven process.exit) kills the running CLI's process group.
+  // Host exit attempts group signalling only while its retained direct child is not known exited.
   #hookExit() {
     if (this.#exitHook) return;
     this.#exitHook = () => { if (this.#running?.child) killGroup(this.#running.child); };

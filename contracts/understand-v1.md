@@ -42,7 +42,11 @@ Reached from chrome over the existing provider-host stdio transport
   with a reference to the documentation they came from.
 - The prompt states: read-only, do not open `.env*` or credential files, answer
   with one JSON object matching the schema, nothing else.
-- Process group is killed on timeout, cancel or host exit.
+- Timeout, cancellation and host exit attempt group/direct signals only while
+  the retained direct child still records live state. Known exit suppresses
+  numeric signals. A stopped request closes owned streams and settles after
+  known direct-child exit; this does not prove descendant termination or reaping.
+  Ordinary results continue draining output until close.
 
 ## 3. Result
 
@@ -87,10 +91,48 @@ hosts validated). Anything else → `invalid_output`, `document: null`.
 ## 4. Storage in the browser
 
 The brief is stored in the profile on the project record (`brief`, context
-store v3): `{ "version": 1, "cli": "claude-code", "generated_at": "<timestamp>", "accepted": false, "document": <brief> }`.
+store v3): `{ "version": 1, "cli": "claude-code", "generated_at": <safe integer epoch milliseconds>, "accepted": false, "document": <brief> }`.
 "Accept into manifest" writes only `name`/`kind` changes the user confirms;
 the brief itself is never written to `.axiosozo/project.json`.
 
-## 5. Changelog
+## 5. Browser service boundary
+
+The process-wide chrome facade owns a bounded queue and private native caller
+identities. Page JSON never supplies an owner, filesystem root, revision, runtime
+or authorization flag. Production state/availability/read remain
+`NOT_AUTHORIZED` before project lookup, admission, discovery or process launch.
+A separately pinned private synthetic fixture may exercise canned clients; its
+mode is `OFFLINE_FIXTURE` while authorization remains `NOT_AUTHORIZED`.
+
+Each operation captures the registered project root and monotonic revision,
+then requires current native owner and fresh root admission through dispatch
+and publication. External mutations invalidate authority synchronously, before
+asynchronous storage or detection. Releasing one owner cancels only its work;
+process shutdown retires the shared runtime. Queue/running notifications are
+not persistence receipts. A successful brief replaces the old saved brief only
+through a guarded serialized contexts-store update returning the exact published
+record with a new revision. Failed, cancelled or stale work preserves the old
+brief. Authority lost after publication cannot promise rollback.
+
+Manifest acceptance is separate from optional live Read authorization. Preview
+creates a private owner/project/root/revision/exact-brief-bound token, valid for
+120 seconds and one use. Only explicitly confirmed nonempty `name`/`kind` edits
+are accepted. Commands, domains and other brief fields are inert data and cannot
+be copied into the manifest by this API. The pinned descriptor-based helper
+revalidates the root, current static manifest and target identity before its
+atomic file replacement; metadata checks do not exclude arbitrary same-UID
+filesystem races.
+
+Acceptance returns `{status, committed, reason}`. Only `ACCEPTED` means native
+publication was freshly inspected and the exact saved brief was guardedly
+reconciled. A lost/uncertain write result retains an inspection debt and returns
+`REINSPECTION_REQUIRED`; no automatic write retry or fresh writer is admitted
+until explicit inspection. Inspection does not itself retry a write. Page events
+contain only the fixed `understand` name; documents, aliases, tokens and paths
+never become global event payloads.
+
+## 6. Changelog
 
 - 2 October 2026 — created for Plan 4.
+- 3 October 2026 — integrate the guarded browser facade, manifest acceptance and
+  accurate direct-child cleanup limits; retain live authorization closed.

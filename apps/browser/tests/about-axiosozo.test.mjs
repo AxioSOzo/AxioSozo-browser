@@ -147,17 +147,22 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents and decision keys", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, decision keys and Understand", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
-    "activeContext", "cancelDecisionKeyOperations", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
+    "acceptProjectBrief", "activeContext", "cancelDecisionKeyOperations", "cancelProjectReadOperations", "cancelUnderstand",
+    "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
     "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings",
-    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "linkOrganization", "linkProject",
+    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getUnderstandAvailability", "getUnderstandState",
+    "linkOrganization", "linkProject",
     "listAgentActivity", "listAgentSessions", "listContexts",
     "listOrphans", "listProjectContainers", "listProjects", "listRules", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
-    "projectForUrl", "refreshProjectDetection", "removeDecisionKey", "removeOrphans", "removeProject", "revokeAgentSession", "saveRule", "serviceStatus",
+    "previewProjectBriefAcceptance", "projectForUrl", "readProject", "refreshProjectDetection", "reinspectProjectBriefAcceptance",
+    "removeDecisionKey", "removeOrphans", "removeProject", "revokeAgentSession", "saveRule", "serviceStatus",
     "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeDecisionKey", "updateProject",
     "usageSummary", "writeManifest",
   ]);
+  // Understand owners, roots, revisions, runtimes and openers never cross to the page.
+  assert.ok(!Object.keys(METHODS).some(name => /owner|alias|revision|opener|snapshot|commit|invalidate/iu.test(name)));
   // Key material, runtimes and helpers are never page-named methods.
   assert.ok(!Object.keys(METHODS).some(name => /JevKey|readKey|runtime|fixture|helper|keychain/iu.test(name)));
   // Arrival is accepted in the native notification only (ProjectArrivalRuntime).

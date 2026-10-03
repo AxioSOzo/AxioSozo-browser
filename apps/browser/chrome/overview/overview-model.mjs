@@ -1077,7 +1077,8 @@ export function homeConsoleErrors(errors) {
   return { state: "list", text: `${errors.count} console error${errors.count === 1 ? "" : "s"} in this project's tabs`, count: errors.count, items };
 }
 
-export const BRIEF_UNAVAILABLE = "A brief is a short document your own Claude Code or Codex can write about this folder. Writing one is not available in this build.";
+export const BRIEF_ABOUT = "A brief is a short document your own Claude Code or Codex can write about this folder.";
+export const BRIEF_UNAVAILABLE = `${BRIEF_ABOUT} Writing one is not available in this build.`;
 export const BRIEF_CLIS = Object.freeze({ "claude-code": "Claude Code", codex: "Codex" });
 
 /** A stored brief (understand-v1 §4) as a document, or null. Text only; its
@@ -1089,7 +1090,8 @@ export function briefView(brief) {
     .filter(item => textOr(item[keys[0]]));
   return {
     product: doc.product,
-    apps: rows(doc.apps, ["name", "kind", "summary"]).map(item => ({ name: item.name, kind: textOr(item.kind), summary: textOr(item.summary) })),
+    apps: rows(doc.apps, ["name", "kind", "summary"]).map(item => ({ name: item.name, kind: textOr(item.kind),
+      path: textOr(item.path) || null, summary: textOr(item.summary) })),
     domains: rows(doc.domains, ["host", "purpose"]).map(item => ({ host: item.host, purpose: textOr(item.purpose) })),
     services: rows(doc.services, ["name", "purpose"]).map(item => ({ name: item.name, purpose: textOr(item.purpose) })),
     start: rows(doc.start, ["label", "command"]).map(item => ({ label: item.label, command: textOr(item.command), cwd: textOr(item.cwd) || null })),
@@ -1098,6 +1100,195 @@ export function briefView(brief) {
     accepted: brief.accepted === true,
     generatedAt: Number.isSafeInteger(brief.generated_at) ? brief.generated_at : null,
   };
+}
+
+// ---------------------------------------------------------------- Understand (Plan 4 step 6)
+
+// Reading a project runs the user's own Claude Code or Codex (understand-v1).
+// Product reads are NOT_AUTHORIZED in this build; only the explicit synthetic
+// fixture mode (state.mode OFFLINE_FIXTURE) offers Read. Nothing here infers
+// authorization from an installed CLI, a version, a key or an earlier result.
+export const UNDERSTAND_CLIS = Object.freeze(["claude-code", "codex"]);
+export const UNDERSTAND_INTRO = Object.freeze({
+  fixture: "Synthetic test mode: a stand-in for your own Claude Code or Codex reads this folder on this Mac and writes a brief here. No assistant or provider is contacted. Switching tabs or leaving this page stops it.",
+  production: "Your own Claude Code or Codex could read this folder on this Mac and write a brief here. Reading is not available in this build, so nothing is sent.",
+  unknown: "Reading this project is not available right now. Nothing is sent.",
+});
+export const BRIEF_EMPTY_FIXTURE = "No brief yet. Read the project below to write one; it shows here once it is saved.";
+const READING_STATES = new Set(["queued", "running", "persisting"]);
+const cliName = cli => BRIEF_CLIS[cli] ?? "The assistant";
+
+/** The mode a getUnderstandState answer reports: "fixture" only for the
+ * explicit synthetic capability, "production" for the closed product path,
+ * "unknown" when there is no answer. Authorization stays NOT_AUTHORIZED in all. */
+export function understandMode(reply) {
+  if (reply?.authorization !== "NOT_AUTHORIZED") return "unknown";
+  return reply.mode === "OFFLINE_FIXTURE" ? "fixture" : reply.mode === "PRODUCTION" ? "production" : "unknown";
+}
+
+/** This page's read still under way: the latest queued, running or saving
+ * job of its own owner, or null. `persisting` (status null) is not success. */
+export function activeUnderstandJob(reply) {
+  const jobs = listOf(reply?.jobs).filter(job => typeof job?.request_id === "string" && READING_STATES.has(job.state));
+  return jobs.length ? { requestId: jobs.at(-1).request_id, state: jobs.at(-1).state } : null;
+}
+
+const JOB_TEXT = Object.freeze({
+  queued: () => "Waiting to start. It begins when the reader is free.",
+  running: cli => (Object.hasOwn(BRIEF_CLIS, cli ?? "") ? `Reading the folder with ${BRIEF_CLIS[cli]}…` : "Reading the folder…"),
+  persisting: () => "Saving the brief…",
+});
+
+/** One finished read as a calm sentence (never a raw code): a result of
+ * readProject, or a fixed code it refused with. Only a saved brief is success. */
+export function understandOutcome(outcome, { mode = "production" } = {}) {
+  if (!outcome) return null;
+  if (outcome.code) {
+    switch (outcome.code) {
+      case "BRIEF_SAVE_FAILED": return { tone: "bad", text: "The brief could not be saved. Any earlier brief is unchanged." };
+      // A save already under way cannot be undone: the brief shown is what the browser saved.
+      case "OWNER_REVOKED": case "DOCUMENT_GONE":
+        return { tone: "warn", text: "It stopped because another tab was selected or this page was left. The brief shown is the one that is saved." };
+      case "PROJECT_CHANGED": case "STALE_PROJECT": case "INVALID_PROJECT":
+        return { tone: "warn", text: "This project is changing right now, so it was not read. Try again in a moment." };
+      case "PRIVATE_WINDOW": return { tone: "warn", text: "Projects are read only from a normal window, never a private one." };
+      case "SERVICE_CLOSED": return { tone: "warn", text: "AxioSozo is closing, so nothing was read." };
+      default: return { tone: "warn", text: "The reader is not available right now, so nothing was read." };
+    }
+  }
+  const { status, reason } = outcome.result ?? {};
+  const name = cliName(outcome.result?.cli);
+  switch (status) {
+    case "ok": return { tone: "ok", text: "Brief saved. It is shown above." };
+    case "cancelled":
+      if (reason === "STALE_PROJECT") return { tone: "warn", text: "It stopped because the project changed while it was read. The brief shown is the one that is saved." };
+      if (reason === "HOST_CLOSED") return { tone: "warn", text: "Stopped because the reader closed. Nothing was saved." };
+      return { tone: "info", text: "Stopped. Nothing was saved, and any earlier brief is unchanged." };
+    case "timeout": return { tone: "warn", text: "It took too long and was stopped. Nothing was saved." };
+    case "unavailable":
+      if (reason === "NOT_AUTHORIZED") return { tone: "info", text: "Reading projects is not available in this build, so nothing was sent." };
+      if (reason === "CLI_NOT_INSTALLED") return { tone: "warn", text: `${name} is not available to read with${mode === "fixture" ? " in this test setup" : ""}, so nothing was sent.` };
+      return { tone: "warn", text: "The reader is not available right now, so nothing was sent." };
+    case "invalid_output": return { tone: "warn", text: "The answer was not a valid brief, so nothing was saved." };
+    case "busy": return { tone: "warn", text: "Too many reads are waiting. Try again in a moment." };
+    case "failed": return { tone: "bad", text: `${name} could not finish reading this project. Nothing was saved.` };
+    default: return { tone: "warn", text: "The read ended without a brief. Nothing was saved." };
+  }
+}
+
+/** Whether a finished read may have saved a brief that its answer does not
+ * show (saved, or stopped around its save): the home is then read again. */
+export function understandMaySave(outcome) {
+  return outcome?.result?.status === "ok" || outcome?.result?.reason === "STALE_PROJECT"
+    || outcome?.code === "OWNER_REVOKED" || outcome?.code === "DOCUMENT_GONE";
+}
+
+/** Whether a finished read started the assistant, as a fact (never a permission). */
+export function understandDataFact(result, { mode = "production" } = {}) {
+  if (typeof result?.data_sent !== "boolean") return null;
+  if (!result.data_sent) return "The assistant was not started; nothing was sent.";
+  return mode === "fixture" ? "The synthetic test reader was started for this read; it reads only this folder."
+    : `${cliName(result.cli)} was started for this read, so it may have contacted its provider.`;
+}
+
+/**
+ * What the Read part of a home shows, from this page's latest state answer
+ * (or its refusal code), its own read under way ({ cli } while readProject is
+ * out) and the last outcome. Read is offered only in fixture mode; while a
+ * read, its admission or its save is pending, Read is inactive (no duplicate)
+ * and Stop is offered for a queued or running job.
+ */
+export function understandView({ reply = null, error = null, pending = null, outcome = null, checking = false, replyStale = false } = {}) {
+  const mode = error ? "unknown" : understandMode(reply);
+  // A state answer asked for before the read's own result arrived still lists it as under way.
+  const job = replyStale && !pending ? null : activeUnderstandJob(reply);
+  const busy = !!pending || !!job;
+  let status = null;
+  if (job) status = { tone: "info", text: JOB_TEXT[job.state](pending?.cli) };
+  else if (pending) status = { tone: "info", text: "Starting…" };
+  else if (outcome) status = understandOutcome(outcome, { mode });
+  const clis = listOf(reply?.clis);
+  const versions = clis.length ? UNDERSTAND_CLIS.map(cli => {
+    const found = clis.find(item => item?.cli === cli);
+    return `${cliName(cli)}: ${found ? found.version ?? "version unknown" : "not found"}`;
+  }).join(" · ") : null;
+  return {
+    mode, intro: UNDERSTAND_INTRO[mode], canRead: mode === "fixture" && !busy, offered: mode === "fixture",
+    busy, job, canStop: !!job && job.state !== "persisting", status,
+    fact: !busy && outcome?.result ? understandDataFact(outcome.result, { mode }) : null,
+    versions, checking,
+  };
+}
+
+/** Readable sentence for an acceptance outcome ({ status, committed, reason }).
+ * Only ACCEPTED is success; a changed disk or project is never called one. */
+export function acceptanceOutcome(outcome) {
+  switch (outcome?.status) {
+    case "ACCEPTED": return { tone: "ok", text: "Accepted. The project file has the name and kind you confirmed, and the brief is marked accepted." };
+    case "REFUSED": return { tone: "warn", text: `Nothing was written: ${refusalText(outcome.reason)}` };
+    case "REINSPECTION_REQUIRED": return { tone: "warn", inspect: true,
+      text: "AxioSozo could not confirm whether the project file was written. Check the project file before anything else is written." };
+    case "INSPECTED": return { tone: "info",
+      text: "Checked. The write could not be confirmed, so the brief is not marked accepted. Review and accept again to write it." };
+    case "CHANGED": return { tone: "warn", text: outcome.reason === "STALE_PROJECT"
+      ? "The project file was written, but the project changed meanwhile, so the brief is not marked accepted."
+      : "The project file changed right after it was written, so the brief is not marked accepted. Nothing else was changed." };
+    case "UNCHANGED": return { tone: "info", text: "Nothing to check: no project file write is waiting to be confirmed." };
+    default: return { tone: "warn", text: "The outcome is unknown. Check the project file before accepting again." };
+  }
+}
+
+function refusalText(reason) {
+  switch (reason) {
+    case "MANIFEST_CHANGED": case "IDENTITY_CHANGED": case "STALE_ACCEPTANCE":
+      return "the project file changed since you opened the review. Open Accept again to review it.";
+    case "DIRECTORY_REFUSED": case "MANIFEST_REFUSED": case "WRITE_CONTAINMENT_REFUSED":
+      return "AxioSozo does not write a project file at this place.";
+    case "MANIFEST_SECRET": return "the project file would hold something that looks like a secret.";
+    case "TOO_LARGE": case "INVALID_MANIFEST": case "UNCONFIRMED_FIELDS": return "the project file would not be valid.";
+    case "BUSY": return "another change to the project file is running.";
+    case "WRITE_CONTAINMENT_UNAVAILABLE": return "this build cannot write the project file safely.";
+    default: return "the project file could not be written.";
+  }
+}
+
+/** Refusals of an acceptance after which the write's outcome is owed an inspection. */
+export const ACCEPTANCE_INSPECT_CODES = Object.freeze(["MANIFEST_REINSPECTION_REQUIRED", "WRITE_OUTCOME_UNKNOWN"]);
+
+/** Why a preview, acceptance or inspection was refused before any outcome. */
+export function acceptanceErrorText(code) {
+  switch (code) {
+    case "STALE_ACCEPTANCE": return "This review is no longer valid: it expired, was already used or the project changed. Nothing was written; open Accept again.";
+    case "MANIFEST_REINSPECTION_REQUIRED": return "An earlier write still has to be checked first. Check the project file.";
+    // Authority ended after the write may have reached the file: never "nothing was written".
+    case "WRITE_OUTCOME_UNKNOWN":
+      return "This page changed while the project file was being written, so AxioSozo cannot confirm whether it was. Check the project file before anything else is written.";
+    case "BRIEF_UNAVAILABLE": return "There is no saved brief to accept.";
+    case "WRITE_CONTAINMENT_UNAVAILABLE": return "This build cannot write the project file safely, so nothing was written.";
+    case "BUSY": return "Another change to the project file is running. Try again in a moment.";
+    case "PROJECT_CHANGED": case "STALE_PROJECT": case "INVALID_PROJECT": return "This project is changing right now. Nothing was written; try again in a moment.";
+    case "OWNER_REVOKED": case "DOCUMENT_GONE": return "This page changed meanwhile. Nothing was written.";
+    case "PRIVATE_WINDOW": return "Project files are changed only from a normal window.";
+    default: return "The project file could not be reviewed right now. Nothing was written.";
+  }
+}
+
+/** The acceptance review: only the name and kind, starting from the project
+ * file (or the stored manifest) the browser just read. Nothing from the brief. */
+export function acceptanceForm(manifest) {
+  const name = textOr(manifest?.name);
+  const kind = PROJECT_KINDS.includes(manifest?.kind) ? manifest.kind : "web";
+  return { name, kind, currentName: name, currentKind: kind };
+}
+
+/** → { edits: { name, kind }, errors }: both confirmed values, checked like the
+ * manifest's own name (1–80 characters, one line) and kind. */
+export function acceptanceEdits(form) {
+  const name = String(form?.name ?? "").trim();
+  const errors = [];
+  if (!validName(name)) errors.push("The name must be 1 to 80 characters on one line.");
+  if (!PROJECT_KINDS.includes(form?.kind)) errors.push("Choose a project kind.");
+  return errors.length ? { edits: null, errors } : { edits: { name, kind: form.kind }, errors };
 }
 
 /** Folder, project file and last read, for the About part of the home. */

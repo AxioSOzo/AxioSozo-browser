@@ -320,10 +320,54 @@ test("console errors (step 7 seam) and the brief (step 6 seam): unavailable, emp
     domains: [{ host: "shop.example.dev", purpose: "production" }], services: [{ name: "Stripe", purpose: "billing" }],
     start: [{ label: "Web", command: "bun run dev", cwd: "apps/web" }], risks: ["Payments untested"] } });
   assert.deepEqual([brief.product, brief.by, brief.accepted, brief.generatedAt], ["A <b>shop</b>.", "Codex", false, 5]);
-  assert.deepEqual(brief.apps, [{ name: "web", kind: "web", summary: "Storefront" }]);
+  assert.deepEqual(brief.apps, [{ name: "web", kind: "web", path: "apps/web", summary: "Storefront" }]);
   assert.deepEqual(brief.start, [{ label: "Web", command: "bun run dev", cwd: "apps/web" }]);
   assert.deepEqual(brief.domains, [{ host: "shop.example.dev", purpose: "production" }]);
   assert.match(M.BRIEF_UNAVAILABLE, /not available in this build/u);
+});
+
+test("Understand (step 6): Read is offered only in the synthetic fixture mode, never inferred from CLIs, versions or an earlier success", () => {
+  const production = { authorization: "NOT_AUTHORIZED", mode: "PRODUCTION", clis: [{ cli: "codex", version: "9.9.9" }, { cli: "claude-code", version: "1.0" }], jobs: [] };
+  const view = M.understandView({ reply: production, outcome: { result: { status: "ok", reason: null, cli: "codex", data_sent: true } } });
+  assert.deepEqual([view.mode, view.offered, view.canRead], ["production", false, false], "installed and versioned CLIs grant nothing");
+  for (const reply of [null, { mode: "OFFLINE_FIXTURE" }, { authorization: "AUTHORIZED", mode: "OFFLINE_FIXTURE" }, { authorization: "NOT_AUTHORIZED", mode: "LIVE" }]) {
+    assert.equal(M.understandView({ reply }).offered, false, JSON.stringify(reply));
+  }
+  const fixture = { authorization: "NOT_AUTHORIZED", mode: "OFFLINE_FIXTURE", clis: [], jobs: [] };
+  assert.deepEqual([M.understandView({ reply: fixture }).canRead, M.understandView({ reply: fixture, error: "PRIVATE_WINDOW" }).offered], [true, false]);
+  // Pending, queued, running and saving all block a second activation; only queued and running can be stopped.
+  const job = state => ({ ...fixture, jobs: [{ request_id: "r:1", project_id: "p_harbor1", state, status: null, reason: null, data_sent: false }] });
+  assert.deepEqual([M.understandView({ reply: fixture, pending: { cli: "codex" } }).canRead, M.understandView({ reply: fixture, pending: { cli: "codex" } }).status.text], [false, "Starting…"]);
+  for (const [state, stop] of [["queued", true], ["running", true], ["persisting", false]]) {
+    const busy = M.understandView({ reply: job(state), pending: { cli: "claude-code" } });
+    assert.deepEqual([busy.canRead, busy.canStop], [false, stop], state);
+    assert.doesNotMatch(busy.status.text, /saved\./u, `${state} is not success`);
+  }
+  assert.equal(M.understandView({ reply: job("running"), pending: { cli: "claude-code" } }).status.text, "Reading the folder with Claude Code…");
+  // A state answer older than the read's own result no longer holds it as running.
+  assert.equal(M.understandView({ reply: job("running"), outcome: { code: "BRIEF_SAVE_FAILED" }, replyStale: true }).busy, false);
+  // Fixed sentences only; data_sent is a fact, never a permission.
+  assert.equal(M.understandOutcome({ code: "SOMETHING_NEW" }).text, "The reader is not available right now, so nothing was read.");
+  assert.match(M.understandDataFact({ data_sent: true, cli: "codex" }), /Codex was started for this read/u);
+  assert.match(M.understandDataFact({ data_sent: false, cli: "codex" }), /nothing was sent/u);
+  assert.deepEqual([M.understandMaySave({ result: { status: "ok" } }), M.understandMaySave({ code: "OWNER_REVOKED" }),
+    M.understandMaySave({ result: { status: "cancelled", reason: "CANCELLED" } })], [true, true, false]);
+});
+
+test("Understand acceptance: only name and kind, checked like the manifest; outcomes are distinct and only ACCEPTED is success", () => {
+  assert.deepEqual(M.acceptanceForm({ name: "Disk", kind: "desktop", environments: [{ name: "local" }] }),
+    { name: "Disk", kind: "desktop", currentName: "Disk", currentKind: "desktop" });
+  assert.deepEqual(M.acceptanceForm(null).kind, "web");
+  assert.deepEqual(M.acceptanceEdits({ name: "  Harbor  ", kind: "cli" }), { edits: { name: "Harbor", kind: "cli" }, errors: [] });
+  for (const form of [{ name: "", kind: "web" }, { name: "x".repeat(81), kind: "web" }, { name: "a\nb", kind: "web" }, { name: "ok", kind: "service" }]) {
+    assert.equal(M.acceptanceEdits(form).edits, null, JSON.stringify(form));
+  }
+  const texts = ["ACCEPTED", "REFUSED", "REINSPECTION_REQUIRED", "INSPECTED", "CHANGED", "UNCHANGED"].map(status => M.acceptanceOutcome({ status, committed: null, reason: null }));
+  assert.equal(new Set(texts.map(item => item.text)).size, 6);
+  assert.deepEqual(texts.map(item => item.tone === "ok"), [true, false, false, false, false, false]);
+  assert.equal(M.acceptanceOutcome({ status: "REINSPECTION_REQUIRED" }).inspect, true);
+  assert.doesNotMatch(M.acceptanceErrorText("WRITE_OUTCOME_UNKNOWN"), /Nothing was written/u, "an unknown outcome never claims a rollback");
+  assert.deepEqual(M.ACCEPTANCE_INSPECT_CODES, ["MANIFEST_REINSPECTION_REQUIRED", "WRITE_OUTCOME_UNKNOWN"]);
 });
 
 test("home facts, section order and problems", () => {

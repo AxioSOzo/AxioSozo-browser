@@ -140,6 +140,10 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   }
   // Read-only runtime counters for GUI evidence (e.g. Jev decideCalls, provider host state).
   if (typeof hostDecide?.diagnostics === "function") runtime.decisionHost = hostDecide.diagnostics;
+  // Understand (Plan 4 step 6): counts only. Reading them creates no facade and
+  // starts nothing; this window's owners end with its registration above, and
+  // the shared facade closes once at profile shutdown, never per window.
+  if (typeof services.getUnderstandDiagnostics === "function") runtime.understand = () => services.getUnderstandDiagnostics();
   return { disposers, services, zen, runtime };
 }
 

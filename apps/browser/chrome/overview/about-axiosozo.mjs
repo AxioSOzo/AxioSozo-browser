@@ -48,6 +48,10 @@ const state = {
   // refused with, hook settings per agent for the listening socket, and
   // whether a switch request is on its way.
   agents: { endpoint: null, error: null, hooks: new Map(), socket: null, busy: false },
+  // Understand (Plan 4 step 6): this visit of the shown home's Read and brief
+  // acceptance work (understandVisit). A new visit starts on every route change,
+  // pagehide and restore, so nothing of an earlier one can publish.
+  understand: understandVisit(null),
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -258,15 +262,22 @@ function setupDialog() {
   dialog.addEventListener("cancel", event => { event.preventDefault(); dialogResolve?.(false); });
 }
 
-// One modal sheet for the project review and the rule editor.
+// One modal sheet for the project review, the rule editor and the brief
+// acceptance review. onClose runs once however it closes (Cancel, Escape, done).
 let sheetClose = null;
-function openSheet({ title, body, footer }) {
+function openSheet({ title, body, footer, onClose = null }) {
   const dialog = $("sheet");
+  // A sheet opened over another one ends that one first (its onClose runs).
+  sheetClose?.();
   const returnFocus = document.activeElement;
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     sheetClose = null;
     if (dialog.open) dialog.close();
     $("sheet-body").replaceChildren();
+    onClose?.();
     returnFocus?.focus?.();
   };
   sheetClose = close;
@@ -1055,6 +1066,9 @@ async function loadHome({ retry = true } = {}) {
   }
   state.home = next;
   await keepFocus(renderHome);
+  // The Read part asks for this visit's own state once a home is shown; that
+  // reads a status only, it never starts a read, metadata check or client.
+  if (current() && next.data) ensureUnderstandState();
   if (!current() || !state.homeProbe || !next.data) return;
   state.homeProbe = false;
   if (next.data.project.manifest.services.length) refreshServiceStatus(next.data.project, { quiet: true });
@@ -1184,10 +1198,62 @@ async function revokeAgentSession(project, item) {
   if (state.homeId === project.id) await loadHome();
 }
 
+/** The saved brief as a document (never a chat): what the product is, its
+ * apps, the domains it mentions (unconfirmed, never links), services, start
+ * commands as inert text, risks and who wrote it when. Then its acceptance. */
+function briefDocument(project, brief, visit) {
+  const written = dateText(brief.generatedAt);
+  return h("div", { class: "brief", role: "group", "aria-labelledby": "home-brief-heading" },
+    h("div", { class: "brief-head" },
+      h("h4", { id: "home-brief-heading", tabindex: "-1", "data-focus-key": "brief:heading" }, "Brief"),
+      brief.accepted ? h("span", { class: "tag state", "data-tone": "ok" }, "Accepted into the project file") : null),
+    brief.apps.length ? [h("h5", {}, "Apps"), h("ul", { class: "brief-list" }, brief.apps.map(app =>
+      h("li", {}, h("strong", {}, app.name), app.kind ? ` (${app.kind})` : "", app.summary ? ` — ${app.summary}` : "",
+        app.path ? [" ", h("span", { class: "path brief-path" }, app.path)] : null)))] : null,
+    brief.start.length ? [h("h5", {}, "How to start"), h("ul", { class: "brief-list" }, brief.start.map(step =>
+      h("li", {}, `${step.label}: `, h("code", {}, step.command), step.cwd ? [" in ", h("span", { class: "path brief-path" }, step.cwd)] : ""))),
+    h("p", { class: "footnote" }, "AxioSozo shows these commands; it never runs them.")] : null,
+    brief.services.length ? [h("h5", {}, "Services"), h("ul", { class: "brief-list" }, brief.services.map(item =>
+      h("li", {}, h("strong", {}, item.name), item.purpose ? ` — ${item.purpose}` : "")))] : null,
+    brief.domains.length ? [h("h5", {}, "Domains it mentions"), h("ul", { class: "brief-list" }, brief.domains.map(item =>
+      h("li", {}, item.host, item.purpose ? ` — ${item.purpose}` : "", " ", h("span", { class: "tag unconfirmed" }, "unconfirmed"))))] : null,
+    brief.risks.length ? [h("h5", {}, "Known risks"), h("ul", { class: "brief-list" }, brief.risks.map(text => h("li", {}, text)))] : null,
+    h("p", { class: "footnote" }, `Written by ${brief.by}${written ? ` on ${written}` : ""}. `,
+      brief.accepted ? "Accepted." : "Not accepted into the project file."),
+    briefActions(project, brief, visit));
+}
+
+/** Accepting the saved brief's name and kind into the project file, or the
+ * explicit check a write of unknown outcome needs first; then what happened. */
+function briefActions(project, brief, visit) {
+  const acceptance = visit.acceptance;
+  const inactive = !!acceptance.busy || understandBusy(visit);
+  let action = null;
+  if (acceptance.inspect) {
+    action = h("button", { type: "button", "data-focus-key": "brief:action", "aria-disabled": acceptance.busy ? "true" : null,
+      "aria-describedby": "brief-action-help", onclick: () => reinspectFlow(project) },
+    acceptance.busy === "inspect" ? "Checking…" : "Check the project file");
+  } else if (!brief.accepted) {
+    action = h("button", { type: "button", "data-focus-key": "brief:action", "aria-disabled": inactive ? "true" : null,
+      "aria-describedby": "brief-action-help", onclick: () => acceptBriefFlow(project) },
+    acceptance.busy === "preview" ? "Opening the review…" : "Accept into project file…");
+  }
+  const help = acceptance.inspect ? "Reads the file again; it never writes it a second time."
+    : "Writes only the name and kind you confirm to .axiosozo/project.json.";
+  const notice = acceptance.notice
+    ? h("p", { class: "brief-notice", "data-tone": acceptance.notice.tone }, h("span", { class: "dot", "data-status": toneDot(acceptance.notice.tone), "aria-hidden": "true" }),
+      h("span", {}, acceptance.notice.text)) : null;
+  if (!action && !notice) return null;
+  return h("div", { class: "brief-actions" },
+    action ? h("div", { class: "inline-action" }, action, h("span", { class: "help", id: "brief-action-help" }, help)) : null, notice);
+}
+
 /** The brief (a document, never a chat), then folder, apps and domains found. */
 function homeAbout(project) {
   const key = suffix => `project:${project.id}:${suffix}`;
   const brief = M.briefView(project.brief);
+  const visit = state.understand;
+  const mode = understandViewOf(visit).mode;
   const found = M.detectionSummary(project.detected);
   const folder = M.folderFacts(project);
   const read = dateText(folder.lastRead);
@@ -1203,22 +1269,15 @@ function homeAbout(project) {
       h("button", { type: "button", class: "ghost small", "data-focus-key": key("home-read"), onclick: () => refreshDetectionFlow(project) },
         read ? "Read folder again" : "Read folder"))],
   ].filter(Boolean);
-  const briefBlock = brief ? h("div", { class: "brief", role: "group", "aria-label": "Brief" },
-    h("h4", {}, "Brief"),
-    brief.apps.length ? [h("h5", {}, "Apps"), h("ul", { class: "brief-list" }, brief.apps.map(app =>
-      h("li", {}, h("strong", {}, app.name), app.kind ? ` (${app.kind})` : "", app.summary ? ` — ${app.summary}` : "")))] : null,
-    brief.start.length ? [h("h5", {}, "How to start"), h("ul", { class: "brief-list" }, brief.start.map(step =>
-      h("li", {}, `${step.label}: `, h("code", {}, step.command), step.cwd ? ` in ${step.cwd}` : ""))),
-    h("p", { class: "footnote" }, "AxioSozo shows these commands; it never runs them.")] : null,
-    brief.services.length ? [h("h5", {}, "Services"), h("ul", { class: "brief-list" }, brief.services.map(item =>
-      h("li", {}, h("strong", {}, item.name), item.purpose ? ` — ${item.purpose}` : "")))] : null,
-    brief.domains.length ? [h("h5", {}, "Domains it mentions"), h("ul", { class: "brief-list" }, brief.domains.map(item =>
-      h("li", {}, item.host, item.purpose ? ` — ${item.purpose}` : "", " ", h("span", { class: "tag unconfirmed" }, "unconfirmed"))))] : null,
-    brief.risks.length ? [h("h5", {}, "Known risks"), h("ul", { class: "brief-list" }, brief.risks.map(text => h("li", {}, text)))] : null,
-    h("p", { class: "footnote" }, `Written by ${brief.by}${dateText(brief.generatedAt) ? ` on ${dateText(brief.generatedAt)}` : ""}. `,
-      brief.accepted ? "Accepted." : "Not accepted into the project file."))
-    : h("div", { class: "brief absent" }, h("h4", {}, "Brief"), h("p", { class: "quiet-text" }, `No brief yet. ${M.BRIEF_UNAVAILABLE}`));
+  const briefBlock = brief ? briefDocument(project, brief, visit)
+    : h("div", { class: "brief absent", role: "group", "aria-labelledby": "home-brief-heading" },
+      h("h4", { id: "home-brief-heading", tabindex: "-1", "data-focus-key": "brief:heading" }, "Brief"),
+      h("p", { class: "quiet-text" }, mode === "fixture" ? M.BRIEF_EMPTY_FIXTURE
+        : mode === "production" ? `No brief yet. ${M.BRIEF_UNAVAILABLE}` : `No brief yet. ${M.BRIEF_ABOUT}`));
+  // The Read part exists only where Read is offered (the synthetic fixture);
+  // the same nodes stay in place across renders, so its live status is stable.
   return homeSection("about", "About this project", [briefBlock,
+    mode === "fixture" ? understandPanel(visit).root : null,
     h("dl", { class: "home-facts" }, facts.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))]);
 }
 
@@ -1288,6 +1347,304 @@ function focusHomeTitle() {
   window.scrollTo?.({ top: 0 });
   deliberateFocus++;
   $("home-title")?.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------- Understand: reading a project (Plan 4 step 6)
+
+// Every Read, state, version, preview, acceptance and inspection answer belongs
+// to one visit (state.understand) and, inside it, to its own latest ticket. A
+// new visit starts on every route change (A → list → A included), pagehide and
+// restore: an older visit's answer changes no state, toast or focus and starts
+// nothing. Leaving ends this page's owner in the browser, and with it the
+// visit's reads and acceptance leases. Only the browser's saved record is ever
+// shown as the brief; an answer document is never rendered by itself.
+
+const toneDot = tone => ({ ok: "up", bad: "down", warn: "warn" })[tone] ?? "unknown";
+const setInactive = (node, inactive) => { if (inactive) node.setAttribute("aria-disabled", "true"); else node.removeAttribute("aria-disabled"); };
+
+function understandVisit(projectId) {
+  return { projectId, reply: null, replyTicket: 0, error: null, requested: false, stateTicket: 0, pending: null, outcome: null,
+    outcomeTicket: 0, lastCli: null, checking: false, owned: false, panel: null,
+    acceptance: { busy: null, notice: null, inspect: false, ticket: 0 } };
+}
+const understandCurrent = visit => visit === state.understand && state.active && !!visit.projectId && state.homeId === visit.projectId;
+const understandViewOf = visit => M.understandView({ reply: visit.reply, error: visit.error, pending: visit.pending,
+  outcome: visit.outcome, checking: visit.checking, replyStale: !!visit.outcome && visit.replyTicket < visit.outcomeTicket });
+const understandBusy = visit => understandViewOf(visit).busy;
+
+/** The shown home's visit ends: its review closes, its token is dropped, and
+ * the browser ends this page's owner (its reads and leases, nobody else's). */
+function leaveUnderstand(nextProjectId) {
+  const visit = state.understand;
+  closeAcceptanceReview();
+  state.understand = understandVisit(nextProjectId);
+  if (visit.owned && api && state.connected) call("cancelProjectReadOperations").catch(() => {});
+}
+
+/** The visit's first state read, once a home is shown (again after a refusal). */
+function ensureUnderstandState() {
+  const visit = state.understand;
+  if (understandCurrent(visit) && !visit.reply && !visit.requested) loadUnderstandState(visit);
+}
+
+/** This page's own state for the shown project: the mode, installed versions
+ * once checked, and its own reads. Reading it starts nothing. A refusal keeps
+ * the last answer (a changing project is asked again later). */
+async function loadUnderstandState(visit = state.understand) {
+  if (!understandCurrent(visit) || !state.connected) return;
+  const ticket = visit.stateTicket = nextTicket();
+  visit.requested = true;
+  visit.owned = true;
+  let reply = null, code = null;
+  try { reply = await call("getUnderstandState", { projectId: visit.projectId }); } catch (error) { code = error?.code ?? "ERROR"; }
+  if (!understandCurrent(visit) || visit.stateTicket !== ticket) return;
+  const before = understandViewOf(visit).mode;
+  if (reply) { visit.reply = reply; visit.replyTicket = ticket; visit.error = null; }
+  else if (!visit.reply) { visit.error = code; visit.requested = false; }
+  // The Read part appears or goes only when the mode changes; otherwise its nodes update in place.
+  if (understandViewOf(visit).mode !== before) await keepFocus(renderHome);
+  else renderUnderstand(visit);
+}
+
+/** The Read part: built once per visit and kept across renders, so its status
+ * line (a polite live region) and keyboard focus stay where they are. */
+function understandPanel(visit) {
+  if (visit.panel) return visit.panel;
+  const statusDot = h("span", { class: "dot", "data-status": "unknown", "aria-hidden": "true" });
+  const statusText = h("span", {});
+  const panel = {
+    heading: h("h4", { id: "home-understand-heading", tabindex: "-1" }, "Read this project"),
+    intro: h("p", { class: "help understand-intro", id: "home-understand-intro" }),
+    read: M.UNDERSTAND_CLIS.map(cli => h("button", { type: "button", "data-cli": cli, "data-focus-key": `understand:read:${cli}`,
+      "aria-describedby": "home-understand-intro", onclick: () => readProjectFlow(cli) }, `Read with ${M.BRIEF_CLIS[cli]}`)),
+    stop: h("button", { type: "button", class: "ghost", hidden: true, "data-focus-key": "understand:stop", "aria-label": "Stop reading",
+      onclick: () => stopRead() }, "Stop"),
+    versionsButton: h("button", { type: "button", class: "ghost small", "data-focus-key": "understand:versions",
+      onclick: () => checkUnderstandVersions() }, "Check versions"),
+    versions: h("p", { class: "fact-note", hidden: true }),
+    statusDot, statusText,
+    status: h("p", { class: "understand-status", role: "status", "aria-live": "polite", "aria-atomic": "true", "data-tone": "none" }, statusDot, statusText),
+    fact: h("p", { class: "fact-note", hidden: true }),
+  };
+  panel.root = h("div", { class: "understand", role: "group", "aria-labelledby": "home-understand-heading" },
+    h("div", { class: "understand-head" }, panel.heading, panel.versionsButton),
+    panel.intro,
+    h("div", { class: "understand-actions", role: "group", "aria-label": "Read with" }, panel.read, panel.stop),
+    panel.status, panel.fact, panel.versions);
+  visit.panel = panel;
+  renderUnderstand(visit);
+  return panel;
+}
+
+/** Updates the Read part in place. While a read, its admission or its save is
+ * pending, Read stays focusable but inactive (aria-disabled): a second press
+ * does nothing. Saving is never shown as done before the browser saved it. */
+function renderUnderstand(visit = state.understand) {
+  const panel = visit.panel;
+  if (!panel || visit !== state.understand) return;
+  const view = understandViewOf(visit);
+  const focused = document.activeElement;
+  panel.intro.textContent = view.intro;
+  for (const button of panel.read) setInactive(button, !view.canRead);
+  panel.stop.hidden = !view.canStop;
+  setInactive(panel.versionsButton, view.checking || view.busy);
+  panel.versionsButton.textContent = view.checking ? "Checking versions…" : "Check versions";
+  panel.versions.textContent = view.versions ?? "";
+  panel.versions.hidden = !view.versions;
+  panel.status.setAttribute("data-tone", view.status?.tone ?? "none");
+  panel.statusDot.setAttribute("data-status", toneDot(view.status?.tone));
+  panel.statusText.textContent = view.status?.text ?? "";
+  panel.fact.textContent = view.fact ?? "";
+  panel.fact.hidden = !view.fact;
+  // The brief's Accept waits while a read runs (it would replace that brief).
+  const action = $("project-home").querySelector('[data-focus-key="brief:action"]');
+  if (action && !visit.acceptance.inspect) setInactive(action, !!visit.acceptance.busy || view.busy);
+  // Stop goes when the read ends: keyboard focus moves to the Read it started from.
+  if (focused === panel.stop && panel.stop.hidden) {
+    (panel.read.find(button => button.dataset.cli === visit.lastCli) ?? panel.read[0]).focus({ preventScroll: true });
+  }
+}
+
+/** The explicit Read: the user's chosen CLI for the shown project only. Its
+ * outcome is shown once; a saved brief is then read from the browser's record.
+ * A failure, cancel, timeout or refusal never removes the brief already shown. */
+async function readProjectFlow(cli) {
+  const visit = state.understand;
+  if (!understandCurrent(visit) || !M.UNDERSTAND_CLIS.includes(cli) || !understandViewOf(visit).canRead) return;
+  const ticket = nextTicket();
+  visit.pending = { cli, ticket };
+  visit.lastCli = cli;
+  visit.outcome = null;
+  visit.owned = true;
+  renderUnderstand(visit);
+  let result = null, code = null;
+  try { result = await call("readProject", { projectId: visit.projectId, cli }); } catch (error) { code = error?.code ?? "ERROR"; }
+  if (!understandCurrent(visit) || visit.pending?.ticket !== ticket) return;
+  visit.pending = null;
+  visit.outcome = result ? { result } : { code };
+  visit.outcomeTicket = nextTicket();
+  renderUnderstand(visit);
+  const outcome = M.understandOutcome(visit.outcome, { mode: understandViewOf(visit).mode });
+  if (outcome) setStatus(outcome.text, outcome.tone === "ok" || outcome.tone === "info" ? "info" : "error");
+  // A saved brief (or a save that may have finished before it stopped) is read from the browser's own record.
+  if (M.understandMaySave(visit.outcome)) await loadHome();
+  if (understandCurrent(visit)) loadUnderstandState(visit);
+}
+
+/** Stop: asks to cancel this page's own queued or running read. The answer is
+ * an acknowledgement only; the read's own result says how it ended. */
+async function stopRead() {
+  const visit = state.understand;
+  const job = M.activeUnderstandJob(visit.reply);
+  if (!understandCurrent(visit) || !job || job.state === "persisting") return;
+  try { await call("cancelUnderstand", { projectId: visit.projectId, requestId: job.requestId }); } catch { /* the read's own result tells */ }
+  if (understandCurrent(visit)) loadUnderstandState(visit);
+}
+
+/** The explicit metadata check: which of the two CLIs this setup has, by version. */
+async function checkUnderstandVersions() {
+  const visit = state.understand;
+  const view = understandViewOf(visit);
+  if (!understandCurrent(visit) || view.checking || view.busy || view.mode !== "fixture") return;
+  visit.checking = true;
+  renderUnderstand(visit);
+  let failed = false;
+  try { await call("getUnderstandAvailability", { projectId: visit.projectId }); } catch { failed = true; }
+  if (!understandCurrent(visit)) return;
+  visit.checking = false;
+  if (failed) setStatus("The versions could not be checked right now.", "error");
+  await loadUnderstandState(visit);
+}
+
+// ---------------------------------------------------------------- Understand: accepting a brief
+
+// The open acceptance review: its one-use token lives only here (never in the
+// DOM, a log or the profile) and is dropped when the review closes, the route
+// or page changes, or the token is sent.
+let acceptanceReview = null;
+
+function closeAcceptanceReview() {
+  const review = acceptanceReview;
+  if (!review) return;
+  acceptanceReview = null;
+  review.token = null;
+  review.close?.();
+}
+
+/** Accept into project file: a fresh preview first (every time), then the
+ * review of the name and kind only. */
+async function acceptBriefFlow(project) {
+  const visit = state.understand;
+  const acceptance = visit.acceptance;
+  if (!understandCurrent(visit) || acceptance.busy || acceptance.inspect || understandBusy(visit)) return;
+  const ticket = acceptance.ticket = nextTicket();
+  acceptance.busy = "preview";
+  acceptance.notice = null;
+  visit.owned = true;
+  await keepFocus(renderHome);
+  let preview = null, code = null;
+  try { preview = await call("previewProjectBriefAcceptance", { projectId: project.id }); } catch (error) { code = error?.code ?? "ERROR"; }
+  // A late preview opens nothing; its lease expires unused in the browser.
+  if (!understandCurrent(visit) || acceptance.ticket !== ticket) return;
+  acceptance.busy = null;
+  if (!preview) {
+    acceptance.inspect ||= M.ACCEPTANCE_INSPECT_CODES.includes(code);
+    acceptance.notice = { tone: "warn", text: M.acceptanceErrorText(code) };
+    setStatus(acceptance.notice.text, "error");
+    await keepFocus(renderHome);
+    return;
+  }
+  await keepFocus(renderHome);
+  openAcceptanceReview(project, preview, visit);
+}
+
+function openAcceptanceReview(project, preview, visit) {
+  closeAcceptanceReview();
+  const form = M.acceptanceForm(preview.manifest);
+  const review = { visit, token: preview.token, close: null, sending: false };
+  acceptanceReview = review;
+  const errorsList = h("ul", { class: "errors", role: "alert" });
+  const nameInput = h("input", { type: "text", value: form.name, maxlength: "80", required: true, spellcheck: "false",
+    oninput: event => { form.name = event.target.value; } });
+  const kindSelect = h("select", { onchange: event => { form.kind = event.target.value; } },
+    M.PROJECT_KINDS.map(kind => option(kind, M.KIND_LABELS[kind] ?? kind, form.kind)));
+  nameInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); submitAcceptance(project, review, form, errorsList); }
+  });
+  review.close = openSheet({
+    title: "Accept into the project file",
+    body: [
+      h("p", { class: "notice" }, "Confirm the name and kind for .axiosozo/project.json. Only these two are written, and the brief is then marked accepted. Nothing from the brief is copied: no commands, domains, services or risks."),
+      h("div", { class: "form-row" }, field({ label: "Name", control: nameInput }), field({ label: "Kind", control: kindSelect })),
+      h("p", { class: "help" }, "Everything else in the file stays as it is. AxioSozo reads the file again right after writing it."),
+      errorsList],
+    footer: [h("button", { type: "button", onclick: () => review.close() }, "Cancel"),
+      h("button", { type: "button", class: "primary", onclick: () => submitAcceptance(project, review, form, errorsList) }, "Write project file")],
+    onClose: () => { review.token = null; if (acceptanceReview === review) acceptanceReview = null; },
+  });
+}
+
+/** The deliberate confirmation. The token is sent once and dropped first; the
+ * outcome is what the browser inspected afterwards, never a blind retry. A
+ * review closed meanwhile still learns the outcome of its own write. */
+async function submitAcceptance(project, review, form, errorsList) {
+  if (review.sending || !review.token || acceptanceReview !== review || !understandCurrent(review.visit)) return;
+  const { edits, errors } = M.acceptanceEdits(form);
+  errorsList.replaceChildren(...errors.map(text => h("li", {}, text)));
+  if (!edits) return;
+  const token = review.token;
+  review.token = null;
+  review.sending = true;
+  const visit = review.visit;
+  const acceptance = visit.acceptance;
+  const ticket = acceptance.ticket = nextTicket();
+  acceptance.busy = "accept";
+  let outcome = null, code = null;
+  try { outcome = await call("acceptProjectBrief", { projectId: project.id, token, edits, confirmed: true }); }
+  catch (error) { code = error?.code ?? "ERROR"; }
+  if (!understandCurrent(visit) || acceptance.ticket !== ticket) return;
+  acceptance.busy = null;
+  const view = outcome ? M.acceptanceOutcome(outcome)
+    : { tone: "warn", text: M.acceptanceErrorText(code), inspect: M.ACCEPTANCE_INSPECT_CODES.includes(code) };
+  acceptance.notice = { tone: view.tone, text: view.text };
+  acceptance.inspect = !!view.inspect;
+  const open = acceptanceReview === review;
+  if (open) review.close();
+  setStatus(view.text, view.tone === "ok" || view.tone === "info" ? "info" : "error");
+  await loadHome();
+  if (open) restoreBriefFocus();
+}
+
+/** The explicit inspection a write of unknown outcome needs. It reads the file
+ * again; it never writes. Until it settles, no new review can open. */
+async function reinspectFlow(project) {
+  const visit = state.understand;
+  const acceptance = visit.acceptance;
+  if (!understandCurrent(visit) || acceptance.busy) return;
+  const ticket = acceptance.ticket = nextTicket();
+  acceptance.busy = "inspect";
+  visit.owned = true;
+  await keepFocus(renderHome);
+  let outcome = null, code = null;
+  try { outcome = await call("reinspectProjectBriefAcceptance", { projectId: project.id }); } catch (error) { code = error?.code ?? "ERROR"; }
+  if (!understandCurrent(visit) || acceptance.ticket !== ticket) return;
+  acceptance.busy = null;
+  const view = outcome ? M.acceptanceOutcome(outcome) : { tone: "warn", text: M.acceptanceErrorText(code) };
+  acceptance.notice = { tone: view.tone, text: view.text };
+  // Still owed unless an inspection actually answered.
+  acceptance.inspect = outcome ? !!view.inspect : true;
+  setStatus(view.text, view.tone === "ok" || view.tone === "info" ? "info" : "error");
+  await loadHome();
+}
+
+/** After the review closed on a write's outcome: focus stays on the brief's
+ * action when one is left there, else on the brief's heading. */
+function restoreBriefFocus() {
+  if (!state.active || $("sheet").open || $("confirm-dialog").open) return;
+  const focused = document.activeElement;
+  if (focused && document.contains(focused) && focused !== document.body) return;
+  const target = $("project-home").querySelector('[data-focus-key="brief:action"]') ?? $("home-brief-heading");
+  if (target) { deliberateFocus++; target.focus({ preventScroll: true }); }
 }
 
 // ---------------------------------------------------------------- site rules
@@ -1942,6 +2299,8 @@ const loaders = {
   attention: loadAttention,
   // Agent status, activity or a browser session changed.
   agents: () => Promise.all([state.view === "ai" ? loadAgentSettings() : null, state.homeId ? loadHome() : null]),
+  // Some read changed state: this page asks for its own, if it reads at all.
+  understand: async () => { if (state.understand.owned) await loadUnderstandState(state.understand); },
 };
 // Events that can change what a project home shows.
 const HOME_EVENTS = new Set(["projects", "contexts", "agents"]);
@@ -2026,6 +2385,8 @@ function renderDisconnected() {
 function deactivate() {
   if (!state.active) return;
   leaveDecisionKeys();
+  // The Read and acceptance work of this visit ends with it; a restore starts afresh.
+  leaveUnderstand(state.homeId);
   state.active = false;
   state.admitted = false;
   latest.admission = nextTicket();
@@ -2127,7 +2488,9 @@ function applyRoute() {
   state.homeId = homeId;
   showView(route.view);
   if (homeId !== previous) {
-    // Answers for the route left behind (even the same project, away and back) are void.
+    // Answers for the route left behind (even the same project, away and back) are void,
+    // and its Read and acceptance work ends in the browser too.
+    leaveUnderstand(homeId);
     invalidateHome();
     clearTimeout(homeRetry);
     homeRetry = null;
@@ -2182,6 +2545,11 @@ async function init() {
   // Hidden (also into the back/forward cache): inactive until shown again from it.
   window.addEventListener("pagehide", deactivate);
   window.addEventListener("pageshow", reactivate);
+  // Selected again (another tab ended this page's read, or it loaded in the
+  // background): the shown home asks for its own state afresh.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.understand.owned) loadUnderstandState(state.understand);
+  });
   if (!api) {
     state.connected = false;
     renderDisconnected();

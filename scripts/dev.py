@@ -34,6 +34,7 @@ PROJECT_READER = ROOT / "scripts" / "project_reader.py"
 ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
 AGENT_SOCKET_INSTALL = ROOT / "scripts" / "agent_socket_install.py"
 AGENT_NOTIFY_INSTALL = ROOT / "scripts" / "agent_notify_install.py"
+MANIFEST_ACCEPT = ROOT / "scripts" / "manifest_accept.py"
 AGENT_SOCKET_PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
@@ -173,6 +174,7 @@ def setup_components():
     results.append(component(ARRIVAL_SUBPROCESS, "setup"))
     results.append(component(AGENT_SOCKET_INSTALL, "setup"))
     results.append(component(AGENT_NOTIFY_INSTALL, "setup"))
+    results.append(component(MANIFEST_ACCEPT, "setup"))
     print("SETUP: " + ("completed" if not any(results) else "incomplete; see component results"), flush=True)
     return 2 if any(results) else 0
 
@@ -194,7 +196,8 @@ def check():
                run(["cargo", "clippy", "--locked", "--offline", "--workspace", "--all-targets", "--jobs", "2", "--", "-D", "warnings"], build=True),
                component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check"),
                component(PROJECT_READER, "check"), component(ARRIVAL_SUBPROCESS, "check"),
-               component(AGENT_SOCKET_INSTALL, "check"), component(AGENT_NOTIFY_INSTALL, "check")]
+               component(AGENT_SOCKET_INSTALL, "check"), component(AGENT_NOTIFY_INSTALL, "check"),
+               component(MANIFEST_ACCEPT, "check")]
     for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("scripts/release/*.py"), *ROOT.glob("tests/test_*.py")]:
         if path.name.startswith("._"):
             continue
@@ -213,6 +216,7 @@ def test():
                component(ZEN, "check"),
                run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True),
                run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-manifest/manifest_accept_test.py"], build=True),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
                run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
                # Handoff 3 contexts core: DOM-free logic and fixture repositories.

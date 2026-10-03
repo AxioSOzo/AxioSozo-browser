@@ -747,6 +747,44 @@ p.container-line { display: flex; padding-inline: 2px; font-size: var(--font-siz
 .brief-list { display: flex; flex-direction: column; gap: 3px; margin: 0; padding-inline-start: var(--space-xlarge); overflow-wrap: anywhere; }
 .brief code { padding: 1px 5px; border-radius: var(--radius-small); background: var(--surface-hover); font-family: var(--mono); font-size: var(--font-caption); }
 .home-section .brief + .home-facts { margin-top: var(--space-xsmall); }
+/* The brief's title with whether it was accepted; app paths and working
+ * folders as quiet monospace text, never links. */
+.brief-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); }
+.brief-path { color: var(--ink-soft); }
+/* Accepting into the project file: below the document, after a hairline. */
+.brief-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
+  margin-top: var(--space-small);
+  padding-top: var(--space-medium);
+  box-shadow: 0 -1px 0 var(--hairline);
+}
+/* One status sentence with a dot; the words carry the meaning, the dot only echoes it. */
+.brief-notice, .understand-status { display: flex; align-items: baseline; gap: var(--space-small); max-width: 40rem; font-size: var(--font-caption); }
+.brief-notice > .dot, .understand-status > .dot { align-self: center; }
+.brief-notice[data-tone="bad"], .understand-status[data-tone="bad"] { color: var(--bad-ink); }
+.understand-status[data-tone="none"] > .dot { display: none; }
+/* An empty status line stays in place (a live region must exist before it
+ * speaks) but takes no room: it gives back the gap in front of it. */
+.understand-status[data-tone="none"] { margin-top: calc(-1 * var(--space-small)); }
+
+/* Reading a project (synthetic test mode only): a quiet outlined part under
+ * the brief. Its buttons are one choice between the user's own CLIs. */
+.understand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
+  padding: var(--space-large);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.understand-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-medium); min-height: 24px; }
+.understand-head h4 { color: var(--ink); font-size: var(--font-size-small); font-weight: var(--font-weight-semibold); }
+.understand-intro { max-width: 40rem; }
+.understand-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); margin-top: var(--space-xsmall); }
+/* Inactive while a read or a write is under way, yet still focusable. */
+:is(.understand, .brief-actions) button[aria-disabled="true"] { opacity: 0.45; }
 
 .home-problem { display: flex; flex-direction: column; gap: var(--space-small); padding: var(--space-xlarge); border: 1px dashed var(--hairline-strong); border-radius: var(--radius); }
 .home-problem p { color: var(--ink-soft); }

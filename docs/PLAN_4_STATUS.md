@@ -99,7 +99,8 @@ integration remains delegated to Claude in later steps.
 Steps 1–3 have integrated source and verified builds below. Interactive arrival,
 cookie isolation and reference-home admission remain unverified behind the
 recorded human gates. Step 3 synthetic light/dark rendering is verified. Step 5 source/build and light initial key presence are verified below; dark
-startup and interactive key flows remain limited. Steps 6–9 remain unintegrated. Step 4
+startup and interactive key flows remain limited. Step 6 source/build and initial light/dark rendering are verified below;
+steps 7–9 remain unintegrated. Step 4
 source/build and status GUI are verified below.
 Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
@@ -512,6 +513,8 @@ Step 4 local commit: `5017c4c5749e07bd03059f40d5991aa403ac06a5`.
 
 ## Step 5 — integrated; light key presence verified; interaction BLOCKED_HUMAN
 
+Local integration commit: `30bda52`.
+
 Codex integrated provider-qualified DOM-free key APIs, fixed synthetic presence
 fixture/native admission, additive per-rule provider/screen policy, contracts,
 tests and the owned GUI observer. Claude Opus 5.5 CLI, session
@@ -681,3 +684,95 @@ Step5 source, final tests/check/build and scoped real GUI review are complete fo
 local commit under the stated interaction gate. Dark initial key presence,
 store/remove and dialog/keyboard tests remain follow-ups. Steps6–9 preparations
 remain ignored until this commit; they establish no native or GUI pass. Not READY.
+
+
+## Step 6 — integrated source/build and initial light/dark render; interactions BLOCKED_HUMAN
+
+Codex owns the DOM-free runner, transport, private-owner facade, pinned offline
+fixture and manifest helper, contracts, tests, builds and observation harness.
+Claude Opus 5.5 CLI session `c2a11ccc-533e-45cb-984c-08818ac46390` wrote all
+mixed Services/actor/startup and Overview/UI changes. Codex created or edited no
+frontend code. The original task, source-review round and screenshot round are
+retained under `.local/claude-tasks/06-understand-tier*`.
+
+The process service creates an offline facade only for the exact native fixture
+request. Product Read, state and availability remain **NOT_AUTHORIZED**, before
+project lookup, filesystem admission or client discovery. Fake Claude Code/Codex
+reads are explicit; queued/running/saving status and cancellation are separate
+from success. Only a durably stored schema-validated brief is rendered. Its
+commands, paths and unconfirmed domains are inert text.
+
+Every read/preview/acceptance has a private native owner bound to the registered
+normal window, selected browser, current document and exact project-home route.
+Tab selection, native top-level location changes, destruction or privacy loss
+end it. Native URI identity detects A→list→A even before a cooperative page
+cleanup request. Root checked the pinned Gecko URI replacement and tab progress
+sources; this is source evidence, not an interactive navigation pass.
+
+Settled project snapshots carry monotonic revisions. External changes withdraw
+authority before their first await, including detection refresh and the legacy
+manifest write. The facade's serialized own commit stays separate. Acceptance
+uses a one-use expiring preview token and writes only the explicitly confirmed
+name/kind through the pinned containment helper. Recognizable own tokens are
+spent on malformed attempts, including wrong/missing project IDs; another
+owner's token stays protected. Uncertain write outcomes require inspection
+before another write. No automatic retry or copied AI command/domain grants
+filesystem or execution authority.
+
+Actual verification:
+
+- `./dev test` and `./dev check`: **PASS**, exit 0. Browser 1,593; provider-host
+  133; contexts 165; root Python 237; Cargo 10; bootstrap 33; reader 22; arrival
+  18; manifest helper 28; socket 11; coordinator 4; probe 14. Provider sandbox 5,
+  negative Keychain 8, positive synthetic Keychain 3, CEF adapter 38 and saved
+  pages 3 also passed. Native/stream CEF gates stayed `SKIPPED_ENGINE_WORKSTREAM`.
+- Claude's relevant in-memory suites: 402/402, including 43 Services integration
+  and 30 Overview cases. Eighteen added regressions cover route/ABA lifetime,
+  held admission/preview/write guards, own-token consumption and synchronous
+  mutation entry. Root reviewed these changes and ran the full suites above.
+- Focused DOM-free suites: 191/191 on pinned Node 22.22.3; active native stdin
+  close/known-exit regressions: 40/40. The manifest helper installed and its
+  28 actual synthetic filesystem tests passed.
+- Owned native backend fixture `5614c42be0474c71aa51c49667e6153b`: 12/12,
+  zero skips, exit 0. Both canned briefs, explanation, queued/active cancellation,
+  EOF, crash and bounded cleanup ran. Sixteen launch records (9 host/7 CLI)
+  contain 32 unique PIDs; all were absent in read-only post-run observations.
+  These launch records are not aggregate wait/EOF or universal descendant proof.
+  No Gecko app or real provider ran in this separate backend gate.
+- `./dev setup`: **PASS**, exit 0, workstation-only native build. Fingerprint
+  `3745d93affe20d5001430203524364bd11a3ef984fa71064048d6303feaea92b`.
+- Actual Gecko initial render: Harbor light and Inkline dark **PASS**. Four
+  screenshots were captured and inspected by the lead and Claude; Claude
+  accepted the initial visual surface in its same-session read-only review. Both exact owned runs
+  had native exit 0, direct children reaped, listener closed, unchanged seeded
+  store and nine installed fixture inputs, matching source/build/profile
+  identities and no agent endpoint. Renderer fakes 75 and native-object fakes
+  24 passed; their checks do not establish interactive functionality.
+
+GUI evidence (ignored):
+
+- `docs/evidence/plan4-6/understand-harbor-light-20261003-a/initial-light-window.png`
+- `docs/evidence/plan4-6/understand-harbor-light-20261003-a/initial-light-full-content.png`
+- `docs/evidence/plan4-6/understand-inkline-dark-20261003-b/initial-dark-window.png`
+- `docs/evidence/plan4-6/understand-inkline-dark-20261003-b/initial-dark-full-content.png`
+
+The corresponding `step6-render-report.json` files retain native identity,
+read-only assertions, hashes and cleanup. These are **SEEDED_RENDER_ONLY /
+ADMISSION_NOT_RUN**, with zero observer actor/service/provider operations.
+No Read, Stop, Accept, reinspection or persistence interaction was performed.
+Fresh `cua.getState` again reported the Mac locked and automatic unlock failed:
+`.local/logs/plan4-step6-cua-after-review-20261003.json`. Those interactions are
+**BLOCKED_HUMAN**; VoiceOver, actual route-change timing and reference-project
+admission remain **NOT_VERIFIED**. The human gate permits the next plan step.
+
+Logs: `.local/logs/plan4-step6-{test,check,build}.log`,
+`plan4-step6-build-identity.json`, `plan4-step6-gui-lead-review.json`,
+`plan4-step6-route-primary-source.json`, and
+`.local/plan4-prepared/step6-native-integrated-check/`. The 30-file integrated
+backend manifest stayed unchanged through its native gate. Product AI remains
+**NOT_AUTHORIZED**. E1/E2 are not verified; no READY claim, push, tag or release.
+
+Decisions taken for Step 6: retain selected-tab cancellation and state this in
+its fixture explanation; keep product Read controls unavailable while showing
+previously saved briefs; explicit acceptance always confirms both name and kind;
+known non-writes report refusal, while uncertain writes require inspection.

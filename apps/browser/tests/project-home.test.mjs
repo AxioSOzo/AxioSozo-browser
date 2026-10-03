@@ -64,8 +64,9 @@ const BRIEF = { version: 1, cli: "claude-code", generated_at: Date.UTC(2026, 9, 
   domains: [{ host: "api.harborsuite.dev", purpose: "API" }], services: [{ name: "Convex", purpose: "backend" }],
   start: [{ label: "Web", command: "bun run dev --filter web", cwd: "apps/web" }], risks: ["Payments are not tested end to end."] } };
 
+// getUnderstandState reads a status only (Plan 4 step 6): no read, metadata check or client starts.
 const READS = new Set(["getOverviewFlags", "activeContext", "listContexts", "listProjects", "listProjectContainers", "getProjectHome",
-  "serviceStatus", "listRules", "getJevSettings", "usageSummary", "listOrphans", "needsAttention", "getJevKeyStatus"]);
+  "serviceStatus", "listRules", "getJevSettings", "usageSummary", "listOrphans", "needsAttention", "getJevKeyStatus", "getUnderstandState"]);
 
 async function loadPage({ hash = "#projects", projects = [HARBOR, INKLINE], handlers = {}, home = {} } = {}) {
   const document = parseHtml(HTML);
@@ -98,6 +99,8 @@ async function loadPage({ hash = "#projects", projects = [HARBOR, INKLINE], hand
     usageSummary: () => [], listOrphans: () => [], needsAttention: () => [],
     getJevKeyStatus: () => ({ id: "jev", label: "Jev", state: "needs-key", state_label: "No key stored", detail: "No Jev key is stored.", key: "missing", key_entry_enabled: true }),
     openProjectUrl: () => ({ opened: true, container: "project", selected: true }),
+    // Like the actor in a production build: reading projects stays closed.
+    getUnderstandState: () => ({ authorization: "NOT_AUTHORIZED", mode: "PRODUCTION", clis: [], jobs: [] }),
   };
   const api = {
     async request(name, params) {

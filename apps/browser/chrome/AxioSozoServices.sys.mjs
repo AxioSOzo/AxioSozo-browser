@@ -8,7 +8,9 @@
 // (ProjectArrival, ProjectRecords), on-request status checks of loopback
 // services (TCP connect only; remote services are never contacted), the
 // no-follow manifest write, project containers (ProjectContainers: one Gecko
-// contextual identity per project, routed before any project tab exists) and
+// contextual identity per project, routed before any project tab exists), the
+// process-wide Understand facade with its quiet snapshot cache and guarded
+// brief commit (UnderstandService; product reads stay NOT_AUTHORIZED) and
 // events. Every Zen call goes through ZenWorkspaceAdapter.
 // All methods except on()/registerWindow() return promises of JSON data.
 
@@ -27,9 +29,17 @@ import { createProjectContainers, createGeckoIdentityAdapter, MAX_PUBLIC_USER_CO
 import { canonicalContainerColor, projectContainerPresentation, PROJECT_CONTAINER_ICON } from "./ProjectAccountRuntime.sys.mjs";
 import { createAgentChannelService } from "./AgentChannelService.sys.mjs";
 import { createGeckoAgentTransportRuntime } from "./AgentChannelTransport.sys.mjs";
+import { createUnderstandService, createOfflineUnderstandService } from "./UnderstandService.sys.mjs";
+import { createNativeManifestAcceptIO } from "./ProjectManifestAccept.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
+// The facade operations a page reaches through the actor (Plan 4 step 6). The
+// alias and the strictly validated params are the only arguments.
+const UNDERSTAND_OPERATIONS = Object.freeze(["state", "available", "read", "cancel", "preview", "accept", "reinspect"]);
+// Read, state and availability need the project only off the production path;
+// saved-brief confirmation always does (it works while production Read is closed).
+const UNDERSTAND_PROJECT_OPERATIONS = new Set(["preview", "reinspect"]);
 // Documented default only (contracts/agent-channel-v1.md §1): every process
 // starts with the agent endpoint off, and a saved true never starts it.
 export const AGENT_ENDPOINT_PREF = "axiosozo.agent.endpoint.enabled";
@@ -219,6 +229,23 @@ export class AxioSozoServices {
   // use. Its project cache is only ever filled by #loadAgentProjects at global
   // quiescence. Presenters are registered per normal window.
   #agentChannel = null; #agentChannelClosed = false; #agentPresenters = new Map();
+  // Understand (Plan 4 step 6): one facade per process, created when the first
+  // native owner registers; its private owner aliases per registered window.
+  #understand = null; #understandClosed = false; #understandOffline = false;
+  #understandWindows = new Map(); #understandAliases = new Map();
+  #manifestAcceptIO = null;
+  // Its authoritative project snapshots: id → { binding: { id, revision,
+  // canonicalRoot }, record }, filled only from the settled store at global
+  // quiescence. Revisions are this service's own monotonic counter, never a
+  // timestamp. An external mutation deletes the entries it can change before it
+  // starts (its id or every id), counts itself pending and moves the change
+  // marks a facade-owned commit compares inside its serialized write. Ids ever
+  // published stay known so an every-project change reaches all of them.
+  #snapshots = new Map(); #snapshotRevision = 0; #snapshotsKnown = new Set();
+  #understandPending = new Map(); #understandPendingAll = 0;
+  #understandChanges = new Map(); #understandChangesAll = 0; #understandSequence = 0;
+  // Facade-owned commits in flight per project (their own reserved writes).
+  #understandWrites = new Map(); #lastUnderstandClock = 0;
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -250,6 +277,11 @@ export class AxioSozoServices {
    * buildHookConfig({ agent, socketPath }) } (absent = never available);
    * createAgentChannel(deps) (tests only; default createAgentChannelService);
    * resetAgentEndpointPref() (clears a saved true; nothing reads it to start).
+   * Understand: rootMetadata(path) → { canonical, directory } | null, synchronous
+   * metadata only (chrome: nsIFile); understandFixture { openRuntime({ signal }) }
+   * only when the native environment explicitly requests the synthetic fixture
+   * (absent: the always-closed production facade); createManifestAcceptIO() →
+   * the pinned manifest helper's { snapshot, accept }, built on first explicit use.
    */
   constructor(deps = {}) {
     this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId, randomHex: defaultRandomHex,
@@ -308,6 +340,9 @@ export class AxioSozoServices {
     this.#emit("contexts");
     return () => {
       unsubscribe();
+      // Its Understand owners end at once: their reads and leases only, never
+      // the shared facade or another window's work.
+      this.#releaseUnderstandWindow(window);
       // Its agent presenter goes first: outstanding prompts are cancelled.
       this.#agentPresenters.get(window)?.();
       if (this.#windows.get(window) === adapter) this.#windows.delete(window);
@@ -355,9 +390,14 @@ export class AxioSozoServices {
   async #loadContexts() {
     const doc = await this.#stores.contexts.load();
     if (!this.#contextsNeedPersistence) return doc;
-    this.#persistingContexts ??= this.#stores.contexts.update(current => ({ ...current }))
-      .then(written => { this.#contextsNeedPersistence = false; return written; })
-      .finally(() => { this.#persistingContexts = null; });
+    if (!this.#persistingContexts) {
+      // A direct migration write is an every-project change for Understand: no
+      // snapshot is captured until it settled, and a failed one keeps the flag.
+      this.#beginUnderstandChange(null);
+      this.#persistingContexts = this.#stores.contexts.update(current => ({ ...current }))
+        .then(written => { this.#contextsNeedPersistence = false; return written; })
+        .finally(() => { this.#persistingContexts = null; this.#endUnderstandChange(null); });
+    }
     try { return await this.#persistingContexts; }
     catch (error) { console.error("AxioSozo: contexts.json v3 write failed", error); return doc; }
   }
@@ -646,17 +686,22 @@ export class AxioSozoServices {
    * parameter). Only `detected` and `updated_at` change; manifest, space,
    * container, accounts, shared sites, brief and trust stay as they are. */
   async refreshProjectDetection(id) {
-    const project = (await this.#loadContexts()).projects.find(item => item.id === id);
-    if (!project) fail("UNKNOWN_PROJECT");
-    // The registered root is canonical; a folder that now resolves elsewhere is not opened.
-    const result = await this.#detectSecurely(project.root, { expectedCanonicalRoot: project.root });
-    this.#records.rememberDetection(result);
-    await this.#routingMutation([id], () => this.#updateContexts(doc => {
-      const current = doc.projects.find(item => item.id === id);
-      if (!current) fail("UNKNOWN_PROJECT");
-      const next = this.#records.refreshedRecord(current, { root: project.root, canonicalRoot: result.canonicalRoot });
-      return { ...doc, projects: doc.projects.map(item => (item.id === id ? next : item)) };
-    }, ["projects"]));
+    // Understand authority over this project ends synchronously at entry:
+    // before the record is even looked up, the folder read again or the final
+    // write made (an unknown id withdraws nothing that exists).
+    await this.#understandScope([id], async () => {
+      const project = (await this.#loadContexts()).projects.find(item => item.id === id);
+      if (!project) fail("UNKNOWN_PROJECT");
+      // The registered root is canonical; a folder that now resolves elsewhere is not opened.
+      const result = await this.#detectSecurely(project.root, { expectedCanonicalRoot: project.root });
+      this.#records.rememberDetection(result);
+      await this.#routingMutation([id], () => this.#updateContexts(doc => {
+        const current = doc.projects.find(item => item.id === id);
+        if (!current) fail("UNKNOWN_PROJECT");
+        const next = this.#records.refreshedRecord(current, { root: project.root, canonicalRoot: result.canonicalRoot });
+        return { ...doc, projects: doc.projects.map(item => (item.id === id ? next : item)) };
+      }, ["projects"]));
+    });
     return this.getProject(id);
   }
 
@@ -664,15 +709,20 @@ export class AxioSozoServices {
    * repository may have planted (writeManifestFile). Callers invoke this only
    * after the user explicitly confirmed the write in the Overview. */
   async writeManifest(projectId) {
-    const project = await this.getProject(projectId);
-    if (!project) fail("UNKNOWN_PROJECT");
-    const manifest = core.validateManifest(project.manifest);
-    core.assertNoSecrets(manifest);
-    const path = await writeManifestFile(this.#fs(), project.root, core.MANIFEST_PATH, core.serializeManifest(manifest),
-      this.#deps.randomId("tmp_"));
-    await this.#routingMutation([projectId], () => this.#updateContexts(doc => ({ ...doc, projects: doc.projects.map(item => (item.id === projectId
-      ? { ...item, manifest_state: "written", updated_at: this.#deps.clock() } : item)) }), ["projects"]));
-    return { path };
+    // The disk write comes before the profile write; Understand authority over
+    // this project (a brief acceptance included) ends synchronously at entry,
+    // before the record lookup and either write.
+    return this.#understandScope([projectId], async () => {
+      const project = await this.getProject(projectId);
+      if (!project) fail("UNKNOWN_PROJECT");
+      const manifest = core.validateManifest(project.manifest);
+      core.assertNoSecrets(manifest);
+      const path = await writeManifestFile(this.#fs(), project.root, core.MANIFEST_PATH, core.serializeManifest(manifest),
+        this.#deps.randomId("tmp_"));
+      await this.#routingMutation([projectId], () => this.#updateContexts(doc => ({ ...doc, projects: doc.projects.map(item => (item.id === projectId
+        ? { ...item, manifest_state: "written", updated_at: this.#deps.clock() } : item)) }), ["projects"]));
+      return { path };
+    });
   }
 
   async updateProject(id, patch = {}) {
@@ -768,12 +818,20 @@ export class AxioSozoServices {
    * quiescence (no pending mark anywhere, no container cleanup in flight or
    * failed) refreshes it; a nested or earlier scope never does. The refresh is
    * isolated: its failure or a closed channel never replaces this mutation's
-   * own result or error, and the cache stays unavailable instead. */
-  async #routingMutation(projectIds, run) {
+   * own result or error, and the cache stays unavailable instead.
+   *
+   * Understand authority (Plan 4 step 6) ends the same way, before the first
+   * await: the projects' snapshots are withdrawn and their facade jobs and
+   * acceptance leases invalidated. `understand: false` is only for the facade's
+   * own guarded commit, which checks its captured authority inside the write
+   * instead (invalidating it first would cancel every save). */
+  async #routingMutation(projectIds, run, { understand = true } = {}) {
     this.#markRouting(projectIds, 1);
+    if (understand) this.#beginUnderstandChange(projectIds);
     this.#invalidateAgentProjects();
     try { return await run(); } finally {
       this.#markRouting(projectIds, -1);
+      if (understand) this.#endUnderstandChange(projectIds);
       this.#settleAgentProjects();
     }
   }
@@ -1728,6 +1786,328 @@ export class AxioSozoServices {
     if (channel) await channel.close();
   }
 
+  // ── Understand (Plan 4 step 6; reached through the Overview actor only) ──
+  /** The process-wide facade, created when the first native owner registers.
+   * Without an explicit synthetic request in the native environment it is the
+   * always-closed production service: read, state and availability answer
+   * NOT_AUTHORIZED before any project lookup, admission or runtime. Only that
+   * privileged request selects the offline constructor, whose opener the
+   * facade calls lazily with its process lifetime signal; a refused fixture
+   * never falls back to a product client. Saved-brief confirmation works in
+   * both, through the pinned manifest helper only. */
+  #understandService() {
+    if (this.#understand || this.#understandClosed) return this.#understand;
+    const fixture = this.#deps.understandFixture ?? null;
+    const dependencies = {
+      core,
+      lookupSnapshot: id => this.#lookupSnapshot(id),
+      rootAdmission: root => this.#understandRootAdmission(root),
+      commitProject: request => this.#commitUnderstandProject(request),
+      uuid: () => this.#deps.newToken(),
+      manifestIO: typeof this.#deps.createManifestAcceptIO === "function" ? this.#lazyManifestIO() : null,
+      clock: () => this.#understandClock(),
+      timers: { setTimeout: (fn, ms) => this.#deps.timers.setTimeout(fn, ms), clearTimeout: id => this.#deps.timers.clearTimeout(id) },
+      // Pages learn that something changed, never whose or what: each asks for its own owner's state.
+      onState: () => this.#emit("understand"),
+    };
+    try {
+      this.#understand = typeof fixture?.openRuntime === "function"
+        ? createOfflineUnderstandService(dependencies, { openRuntime: ({ signal }) => fixture.openRuntime({ signal }) })
+        : createUnderstandService(dependencies);
+      this.#understandOffline = typeof fixture?.openRuntime === "function";
+    } catch (error) {
+      console.error("AxioSozo: Understand unavailable", error?.code ?? error);
+      return null;
+    }
+    try { this.#deps.onShutdown?.(() => this.closeUnderstand(), "AxioSozo: close Understand"); }
+    catch (error) { console.error("AxioSozo: Understand shutdown not registered", error); }
+    return this.#understand;
+  }
+
+  /** Nondecreasing epoch milliseconds for the facade, even if the clock steps back. */
+  #understandClock() {
+    const now = this.#deps.clock();
+    if (Number.isSafeInteger(now) && now > this.#lastUnderstandClock) this.#lastUnderstandClock = now;
+    return this.#lastUnderstandClock;
+  }
+
+  /** The pinned manifest helper's exact snapshot/accept, built only when an
+   * explicit preview, acceptance or inspection first needs it. Unavailable
+   * refuses that operation (known uncommitted); there is no other writer. */
+  #lazyManifestIO() {
+    const io = () => {
+      if (this.#manifestAcceptIO) return this.#manifestAcceptIO;
+      let created = null;
+      try { created = this.#deps.createManifestAcceptIO(); } catch { created = null; }
+      if (typeof created?.snapshot !== "function" || typeof created?.accept !== "function") {
+        throw Object.assign(new ServicesError("WRITE_CONTAINMENT_UNAVAILABLE"), { committed: false });
+      }
+      this.#manifestAcceptIO = created;
+      return created;
+    };
+    return Object.freeze({ snapshot: (root, options) => io().snapshot(root, options), accept: (value, options) => io().accept(value, options) });
+  }
+
+  /**
+   * Chrome-only (never a page method): mints the facade's private owner alias
+   * for one native caller. `current` is the caller's own synchronous, literal
+   * true predicate (the actor binds it to its document, browser and selection);
+   * it is composed with this registered normal window. The optional signal is
+   * browser-owned. The alias is an object identity: never cloned, stringified
+   * or derived from a project. Releasing it (or the signal, the window's
+   * unregistration, shutdown) cancels that owner's reads and leases only.
+   */
+  registerUnderstandOwner({ window, current, signal } = {}) {
+    if (this.#understandClosed) fail("UNDERSTAND_UNAVAILABLE");
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (typeof current !== "function" || !adapter || !this.#normalWindow(window, adapter)) fail("PRIVATE_WINDOW");
+    const facade = this.#understandService();
+    if (!facade) fail("UNDERSTAND_UNAVAILABLE");
+    const alias = facade.createOwner({ current: () => this.#normalWindow(window, adapter) && current() === true,
+      ...(signal === undefined ? {} : { signal }) });
+    let owned = this.#understandWindows.get(window);
+    if (!owned) this.#understandWindows.set(window, owned = new Set());
+    owned.add(alias);
+    this.#understandAliases.set(alias, window);
+    signal?.addEventListener?.("abort", () => this.releaseUnderstandOwner(alias), { once: true });
+    return alias;
+  }
+
+  /** Chrome-only, idempotent: ends one owner's work; the facade and every other owner continue. */
+  releaseUnderstandOwner(alias) {
+    if (!this.#understandAliases.has(alias)) return false;
+    const window = this.#understandAliases.get(alias);
+    this.#understandAliases.delete(alias);
+    const owned = this.#understandWindows.get(window);
+    owned?.delete(alias);
+    if (owned && !owned.size) this.#understandWindows.delete(window);
+    try { this.#understand?.releaseOwner(alias); } catch (error) { console.error("AxioSozo: Understand owner not released", error?.code ?? error); }
+    return true;
+  }
+
+  #releaseUnderstandWindow(window) {
+    for (const alias of [...(this.#understandWindows.get(window) ?? [])]) this.releaseUnderstandOwner(alias);
+  }
+
+  /** Process shutdown: every owner ends and the facade closes once; nothing new is admitted. */
+  async closeUnderstand() {
+    if (this.#understandClosed) return;
+    this.#understandClosed = true;
+    for (const alias of [...this.#understandAliases.keys()]) this.releaseUnderstandOwner(alias);
+    const facade = this.#understand;
+    if (facade) await facade.close();
+  }
+
+  // The closed page RPCs (AboutAxioSozoParent): the actor's private alias and
+  // its strictly validated JSON params, unchanged, to the facade operation.
+  getUnderstandState(alias, params) { return this.#understandCall("state", alias, params); }
+  getUnderstandAvailability(alias, params) { return this.#understandCall("available", alias, params); }
+  readProject(alias, params) { return this.#understandCall("read", alias, params); }
+  cancelUnderstand(alias, params) { return this.#understandCall("cancel", alias, params); }
+  previewProjectBriefAcceptance(alias, params) { return this.#understandCall("preview", alias, params); }
+  acceptProjectBrief(alias, params) { return this.#understandCall("accept", alias, params); }
+  reinspectProjectBriefAcceptance(alias, params) { return this.#understandCall("reinspect", alias, params); }
+
+  /** Production read/state/availability go straight to the facade's closed
+   * branch: no snapshot is prepared and no project looked up. Off it, and for
+   * every confirmation step, the settled snapshots are prepared first; the same
+   * registered owner is required again after that await, and the facade then
+   * checks the owner, root and revision itself. A project whose snapshot is
+   * withheld (a change pending, cleanup failed) refuses as PROJECT_CHANGED. */
+  async #understandCall(operation, alias, params) {
+    if (!UNDERSTAND_OPERATIONS.includes(operation)) fail("UNSUPPORTED");
+    let facade = this.#understandFor(alias);
+    const project = operation === "accept" || UNDERSTAND_PROJECT_OPERATIONS.has(operation)
+      || (this.#understandOffline && operation !== "cancel");
+    if (project) {
+      await this.#prepareSnapshots();
+      facade = this.#understandFor(alias);
+      // An acceptance attempt always reaches the facade: it consumes its own token even when stale.
+      if (operation !== "accept" && core.isProjectId(params?.projectId) && !this.#lookupSnapshot(params.projectId)) fail("PROJECT_CHANGED");
+    }
+    return facade[operation](alias, params);
+  }
+
+  #understandFor(alias) {
+    if (this.#understandClosed || !this.#understand) fail("UNDERSTAND_UNAVAILABLE");
+    if (!this.#understandAliases.has(alias)) fail("OWNER_REVOKED");
+    return this.#understand;
+  }
+
+  /** Privileged evidence only: booleans and counts, never aliases, roots or documents. */
+  getUnderstandDiagnostics() {
+    const facade = this.#understand;
+    if (!facade) return Object.freeze({ created: false, closed: this.#understandClosed });
+    let raw = null;
+    try { raw = facade.diagnostics(); } catch { raw = null; }
+    return countsOnly({ created: true, closed: this.#understandClosed, offline: this.#understandOffline,
+      owners: this.#understandAliases.size, windows: this.#understandWindows.size, snapshots: this.#snapshots.size,
+      pending: this.#understandPending.size + this.#understandPendingAll, writes: this.#understandWrites.size, facade: raw });
+  }
+
+  /** Nothing that can change `id`'s authority (null: any project's) is pending,
+   * in flight or failed: no store mutation or facade-owned write, no container
+   * cleanup, no migration write still owed. */
+  #snapshotQuiet(id = null) {
+    const containers = this.#resetAttempt === null && this.#deletionAttempts.size === 0 && !this.#containerResetFailed
+      && this.#failedDeletions.size === 0;
+    const routing = this.#routingPendingAll === 0 && (id === null ? this.#routingPending.size === 0 : !this.#routingPending.has(id));
+    const understand = this.#understandPendingAll === 0 && (id === null
+      ? this.#understandPending.size === 0 && this.#understandWrites.size === 0
+      : !this.#understandPending.has(id) && !this.#understandWrites.has(id));
+    return containers && routing && understand && !this.#contextsNeedPersistence && this.#persistingContexts === null;
+  }
+
+  /** The facade's synchronous lookupSnapshot: exactly { binding, record } of the
+   * settled cache, or null while anything that can change it is unsettled. */
+  #lookupSnapshot(id) {
+    if (!core.isProjectId(id) || this.#understandClosed || !this.#snapshotQuiet(id)) return null;
+    const entry = this.#snapshots.get(id);
+    return entry ? { binding: { ...entry.binding }, record: entry.record } : null;
+  }
+
+  /** Fills the cache from the settled store, at global quiescence only: nothing
+   * pending before or after the read, and the routing sequence, container
+   * generation and Understand change counter unmoved by it. An unchanged record
+   * keeps its revision; a new or withdrawn one gets a fresh one (also when its
+   * values came back to what they were). No await follows the final check. */
+  async #prepareSnapshots() {
+    if (!this.#snapshotQuiet()) return false;
+    const sequence = this.#routingSequence, generation = this.#containerGeneration, changes = this.#understandSequence;
+    const { projects } = await this.#loadContexts();
+    if (!this.#snapshotQuiet() || sequence !== this.#routingSequence || generation !== this.#containerGeneration
+      || changes !== this.#understandSequence) return false;
+    const next = new Map();
+    for (const stored of projects) {
+      let record;
+      try { record = core.upgradeProject(stored); } catch { continue; }
+      const known = this.#snapshots.get(record.id);
+      const same = known && known.binding.canonicalRoot === record.root && JSON.stringify(known.record) === JSON.stringify(record);
+      next.set(record.id, same ? known : Object.freeze({
+        binding: Object.freeze({ id: record.id, revision: ++this.#snapshotRevision, canonicalRoot: record.root }), record }));
+      this.#snapshotsKnown.add(record.id);
+    }
+    this.#snapshots = next;
+    return true;
+  }
+
+  /** Synchronously before an external mutation of `projectIds` (null: every
+   * project) starts: marked pending, its snapshots withdrawn, its change marks
+   * moved, then the facade's jobs and leases for it invalidated (a job the
+   * controller pumps meanwhile already finds no snapshot). */
+  #beginUnderstandChange(projectIds) {
+    this.#understandSequence++;
+    let affected;
+    if (projectIds === null) {
+      this.#understandPendingAll++;
+      this.#understandChangesAll++;
+      affected = [...new Set([...this.#snapshots.keys(), ...this.#snapshotsKnown])];
+      this.#snapshots = new Map();
+    } else {
+      affected = projectIds.filter(id => typeof id === "string");
+      for (const id of affected) {
+        this.#understandPending.set(id, (this.#understandPending.get(id) ?? 0) + 1);
+        this.#understandChanges.set(id, (this.#understandChanges.get(id) ?? 0) + 1);
+        this.#snapshots.delete(id);
+      }
+    }
+    const facade = this.#understand;
+    if (!facade) return;
+    for (const id of affected) {
+      if (!core.isProjectId(id)) continue;
+      try { facade.invalidateProject(id); } catch (error) { console.error("AxioSozo: Understand invalidation failed", error?.code ?? error); }
+    }
+  }
+
+  #endUnderstandChange(projectIds) {
+    if (projectIds === null) { this.#understandPendingAll = Math.max(0, this.#understandPendingAll - 1); return; }
+    for (const id of projectIds) {
+      if (typeof id !== "string") continue;
+      const pending = (this.#understandPending.get(id) ?? 0) - 1;
+      if (pending > 0) this.#understandPending.set(id, pending); else this.#understandPending.delete(id);
+    }
+  }
+
+  /** An external phase that changes `projectIds` before (or without) a store
+   * write, such as a folder read or a disk write ahead of the profile write. */
+  async #understandScope(projectIds, run) {
+    this.#beginUnderstandChange(projectIds);
+    try { return await run(); } finally { this.#endUnderstandChange(projectIds); }
+  }
+
+  /** The facade's synchronous rootAdmission: literal true only for a root that
+   * a settled snapshot registers, that is no denied system, home-settings,
+   * credential or profile tree (given and resolved) and not home itself, and
+   * that is now an existing directory whose canonical path is exactly itself.
+   * Metadata only (no listing or reading); asked afresh on every call. */
+  #understandRootAdmission(root) {
+    try {
+      if (!normalAbsolute(root) || this.#understandClosed) return false;
+      const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
+      const denied = this.#deniedRoots();
+      if (root === home || denied.some(base => within(root, base))) return false;
+      if (![...this.#snapshots.values()].some(entry => entry.binding.canonicalRoot === root && entry.record.root === root)) return false;
+      if (typeof this.#deps.rootMetadata !== "function") return false;
+      const meta = this.#deps.rootMetadata(root);
+      if (!meta || typeof meta !== "object" || typeof meta.then === "function") return false;
+      if (meta.directory !== true || meta.canonical !== root) return false;
+      return !denied.some(base => within(meta.canonical, base));
+    } catch { return false; }
+  }
+
+  /**
+   * The facade's commitProject: its own guarded profile write through the
+   * contexts JsonStore queue, never an external-mutation hook (that would end
+   * the facade's epoch before its guard runs). While reserved, no snapshot of
+   * the project is handed out and its routing and the agent cache are held.
+   * Inside the serialized write the latest record must still be the cached one
+   * and no external change of it (or of every project) may have begun since;
+   * then the facade's synchronous mutate(latest) runs exactly once and its
+   * validated record is written atomically. Only after that durable write does
+   * the cache take a new revision with exactly that record; then projects is
+   * emitted. A refused or failed write leaves the record, cache and revision.
+   */
+  async #commitUnderstandProject({ binding, mutate } = {}) {
+    const id = binding?.id;
+    if (!core.isProjectId(id) || typeof mutate !== "function" || this.#understandClosed) fail("STALE_PROJECT");
+    const marks = { id: this.#understandChanges.get(id) ?? 0, all: this.#understandChangesAll };
+    const unchanged = () => !this.#understandClosed && marks.id === (this.#understandChanges.get(id) ?? 0)
+      && marks.all === this.#understandChangesAll;
+    this.#understandWrites.set(id, (this.#understandWrites.get(id) ?? 0) + 1);
+    let published, before;
+    try {
+      published = await this.#routingMutation([id], async () => {
+        await this.#loadContexts();
+        let next = null;
+        const doc = await this.#stores.contexts.update(current => {
+          const known = this.#snapshots.get(id);
+          const latest = current.projects.find(item => item.id === id);
+          if (!unchanged() || !known || !latest || latest.root !== known.binding.canonicalRoot
+            || JSON.stringify(latest) !== JSON.stringify(known.record)) fail("STALE_PROJECT");
+          before = latest;
+          next = core.validateProject(mutate({ binding: { ...known.binding }, record: latest }));
+          if (next.id !== id || next.root !== latest.root) fail("STALE_PROJECT");
+          return { ...current, projects: current.projects.map(item => (item.id === id ? next : item)) };
+        });
+        const stored = next ? doc.projects.find(item => item.id === id) : null;
+        if (!stored) fail("BRIEF_SAVE_FAILED");
+        const entry = Object.freeze({ binding: Object.freeze({ id, revision: ++this.#snapshotRevision, canonicalRoot: stored.root }), record: stored });
+        this.#snapshots.set(id, entry);
+        this.#snapshotsKnown.add(id);
+        return entry;
+      }, { understand: false });
+    } finally {
+      const writes = (this.#understandWrites.get(id) ?? 1) - 1;
+      if (writes > 0) this.#understandWrites.set(id, writes); else this.#understandWrites.delete(id);
+    }
+    // An accepted brief can bring the inspected file's manifest with it: checks
+    // start afresh, and a confirmed new name renames the project's own container.
+    if (JSON.stringify(before?.manifest) !== JSON.stringify(published.record.manifest)) this.#serviceStatus.delete(id);
+    if (before?.manifest?.name !== published.record.manifest.name) void this.#renameContainer(id);
+    this.#emit("projects");
+    return { committed: true, snapshot: { binding: { ...published.binding }, record: published.record } };
+  }
+
   // ── handoff project authority (P3; never the actor or the wire) ───────
   /**
    * The project of a page being handed off, captured only while no project or
@@ -1941,7 +2321,53 @@ function chromeDependencies() {
     },
     containersEnabled: () => Services.prefs.getBoolPref(CONTAINERS_PREF, false),
     observeContainers: observeChromeContainers,
+    // Understand (Plan 4 step 6): synchronous nsIFile metadata for root
+    // admission; the synthetic fixture only when this process's native
+    // environment explicitly requests it (otherwise the always-closed
+    // production facade, and no fixture factory is ever called); the pinned
+    // manifest helper, built on the first explicit confirmation.
+    rootMetadata: rootMetadataSync,
+    understandFixture: understandFixtureRequested(name => Services.env.get(name))
+      ? Object.freeze({ openRuntime: understandFixtureOpener({
+        createRuntime: async options => (await import("./NativeUnderstandFixtureRuntime.sys.mjs")).createNativeUnderstandFixtureRuntime(options),
+        createTransport: async options => (await import("./ProviderUnderstand.sys.mjs")).createUnderstandTransport(options) }) })
+      : null,
+    createManifestAcceptIO: () => createNativeManifestAcceptIO(),
   };
+}
+
+/** Whether this process's native environment explicitly requests the synthetic
+ * Understand fixture (the variable the native factory itself requires). Being
+ * requested admits nothing: the factory validates its exact root, profile,
+ * flags, pins and executables, and refuses without any fallback. */
+export function understandFixtureRequested(env) {
+  try { const value = env("AXIOSOZO_UNDERSTAND_GUI_FIXTURE_ROOT"); return typeof value === "string" && value !== ""; }
+  catch { return false; }
+}
+
+/** The offline facade's process-scoped opener: the admitted native fixture
+ * runtime (called with the facade's lifetime signal only), then the staged
+ * transport over it. Returns exactly { transport, projectRoots }, the roots
+ * taken from that admitted runtime. An absent or refused runtime throws; a
+ * product runtime or installed client is never used instead. */
+export function understandFixtureOpener({ createRuntime, createTransport }) {
+  return async ({ signal } = {}) => {
+    const runtime = await createRuntime({ signal });
+    const roots = runtime?.fixturePaths?.projectRoots;
+    if (!runtime || !Array.isArray(roots) || !roots.length) throw new ServicesError("UNDERSTAND_FIXTURE_UNAVAILABLE");
+    const transport = await createTransport({ runtime });
+    return { transport, projectRoots: [...roots] };
+  };
+}
+
+/** Synchronous metadata of a folder for Understand root admission: whether it
+ * exists as a directory and its canonical path. Nothing is listed or read. */
+function rootMetadataSync(path) {
+  const file = localFile(path);
+  if (!file.exists()) return null;
+  const directory = file.isDirectory();
+  file.normalize();
+  return { canonical: file.path, directory };
 }
 
 /** Firefox's container deletion notification (its trusted payload carries the
