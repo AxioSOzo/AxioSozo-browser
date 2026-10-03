@@ -111,10 +111,12 @@ function hostLabel(baseUrl) {
  * workspaceElement, containerForWorkspace, containerIdentity, tabUserContextId).
  * Optional: `core` (contexts core), `timers`, `clock`, `probe({ url, port }) → boolean`,
  * `openUrl(url, where, tab)` (in-place loads, and private windows' new tabs),
- * `openSettings(projectId, { edit })` (the project in about:axiosozo).
+ * `openSettings(projectId, { edit })` (the project in about:axiosozo),
+ * `consoleErrors` (the RAM console facade: readCounts({ window }) for the
+ * count beside a project's summary; refreshed on the name-only console event).
  */
 export function installDevLoop(window, { services, adapter, core = defaultCore, timers = defaultTimers(window),
-  clock = () => Date.now(), probe = null, openUrl = null, openSettings = null } = {}) {
+  clock = () => Date.now(), probe = null, openUrl = null, openSettings = null, consoleErrors = null } = {}) {
   if (!services || !adapter || !window?.gBrowser || !prefEnabled(window, "axiosozo.contexts.enabled", true)) return INERT;
   const document = window.document;
   const gBrowser = window.gBrowser;
@@ -601,6 +603,36 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return parts.length ? `, ${parts.join(", ")}` : "";
   }
 
+  // ---- Console errors (P5, Plan 4 step 7): counts only, from RAM ---------------------
+  // Every change of what is retained (or of whether it can be read) raises the
+  // console event, so the counts are read again only after one.
+  let consoleCache = null, consoleStale = true;
+  function consoleCounts() {
+    if (consoleStale) { consoleCache = readConsoleCounts(); consoleStale = false; }
+    return consoleCache;
+  }
+  /** project id → { count, errors, warnings } of this window's eligible tabs,
+   * or null while the console facade cannot answer. Never in private windows. */
+  function readConsoleCounts() {
+    if (privateWindow || typeof consoleErrors?.readCounts !== "function") return null;
+    let list = null;
+    try { list = consoleErrors.readCounts({ window }); } catch { list = null; }
+    if (!Array.isArray(list)) return null;
+    const counts = new Map();
+    for (const item of list) {
+      if (typeof item?.project_id !== "string" || !Number.isSafeInteger(item.count) || item.count < 1) continue;
+      counts.set(item.project_id, { count: item.count, errors: Number.isSafeInteger(item.errors) ? item.errors : 0,
+        warnings: Number.isSafeInteger(item.warnings) ? item.warnings : 0 });
+    }
+    return counts;
+  }
+  /** "2 console errors and 1 warning", or "1 console warning". */
+  function consolePhrase({ errors, warnings }) {
+    const part = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    if (!errors) return part(warnings, "console warning");
+    return warnings ? `${part(errors, "console error")} and ${part(warnings, "warning")}` : part(errors, "console error");
+  }
+
   function row(list, { kind, label, detail, url, status = null, onActivate, current = false, focusKey }) {
     const item = element(document, "li", { className: "axiosozo-project-link" }, list);
     const button = element(document, "button", { attrs: { "data-kind": kind, "data-focus-key": focusKey,
@@ -618,20 +650,21 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return button;
   }
 
-  function projectFolder(entry, uuid) {
+  function projectFolder(entry, uuid, counts = null) {
     const { project } = entry;
     const id = project.id;
     const statuses = cachedStatuses(project);
     const expanded = expandedChoice.has(id) ? expandedChoice.get(id) : entry.active;
     const name = project.manifest?.name ?? "Project";
     const bodyId = `axiosozo-project-body-${++folderSerial}`;
+    const logged = counts?.get(id) ?? null;
     const block = element(document, "div", { className: "axiosozo-project-block",
       attrs: { "data-project-id": id, role: "group", "aria-label": `Project ${name}` } }, folders);
     block.toggleAttribute?.("data-expanded", expanded);
     block.toggleAttribute?.("data-active", entry.active);
     const toggle = element(document, "button", { className: "axiosozo-project-toggle",
       attrs: { "aria-expanded": String(expanded), "aria-controls": bodyId, "data-focus-key": `${id}:toggle`,
-        "aria-label": `${name}${statusSentence(project, statuses)}. ${expanded ? "Collapse" : "Expand"} project` } }, block);
+        "aria-label": `${name}${logged ? `, ${consolePhrase(logged)}` : ""}${statusSentence(project, statuses)}. ${expanded ? "Collapse" : "Expand"} project` } }, block);
     // The folder takes the colour of the project's own container, as its tabs do.
     const glyph = element(document, "span", { className: "axiosozo-project-glyph", attrs: { "aria-hidden": "true" } }, toggle);
     paintContainer(glyph, "axiosozo-project-glyph", projectColor(project));
@@ -641,6 +674,12 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     for (const environment of environments) {
       const status = environmentStatus(project, environment, statuses);
       if (status !== "remote" || environment.name === "production") dot(status, summary).setAttribute("title", envLabel(project, environment));
+    }
+    // Retained console messages of this project's tabs here: a small count
+    // beside the dots; the button's name says it in words.
+    if (logged) {
+      element(document, "span", { className: "axiosozo-project-console", text: logged.count > 99 ? "99+" : String(logged.count),
+        attrs: { "aria-hidden": "true", "data-level": logged.errors ? "error" : "warning", title: consolePhrase(logged) } }, toggle);
     }
     element(document, "span", { className: "axiosozo-project-chevron", attrs: { "aria-hidden": "true" } }, toggle);
     toggle.addEventListener("click", event => {
@@ -736,7 +775,8 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     while (folders.firstChild) folders.firstChild.remove();
     const all = showAll.has(uuid);
     const visible = entries.length > FOLDER_LIMIT && !all ? entries.slice(0, FOLDER_LIMIT) : entries;
-    for (const entry of visible) projectFolder(entry, uuid);
+    const counts = consoleCounts();
+    for (const entry of visible) projectFolder(entry, uuid, counts);
     if (entries.length > FOLDER_LIMIT) {
       const hidden = entries.length - FOLDER_LIMIT;
       const toggleAll = element(document, "button", { className: "axiosozo-project-overflow",
@@ -981,6 +1021,12 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
       statusCache.clear();
       loadProjects().then(() => Promise.all([refreshFolders(), refreshPill()])).catch(() => {});
     }));
+  }
+  if (!privateWindow && consoleErrors) {
+    // Retained console messages changed (name only): the folders draw again,
+    // coalesced, keeping expansion and keyboard focus.
+    try { const off = services.on("console", () => { consoleStale = true; scheduleFolders(); }); if (typeof off === "function") cleanups.push(off); }
+    catch { /* an older services build has no console event */ }
   }
   if (!privateWindow) {
     cleanups.push(services.on("services", () => {

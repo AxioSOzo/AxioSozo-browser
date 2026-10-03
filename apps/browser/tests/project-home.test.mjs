@@ -373,7 +373,9 @@ test("step seams: the home shows reported agent activity, console errors and a s
   const activity = quiet.section("activity");
   assert.equal(activity.className, "home-section quiet");
   assert.match(activity.textContent, /Agent activity cannot be shown right now\./u);
-  assert.match(activity.textContent, /Console errors are not collected in this build\./u);
+  // Step 7: null means the browser cannot read them now, never "not collected".
+  assert.match(activity.textContent, /Console errors cannot be shown right now\./u);
+  assert.equal(activity.querySelector("#axiosozo-send-project-errors"), null, "nothing to send while unavailable");
   assert.match(activity.textContent, /In the folder: AGENTS\.md, CLAUDE\.md, \.claude, 3 agent worktrees\. These show the folder is set up for agents, not that one is running\./u);
   assert.match(quiet.section("about").querySelector(".brief.absent").textContent, /No brief yet\. .*not available in this build\./u);
   same(quiet.$("project-home").querySelector(".home-lede"), null, "no brief, no product line");
@@ -393,6 +395,81 @@ test("step seams: the home shows reported agent activity, console errors and a s
   assert.equal(busy.$("project-home").querySelector(".home-lede").textContent, BRIEF.document.product);
   assert.deepEqual(busy.section("about").querySelectorAll(".brief h5").map(h5 => h5.textContent),
     ["Apps", "How to start", "Services", "Domains it mentions", "Known risks"]);
+});
+
+test("console errors (step 7): the retained count, five newest as text, and an explicit Send errors to agent… that the page never sends", async () => {
+  const hostile = "<img src=x onerror=alert(1)>";
+  const recent = [{ level: "error", text: `TypeError: ${hostile}` }, { level: "warning", text: "Deprecated‮API" },
+    ...Array.from({ length: 5 }, (_, i) => ({ level: "error", text: `e${i}` }))];
+  const page = await loadPage({ hash: "#project=p_harbor1", home: { console_errors: { count: 12, recent } } });
+  const activity = page.section("activity");
+  assert.equal(activity.className, "home-section", "activity is not quiet when it has news");
+  assert.equal(activity.querySelector(".console-count").textContent, "12 console errors in this project's tabs");
+  const items = activity.querySelectorAll(".console-list li");
+  assert.deepEqual(items.map(li => [li.querySelector(".tag").textContent, li.querySelector(".activity-title").textContent]),
+    [["error", `TypeError: ${hostile}`], ["warning", "Deprecated API"], ["error", "e0"], ["error", "e1"], ["error", "e2"]], "five at most, as text");
+  assert.equal(activity.querySelectorAll("img").length, 0);
+  assert.equal(activity.querySelector(".console-list").getAttribute("aria-label"), "Newest console errors");
+  const send = page.$("axiosozo-send-project-errors");
+  assert.deepEqual([send.localName, send.getAttribute("type"), send.textContent, page.$(send.getAttribute("aria-describedby")).textContent],
+    ["button", "button", "Send errors to agent…", "You choose one of this project's tabs; AxioSozo switches to it and opens Send to agent with its console errors ticked. Nothing is copied until you choose Copy for agent."]);
+  assert.match(activity.textContent, /kept in memory until the page navigates\. Nothing is saved or sent\./u);
+  const before = page.calls.length;
+  send.click();
+  await flush();
+  assert.deepEqual(page.calls.slice(before), [], "the click is the browser actor's to see; the page requests nothing");
+  assert.equal(page.document.querySelectorAll("#axiosozo-send-project-errors").length, 1);
+
+  const empty = await loadPage({ hash: "#project=p_harbor1", home: { console_errors: { count: 0, recent: [] } } });
+  assert.match(empty.section("activity").textContent, /No console errors in this project's tabs\./u);
+  assert.match(empty.section("activity").textContent, /Nothing is saved or sent\./u);
+  assert.equal(empty.$("axiosozo-send-project-errors"), null, "nothing to send");
+  assert.equal(empty.section("activity").className, "home-section quiet");
+});
+
+test("a console event re-reads the shown home once, keeps keyboard focus, and starts no check or read", async () => {
+  let console_errors = { count: 1, recent: [{ level: "error", text: "First" }] };
+  const page = await loadPage({ hash: "#project=p_harbor1", handlers: { getProjectHome: ({ id }, state) => {
+    const stored = state.projects.find(project => project.id === id);
+    const { container: _mapping, ...project } = structuredClone(stored);
+    return { version: 1, project, space: null, container: { state: "pending" }, agent_activity: null, console_errors };
+  } } });
+  page.$("axiosozo-send-project-errors").focus();
+  const homes = homeCalls(page).length, checks = statusChecks(page);
+  const others = () => page.calls.filter(([name]) => /serviceStatus|Understand|readProject|getAgent/u.test(name)).length;
+  const otherCalls = others();
+  console_errors = { count: 2, recent: [{ level: "warning", text: "Second" }, { level: "error", text: "First" }] };
+  page.emitNow("console");
+  page.emitNow("console");
+  await sleep(150);
+  await flush();
+  assert.equal(homeCalls(page).length, homes + 1, "coalesced into one read");
+  assert.match(page.section("activity").textContent, /2 console errors in this project's tabs/u);
+  same(page.document.activeElement, page.$("axiosozo-send-project-errors"), "focus stays on the same control");
+  assert.deepEqual([statusChecks(page), others()], [checks, otherCalls], "no server check, Understand read or agent call");
+  // Down to unavailable: the button goes, focus is not forced anywhere else.
+  console_errors = null;
+  await page.emit("console");
+  assert.equal(page.$("axiosozo-send-project-errors"), null);
+  assert.match(page.section("activity").textContent, /Console errors cannot be shown right now\./u);
+});
+
+test("a console event voids a home answer still on its way; the reload publishes the current one", async () => {
+  const held = heldHomes();
+  const page = await loadPage({ handlers: { getProjectHome: held.handler } });
+  await page.navigate("#project=p_harbor1");
+  const older = page.answer("p_harbor1");
+  page.emitNow("console");
+  held.queue[0].resolve({ ...older, console_errors: { count: 1, recent: [{ level: "error", text: "Old" }] } });
+  await flush();
+  same(page.$("home-title"), null, "the older answer is not shown");
+  await sleep(150);
+  await flush();
+  assert.equal(held.queue.length, 2);
+  held.queue[1].resolve({ ...page.answer("p_harbor1"), console_errors: { count: 1, recent: [{ level: "error", text: "New" }] } });
+  await flush();
+  assert.match(page.section("activity").textContent, /New/u);
+  assert.doesNotMatch(page.section("activity").textContent, /Old/u);
 });
 
 test("agent activity (step 4): off says where to turn it on; a browser session can be ended; an agents event re-reads the home", async () => {

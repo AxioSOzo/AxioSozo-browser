@@ -1007,8 +1007,9 @@ test("store v3: v3 files with v1 records are upgraded; current files are not rew
 
 // ── arrival ──
 const ARRIVAL_URL = "http://localhost:5174/cart?x=1#top";
+// Native nodes name their window through Node.documentGlobal (Node.webidl); there is no ownerGlobal.
 function fakeTab(window, { url = ARRIVAL_URL, browserId = 7, privateBrowsing = false, space = APP } = {}) {
-  return { ownerGlobal: window, closing: false,
+  return { documentGlobal: window, closing: false,
     linkedBrowser: { browserId, currentURI: { spec: url }, browsingContext: privateBrowsing === null ? null : { usePrivateBrowsing: privateBrowsing } },
     getAttribute: name => (name === "zen-workspace-id" ? space : null) };
 }
@@ -1061,6 +1062,25 @@ test("arrival: private windows, private or unknown-privacy tabs and foreign tabs
   for (const [window, tab] of cases) assert.equal(await h.services.offerArrival({ window, tab }), null);
   assert.deepEqual(h.runtime.calls, []);
   assert.deepEqual(h.fs.reads, []);
+});
+
+test("arrival: a tab's window is its native Node.documentGlobal; foreign, missing or ownerGlobal-only tabs start nothing", { skip }, async () => {
+  const h = arrivalHarness();
+  const other = fakeZenWindow({ spaces: [{ uuid: HOME, name: "Home" }] });
+  h.services.registerWindow(other.window, new ZenWorkspaceAdapter(other.window));
+  const stale = fakeTab(h.window);
+  delete stale.documentGlobal;
+  const cases = [
+    ["a foreign registered window", { ...fakeTab(h.window), documentGlobal: other.window }],
+    ["no document window", (() => { const tab = fakeTab(h.window); delete tab.documentGlobal; return tab; })()],
+    ["the obsolete ownerGlobal only", { ...stale, ownerGlobal: h.window }],
+  ];
+  for (const [label, tab] of cases) assert.equal(await h.services.offerArrival({ window: h.window, tab }), null, label);
+  assert.deepEqual([h.runtime.calls, h.fs.reads], [[], []], "no process, no read");
+  const native = fakeTab(h.window);
+  assert.ok(!("ownerGlobal" in native), "native-shaped tab: no ownerGlobal");
+  const offer = await h.services.offerArrival({ window: h.window, tab: native });
+  assert.equal(offer?.kind, "new", "the same tab with its own documentGlobal is offered");
 });
 
 test("arrival: a known repository URL links to its project without any process", { skip }, async () => {
@@ -2028,4 +2048,273 @@ test("P2: a configured but broken identity service fails closed instead of openi
   await assert.rejects(h.services.openProjectUrl({ window: h.zen.window, projectId: shop.id, url: "https://vercel.com/" }), { code: "CONTAINERS_UNAVAILABLE" });
   assert.equal(h.zen.opened.length, 0);
   assert.deepEqual(await h.services.listProjectContainers(), [{ project_id: shop.id, state: "unavailable" }]);
+});
+
+// ── Plan 4 step 7: native project authority for console collection ─────────
+// Chrome-only Services methods over the synthetic profile store, a synchronous
+// root metadata seam and a fake console owner. No facade, client, endpoint,
+// probe, repository read or manifest write is involved unless a test says so.
+const NATIVE_ROOT = "/work/native/harbor", NATIVE_OTHER = "/work/native/inkline";
+const contextsCore = skip ? null : await import("../../../packages/contexts/src/index.mjs");
+const nativeRecord = (id, root, name, extra = {}) => ({ ...JSON.parse(JSON.stringify(contextsCore.upgradeProject({ version: 1, id, root,
+  manifest: { version: 1, name, kind: "web", environments: [{ name: "local", base_url: "http://localhost:5173" }], services: [], surfaces: [] },
+  manifest_state: "none", context_uuid: null, trusted: false, created_at: 1, updated_at: 2 }))), ...extra });
+
+function nativeHarness({ projects, metadata = path => ({ canonical: path, directory: true }), deps = {} } = {}) {
+  const h = harness({ deps: { rootMetadata: path => metadata(path), ...deps } });
+  h.storage.files.set("contexts.json", JSON.stringify({ version: 3, contexts: [],
+    projects: projects ?? [nativeRecord("p_harbor1", NATIVE_ROOT, "Harbor"), nativeRecord("p_inkline1", NATIVE_OTHER, "Inkline")] }));
+  const services = h.make();
+  const unregister = services.registerWindow(h.zen.window, h.adapter);
+  const phases = [];
+  services.onNativeProjectAuthority(event => phases.push(event));
+  return { ...h, services, unregister, phases };
+}
+function fakeOwner(services, { readProject = () => null } = {}) {
+  const calls = { dispose: 0, detach: [], readProject: [] };
+  let changed = null;
+  return { calls,
+    service: { onChange(callback) { changed = callback; return () => { changed = null; }; },
+      readProject(args) { calls.readProject.push(args); return readProject(args); } },
+    detachWindow(window) { calls.detach.push([window, services.isNormalWindow(window)]); },
+    dispose() { calls.dispose++; },
+    change: () => changed?.() };
+}
+
+test("native authority: published from the settled store while Understand and the agent endpoint stay closed; nothing else starts", { skip }, async () => {
+  const h = nativeHarness();
+  assert.equal(h.services.readNativeProjectSnapshot(), null, "unpublished until prepared");
+  assert.equal(await h.services.prepareNativeProjectAuthority(), true);
+  const snapshot = h.services.readNativeProjectSnapshot();
+  assert.ok(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.projects) && Object.isFrozen(snapshot.projects[0].manifest));
+  assert.deepEqual(snapshot.projects.map(project => project.id), ["p_harbor1", "p_inkline1"]);
+  assert.deepEqual(h.phases, [{ phase: "settled", revision: snapshot.revision }]);
+  const harbor = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" });
+  const inkline = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_inkline1" });
+  assert.deepEqual([harbor.id, harbor.root, harbor.revision, harbor.check()], ["p_harbor1", NATIVE_ROOT, snapshot.revision, true]);
+  assert.equal(inkline.revision, harbor.revision, "one global epoch for every project of a publication");
+  assert.ok(Object.isFrozen(harbor));
+  assert.deepEqual([h.services.getUnderstandDiagnostics().created, h.services.getAgentDiagnostics().created], [false, false]);
+  assert.deepEqual([h.probes.length, h.fs.reads.length, h.reader.calls.length, h.fs.writes.length], [0, 0, 0, 0], "no probe, read or write");
+  assert.equal(h.services.captureNativeProjectAuthority({ window: { foreign: true }, project_id: "p_harbor1" }), null);
+  assert.equal(h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_gone1" }), null);
+  // Nothing of it is a page method; only the console event name reaches pages.
+  const { METHODS, EVENT_NAMES: PAGE_EVENTS } = await import("../chrome/AboutAxioSozoParent.sys.mjs");
+  assert.ok(!Object.keys(METHODS).some(name => /Native|ProjectAuthority|BrowserOwner|ProjectError/u.test(name)));
+  assert.ok(PAGE_EVENTS.includes("console"));
+});
+
+test("native authority: every project mutation withdraws it before its first await and the settling scope publishes a new epoch", { skip }, async () => {
+  const h = nativeHarness();
+  h.services.registerNativeBrowserOwner(fakeOwner(h.services));
+  await h.services.prepareNativeProjectAuthority();
+  const harbor = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" });
+  const inkline = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_inkline1" });
+  const pending = h.services.setAccountLabel("p_harbor1", { key: "vercel", label: "Work" });
+  assert.equal(h.phases.at(-1).phase, "invalidated", "synchronously, before the store is touched");
+  assert.deepEqual([h.services.readNativeProjectSnapshot(), harbor.check(), inkline.check()], [null, false, false],
+    "another project's authority ends too: the epoch is global");
+  assert.equal(h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_inkline1" }), null);
+  await pending;
+  await settle();
+  const after = h.services.readNativeProjectSnapshot();
+  assert.equal(h.phases.at(-1).phase, "settled");
+  assert.ok(after.revision > harbor.revision + 1, "invalidation and publication each moved the epoch");
+  assert.equal(harbor.check(), false, "an old authority never comes back, even with the same root and record");
+  assert.equal(h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_inkline1" }).revision, after.revision);
+});
+
+test("native authority: the facade's own brief commit (understand: false) withdraws it before its write, and the acceptance still succeeds", { skip }, async () => {
+  const disk = new Map(), writes = [], seen = [];
+  const io = Object.freeze({
+    async snapshot(root, { admit }) {
+      assert.equal(admit(), true);
+      const found = disk.get(root);
+      return { rootIdentity: { device: "1", inode: "2" }, directoryIdentity: found ? { device: "1", inode: "3" } : null,
+        target: found ? { identity: { device: "1", inode: "4" }, digest: found.digest, size: 120, mode: 0o644 } : null, manifest: found?.manifest ?? null };
+    },
+    async accept(payload, { admit }) {
+      assert.equal(admit(), true);
+      writes.push(payload);
+      disk.set(payload.root, { manifest: payload.manifest, digest: "b".repeat(64) });
+      return { path: `${payload.root}/.axiosozo/project.json`, digest: "b".repeat(64), committed: true };
+    },
+  });
+  const brief = { version: 1, cli: "codex", generated_at: 500, accepted: false, document: { version: 1, product: "A synthetic harbour.",
+    apps: [], domains: [], services: [], start: [], risks: [] } };
+  let h = null;
+  h = nativeHarness({ projects: [nativeRecord("p_harbor1", NATIVE_ROOT, "Harbor", { brief }), nativeRecord("p_inkline1", NATIVE_OTHER, "Inkline")],
+    deps: { createManifestAcceptIO: () => io, storageFor: name => ({ read: async () => h.storage.files.get(name) ?? null,
+      write: async text => {
+        if (name === "contexts.json") seen.push([h.services.readNativeProjectSnapshot(), h.phases.at(-1)?.phase]);
+        h.storage.files.set(name, text);
+      } }) } });
+  h.services.registerNativeBrowserOwner(fakeOwner(h.services));
+  await h.services.prepareNativeProjectAuthority();
+  const before = h.services.readNativeProjectSnapshot().revision;
+  const alias = h.services.registerUnderstandOwner({ window: h.zen.window, current: () => true });
+  const preview = await h.services.previewProjectBriefAcceptance(alias, { projectId: "p_harbor1" });
+  // Understand's own snapshots now give each project its own binding revision; the native epoch is one for both.
+  const a = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" });
+  const b = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_inkline1" });
+  assert.deepEqual([a.revision, b.revision], [before, before]);
+  const result = await h.services.acceptProjectBrief(alias, { projectId: "p_harbor1", token: preview.token, edits: { name: "Harbor Accepted" }, confirmed: true });
+  assert.deepEqual([result.status, result.committed], ["ACCEPTED", true], "the commit did not cancel itself");
+  assert.equal(writes.length, 1);
+  assert.deepEqual(seen, [[null, "invalidated"]], "withdrawn before the profile write");
+  assert.equal(a.check(), false);
+  await settle();
+  assert.equal(h.phases.at(-1).phase, "settled");
+  assert.ok(h.services.readNativeProjectSnapshot().revision > before);
+  assert.equal(h.services.readNativeProjectSnapshot().projects.find(project => project.id === "p_harbor1").manifest.name, "Harbor Accepted");
+});
+
+test("native authority: a folder re-read withdraws it before the reader starts; it settles only at global quiescence", { skip }, async () => {
+  const h = harness({ tree: VITE_TREE, deps: { rootMetadata: path => ({ canonical: path, directory: true }) } });
+  const shop = await shopIn(h, HOME);
+  const phases = [];
+  h.services.onNativeProjectAuthority(event => phases.push(event.phase));
+  await h.services.prepareNativeProjectAuthority();
+  const readerCalls = h.reader.calls.length;
+  const pending = h.services.refreshProjectDetection(shop.id);
+  assert.deepEqual([phases.at(-1), h.services.readNativeProjectSnapshot(), h.reader.calls.length], ["invalidated", null, readerCalls],
+    "before the folder is read");
+  await pending;
+  await settle();
+  assert.equal(phases.at(-1), "settled");
+  assert.ok(h.services.readNativeProjectSnapshot());
+});
+
+test("native authority: root admission is fresh synchronous metadata; mismatch, file, throw, Promise and denied roots refuse", { skip }, async () => {
+  let answer = path => ({ canonical: path, directory: true });
+  const h = nativeHarness({ projects: [nativeRecord("p_harbor1", NATIVE_ROOT, "Harbor"), nativeRecord("p_denied1", "/etc/project", "Denied")],
+    metadata: path => answer(path) });
+  await h.services.prepareNativeProjectAuthority();
+  const capture = (id = "p_harbor1") => h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: id });
+  const held = capture();
+  assert.equal(held.check(), true);
+  assert.equal(capture("p_denied1"), null, "a denied system folder is never authority");
+  for (const [label, value] of [["another canonical path", path => ({ canonical: `${path}-elsewhere`, directory: true })],
+    ["not a directory", path => ({ canonical: path, directory: false })], ["missing", () => null],
+    ["throws", () => { throw new Error("EACCES"); }], ["a Promise", path => Promise.resolve({ canonical: path, directory: true })]]) {
+    answer = value;
+    assert.equal(capture(), null, label);
+    assert.equal(held.check(), false, `${label}: an authority already held fails its own check`);
+  }
+  answer = path => ({ canonical: path, directory: true });
+  assert.equal(held.check(), true, "the same publication and root again");
+});
+
+test("native owner: one per process, idempotent, detached from a window before it loses normal authority, replaceable until shutdown", { skip }, async () => {
+  const h = nativeHarness();
+  assert.throws(() => h.services.registerNativeBrowserOwner({}), { code: "INVALID_OWNER" });
+  const owner = fakeOwner(h.services);
+  const unregister = h.services.registerNativeBrowserOwner(owner);
+  const shutdownOf = h.shutdown.at(-1);
+  assert.equal(h.services.registerNativeBrowserOwner(owner), unregister, "the same owner again");
+  assert.throws(() => h.services.registerNativeBrowserOwner(fakeOwner(h.services)), { code: "OWNER_REGISTERED" });
+  h.unregister();
+  assert.deepEqual(owner.calls.detach, [[h.zen.window, true]], "detached while still a registered normal window");
+  // An ordinary unregistration (not a shutdown) lets a new owner in.
+  unregister(); unregister();
+  const next = fakeOwner(h.services);
+  assert.equal(typeof h.services.registerNativeBrowserOwner(next), "function", "a new owner after unregistration");
+  assert.equal(owner.calls.dispose, 0, "unregistering disposes nothing");
+  // Profile shutdown: every registration's callback ends authority; each owner is disposed once.
+  await Promise.all([...h.shutdown].map(fn => fn()));
+  await Promise.all([...h.shutdown].map(fn => fn()));
+  await shutdownOf();
+  assert.deepEqual([owner.calls.dispose, next.calls.dispose], [1, 1], "once each, however often shutdown runs");
+  assert.throws(() => h.services.registerNativeBrowserOwner(fakeOwner(h.services)), { code: "SHUTDOWN" }, "never reopened");
+  assert.throws(() => h.services.registerNativeBrowserOwner(next), { code: "SHUTDOWN" });
+});
+
+test("native shutdown: the registered callback withdraws publication before the owner is disposed; held checks end; nothing reopens", { skip }, async () => {
+  const h = nativeHarness();
+  const seenAtDispose = [];
+  const owner = fakeOwner(h.services);
+  owner.dispose = () => {
+    owner.calls.dispose++;
+    seenAtDispose.push([h.services.readNativeProjectSnapshot(), h.phases.at(-1)?.phase]);
+  };
+  h.services.registerNativeBrowserOwner(owner);
+  const shutdown = h.shutdown.at(-1);
+  assert.equal(await h.services.prepareNativeProjectAuthority(), true);
+  const held = h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" });
+  assert.equal(held.check(), true);
+  const before = h.phases.length;
+  await shutdown();
+  assert.deepEqual(seenAtDispose, [[null, "invalidated"]], "withdrawn and announced before disposal");
+  assert.deepEqual(h.phases.slice(before).map(event => event.phase), ["invalidated"]);
+  assert.equal(held.check(), false, "an authority captured before shutdown never holds again");
+  assert.equal(h.services.readNativeProjectSnapshot(), null);
+  assert.equal(await h.services.prepareNativeProjectAuthority(), false);
+  assert.equal(h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" }), null);
+  // A later project write settles nothing.
+  await h.services.setAccountLabel("p_harbor1", { key: "vercel", label: "Work" });
+  await settle();
+  assert.equal(h.phases.some((event, index) => index >= before && event.phase === "settled"), false);
+  assert.equal(h.services.readNativeProjectSnapshot(), null);
+  assert.equal(owner.calls.dispose, 1);
+});
+
+test("native shutdown: a first hydration held across shutdown publishes nothing when it completes", { skip }, async () => {
+  let release = null;
+  const gate = new Promise(resolve => { release = resolve; });
+  let h = null;
+  h = nativeHarness({ deps: { storageFor: name => ({
+    read: async () => { if (name === "contexts.json") await gate; return h.storage.files.get(name) ?? null; },
+    write: async text => { h.storage.files.set(name, text); } }) } });
+  const owner = fakeOwner(h.services);
+  h.services.registerNativeBrowserOwner(owner);
+  const shutdown = h.shutdown.at(-1);
+  const hydration = h.services.prepareNativeProjectAuthority();
+  await settle();
+  await shutdown();
+  release();
+  assert.equal(await hydration, false);
+  await settle();
+  assert.deepEqual(h.phases.map(event => event.phase), ["invalidated"], "no settled publication after shutdown");
+  assert.deepEqual([h.services.readNativeProjectSnapshot(), owner.calls.dispose], [null, 1]);
+  assert.equal(await h.services.prepareNativeProjectAuthority(), false);
+});
+
+test("native authority listeners: a throwing or re-entrant listener changes nothing for the others or for checks", { skip }, async () => {
+  const h = nativeHarness();
+  const seen = [];
+  h.services.onNativeProjectAuthority(() => { throw new Error("listener failure"); });
+  h.services.onNativeProjectAuthority(event => {
+    seen.push([event.phase, h.services.readNativeProjectSnapshot() === null,
+      h.services.captureNativeProjectAuthority({ window: h.zen.window, project_id: "p_harbor1" }) !== null]);
+  });
+  h.services.registerNativeBrowserOwner(fakeOwner(h.services));
+  await quietly(async () => {
+    await h.services.prepareNativeProjectAuthority();
+    await h.services.setAccountLabel("p_harbor1", { key: "vercel", label: "Work" });
+    await settle();
+  });
+  assert.deepEqual(seen, [["settled", false, true], ["invalidated", true, false], ["settled", false, true]]);
+});
+
+test("project home: console errors are the owner's RAM count and five newest of this window, or null; events are name-only and throttled", { skip }, async () => {
+  const h = nativeHarness();
+  const recent = Array.from({ length: 7 }, (_, i) => ({ level: i % 2 ? "warning" : "error", text: `message ${i}`, source: "http://x/", line: 1, at: i }));
+  let answer = () => ({ count: 9, recent });
+  const owner = fakeOwner(h.services, { readProject: args => answer(args) });
+  h.services.registerNativeBrowserOwner(owner);
+  const home = await h.services.projectHome({ window: h.zen.window, id: "p_harbor1" });
+  assert.deepEqual(home.console_errors, { count: 9, recent: recent.slice(0, 5).map(({ level, text }) => ({ level, text })) },
+    "text and level only; no source, line, time, tab or root");
+  assert.deepEqual(owner.calls.readProject, [{ window: h.zen.window, project_id: "p_harbor1" }]);
+  for (const value of [() => null, () => { throw new Error("x"); }, () => ({ count: -1, recent: [] }), () => ({ count: 2 })]) {
+    answer = value;
+    assert.equal((await h.services.projectHome({ window: h.zen.window, id: "p_harbor1" })).console_errors, null);
+  }
+  const events = [];
+  h.services.on("console", event => events.push(event));
+  h.timers.queue.length = 0;
+  owner.change(); owner.change(); owner.change();
+  assert.deepEqual(events, [{ name: "console" }], "the first at once");
+  await h.timers.runAll();
+  assert.deepEqual(events, [{ name: "console" }, { name: "console" }], "one trailing event for the burst");
 });

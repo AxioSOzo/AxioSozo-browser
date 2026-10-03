@@ -947,6 +947,65 @@ test("dispose removes every addition and listener", async () => {
   assert.equal(t.clock.timers.size, 0);
 });
 
+test("console errors (step 7): a small count beside the project's summary, said in words; the console event redraws it, keeping expansion and focus", async () => {
+  const h = createFakeWindow();
+  const adapter = createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) });
+  const p = project({ services: [WEB] });
+  const other = project({ id: "p_other", name: "Other", environments: [{ name: "local", base_url: "http://localhost:4000" }] });
+  const services = createFakeServices(core, { projects: [p, other], statuses: { [p.id]: [{ ...WEB, status: "up", checked_at: 1 }] } });
+  let counts = [{ project_id: p.id, count: 3, errors: 2, warnings: 1, tabs: 1 }];
+  const reads = [];
+  const consoleErrors = { readCounts: args => { reads.push(args); if (counts instanceof Error) throw counts; return counts; } };
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0, consoleErrors });
+  await flushMicrotasks();
+  const badgeOf = id => blockFor(h, id)?.querySelector(".axiosozo-project-console") ?? null;
+  const badge = badgeOf(p.id);
+  assert.deepEqual([badge.textContent, badge.getAttribute("aria-hidden"), badge.getAttribute("data-level"), badge.getAttribute("title")],
+    ["3", "true", "error", "2 console errors and 1 warning"]);
+  assert.equal(badge.previousElementSibling.className, "axiosozo-project-summary", "right beside the summary dots");
+  assert.match(blockFor(h, p.id).querySelector(".axiosozo-project-toggle").getAttribute("aria-label"),
+    /^Webapp, 2 console errors and 1 warning, 1 of 1 local server running, production not checked\. Expand project$/u);
+  assert.equal(badgeOf(other.id), null, "no messages, no count");
+  assert.ok(reads.length > 0 && reads.every(args => args.window === h.window && Object.keys(args).length === 1), "this window only");
+  const readsBefore = reads.length;
+  blockFor(h, p.id).querySelector(".axiosozo-project-toggle").click();
+  await flushMicrotasks();
+  assert.equal(reads.length, readsBefore, "redrawing the folders reads no counts; only the console event does");
+  blockFor(h, p.id).querySelector(".axiosozo-project-toggle").focus();
+  counts = [{ project_id: p.id, count: 120, errors: 0, warnings: 120, tabs: 2 }];
+  services.emit("console");
+  await flushMicrotasks();
+  const toggle = blockFor(h, p.id).querySelector(".axiosozo-project-toggle");
+  assert.deepEqual([toggle.getAttribute("aria-expanded"), h.document.activeElement === toggle], ["true", true], "expansion and focus kept");
+  assert.deepEqual([badgeOf(p.id).textContent, badgeOf(p.id).getAttribute("data-level"), badgeOf(p.id).getAttribute("title")],
+    ["99+", "warning", "120 console warnings"]);
+  for (const next of [[], null, new Error("unavailable")]) {
+    counts = next;
+    services.emit("console");
+    await flushMicrotasks();
+    assert.equal(badgeOf(p.id), null, String(next));
+  }
+  loop.dispose();
+  assert.equal(services.listenerCount(), 0);
+});
+
+test("console counts are never read in a private window, and without the console facade the sidebar is as before", async () => {
+  const reads = [];
+  const consoleErrors = { readCounts: () => { reads.push(1); return [{ project_id: "p_webapp", count: 1, errors: 1, warnings: 0, tabs: 1 }]; } };
+  const h = createFakeWindow({ privateWindow: true });
+  const adapter = createFakeAdapter({ privateWindow: true, elements: uuid => h.document.getElementById(uuid) });
+  const services = createFakeServices(core, { projects: [project()] });
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0, consoleErrors });
+  services.emit("console");
+  await flushMicrotasks();
+  assert.equal(reads.length, 0);
+  loop.dispose();
+  const t = setup();
+  await flushMicrotasks();
+  assert.equal(blockFor(t.h, t.project.id).querySelector(".axiosozo-project-console"), null);
+  t.loop.dispose();
+});
+
 test("web progress flag values match nsIWebProgressListener.idl", () => {
   // LOCATION_CHANGE_ERROR_PAGE was 0x4 (that is LOCATION_CHANGE_RELOAD), so real
   // error pages were not recognized and reloads were (H3 GUI run).

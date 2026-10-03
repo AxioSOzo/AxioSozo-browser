@@ -304,8 +304,13 @@ test("agent status setting follows the browser's own endpoint state; codes stay 
   assert.deepEqual(M.AGENT_HOOKS.map(hook => hook.agent), ["claude-code", "codex"]);
 });
 
-test("console errors (step 7 seam) and the brief (step 6 seam): unavailable, empty or validated text", () => {
+test("console errors (step 7) and the brief (step 6 seam): unavailable, empty or validated text", () => {
   assert.deepEqual(M.homeConsoleErrors(null), { state: "unavailable", text: M.ERRORS_UNAVAILABLE, count: null, items: [] });
+  assert.equal(M.ERRORS_UNAVAILABLE, "Console errors cannot be shown right now.", "null is 'not now', never 'not collected'");
+  assert.doesNotMatch(`${M.ERRORS_NOTE} ${M.SEND_ERRORS_HELP}`, /private|Chromium|secret|password/iu, "no claim about private, Chromium or secret data");
+  assert.match(M.SEND_ERRORS_HELP, /Nothing is copied until you choose Copy for agent\./u);
+  assert.deepEqual(M.homeConsoleErrors({ count: 1, recent: [{ level: "error", text: "a‮b⁦c" }] }).items, [{ level: "error", text: "a b c" }],
+    "bidi controls do not reorder the line");
   assert.equal(M.homeConsoleErrors({ count: -1 }).state, "unavailable");
   assert.equal(M.homeConsoleErrors({ count: 0, recent: [] }).state, "empty");
   const errors = M.homeConsoleErrors({ count: 7, recent: [{ level: "error", text: "TypeError: x\u0000 is undefined" }, { level: "warning", text: "Deprecated" },

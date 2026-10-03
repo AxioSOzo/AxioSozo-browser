@@ -115,7 +115,7 @@ export function installAgentStatus(window, { services, adapter, openOverview = n
     const facts = () => {
       try {
         const browser = tab?.linkedBrowser, context = browser?.browsingContext, global = context?.currentWindowGlobal;
-        if (!tab || tab.closing !== false || tab.isConnected !== true || tab.ownerGlobal !== window || !browser.permanentKey
+        if (!tab || tab.closing !== false || tab.isConnected !== true || tab.documentGlobal !== window || !browser.permanentKey
           || !browser.frameLoader || context.usePrivateBrowsing !== false || !global || global.isClosed !== false
           || global.isCurrentGlobal !== true) return null;
         if (typeof engineOf !== "function" || engineOf(tab) !== "gecko") return null;

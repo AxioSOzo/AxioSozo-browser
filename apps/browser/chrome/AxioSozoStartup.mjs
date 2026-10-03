@@ -115,8 +115,26 @@ async function installContexts({ engineProbe, aboutRegistered }) {
     if (!hostDecide) return neutralDecision(request, "HOST_UNAVAILABLE");
     try { return await hostDecide(request, options); } catch { return neutralDecision(request, "HOST_UNAVAILABLE"); }
   };
+  // P5 console errors (Plan 4 step 7): one process owner of the shared tab
+  // registry, the RAM console facade and the ConsoleErrors actor, created on
+  // the first window and shared by every later one. It starts no endpoint,
+  // provider or Understand facade. A normal window is attached after its
+  // registration and Zen readiness, before Send to agent is installed.
+  const normalWindow = !!guarded("arrival privacy check", () => zen.isPrivateWindow() === false);
+  const consoleModule = optionalModule("ConsoleErrorsNativeRuntime.sys.mjs");
+  const consoleOwner = consoleModule ? guarded("console errors", () => servicesModule.processSingleton("console-errors-native",
+    () => consoleModule.createConsoleErrorsNativeRuntime({ services }))) : null;
+  if (consoleOwner && normalWindow) {
+    // Its own engine authority: the probe handle's actual answer, or Gecko only
+    // when the native environment proves switching and the probe are off.
+    const consoleEngineOf = consoleModule.createConsoleEngineOf({ window, engineProbe, env: () => Services.env });
+    const detach = guarded("console errors window", () => consoleOwner.attachWindow(window, { adapter: zen, engineOf: consoleEngineOf }));
+    if (typeof detach === "function") disposers.push(detach);
+    runtime.consoleErrors = () => consoleOwner.diagnostics();
+  }
   const installers = [
-    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings }],
+    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings,
+      consoleErrors: consoleOwner?.service ?? null }],
     ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decide }],
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],
   ];
@@ -125,12 +143,12 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   // requests and status (the endpoint itself stays off until Settings turns it
   // on), and offers Send to agent on its own tabs. Normal windows only;
   // unknown privacy counts as private and installs nothing.
-  if (guarded("arrival privacy check", () => zen.isPrivateWindow() === false)) {
+  if (normalWindow) {
     installers.push(["ProjectArrivalRuntime.sys.mjs", "installProjectArrival", { services, adapter: zen, openOverview }]);
     // The engine a tab shows, read only (no engine file is involved here).
     const engineOf = tab => engineProbe?.engineOf(tab) ?? "gecko";
     installers.push(["AgentStatusRuntime.sys.mjs", "installAgentStatus", { services, adapter: zen, openOverview, engineOf }]);
-    installers.push(["AgentHandoffRuntime.sys.mjs", "installAgentHandoff", { services, adapter: zen, engineOf }]);
+    installers.push(["AgentHandoffRuntime.sys.mjs", "installAgentHandoff", { services, adapter: zen, engineOf, nativeOwner: consoleOwner }]);
   }
   for (const [file, name, options] of installers) {
     const module = optionalModule(file);

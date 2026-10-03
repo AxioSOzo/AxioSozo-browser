@@ -53,8 +53,9 @@ function fixture({ privateWindow = false, engine = undefined } = {}) {
   context.top = context;
   const browser = { browserId: 9, permanentKey: {}, frameLoader: {}, browsingContext: context, currentURI: { spec: PAGE }, reloads: 0,
     reload() { this.reloads++; } };
-  const tab = { ownerGlobal: window, closing: false, isConnected: true, linkedBrowser: browser };
-  const front = { ownerGlobal: window, closing: false, isConnected: true, linkedBrowser: { browserId: 3, permanentKey: {}, frameLoader: {} } };
+  // Native nodes name their window through Node.documentGlobal (Node.webidl); there is no ownerGlobal.
+  const tab = { documentGlobal: window, closing: false, isConnected: true, linkedBrowser: browser };
+  const front = { documentGlobal: window, closing: false, isConnected: true, linkedBrowser: { browserId: 3, permanentKey: {}, frameLoader: {} } };
   const progress = [];
   const state = { normal: true, target: null, project: { id: "p_harbor1", root: "/Volumes/Synthetic/harbor-suite" }, checks: true,
     engine: "gecko", veto: false, shownBrowser: null, duringLookup: null };
@@ -221,6 +222,30 @@ async function goOnce(f, isTrusted = true) {
   await flush();
 }
 const remember = f => { f.state.target = { project_id: "p_harbor1", tab_id: "t_9", navigation_id: currentNavigationId(f.window, f.browser), user_context_id: 7 }; };
+
+test("Go to project proves the tab's window through its native Node.documentGlobal; foreign, missing or ownerGlobal-only never reload", async () => {
+  const valid = fixture();
+  try {
+    assert.ok(!("ownerGlobal" in valid.tab), "native-shaped tab: no ownerGlobal");
+    remember(valid);
+    await goOnce(valid);
+    assert.deepEqual([valid.browser.reloads, valid.window.gBrowser.selectedTab === valid.tab, valid.opened], [1, true, []]);
+  } finally { valid.dispose(); }
+  for (const [label, change] of [
+    ["a foreign window", f => { f.tab.documentGlobal = { gBrowser: f.window.gBrowser }; }],
+    ["no document window", f => { delete f.tab.documentGlobal; }],
+    ["the obsolete ownerGlobal only", f => { delete f.tab.documentGlobal; f.tab.ownerGlobal = f.window; }],
+  ]) {
+    const f = fixture();
+    try {
+      remember(f);
+      change(f);
+      await goOnce(f);
+      assert.deepEqual([f.browser.reloads, f.window.gBrowser.selectedTab === f.front, f.opened], [0, true, ["#project=p_harbor1"]], label);
+      assert.equal(f.calls.some(([name]) => name === "authority"), false, `${label}: nothing is looked up`);
+    } finally { f.dispose(); }
+  }
+});
 
 test("Go to project never selects or reloads a target that no longer shows Gecko, before or during the lookup", async () => {
   const f = fixture();

@@ -197,6 +197,24 @@
 .axiosozo-project-toggle[aria-expanded="true"] .axiosozo-project-chevron { opacity: 0.8; transform: none; }
 .axiosozo-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .axiosozo-project-summary { display: inline-flex; align-items: center; gap: 3px; }
+/* Retained console messages of the project's tabs (Plan 4 step 7): a quiet,
+ * legible count; tinted with Firefox's critical colour when errors are among them. */
+.axiosozo-project-console {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.axiosozo-project-console[data-level="error"] {
+  background: color-mix(in srgb, var(--icon-color-critical, currentColor) 22%, transparent);
+}
 .axiosozo-project-body[hidden] { display: none; }
 .axiosozo-project-body { padding-block: 0 4px; }
 .axiosozo-project-links { margin: 0; padding: 0 0 0 10px; list-style: none; }

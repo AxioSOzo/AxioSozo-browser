@@ -1185,9 +1185,18 @@ function homeActivity(project, agents, errors) {
       presence.length ? h("p", { class: "footnote" }, `In the folder: ${presence.join(", ")}. ${M.PRESENCE_TEXT}`) : null),
     h("dt", {}, "Console errors"),
     h("dd", {},
-      errors.state === "list" ? [h("p", {}, errors.text), h("ul", { class: "activity-list" }, errors.items.map(item =>
-        h("li", {}, h("span", { class: "tag state", "data-tone": item.level === "warning" ? "warn" : "bad" }, item.level), h("span", { class: "activity-title" }, item.text))))]
-        : h("p", { class: "quiet-text" }, errors.text))), { quiet });
+      errors.state === "list" ? [h("p", { class: "console-count" }, errors.text),
+        h("ul", { class: "activity-list console-list", "aria-label": "Newest console errors" }, errors.items.map(item =>
+          h("li", {}, h("span", { class: "tag state", "data-tone": item.level === "warning" ? "warn" : "bad" }, item.level),
+            h("span", { class: "activity-title" }, item.text)))),
+        // The browser's own actor acts on a trusted click of this exact
+        // button (id); the page sends nothing and names no tab or project.
+        h("div", { class: "inline-action send-errors" },
+          h("button", { type: "button", id: "axiosozo-send-project-errors", class: "ghost small", "data-focus-key": key("send-errors"),
+            "aria-describedby": "home-send-errors-help" }, "Send errors to agent…"),
+          h("span", { class: "help", id: "home-send-errors-help" }, M.SEND_ERRORS_HELP))]
+        : h("p", { class: "quiet-text" }, errors.text),
+      errors.state !== "unavailable" ? h("p", { class: "footnote" }, M.ERRORS_NOTE) : null)), { quiet });
 }
 
 /** Ends one browser-bridge session of this project (it closes its connection). */
@@ -2301,9 +2310,12 @@ const loaders = {
   agents: () => Promise.all([state.view === "ai" ? loadAgentSettings() : null, state.homeId ? loadHome() : null]),
   // Some read changed state: this page asks for its own, if it reads at all.
   understand: async () => { if (state.understand.owned) await loadUnderstandState(state.understand); },
+  // Retained console messages changed (name only): the shown home reads its
+  // count and newest messages again; nothing else is asked or started.
+  console: async () => { if (state.homeId) await loadHome(); },
 };
 // Events that can change what a project home shows.
-const HOME_EVENTS = new Set(["projects", "contexts", "agents"]);
+const HOME_EVENTS = new Set(["projects", "contexts", "agents", "console"]);
 const pending = new Map();
 function onServicesEvent(event) {
   const name = event?.name;

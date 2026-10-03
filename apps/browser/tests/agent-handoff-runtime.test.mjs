@@ -15,6 +15,7 @@ import { inspectHandoffDocument, HANDOFF_MESSAGES } from "../chrome/AgentHandoff
 
 const { installAgentHandoff, HANDOFF_KEY, HANDOFF_MENU_ITEM, HANDOFF_NOTIFICATION, HANDOFF_RESULT_NOTIFICATION, currentNavigationId }
   = await import("../chrome/AgentHandoffRuntime.sys.mjs");
+const { watchNativeNavigation } = await import("../chrome/ConsoleErrorsNativeRuntime.sys.mjs");
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const PAGE = "http://localhost:5173/settings?token=secret#tab";
@@ -63,7 +64,7 @@ function fakePopups() {
 
 function fixture({ url = PAGE, title = "Synthetic settings", selection = "render failed\r\nat line 2", collapsed = false, inputs = [],
   engine = "gecko", authority = PROJECT, privateWindow = false, workspace = "{11111111-1111-4111-8111-111111111111}",
-  fixtureEnv = false, securityDelayMs = 0 } = {}) {
+  fixtureEnv = false, securityDelayMs = 0, native = null } = {}) {
   const document = browserDocument();
   const popups = fakePopups();
   const reads = [], queries = [], copies = [], targets = [], listeners = [], events = new Map();
@@ -80,8 +81,9 @@ function fixture({ url = PAGE, title = "Synthetic settings", selection = "render
     focus() { this.focused++; } };
   const tabContainer = document.createElement("tabs");
   const window = { document, closed: false, PopupNotifications: popups, gContextMenu: null };
-  const tab = { ownerGlobal: window, closing: false, isConnected: true, linkedBrowser: browser, workspace };
-  const otherTab = { ownerGlobal: window, closing: false, isConnected: true, linkedBrowser: { browserId: 6, permanentKey: {}, frameLoader: {} } };
+  // Native nodes name their window through Node.documentGlobal (Node.webidl); there is no ownerGlobal.
+  const tab = { documentGlobal: window, closing: false, isConnected: true, linkedBrowser: browser, workspace };
+  const otherTab = { documentGlobal: window, closing: false, isConnected: true, linkedBrowser: { browserId: 6, permanentKey: {}, frameLoader: {} } };
   // The tabbrowser's own selected browser; a test can change it alone, without any event.
   let browserOverride = null;
   window.gBrowser = {
@@ -130,11 +132,13 @@ function fixture({ url = PAGE, title = "Synthetic settings", selection = "render
     },
     rememberAgentReturnTarget: target => { targets.push(target); return true; },
     on: (name, callback) => { events.set(name, callback); return () => events.delete(name); },
+    ...(native ? { captureNativeProjectAuthority: args => native.capture(args) } : {}),
   };
   const adapter = { isPrivateWindow: () => privateWindow, workspaceForTab: target => target.workspace ?? null };
   const timers = { setTimeout: () => 1, clearTimeout: () => {} };
   let serial = 0;
   const runtime = installAgentHandoff(window, { services, adapter, engineOf: () => engine, timers, clock: () => 1_700_000_000_000,
+    ...(native ? { nativeOwner: native.owner } : {}),
     clipboardHelper: { copyString: text => copies.push(text) }, registerActor: () => true,
     requestId: () => `hf_${(++serial).toString(16).padStart(16, "0")}`,
     // Synthetic-agent seams: privileged flags and the root factory, both fakes here.
@@ -353,6 +357,28 @@ test("only a known live tab with its native permanentKey and frameLoader is offe
       change(f);
       await f.press();
       assert.deepEqual([f.queries.length, f.compose(), f.copies.length], [0, null, 0]);
+    } finally { f.runtime.dispose(); }
+  }
+});
+
+test("the tab's own window is its native Node.documentGlobal: foreign, missing or ownerGlobal-only tabs are never offered", async () => {
+  const valid = fixture();
+  try {
+    assert.ok(!("ownerGlobal" in valid.tab), "native-shaped tab: no ownerGlobal");
+    await valid.press();
+    assert.equal(valid.queries.length, 1, "a native tab of this window is prechecked");
+    assert.ok(valid.compose(), "and offered");
+  } finally { valid.runtime.dispose(); }
+  for (const [label, change] of [
+    ["a foreign window", f => { f.tab.documentGlobal = { gBrowser: f.window.gBrowser }; }],
+    ["no document window", f => { delete f.tab.documentGlobal; }],
+    ["the obsolete ownerGlobal only", f => { delete f.tab.documentGlobal; f.tab.ownerGlobal = f.window; }],
+  ]) {
+    const f = fixture();
+    try {
+      change(f);
+      await f.press();
+      assert.deepEqual([f.queries.length, f.compose(), f.copies.length, f.reads], [0, null, 0, []], label);
     } finally { f.runtime.dispose(); }
   }
 });
@@ -881,5 +907,104 @@ test("current session: a late cancellation and a late uncertainty are still said
     await flush();
     assert.equal(f.result().message, UNCERTAIN_TEXT);
     assert.equal(f.runtime.diagnostics().superseded, 0);
+  } finally { f.runtime.dispose(); }
+});
+
+// ---- Plan 4 step 7: console errors in the composer -------------------------------------
+// A stand-in console owner over the real shared navigation counter: its RAM
+// records per exact tab/document, its native project authority and the
+// composer registration. The real owner is covered by console-errors-native.
+function nativeOwnerFake() {
+  const calls = { readHandoff: [], ownerForTab: 0, composers: [], unregistered: 0 };
+  const state = { authority: true, records: [], throws: null };
+  const authority = Object.freeze({ id: PROJECT.id, root: PROJECT.root, revision: 7, check: () => state.authority });
+  const owner = {
+    service: { readHandoff(args) {
+      calls.readHandoff.push(args);
+      if (state.throws) throw Object.assign(new Error(state.throws), { code: state.throws });
+      return { tab_id: "t_44", document_id: args.document_id, navigation_id: args.navigation_id, url: args.url, console_errors: state.records };
+    } },
+    ownerForTab: (window, tab) => { calls.ownerForTab++; return { window, tab_id: "t_44", tab }; },
+    registry: { withTrusted: (_id, callback) => callback({ tab: state.tab, window: state.window, descriptor: { project_id: PROJECT.id } }) },
+    onNativeNavigation: (window, callback) => watchNativeNavigation(window, callback),
+    registerHandoffComposer: (_window, value) => { calls.composers.push(value); return () => { calls.unregistered++; }; },
+  };
+  return { owner, calls, state, capture: () => authority };
+}
+const consoleBox = f => f.document.getElementById("axiosozo-handoff-console");
+
+test("with the console owner: console errors are offered unticked; unticked copies none and reads none", async () => {
+  const native = nativeOwnerFake();
+  const f = fixture({ native });
+  try {
+    native.state.records = [{ level: "error", text: "Should not leave", source: "", line: 1, at: 5 }];
+    await f.press();
+    assert.deepEqual([consoleBox(f).checked, consoleBox(f).disabled, consoleBox(f).getAttribute("label")],
+      [false, false, "Include this tab's console errors"]);
+    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent,
+      /Screenshots and opening Claude Code or Codex directly are not in this build yet\./u);
+    await f.copy();
+    assert.deepEqual(JSON.parse(f.copies[0]).console_errors, []);
+    assert.deepEqual([native.calls.readHandoff.length, native.calls.ownerForTab], [0, 0], "nothing of the console is read");
+    assert.equal(native.calls.composers.length, 1, "the console entry is registered with the owner");
+  } finally { f.runtime.dispose(); }
+  assert.equal(native.calls.unregistered, 1, "and removed with the runtime");
+});
+
+test("ticked at the trusted Copy: the owner's records of exactly this tab and document, sanitized and bounded, under both authorities", async () => {
+  const native = nativeOwnerFake();
+  const f = fixture({ native });
+  try {
+    native.state.records = [
+      { level: "error", text: "TypeError:\u0000 broken \uD800 surrogate", source: "http://localhost:5173/app.js", line: 12, at: 1000 },
+      { level: "warning", text: "Deprecated", source: "", line: null, at: 1001 },
+      { level: "info", text: "dropped", source: "", line: 1, at: 1002 },
+      ...Array.from({ length: 60 }, (_, i) => ({ level: "error", text: `e${i}`, source: "", line: 1, at: 2000 + i }))];
+    await f.press();
+    consoleBox(f).checked = true;
+    await f.copy();
+    assert.equal(f.copies.length, 1);
+    const [args] = native.calls.readHandoff;
+    assert.deepEqual({ ...args, window: args.window === f.window, tab: args.tab === f.tab, windowGlobal: args.windowGlobal === f.global },
+      { window: true, tab: true, windowGlobal: true, url: "http://localhost:5173/settings?token=secret#tab", document_id: "11",
+        navigation_id: "w11.n0", project_id: PROJECT.id, project_root: PROJECT.root, project_revision: 7 });
+    const errors = JSON.parse(f.copies[0]).console_errors;
+    assert.equal(errors.length, 49, "at most 50 records of one tab; invalid ones dropped");
+    assert.deepEqual(errors.slice(0, 2), [
+      { level: "error", text: "TypeError: broken � surrogate", source: "http://localhost:5173/app.js", line: 12, at: 1000 },
+      { level: "warning", text: "Deprecated", source: null, line: null, at: 1001 }]);
+    assert.equal(f.runtime.diagnostics().console_included, 1);
+  } finally { f.runtime.dispose(); }
+});
+
+for (const [label, change, text] of [
+  ["the native console authority changes", native => { native.state.authority = false; }, /projects were changing/u],
+  ["the owner refuses the read", native => { native.state.throws = "STALE_TAB"; }, /did not work|changed/u],
+]) {
+  test(`ticked console errors: nothing is copied when ${label}`, async () => {
+    const native = nativeOwnerFake();
+    const f = fixture({ native });
+    try {
+      await f.press();
+      consoleBox(f).checked = true;
+      change(native);
+      await f.copy();
+      assert.deepEqual(f.copies, []);
+      assert.match(f.result().message, text);
+    } finally { f.runtime.dispose(); }
+  });
+}
+
+test("with the console owner, a page of no project cannot tick console errors, and a navigation still ends the session", async () => {
+  const native = nativeOwnerFake();
+  const f = fixture({ native, authority: null });
+  try {
+    await f.press();
+    assert.deepEqual([consoleBox(f).checked, consoleBox(f).disabled], [false, true]);
+    assert.match(consoleBox(f).getAttribute("label"), /pages of an AxioSozo project only/u);
+    f.navigate(true);
+    await flush();
+    assert.equal(f.compose(), null, "the shared counter moved; the session ended");
+    assert.equal(currentNavigationId(f.window, f.browser), "w11.n1");
   } finally { f.runtime.dispose(); }
 });

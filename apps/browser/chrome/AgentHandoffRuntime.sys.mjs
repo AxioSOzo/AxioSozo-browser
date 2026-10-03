@@ -23,8 +23,18 @@
 // between. Navigation, tab switch or close, dismissal, project changes and
 // window teardown end the session. Opening Claude Code, Codex or a desktop app
 // is not offered: product launches are NOT_AUTHORIZED and desktop schemes
-// unverified, so the explicit action is a clipboard copy. Screenshots and
-// console errors are not collected in this build.
+// unverified, so the explicit action is a clipboard copy. Screenshots are not
+// collected in this build.
+//
+// Console errors (Plan 4 step 7): the navigation counter belongs to the
+// process console owner (ConsoleErrorsNativeRuntime); this runtime subscribes
+// to it. The composer offers "Include this tab's console errors", unticked;
+// a project home's "Send errors to agent…" choice opens the same composer on
+// the chosen tab with it ticked (openConsoleComposer, registered with the
+// owner, never a page method). Only the trusted Copy snapshots the opt-in into
+// the request; then, after the child's capture-time privacy gate, the owner's
+// RAM records of exactly this tab, document and navigation are read under both
+// the handoff and the native console project authority.
 //
 // Synthetic test agent (Plan 4 step 4 acceptance only): when the privileged
 // environment of an owned synthetic browser asks for the fake Terminal fixture,
@@ -41,7 +51,8 @@
 import { createHandoff, HANDOFF_LIMITS } from "./AgentHandoff.sys.mjs";
 import { HANDOFF_MESSAGES, handoffLine, handoffProse } from "./AgentHandoffChild.sys.mjs";
 import * as defaultCore from "./contexts/index.mjs";
-import { XHTML, defaultTimers, prefEnabled, addTabsProgressListener } from "./DevLoop.sys.mjs";
+import { XHTML, defaultTimers, prefEnabled } from "./DevLoop.sys.mjs";
+import { currentNativeNavigationId, watchNativeNavigation } from "./ConsoleErrorsNativeRuntime.sys.mjs";
 
 export const HANDOFF_ACTOR = "AxioSozoHandoff";
 // Pinned JSActorOptions: safeForUntrustedWebProcess defaults to false, so a
@@ -71,20 +82,12 @@ export function registerHandoffActor(chromeUtils = globalThis.ChromeUtils) {
 }
 
 // ---- navigation identity (shared with AgentStatusRuntime) -------------------
-// browser → top-level location changes seen since this process started
-// tracking its window, same-document ones included. Only windows with a live
-// tracker give an identity at all.
-const NAVIGATIONS = new WeakMap();
-const TRACKED = new WeakSet();
+// The single counter and listener live in ConsoleErrorsNativeRuntime; this
+// name stays for AgentStatusRuntime and earlier callers.
 
 /** "w<innerWindowId>.n<count>" for the browser's current document, or null. */
 export function currentNavigationId(window, browser) {
-  try {
-    if (!TRACKED.has(window)) return null;
-    const inner = browser?.browsingContext?.currentWindowGlobal?.innerWindowId;
-    if (!Number.isSafeInteger(inner) || inner < 1) return null;
-    return `w${inner}.n${NAVIGATIONS.get(browser) ?? 0}`;
-  } catch { return null; }
+  return currentNativeNavigationId(window, browser);
 }
 
 // ---- texts ---------------------------------------------------------------------
@@ -215,16 +218,19 @@ const SAME = ["tab", "browser", "permanentKey", "frameLoader", "context", "globa
 /**
  * Installs Send to agent for one normal browser window.
  * `services`: AxioSozoServices (isNormalWindow, captureHandoffAuthority,
- * rememberAgentReturnTarget, on). `adapter`: ZenWorkspaceAdapter. Optional:
- * `engineOf(tab)` ("gecko" | "chromium"), `core`, `timers`, `clock`,
- * `clipboardHelper` (nsIClipboardHelper; tests), `registerActor`,
+ * captureNativeProjectAuthority, rememberAgentReturnTarget, on). `adapter`:
+ * ZenWorkspaceAdapter. Optional: `engineOf(tab)` ("gecko" | "chromium"),
+ * `nativeOwner` (the process console owner: navigation counter, RAM console
+ * records and the console composer entry; without it the composer offers no
+ * console errors and the counter is watched directly), `core`, `timers`,
+ * `clock`, `clipboardHelper` (nsIClipboardHelper; tests), `registerActor`,
  * `requestId()` (tests). Synthetic test agent (native defaults; tests inject):
  * `fixtureRequested()` (privileged environment flags only),
  * `createTerminalFixture({ signal, isActive })` (the root factory),
  * `isWindowActive()`, `securityDelayMs` and `elapsed()` for the same
  * click-jacking delay Firefox applies to its own doorhanger buttons.
  */
-export function installAgentHandoff(window, { services, adapter, engineOf = () => "gecko", core = defaultCore,
+export function installAgentHandoff(window, { services, adapter, engineOf = () => "gecko", nativeOwner = null, core = defaultCore,
   timers = defaultTimers(window), clock = () => Date.now(), clipboardHelper = null, registerActor = registerHandoffActor,
   requestId = randomRequestId, fixtureRequested = syntheticFixtureRequested, createTerminalFixture = nativeTerminalFixture,
   isWindowActive = () => { try { return globalThis.Services?.focus?.activeWindow === window; } catch { return false; } },
@@ -238,14 +244,17 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
   const cleanups = [];
   const admitted = new WeakMap(); // exact request object → its session, consumed once
   const diagnostics = { commands: 0, refused: 0, composed: 0, copied: 0, failed: 0, cancelled: 0,
-    fixture_requests: 0, handed_off: 0, launch_uncertain: 0, fixture_unavailable: 0, superseded: 0 };
+    fixture_requests: 0, handed_off: 0, launch_uncertain: 0, fixture_unavailable: 0, superseded: 0,
+    console_composers: 0, console_included: 0 };
   let disposed = false, active = null, serial = 0, menuTab = null, resultTimer = null;
   // Feedback belongs to the newest session of this window (`newest`, id ===
   // serial). A request of an older session that settles late never replaces
   // newer feedback or touches a newer composer; only its uncertain launch is
   // still said, as `lateNotice`, once nothing newer is on screen.
   let newest = null, lateNotice = null;
-  TRACKED.add(window);
+  // Console errors need the owner's RAM records and native project authority.
+  const consoleOffered = typeof nativeOwner?.service?.readHandoff === "function" && typeof nativeOwner.ownerForTab === "function"
+    && typeof nativeOwner.registry?.withTrusted === "function" && typeof services.captureNativeProjectAuthority === "function";
 
   const sensitive = host => {
     try { const value = core.isSensitiveHost(host); return typeof value?.sensitive === "boolean" ? value.sensitive : true; }
@@ -260,7 +269,7 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       if (services.isNormalWindow(window) !== true || adapter.isPrivateWindow() !== false) return refused("PRIVATE");
       // A known live tab only: connected, not closing, with its browser's own
       // native permanentKey and frameLoader. Anything unknown is refused.
-      if (!tab || tab.ownerGlobal !== window || tab.closing !== false || tab.isConnected !== true) return refused("STALE_TAB");
+      if (!tab || tab.documentGlobal !== window || tab.closing !== false || tab.isConnected !== true) return refused("STALE_TAB");
       const browser = tab.linkedBrowser;
       const permanentKey = browser?.permanentKey, frameLoader = browser?.frameLoader;
       if (!permanentKey || typeof permanentKey !== "object" || !frameLoader || typeof frameLoader !== "object") return refused("STALE_TAB");
@@ -414,11 +423,26 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       label: hasSelection ? "Include the selected text" : "Include the selected text (nothing is selected)" });
     selection.checked = hasSelection;
     if (!hasSelection) selection.disabled = true;
+    // Console errors: offered when the console owner is present; ticked only
+    // when this composer was opened from "Send errors to agent…". Only for a
+    // page of an AxioSozo project (they are collected for those only).
+    let consoleBox = null;
+    if (consoleOffered) {
+      const inProject = !!session.authority?.project;
+      consoleBox = node("checkbox", undefined, { id: "axiosozo-handoff-console",
+        label: inProject ? "Include this tab's console errors" : "Include console errors (pages of an AxioSozo project only)" });
+      consoleBox.checked = inProject && session.consoleChosen === true;
+      if (!inProject) consoleBox.disabled = true;
+    }
     const project = session.authority?.project
       ? node("description", `Project folder: ${session.authority.project.root} (${session.authority.name})`)
       : node("description", session.authority ? "This page belongs to no AxioSozo project." : "The project is read again when you copy.");
-    const included = node("description", "Also copied: the page title and its address, without query or fragment.");
-    const route = node("description", "Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet. Paste the copy into your agent.");
+    const included = node("description", consoleBox
+      ? "Also copied: the page title and its address, without query or fragment. Console errors only when ticked; nothing is sent until you copy."
+      : "Also copied: the page title and its address, without query or fragment.");
+    const route = node("description", consoleOffered
+      ? "Screenshots and opening Claude Code or Codex directly are not in this build yet. Paste the copy into your agent."
+      : "Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet. Paste the copy into your agent.");
     for (const quiet of [project, included, route]) quiet.style.maxWidth = "28em";
     let fixture = null, fixtureNote = null;
     if (session.fixtureOffered) {
@@ -437,18 +461,20 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       if (unprojected) fixture.disabled = true;
       fixture.addEventListener("command", event => onFixture(session, event));
     }
-    content.replaceChildren(label, task, selection, project, included, route, ...(fixture ? [fixtureNote, fixture] : []));
-    return { task, selection, fixture };
+    content.replaceChildren(label, task, selection, ...(consoleBox ? [consoleBox] : []), project, included, route,
+      ...(fixture ? [fixtureNote, fixture] : []));
+    return { task, selection, console: consoleBox, fixture };
   }
 
   /** The pending fixture request stays visible and accurate: the action says
    * it is sending, a second press and Copy are blocked, Cancel stays usable. */
   function showFixturePending(session) {
-    const { fixture, task, selection } = session.fields;
+    const { fixture, task, selection, console: consoleBox } = session.fields;
     fixture?.setAttribute("label", "Sending to synthetic test agent…");
     fixture?.setAttribute("aria-disabled", "true");
     task.readOnly = true;
     selection.disabled = true;
+    if (consoleBox) consoleBox.disabled = true;
     document.getElementById(templateId)?.toggleAttribute("mainactiondisabled", true);
   }
 
@@ -517,14 +543,31 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     closeOwned(fixture);
   }
 
-  async function start(facts) {
+  /** The chosen console target ({ descriptor, project_id, authority }) still
+   * holds: its native authority, the registry's own issued descriptor of this
+   * tab in this window, and this tab and browser selected. */
+  function consoleTargetHolds(session) {
+    const target = session.consoleTarget;
+    if (!target) return true;
+    try {
+      if (target.authority.check() !== true || !selected(session)) return false;
+      return nativeOwner.registry.withTrusted(target.descriptor.tab_id, trusted => trusted.tab === session.tab
+        && trusted.window === window && trusted.descriptor.project_id === target.project_id, { expected: target.descriptor }) === true;
+    } catch { return false; }
+  }
+
+  async function start(facts, consoleTarget = null) {
     // `mode`: "copy" or "fixture" once a trusted action chose it. The fixture
     // action is only offered in an owned synthetic browser (flags only here).
     let fixtureOffered = false;
     try { fixtureOffered = fixtureRequested() === true; } catch { fixtureOffered = false; }
     const session = { id: ++serial, tab: facts.tab, browser: facts.browser, facts, controller: new Controller(), phase: "checking",
       precheck: null, authority: null, passwordRisk: false, notification: null, fields: null, request: null,
-      mode: null, fixtureOffered, fixture: null, shownAt: null, finished: false, settled: false };
+      mode: null, fixtureOffered, fixture: null, shownAt: null, finished: false, settled: false,
+      // "Send errors to agent…": the chosen tab's issued descriptor and native
+      // console authority, and console errors ticked. The native authority is
+      // otherwise taken at the trusted Copy, only when console errors are ticked.
+      consoleTarget, consoleChosen: !!consoleTarget, consoleAuthority: consoleTarget?.authority ?? null };
     active = session;
     newest = session;
     // The exact request object the final Copy admits; its opt-ins and task
@@ -544,6 +587,15 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       return;
     }
     if (!live(session)) { end(session, "cancelled"); return; }
+    // The console target must be exactly the project and root this page
+    // belongs to now, and still the chosen, selected tab.
+    if (consoleTarget && (authority?.project?.id !== consoleTarget.project_id || authority.project.root !== consoleTarget.authority.root
+      || authority.check() !== true || !consoleTargetHolds(session))) {
+      end(session, "refused");
+      diagnostics.refused++;
+      showResult(facts.browser, handoffResultText({ status: "failed", reason: "PROJECT_CHANGED" }));
+      return;
+    }
     session.precheck = precheck;
     session.authority = authority;
     showCompose(session);
@@ -553,15 +605,62 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     if (disposed || event?.isTrusted !== true) return;
     diagnostics.commands++;
     if (!tab || tab !== gBrowser.selectedTab || tab.linkedBrowser !== gBrowser.selectedBrowser) return;
+    openSession(tab, null);
+  }
+
+  /** A new session on the selected `tab`, ending any earlier one. */
+  function openSession(tab, consoleTarget) {
     end(active, "cancelled");
     clearResult();
     const sampled = sample(tab);
     if (!sampled.ok) {
       diagnostics.refused++;
       try { showResult(tab.linkedBrowser, { done: false, text: handoffRefusalText(sampled.reason) }); } catch {}
-      return;
+      return false;
     }
-    start(sampled.facts).catch(() => {});
+    start(sampled.facts, consoleTarget).catch(() => {});
+    return true;
+  }
+
+  /**
+   * Chrome-private (registered with the console owner, never a page method):
+   * the composer of the tab chosen in a project home's native chooser, with
+   * console errors ticked. The tab must be this window's selected tab and
+   * browser, the registry's issued descriptor of it still current and the
+   * native console authority unchanged; it is checked again after the
+   * precheck and the project lookup. It never copies or sends anything.
+   */
+  function openConsoleComposer({ tab, descriptor, project_id, authority } = {}) {
+    if (disposed || !consoleOffered || !tab || tab !== gBrowser.selectedTab || tab.linkedBrowser !== gBrowser.selectedBrowser
+      || !descriptor || typeof authority?.check !== "function" || authority.id !== project_id) return false;
+    const target = Object.freeze({ descriptor, project_id, authority });
+    let holds = false;
+    try {
+      holds = authority.check() === true && nativeOwner.registry.withTrusted(descriptor.tab_id, trusted => trusted.tab === tab
+        && trusted.window === window && trusted.descriptor.project_id === project_id, { expected: descriptor }) === true;
+    } catch { holds = false; }
+    if (!holds) return false;
+    diagnostics.console_composers++;
+    return openSession(tab, target);
+  }
+
+  /** Console errors ticked in the open composer, for a page of a project. */
+  const consoleTicked = session => consoleOffered && !!session.authority?.project && session.fields?.console?.checked === true
+    && session.fields.console.disabled !== true;
+
+  /** At the trusted Copy (or synthetic-agent action) only: the native console
+   * authority of this page's project, taken now when it was not chosen
+   * earlier. Same id and root as the project shown, or nothing. */
+  function snapshotConsole(session) {
+    if (!consoleTicked(session)) return false;
+    const project = session.authority.project;
+    let authority = session.consoleAuthority;
+    if (!authority) {
+      try { authority = services.captureNativeProjectAuthority({ window, project_id: project.id }); } catch { authority = null; }
+    }
+    if (!authority || authority.id !== project.id || authority.root !== project.root || authority.check() !== true) return null;
+    session.consoleAuthority = authority;
+    return true;
   }
 
   function onCopy(session, event) {
@@ -571,7 +670,9 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     session.mode = "copy";
     const task = handoffProse(String(session.fields.task.value ?? ""), HANDOFF_LIMITS.task);
     const include = session.precheck?.has_selection === true && session.fields.selection.checked === true;
-    Object.assign(session.request, { task, include_selection: include });
+    const includeConsole = snapshotConsole(session);
+    if (includeConsole === null) { restoreFocus(session); finish(session, { status: "failed", reason: "PROJECT_CHANGED" }); return; }
+    Object.assign(session.request, { task, include_selection: include, include_console: includeConsole });
     restoreFocus(session);
     send(session).catch(() => finish(session, { status: "failed", reason: "HANDOFF_FAILED" }));
   }
@@ -591,8 +692,11 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     diagnostics.fixture_requests++;
     const task = handoffProse(String(session.fields.task.value ?? ""), HANDOFF_LIMITS.task);
     const include = session.precheck?.has_selection === true && session.fields.selection.checked === true;
+    const includeConsole = snapshotConsole(session);
+    if (includeConsole === null) { finishFixture(session, { status: "failed", reason: "PROJECT_CHANGED" }); return; }
     // The same exact request object; a launch never falls back to a copy.
-    Object.assign(session.request, { task, include_selection: include, target: "codex", fallback_to_clipboard: false });
+    Object.assign(session.request, { task, include_selection: include, include_console: includeConsole, target: "codex",
+      fallback_to_clipboard: false });
     showFixturePending(session);
     sendFixture(session).catch(() => finishFixture(session, { status: "failed", reason: "HANDOFF_FAILED" }));
   }
@@ -609,12 +713,49 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
 
   async function capture(session, tabId, options) {
     if (tabId !== session.tabId || options?.navigation_id !== session.facts.navigation) fail("STALE_TAB");
-    if (options.include_screen === true || options.include_console === true) fail("OBSERVATION_MISMATCH");
+    // Console errors only when the trusted action snapshotted them; screens never.
+    if (options.include_screen === true || (options.include_console === true && session.request.include_console !== true))
+      fail("OBSERVATION_MISMATCH");
     const include = options.include_selection === true;
     const answer = await query(session, "capture", include);
     if (session.authority?.check() !== true) fail("PROJECT_CHANGED");
+    const consoleErrors = options.include_console === true ? consoleRecords(session) : [];
     return { tab_id: session.tabId, navigation_id: session.facts.navigation, url: session.facts.url,
-      title: answer.title, selection: include ? answer.selection : null, screen: null, console_errors: [] };
+      title: answer.title, selection: include ? answer.selection : null, screen: null, console_errors: consoleErrors };
+  }
+
+  /** After the child's capture-time privacy gate: the console owner's RAM
+   * records of exactly this tab, global, document, URL, navigation, project,
+   * root and native epoch, with the session, the handoff authority and the
+   * native console authority holding before and after. One tab only; at most
+   * 50 records, as text lines. The temporary session tab ID selects nothing. */
+  function consoleRecords(session) {
+    const project = session.authority?.project, authority = session.consoleAuthority;
+    if (!consoleOffered || !project || !authority || authority.id !== project.id || authority.root !== project.root) fail("PROJECT_CHANGED");
+    const holds = () => live(session) && session.phase === "sending" && session.authority.check() === true && authority.check() === true
+      && consoleTargetHolds(session);
+    if (!holds()) fail("PROJECT_CHANGED");
+    const { facts } = session;
+    const url = URL.parse(facts.url)?.href;
+    if (!url || !nativeOwner.ownerForTab(window, session.tab)) fail("STALE_TAB");
+    let result;
+    try {
+      result = nativeOwner.service.readHandoff({ window, tab: session.tab, windowGlobal: facts.global, url,
+        document_id: String(facts.innerWindowId), navigation_id: facts.navigation, project_id: project.id, project_root: project.root,
+        project_revision: authority.revision });
+    } catch (error) { fail(error?.code === "PROJECT_CHANGED" ? "PROJECT_CHANGED" : "STALE_TAB"); }
+    if (!holds()) fail("PROJECT_CHANGED");
+    if (result?.url !== url || result.document_id !== String(facts.innerWindowId) || result.navigation_id !== facts.navigation
+      || !Array.isArray(result.console_errors)) fail("OBSERVATION_MISMATCH");
+    const records = [];
+    for (const record of result.console_errors.slice(0, HANDOFF_LIMITS.errors)) {
+      const text = handoffLine(record?.text, HANDOFF_LIMITS.errorText);
+      if (!text || !["error", "warning"].includes(record.level) || !Number.isSafeInteger(record.at) || record.at < 0) continue;
+      records.push({ level: record.level, text, source: typeof record.source === "string" && record.source ? record.source : null,
+        line: Number.isSafeInteger(record.line) && record.line >= 0 && record.line <= 10000000 ? record.line : null, at: record.at });
+    }
+    diagnostics.console_included++;
+    return records;
   }
 
   function clipboard() {
@@ -663,6 +804,8 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
         if (typeof text !== "string" || session.phase !== "sending" || session.controller.signal.aborted) fail("CANCELLED");
         if (gBrowser.selectedTab !== session.tab || gBrowser.selectedBrowser !== session.browser || !live(session)) fail("STALE_TAB");
         if (session.authority?.check() !== true) fail("PROJECT_CHANGED");
+        if (session.request.include_console === true && (session.consoleAuthority?.check() !== true || !consoleTargetHolds(session)))
+          fail("PROJECT_CHANGED");
         if (!helper || typeof helper.copyString !== "function") fail("CLIPBOARD_UNAVAILABLE");
         helper.copyString(text);
       } },
@@ -838,13 +981,19 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     });
   }
 
-  cleanups.push(addTabsProgressListener(window, {
-    onLocationChange(browser, webProgress) {
-      if (!webProgress?.isTopLevel) return;
-      NAVIGATIONS.set(browser, (NAVIGATIONS.get(browser) ?? 0) + 1);
-      if (active?.browser === browser) end(active, "navigated");
-    },
-  }));
+  // The one shared navigation counter: the console owner's for this window,
+  // else watched directly (same listener and counter, never a second one).
+  // It has already moved, and console state cleared, when this runs.
+  const onNavigated = browser => { if (active?.browser === browser) end(active, "navigated"); };
+  let unwatch = null;
+  try { unwatch = nativeOwner?.onNativeNavigation(window, onNavigated) ?? null; } catch { unwatch = null; }
+  unwatch ??= watchNativeNavigation(window, onNavigated);
+  if (typeof unwatch === "function") cleanups.push(unwatch);
+  if (consoleOffered) {
+    let unregister = null;
+    try { unregister = nativeOwner.registerHandoffComposer(window, { openConsoleComposer }); } catch { unregister = null; }
+    if (typeof unregister === "function") cleanups.push(unregister);
+  }
   const onTabSelect = () => { if (active && gBrowser.selectedTab !== active.tab) end(active, "cancelled"); };
   const onTabClose = event => { if (active && event.target === active.tab) end(active, "closed"); };
   gBrowser.tabContainer.addEventListener("TabSelect", onTabSelect);
@@ -871,7 +1020,6 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       disposed = true;
       lateNotice = null;
       clearResult();
-      TRACKED.delete(window);
       for (const cleanup of cleanups.reverse()) { try { cleanup(); } catch {} }
     },
   });

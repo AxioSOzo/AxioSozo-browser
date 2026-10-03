@@ -100,7 +100,7 @@ Steps 1–3 have integrated source and verified builds below. Interactive arriva
 cookie isolation and reference-home admission remain unverified behind the
 recorded human gates. Step 3 synthetic light/dark rendering is verified. Step 5 source/build and light initial key presence are verified below; dark
 startup and interactive key flows remain limited. Step 6 source/build and initial light/dark rendering are verified below;
-steps 7–9 remain unintegrated. Step 4
+Step 7 is in progress; steps 8–9 remain unintegrated. Step 4
 source/build and status GUI are verified below.
 Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
@@ -688,6 +688,8 @@ remain ignored until this commit; they establish no native or GUI pass. Not READ
 
 ## Step 6 — integrated source/build and initial light/dark render; interactions BLOCKED_HUMAN
 
+Local integration commit: `37ac905`.
+
 Codex owns the DOM-free runner, transport, private-owner facade, pinned offline
 fixture and manifest helper, contracts, tests, builds and observation harness.
 Claude Opus 5.5 CLI session `c2a11ccc-533e-45cb-984c-08818ac46390` wrote all
@@ -738,6 +740,7 @@ Actual verification:
   EOF, crash and bounded cleanup ran. Sixteen launch records (9 host/7 CLI)
   contain 32 unique PIDs; all were absent in read-only post-run observations.
   These launch records are not aggregate wait/EOF or universal descendant proof.
+  This gate used the Node/POSIX process adapter, not Gecko Subprocess.
   No Gecko app or real provider ran in this separate backend gate.
 - `./dev setup`: **PASS**, exit 0, workstation-only native build. Fingerprint
   `3745d93affe20d5001430203524364bd11a3ef984fa71064048d6303feaea92b`.
@@ -776,3 +779,135 @@ Decisions taken for Step 6: retain selected-tab cancellation and state this in
 its fixture explanation; keep product Read controls unavailable while showing
 previously saved briefs; explicit acceptance always confirms both name and kind;
 known non-writes report refusal, while uncertain writes require inspection.
+
+## Step 7 — native console collection and light/dark render pass; interactions BLOCKED_HUMAN
+
+Codex imported the reviewed DOM-free RAM store, capture-lease facade and 70 pure
+tests, and owns contracts, tests/builds, the read-only owned observer and local
+commit. Claude Opus 5.5 session `5a81bfde-8191-480e-8552-f0480887cdfc` authored
+all native actors/runtime, mixed Services/startup/handoff wiring, home/sidebar
+UI, fixture HTML and native-facing tests. Codex edited no frontend code.
+Tasks and same-session review results are `.local/claude-tasks/07-console-errors*`.
+
+The one process owner shares its tab registry independently of the disabled
+agent endpoint. Native current/normal/top-level/Gecko/project authority gates
+precede the child protocol. A child holds at most one raw notification for a
+bounded one-use query; its current password/privacy check precedes primitive
+copy. No parent observer bypass, cached-console replay or in-process skip exists.
+Records remain in bounded RAM, never in the profile. The parent rotates the
+shared navigation counter before invalidation, and every project-authority
+mutation conservatively clears all retained console records. Registry admission
+reads no title; the globally quiescent project cache withdraws authority before
+every relevant mutation await and irreversibly at shutdown.
+
+The project home shows the count and five newest records. Send errors opens an
+explicit chooser of the project's eligible Gecko tabs, including when there is
+only one. A trusted choice must activate the exact workspace and tab before the
+existing composer opens with console opt-in checked. Choosing sends/copies
+nothing; final trusted confirmation and current authority remain required.
+Ordinary handoff still defaults console opt-in off. The sidebar has a count
+projection, but its real badge was not exercised by the unassigned GUI fixture.
+
+A real native failure exposed a mismatch hidden by the initial fake nodes.
+Pinned Gecko `Node.webidl:115–117` exposes `documentGlobal`, not `ownerGlobal`;
+`nsINode.cpp:2073–2090` returns the node document's WindowProxy. The obsolete
+browser lookup made every readiness request fail window admission; five other
+console reads would also have refused valid native tabs. Root identified the
+mismatch after the actual refusal counters and delegated the repair to Claude.
+Claude corrected exactly nine reads: six ConsoleErrorsNativeRuntime, one each
+HandoffRuntime, StatusRuntime and Services arrival admission. Independent review
+verified all other production bytes against the diagnostic build were unchanged.
+Strict ownership/privacy/currentness/engine/project guards remain in place.
+
+Fake native nodes now expose the actual API without the obsolete alias. Added
+regressions accept native-shaped nodes and refuse foreign, missing or obsolete-
+only window ownership; console bindings retire and require fresh native readiness.
+Counterfactual restoration of the old property fails the four affected suites.
+The prior step's handoff/Go-to-project/arrival paths received the same narrow
+repair; their interactive native follow-ups remain open.
+
+Final verification on the repaired source:
+
+- Claude's 17 relevant fake suites: **556/556 PASS**, zero skips. Four changed
+  suites total 192 cases. Two earlier diagnostic regressions verify fixed
+  categorical refusal counters and saturation; no page data is retained there.
+- `./dev test`: **PASS**, exit 0. Browser 1,745 total: 1,735 pass and 10 explicit
+  native-only skips. Contexts 165, root Python 237, bootstrap 33, reader 22,
+  arrival 18, manifest 28, socket 11, coordinator 4, probe 14, CEF adapter 38,
+  saved pages 3 and existing provider/Cargo gates passed. Native/stream CEF
+  stayed `SKIPPED_ENGINE_WORKSTREAM`, not silently counted as a pass.
+- `./dev check`: **PASS**, exit 0.
+- `./dev setup`: **PASS**, exit 0, workstation root only. Build fingerprint
+  `177f3bc3a52407b411f5d2a1347f9ed36241e5b5f5618d949b6964588eb7e4e1`.
+- Real app light **G** and dark **H**: **PRODUCTION_RENDERED_SYNTHETIC_PROOF**.
+  Each rendered count 5 with exactly five known messages in order `[4,3,2,1,0]`,
+  both warning/error levels, the enabled Send action and the explanatory text.
+  The strict observer required five records; zero or a partial list could not pass.
+  It called no collector, actor/service operation or provider and injected no
+  records. Both runs had native exit 0, owned direct children reaped, app/fixture
+  listeners closed, source/build/profile/seed/fixture identities unchanged and
+  no agent endpoint. Group/descendant reaping and collector disposal were not
+  independently proved. The optional G refusal sample never ran because the
+  positive render gate passed; its empty diagnostics list is not count evidence.
+- Root inspected all four PNGs: readable warning/error distinction, wrapping and
+  hierarchy in light/dark, no visible clipping/overlap or horizontal overflow.
+  Claude's same-session read-only review accepted all four images with no
+  essential changes (14 turns, zero edits). Minor count-wording/alignment polish
+  is optional and is not a functional or native gate pass.
+
+Final evidence (ignored):
+
+- `docs/evidence/plan4-7/console-diagnostic-light-20261003-g/initial-light-window.png`
+- `docs/evidence/plan4-7/console-diagnostic-light-20261003-g/initial-light-full-content.png`
+- `docs/evidence/plan4-7/console-initial-dark-20261003-h/initial-dark-window.png`
+- `docs/evidence/plan4-7/console-initial-dark-20261003-h/initial-dark-full-content.png`
+
+Each directory retains its exact `observer-contract.json` and
+`step7-console-report.json`. The project record was seeded:
+**ADMISSION_NOT_RUN / SEEDED_RENDER_ONLY** describes project admission, while
+console messages were actually produced and collected by the running app.
+Screenshots do not establish keyboard, occlusion or accessibility behavior.
+Logs are `.local/logs/plan4-step7-document-global-{test,check,build}.log`,
+`plan4-step7-document-global-build-identity.json`,
+`plan4-step7-document-global-source-pins.json` (28 files) and
+`plan4-step7-gui-lead-review.json`.
+
+Diagnostic history, retained rather than converted into passes:
+
+- A rejected native braced workspace UUID; root repaired only the ignored
+  assertion against pinned native source (30 fake cases passed).
+- B loaded the fixture without home; root repaired only the ignored initial
+  command-line bootstrap to the fixed two-URL array (14 fake cases passed).
+- C passed native two-tab/identity checks but rendered no records by120 seconds.
+  D observed one attached window/settled publication and no tracked actors or
+  grants. E additionally found the existing fixture parent actor and two
+  navigations. Root used CUA twice in E to select the fixture (visibly4/13
+  automatic messages emitted) and return home (still empty). Those two actions
+  are separately recorded; E was not interaction-free.
+- Claude's broad source-only round was stopped after142 turns without edits;
+  its aborted result is retained. A focused round requested E's cache-only
+  observation, followed by a bounded categorical diagnostic implementation.
+- F, with no CUA actions, observed3 readiness requests, all3 refused at window
+  admission, no caught exceptions and every other refusal0. This identified the
+  branch for the supported-API correction. F's build was
+  `a5337b0561d90c0f189aa3d7c9eb181b1aa57b10c88f6bd994626df5948c5683`.
+  A–F produced no accepted screenshot/normal exit0, although owned direct
+  children/listeners and source/build/profile/seed checks were preserved.
+  They remain failed attempts under `docs/evidence/plan4-7/`.
+
+CUA became available during E, but the fresh post-repair inventory reported the
+Mac locked and automatic unlock paused after physical input. Receipt:
+`.local/logs/plan4-step7-cua-after-document-global-20261003.json`.
+Send/chooser/copy, sidebar assignment/badge, password/private/navigation/DevTools,
+keyboard/VoiceOver, and earlier repaired arrival/handoff/Go-to-project workflows
+remain **BLOCKED_HUMAN / NOT_VERIFIED**. The lock does not explain the former
+collection defect; that defect was repaired and passive native collection passed.
+The optional ignored post-capture CUA hold was reviewed but not used in G/H.
+
+Decisions taken: one explicit native chooser even for one eligible tab; counts
+cover eligible tabs in this window; all project mutations invalidate all RAM
+records conservatively; retain bounded fixed refusal counters without page data.
+The source, tests/check/build and scoped real GUI review are complete for the
+local integration commit under the prompt's explicit human gate. Steps8/9
+remain ignored preparations until that commit. Product AI stays **NOT_AUTHORIZED**; E1/E2 remain unverified.
+No READY claim, push, tag or release.

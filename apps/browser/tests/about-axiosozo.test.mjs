@@ -6,7 +6,9 @@ import {
   AboutAxioSozoParent, validateSender, validateRequest, dispatch, METHODS, MESSAGES, EVENT_NAMES,
   checkWebUrl, readFlags, setProvidersForTesting,
 } from "../chrome/AboutAxioSozoParent.sys.mjs";
-import { createOverviewApi, exposeOverviewApi } from "../chrome/AboutAxioSozoChild.sys.mjs";
+import { createOverviewApi, exposeOverviewApi, isSendProjectErrorsActivation, AboutAxioSozoChild, SEND_ERRORS_BUTTON }
+  from "../chrome/AboutAxioSozoChild.sys.mjs";
+import { parseHtml, makeEvent } from "./support/mini-dom.mjs";
 import * as ProviderStatus from "../chrome/ProviderStatus.sys.mjs";
 import { decisionKeyStatus, storeDecisionKey, removeDecisionKey } from "../chrome/ProviderKeys.sys.mjs";
 import { createDecisionKeyFixtureRuntime, KEY_FIXTURE_SHA256 } from "../chrome/DecisionKeyFixtureRuntime.sys.mjs";
@@ -985,6 +987,58 @@ test("child subscription sends one subscribe, filters event names and unsubscrib
   offB();
   assert.deepEqual(seen, [["a", "rules"], ["b", "rules"], ["b", "ledger"]]);
   assert.deepEqual(messages, [MESSAGES.SUBSCRIBE, MESSAGES.UNSUBSCRIBE]);
+});
+
+// Plan 4 step 7: the child's own trusted-click route for "Send errors to agent…".
+function homeDocument(uri = "about:axiosozo#project=p_harbor1") {
+  const document = parseHtml(`<html><body><main><p>Console errors</p><button id="${SEND_ERRORS_BUTTON}" type="button"><span>Send errors to agent…</span></button>`
+    + "<button id=\"other\" type=\"button\">Edit</button></main></body></html>");
+  document.documentURI = uri;
+  return document;
+}
+
+test("Send errors to agent is recognized only as a trusted click on the authored button of this about:axiosozo document", () => {
+  const document = homeDocument();
+  const button = document.getElementById(SEND_ERRORS_BUTTON);
+  const click = (target, init = {}) => ({ ...makeEvent("click", init), target });
+  assert.equal(isSendProjectErrorsActivation(click(button), document), true);
+  assert.equal(isSendProjectErrorsActivation(click(button.querySelector("span")), document), true, "inside the button");
+  assert.equal(isSendProjectErrorsActivation(click(button, { isTrusted: false }), document), false, "synthesized by page script");
+  assert.equal(isSendProjectErrorsActivation(click(document.getElementById("other")), document), false);
+  assert.equal(isSendProjectErrorsActivation({ ...click(button), type: "keydown" }, document), false);
+  assert.equal(isSendProjectErrorsActivation(click(button), homeDocument("https://example.test/")), false, "not about:axiosozo");
+  const elsewhere = homeDocument();
+  assert.equal(isSendProjectErrorsActivation(click(elsewhere.getElementById(SEND_ERRORS_BUTTON)), document), false, "another document's button");
+  button.disabled = true;
+  assert.equal(isSendProjectErrorsActivation(click(button), document), false);
+  button.disabled = false;
+  button.id = "renamed";
+  assert.equal(isSendProjectErrorsActivation(click(button), document), false, "only the exact id");
+});
+
+test("the child's click listener sends the fixed { v: 1 } message and nothing of the page; destroy removes it", () => {
+  const previous = globalThis.Cu;
+  globalThis.Cu = fakeCu();
+  try {
+    const document = homeDocument();
+    const win = { Promise, JSON, TypeError };
+    const sent = [];
+    const child = new AboutAxioSozoChild();
+    Object.assign(child, { contentWindow: win, document, sendQuery: async () => ({ ok: true }), sendAsyncMessage: (name, data) => sent.push([name, data]) });
+    child.handleEvent({ type: "DOMDocElementInserted" });
+    child.handleEvent({ type: "DOMDocElementInserted" });
+    assert.equal(document.listeners.get("click")?.size, 1, "one listener on its own document");
+    // As Gecko delivers a click to a document capture listener: once.
+    const deliver = (target, init = {}) => { for (const fn of [...(document.listeners.get("click") ?? [])]) fn({ ...makeEvent("click", init), target }); };
+    const button = document.getElementById(SEND_ERRORS_BUTTON);
+    deliver(button, { isTrusted: false });
+    deliver(button.querySelector("span"));
+    deliver(document.getElementById("other"));
+    assert.deepEqual(sent, [[MESSAGES.SEND_PROJECT_ERRORS, { v: 1 }]], "trusted only, the button only");
+    assert.deepEqual(Object.keys(win.AxioSozoOverview).sort(), ["request", "subscribe"], "no page method for it");
+    child.didDestroy();
+    assert.equal(document.listeners.get("click")?.size ?? 0, 0, "removed on destroy");
+  } finally { if (previous === undefined) delete globalThis.Cu; else globalThis.Cu = previous; }
 });
 
 test("the page API is exposed as a frozen, non-writable window property with only request and subscribe", () => {

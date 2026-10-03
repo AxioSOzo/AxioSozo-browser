@@ -1061,18 +1061,23 @@ export function agentHookErrorText(code) {
   }
 }
 
-export const ERRORS_UNAVAILABLE = "Console errors are not collected in this build.";
+// Null while the browser cannot read them now (its projects are changing, the
+// window is not a normal one); never a claim about private or Chromium tabs.
+export const ERRORS_UNAVAILABLE = "Console errors cannot be shown right now.";
+export const ERRORS_NOTE = "Errors and warnings of this project's Firefox tabs in this window, kept in memory until the page navigates. Nothing is saved or sent.";
+export const SEND_ERRORS_HELP = "You choose one of this project's tabs; AxioSozo switches to it and opens Send to agent with its console errors ticked. Nothing is copied until you choose Copy for agent.";
 const clipText = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
-/** Console errors on the home (P5, step 7). `errors` is null while this build
- * does not collect them; otherwise `{ count, recent: [{ level, text }] }`. */
+/** Console errors on the home (P5, step 7). `errors` is null while they
+ * cannot be read; otherwise `{ count, recent: [{ level, text }] }`: every
+ * retained message of the project's tabs and the five newest. */
 export function homeConsoleErrors(errors) {
   if (!errors || !Number.isSafeInteger(errors.count) || errors.count < 0) {
     return { state: "unavailable", text: ERRORS_UNAVAILABLE, count: null, items: [] };
   }
   const items = listOf(errors.recent).filter(item => typeof item?.text === "string" && item.text.trim()).slice(0, 5)
     .map(item => ({ level: item.level === "warning" ? "warning" : "error",
-      text: clipText(item.text.replace(/[\u0000-\u001f\u007f-\u009f\s]+/gu, " ").trim(), 300) }));
+      text: clipText(item.text.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩\s]+/gu, " ").trim(), 300) }));
   if (!errors.count) return { state: "empty", text: "No console errors in this project's tabs.", count: 0, items: [] };
   return { state: "list", text: `${errors.count} console error${errors.count === 1 ? "" : "s"} in this project's tabs`, count: errors.count, items };
 }

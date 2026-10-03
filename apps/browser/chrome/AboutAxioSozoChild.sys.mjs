@@ -8,17 +8,27 @@
 // Params cross the boundary as a JSON string produced inside the page's own
 // compartment, so page getters or proxies never run with chrome privileges.
 // Results are cloned into the page. Authorization happens in the parent.
+//
+// Besides that API, one privileged click listener on its own document (Plan 4
+// step 7): only a trusted click (a mouse click or the keyboard activation of
+// the button) on the home's "Send errors to agent…" button sends the fixed
+// SendProjectErrors message with { v: 1 }. Page script cannot reach it: a
+// synthesized event or an API call is not trusted, and nothing of the page
+// (project, tab, root, target) travels with it.
 
 const MESSAGES = Object.freeze({
   REQUEST: "AxioSozoOverview:Request",
   SUBSCRIBE: "AxioSozoOverview:Subscribe",
   UNSUBSCRIBE: "AxioSozoOverview:Unsubscribe",
   EVENT: "AxioSozoOverview:Event",
+  SEND_PROJECT_ERRORS: "AxioSozoOverview:SendProjectErrors",
 });
-const EVENT_NAMES = new Set(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
+const EVENT_NAMES = new Set(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console"]);
 const MAX_PARAMS_BYTES = 512 * 1024;
 const DOCUMENT_URI = /^about:axiosozo(?:[?#].*)?$/;
 const METHOD_NAME = /^[A-Za-z]{1,64}$/;
+export const SEND_ERRORS_BUTTON = "axiosozo-send-project-errors";
+const CLICK_OPTIONS = Object.freeze({ capture: true, mozSystemGroup: true });
 
 // Builds the privileged implementation of the page API. `Cu` is the real
 // Components.utils in Gecko and a stand-in in Node tests.
@@ -90,10 +100,26 @@ export function exposeOverviewApi({ win, Cu, api }) {
   return exposed;
 }
 
+/** True only for a trusted click whose target is the authored "Send errors to
+ * agent…" button (or inside it) of this very about:axiosozo document. Every
+ * fact is read natively here; the page supplies nothing. */
+export function isSendProjectErrorsActivation(event, document) {
+  try {
+    if (!event || event.isTrusted !== true || event.type !== "click" || !document) return false;
+    if (!DOCUMENT_URI.test(document.documentURI ?? "")) return false;
+    const button = document.getElementById(SEND_ERRORS_BUTTON);
+    if (!button || button.localName !== "button" || button.ownerDocument !== document || button.disabled === true) return false;
+    const target = event.target;
+    return !!target && (target === button || button.contains(target));
+  } catch { return false; }
+}
+
 const Base = globalThis.JSWindowActorChild ?? class {};
 
 export class AboutAxioSozoChild extends Base {
   #api = null;
+  #clickDocument = null;
+  #onClick = null;
 
   handleEvent(event) {
     if (event.type === "DOMDocElementInserted") this.#install();
@@ -110,6 +136,23 @@ export class AboutAxioSozoChild extends Base {
       sendAsyncMessage: (name, data) => { try { this.sendAsyncMessage(name, data); } catch { /* closing */ } },
     });
     exposeOverviewApi({ win, Cu, api: this.#api });
+    this.#listenForSendErrors(this.document);
+  }
+
+  /** One listener per document, on the actor's own document only. */
+  #listenForSendErrors(document) {
+    if (this.#onClick || !document) return;
+    const onClick = event => {
+      let current = null;
+      try { current = this.document; } catch { current = null; }
+      if (current !== document || !isSendProjectErrorsActivation(event, document)) return;
+      try { this.sendAsyncMessage(MESSAGES.SEND_PROJECT_ERRORS, { v: 1 }); } catch { /* closing */ }
+    };
+    try {
+      document.addEventListener("click", onClick, CLICK_OPTIONS);
+      this.#onClick = onClick;
+      this.#clickDocument = document;
+    } catch { /* no listener: the button does nothing */ }
   }
 
   receiveMessage(message) {
@@ -117,6 +160,9 @@ export class AboutAxioSozoChild extends Base {
   }
 
   didDestroy() {
+    try { this.#clickDocument?.removeEventListener("click", this.#onClick, CLICK_OPTIONS); } catch { /* document gone */ }
+    this.#clickDocument = null;
+    this.#onClick = null;
     this.#api?.clear();
     this.#api = null;
   }

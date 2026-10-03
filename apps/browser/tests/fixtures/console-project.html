@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. https://mozilla.org/MPL/2.0/ -->
+<!--
+  Plan 4 step 7 synthetic GUI fixture (console errors, P5). Serve it from a
+  loopback address that a synthetic project declares as an environment, for
+  example http://localhost:5173/console-project.html for "Harbor Suite". All
+  data is invented. It loads nothing from the network (see the CSP; the icon
+  is inline, so no /favicon.ico request is made), stores nothing and talks to
+  no provider, client or helper.
+
+  Automatic messages (no user action): the page itself logs the fixed,
+  finite sequence in #passive-schedule once per loaded document, starting on
+  its load event: 13 messages, 7 console.error and 6 console.warn, at 6, 10,
+  14, ..., 54 seconds after load (every 4 s), all done by 54 s; no interval,
+  no repeat. Each text begins with "AXIOSOZO-STEP7-PASSIVE". Messages logged
+  before AxioSozo's collection for this tab is ready are not kept, so a
+  passive observer should expect a count between 1 and 13 (13 once the tab
+  and its project were ready within about 5 s) and, with all 13 kept, these
+  five newest on the project home: error 7, warning 6, error 6, warning 5,
+  error 5. On load the page has no password field and no focused embedded
+  field, and makes no console call of its own before 6 s.
+
+  Manual cases (only when the user clicks or presses a button):
+  - Error / Warning / Uncaught / Rejection: kept, counted in the sidebar
+    project block and listed (five newest) on the project home.
+  - console.log, console.info and objects-only calls: not kept.
+  - Mixed arguments: only "Harbor booking failed: 42 true" (objects ignored).
+  - Long text: cut to 1000 characters. Query/fragment of sources: stripped.
+  - Burst: one message is held while it is captured, so a synchronous burst
+    keeps its first message only; at most 20 a second are ever offered.
+  - Password field present (also after "Turn it into a text field", since it
+    was a password field): new messages are not kept; messages kept before
+    stay. After "Remove the field" new messages are kept again.
+  - "Focus inside the frame" creates an embedded (about:blank) frame and
+    focuses its field: new messages are not kept while that focus lasts.
+  - Hash or pushState change, reload, navigation: this page's list clears.
+  - Private windows and Chromium tabs: nothing is collected at all.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbor Suite · synthetic console fixture</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226%22%20fill%3D%22%23718096%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  :root { color-scheme: light dark; font: 15px/1.45 system-ui, sans-serif; }
+  body { max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+  p.lede { margin: 0 0 1rem; opacity: 0.75; }
+  p.passive { margin: 0 0 1.5rem; font-size: 0.9rem; }
+  fieldset { margin: 0 0 1rem; padding: 0.75rem 1rem 1rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 8px; }
+  legend { padding: 0 0.35rem; font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  button { font: inherit; padding: 0.3rem 0.75rem; }
+  #status { min-height: 1.5em; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  #password-slot:empty, #frame-slot:empty { display: none; }
+  iframe { width: 16rem; height: 3.5rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>Harbor Suite — synthetic console fixture</h1>
+<p class="lede">Invented local project page for AxioSozo console checks. Nothing here leaves this machine.</p>
+<p class="passive" id="passive-progress">Automatic messages: 0 of 13 logged. They start 6 seconds after the page has loaded.</p>
+<p id="status" role="status" aria-live="polite">Ready.</p>
+
+<fieldset>
+  <legend>Messages the project keeps</legend>
+  <div class="actions">
+    <button type="button" data-case="error">console.error</button>
+    <button type="button" data-case="warn">console.warn</button>
+    <button type="button" data-case="uncaught">Uncaught TypeError</button>
+    <button type="button" data-case="rejection">Unhandled rejection</button>
+    <button type="button" data-case="mixed">Mixed arguments</button>
+    <button type="button" data-case="long">Long text</button>
+    <button type="button" data-case="burst">Burst of 30</button>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Messages the project ignores</legend>
+  <div class="actions">
+    <button type="button" data-case="log">console.log</button>
+    <button type="button" data-case="info">console.info</button>
+    <button type="button" data-case="objects">Objects only</button>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Privacy controls</legend>
+  <div class="actions">
+    <button type="button" data-case="add-password">Add password field</button>
+    <button type="button" data-case="password-to-text">Turn it into a text field</button>
+    <button type="button" data-case="remove-password">Remove the field</button>
+    <button type="button" data-case="focus-frame">Focus inside the frame</button>
+  </div>
+  <p id="password-slot"></p>
+  <p id="frame-slot"></p>
+</fieldset>
+
+<fieldset>
+  <legend>Navigation</legend>
+  <div class="actions">
+    <button type="button" data-case="hash">Change #hash</button>
+    <button type="button" data-case="push">pushState</button>
+    <button type="button" data-case="reload">Reload</button>
+  </div>
+</fieldset>
+
+<!-- The automatic sequence: milliseconds after the load event, level, fixed text. -->
+<script type="application/json" id="passive-schedule">
+[
+  { "at": 6000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 1 of 7: synthetic harbor booking check failed" },
+  { "at": 10000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 1 of 6: synthetic harbor sync is slow" },
+  { "at": 14000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 2 of 7: synthetic harbor booking check failed" },
+  { "at": 18000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 2 of 6: synthetic harbor sync is slow" },
+  { "at": 22000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 3 of 7: synthetic harbor booking check failed" },
+  { "at": 26000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 3 of 6: synthetic harbor sync is slow" },
+  { "at": 30000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 4 of 7: synthetic harbor booking check failed" },
+  { "at": 34000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 4 of 6: synthetic harbor sync is slow" },
+  { "at": 38000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 5 of 7: synthetic harbor booking check failed" },
+  { "at": 42000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 5 of 6: synthetic harbor sync is slow" },
+  { "at": 46000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 6 of 7: synthetic harbor booking check failed" },
+  { "at": 50000, "level": "warning", "text": "AXIOSOZO-STEP7-PASSIVE warning 6 of 6: synthetic harbor sync is slow" },
+  { "at": 54000, "level": "error", "text": "AXIOSOZO-STEP7-PASSIVE error 7 of 7: synthetic harbor booking check failed" }
+]
+</script>
+
+<script>
+  "use strict";
+  // passive:start — once per loaded document, from its load event; finite, no interval.
+  const passive = JSON.parse(document.getElementById("passive-schedule").textContent);
+  const progress = document.getElementById("passive-progress");
+  let logged = 0;
+  window.addEventListener("load", () => {
+    for (const entry of passive) {
+      setTimeout(() => {
+        if (entry.level === "warning") console.warn(entry.text);
+        else console.error(entry.text);
+        logged++;
+        progress.textContent = `Automatic messages: ${logged} of ${passive.length} logged.`;
+      }, entry.at);
+    }
+  }, { once: true });
+  // passive:end
+
+  // Manual cases: only after a click or key press on their button.
+  const status = text => { document.getElementById("status").textContent = text; };
+  const slot = document.getElementById("password-slot");
+  const frameSlot = document.getElementById("frame-slot");
+  const cases = {
+    error: () => console.error("Harbor booking failed: synthetic error"),
+    warn: () => console.warn("Harbor booking slow: synthetic warning"),
+    uncaught: () => setTimeout(() => { undefined.booking.id; }, 0),
+    rejection: () => Promise.reject(new Error("Harbor sync rejected: synthetic rejection")),
+    mixed: () => console.error("Harbor booking failed:", 42, true, { secret: "object arguments are never read" }, null, Symbol("ignored")),
+    long: () => console.error(`Harbor long message ${"x".repeat(1500)}`),
+    burst: () => { for (let i = 1; i <= 30; i++) console.error(`Harbor burst ${i} of 30`); },
+    log: () => console.log("Harbor log line: not an error"),
+    info: () => console.info("Harbor info line: not an error"),
+    objects: () => console.error({ only: "objects" }, [1, 2, 3]),
+    "add-password": () => {
+      if (slot.querySelector("input")) return;
+      const label = document.createElement("label");
+      label.textContent = "Synthetic password ";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.autocomplete = "off";
+      label.append(input);
+      slot.append(label);
+    },
+    "password-to-text": () => { const input = slot.querySelector("input"); if (input) input.type = "text"; },
+    "remove-password": () => slot.replaceChildren(),
+    // An embedded about:blank frame, made only now; its field gets the focus.
+    "focus-frame": () => {
+      let frame = frameSlot.querySelector("iframe");
+      if (!frame) {
+        frame = document.createElement("iframe");
+        frame.title = "Synthetic embedded document";
+        frameSlot.append(frame);
+        const inner = frame.contentDocument;
+        const label = inner.createElement("label");
+        label.textContent = "Embedded field ";
+        const input = inner.createElement("input");
+        input.id = "inner";
+        label.append(input);
+        inner.body.append(label);
+      }
+      frame.contentDocument.getElementById("inner")?.focus();
+    },
+    hash: () => { location.hash = `step-${Date.now()}`; },
+    push: () => history.pushState(null, "", `?view=${Date.now()}`),
+    reload: () => location.reload(),
+  };
+  document.addEventListener("click", event => {
+    const name = event.target.closest?.("button[data-case]")?.dataset.case;
+    if (!name) return;
+    cases[name]();
+    status(`Ran: ${name}`);
+  });
+</script>
+</body>
+</html>

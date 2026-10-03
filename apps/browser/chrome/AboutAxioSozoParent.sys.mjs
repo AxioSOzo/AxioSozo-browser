@@ -15,9 +15,14 @@ export const MESSAGES = Object.freeze({
   SUBSCRIBE: "AxioSozoOverview:Subscribe",
   UNSUBSCRIBE: "AxioSozoOverview:Unsubscribe",
   EVENT: "AxioSozoOverview:Event",
+  // The child's own trusted click on the home's "Send errors to agent…"
+  // button (Plan 4 step 7): fixed metadata { v: 1 }, never a page request.
+  SEND_PROJECT_ERRORS: "AxioSozoOverview:SendProjectErrors",
 });
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
+// The process console owner (Plan 4 step 7): it shows the native tab chooser.
+export const CONSOLE_RUNTIME_URL = "chrome://browser/content/axiosozo/ConsoleErrorsNativeRuntime.sys.mjs";
 // Provider status and decision-key actions are served by ProviderStatus.sys.mjs
 // directly (Providers workstream), not through AxioSozoServices.
 export const PROVIDER_STATUS_URL = "chrome://browser/content/axiosozo/ProviderStatus.sys.mjs";
@@ -593,13 +598,16 @@ export function readFlags(prefs) {
 let servicesProvider = () => ChromeUtils.importESModule(SERVICES_URL).AxioSozoServices.get();
 let prefsProvider = () => Services.prefs;
 let providerStatusProvider = () => ChromeUtils.importESModule(PROVIDER_STATUS_URL);
-export function setProvidersForTesting({ services, prefs, providerStatus } = {}) {
-  const previous = { services: servicesProvider, prefs: prefsProvider, providerStatus: providerStatusProvider };
+let consoleOwnerProvider = () => ChromeUtils.importESModule(CONSOLE_RUNTIME_URL).getConsoleErrorsNativeRuntime();
+export function setProvidersForTesting({ services, prefs, providerStatus, consoleOwner } = {}) {
+  const previous = { services: servicesProvider, prefs: prefsProvider, providerStatus: providerStatusProvider, consoleOwner: consoleOwnerProvider };
   if (services) servicesProvider = services;
   if (prefs) prefsProvider = prefs;
   if (providerStatus) providerStatusProvider = providerStatus;
+  if (consoleOwner) consoleOwnerProvider = consoleOwner;
   return () => {
     servicesProvider = previous.services; prefsProvider = previous.prefs; providerStatusProvider = previous.providerStatus;
+    consoleOwnerProvider = previous.consoleOwner;
   };
 }
 
@@ -700,13 +708,15 @@ export class AboutAxioSozoParent extends Base {
    * selected one (a current WindowGlobal alone does not prove that), and the
    * document's own native URI: the exact object WindowGlobalParent holds (a
    * same-document route change replaces it, even back to the same text) and
-   * the project home it names. Missing, unexpected or throwing facts are null. */
-  #understandSurface() {
+   * the project home it names. Missing, unexpected or throwing facts are null.
+   * `requireSelected: false` is only for the console chooser after its target
+   * tab was intentionally selected: the document must still be current. */
+  #understandSurface({ requireSelected = true } = {}) {
     const surface = this.#surface();
     if (!surface) return null;
     try {
       const embedder = surface.context.embedderElement;
-      if (!embedder || surface.window.gBrowser?.selectedBrowser !== embedder) return null;
+      if (!embedder || (requireSelected && surface.window.gBrowser?.selectedBrowser !== embedder)) return null;
       const documentURI = surface.manager.documentURI;
       const route = projectHomeRoute(documentURI?.spec);
       return documentURI && route ? { ...surface, embedder, documentURI, route } : null;
@@ -859,9 +869,51 @@ export class AboutAxioSozoParent extends Base {
       case MESSAGES.UNSUBSCRIBE:
         this.#unsubscribe();
         return { ok: true, value: null };
+      case MESSAGES.SEND_PROJECT_ERRORS:
+        return this.#sendProjectErrors(message);
       default:
         return toErrorReply(new OverviewError("UNKNOWN_MESSAGE", "unknown message"));
     }
+  }
+
+  /**
+   * "Send errors to agent…" on a project home (Plan 4 step 7), as the child
+   * reports its own trusted click: never a page request and never a send.
+   * Before the message data is looked at: this sender (checked above), this
+   * document natively shown as the selected tab of a registered normal window,
+   * its exact native document URI object and the project home it names. The
+   * project comes from that route only and must be in the settled native
+   * snapshot; the data must be exactly { v: 1 }. Then the console owner may
+   * show its native tab chooser, bound to `originCurrent`: a predicate over
+   * this actor, manager, browsing context, embedder, window and URI object.
+   */
+  #sendProjectErrors(message) {
+    const refuse = (code, text) => toErrorReply(new OverviewError(code, `Send errors to agent: ${text}`));
+    const surface = this.#understandSurface();
+    if (!surface) return refuse("DOCUMENT_GONE", "this page is not the selected project home");
+    let services = null;
+    try { services = servicesProvider(); } catch { services = null; }
+    if (services?.isNormalWindow?.(surface.window) !== true) return refuse("PRIVATE_WINDOW", "project homes are used from a normal window");
+    const projectId = surface.route;
+    let snapshot = null;
+    try { snapshot = services.readNativeProjectSnapshot?.() ?? null; } catch { snapshot = null; }
+    if (!snapshot?.projects?.some?.(project => project?.id === projectId)) return refuse("PROJECT_CHANGED", "the project is not settled");
+    const data = message?.data;
+    if (!isPlainObject(data) || Object.keys(data).length !== 1 || data.v !== 1) return refuse("INVALID_REQUEST", "unexpected data");
+    let owner = null;
+    try { owner = consoleOwnerProvider(); } catch { owner = null; }
+    if (typeof owner?.requestProjectErrorChooser !== "function") return refuse("UNSUPPORTED", "console errors are not available");
+    const originCurrent = ({ requireSelected = true } = {}) => {
+      try {
+        const now = this.#understandSurface({ requireSelected });
+        return !!now && now.manager === surface.manager && now.context === surface.context && now.embedder === surface.embedder
+          && now.window === surface.window && now.documentURI === surface.documentURI && now.route === projectId
+          && this.#current() && services.isNormalWindow(surface.window) === true;
+      } catch { return false; }
+    };
+    try { owner.requestProjectErrorChooser({ window: surface.window, project_id: projectId, aboutActor: this, originCurrent }); }
+    catch (error) { console.error("AxioSozo: console chooser failed", error); }
+    return { ok: true, value: null };
   }
 
   #subscribe() {

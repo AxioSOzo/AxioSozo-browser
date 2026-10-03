@@ -177,9 +177,71 @@ browser. These shapes follow the [Claude hook reference](https://code.claude.com
 and [Codex configuration reference](https://developers.openai.com/codex/config-reference/),
 checked 2 October 2026. Live provider integration remains NOT_AUTHORIZED.
 
-## 8. Changelog
+## 8. Gecko console records (Plan 4 step 7)
+
+A process-owned service retains warning/error records in RAM only. Its native
+owner and tab registry exist independently of the disabled agent endpoint.
+Collection does not enable a bridge, open a handoff composer, invoke a provider,
+or write logs to the profile, project brief, activity history or diagnostics.
+Firefox DevTools remains intact.
+
+Only an actual current, normal, top-level Gecko web document may offer a record.
+Unknown/private/currentness/engine/category facts refuse before application
+payload inspection. The registered child checks current password risk immediately
+before copying native scalar fields. Historic password inputs, opaque focused
+frames, bounds and uncertainty refuse. No title, selection, input value, stack,
+object property, console cache or arbitrary coercion is read. Free-form console
+text and URL paths can contain user data; these bounds are not a secret scrubber.
+
+A child keeps at most one native event reference for 500 ms. It sends bounded
+metadata only. The parent obtains a one-use private capture lease after checking
+native ownership, the exact issued tab-registry descriptor, project root/revision
+and actor identity. Only the completion of its outstanding query to that exact
+registered actor can complete the lease. The child revalidates its pending offer,
+current native document and password risk before returning a bounded scalar copy.
+The parent repeats authority after the query and consumes the opaque capture
+permit synchronously. Serialized IDs, copied objects and page-supplied safety
+booleans grant no authority. This boundary does not claim protection against a
+compromised privileged process.
+
+A later password field does not revoke an immutable earlier observation; future
+observations check risk again. Every top-level navigation, including same-document
+changes, clears retained records and rotates freshness before callbacks. Live
+revocation/relink preserves per-document rate budgets; only confirmed ownership
+retirement frees a slot. Unknown inventory is not treated as an empty inventory.
+Project mutations withdraw authority synchronously before the first await and
+clear retained console records across the process. This conservative invalidation
+includes container assignment and accepted brief persistence. Profile shutdown
+withdraws the published native snapshot and prevents pending hydration or a later
+owner registration from restoring authority.
+
+Limits: 2,048 live ownership slots; 50 retained messages per tab; 1,000 UTF-16
+units per text and 2,048 per source. Source is empty or http(s), with userinfo,
+query and fragment removed; privileged/internal/file/extension/data/blob and
+malformed sources refuse. Child attempts are limited to 20/second and 500/document;
+parent attempts to 30/second and 1,000/document. One pending lease or unconsumed
+permit is allowed per tab, with a 1,000 ms deadline. Native glue owns timeout,
+destroy and query-failure cleanup. Event delivery contains only the name console.
+
+The project home and sidebar read a current normal-window/project projection;
+the home shows at most five recent messages and the retained total. Unavailable
+collection is distinct from zero retained records. The future console.errors
+bridge tool remains behind its separate session/tab/privacy/category gates.
+Chromium collection remains UNAVAILABLE until the engine workstream supplies it.
+
+Send errors to agent is an explicit manual action for one concrete eligible
+native tab. A project-home action requires visible target selection; it cannot
+implicitly aggregate tabs or treat the about: page as the target web document.
+The existing handoff's selected-tab, current registered child, password, project,
+request admission, confirmation and final clipboard/target guards remain in force.
+Console inclusion is an explicit visible opt-in; collection never sends anything.
+
+## 9. Changelog
 
 - 2 October 2026 — created for Plan 4.
 
 - 2 October 2026 — Step 4 current-profile path, explicit session enablement,
   55-second approval, owned cleanup and quiescent project authority.
+
+- 3 October 2026 — Step 7 bounded RAM console records, native capture leases,
+  current project authority and explicit single-tab manual handoff.

@@ -33,7 +33,10 @@ import { createUnderstandService, createOfflineUnderstandService } from "./Under
 import { createNativeManifestAcceptIO } from "./ProjectManifestAccept.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console"]);
+// Console retention changes reach pages and the sidebar as one name-only
+// event at most this often (Plan 4 step 7); a burst ends with a trailing one.
+export const CONSOLE_EVENT_MS = 250;
 // The facade operations a page reaches through the actor (Plan 4 step 6). The
 // alias and the strictly validated params are the only arguments.
 const UNDERSTAND_OPERATIONS = Object.freeze(["state", "available", "read", "cancel", "preview", "accept", "reinspect"]);
@@ -86,6 +89,10 @@ export class ServicesError extends Error {
 }
 
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+const deepFreeze = value => {
+  if (value && typeof value === "object") { for (const child of Object.values(value)) deepFreeze(child); Object.freeze(value); }
+  return value;
+};
 const fail = code => { throw new ServicesError(code); };
 
 function defaultLocalTime(now) {
@@ -246,6 +253,19 @@ export class AxioSozoServices {
   #understandChanges = new Map(); #understandChangesAll = 0; #understandSequence = 0;
   // Facade-owned commits in flight per project (their own reserved writes).
   #understandWrites = new Map(); #lastUnderstandClock = 0;
+  // Native project authority for console collection (Plan 4 step 7), chrome
+  // only: one global epoch that moves synchronously on every invalidation and
+  // on every settled publication, the published snapshot ({ revision,
+  // hydration, projects, snapshot }) or null, a hydration generation that
+  // voids a read in flight, and the chrome listeners. Independent of the
+  // Understand cache, its per-project binding revisions and of AgentChannel.
+  #nativeEpoch = 0; #nativePublished = null; #nativeHydration = 0; #nativeExhausted = false; #nativeListeners = new Set();
+  // Profile shutdown ended native authority for good: nothing is published,
+  // read, captured or registered again in this process.
+  #nativeShutdown = false;
+  // The one process console owner (ConsoleErrorsNativeRuntime) and its
+  // throttled name-only console event.
+  #nativeOwner = null; #nativeOwnerUnregister = null; #consoleTimer = null; #consolePending = false;
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -338,7 +358,11 @@ export class AxioSozoServices {
     // A restored about:axiosozo tab can load before the first window registers;
     // without this it would keep showing an empty workspace list.
     this.#emit("contexts");
+    // A window that is ready is a real signal to publish native authority again.
+    this.#settleNative();
     return () => {
+      // The console owner forgets this window while it is still known as normal.
+      try { this.#nativeOwner?.detachWindow(window); } catch (error) { console.error("AxioSozo: console window not detached", error); }
       unsubscribe();
       // Its Understand owners end at once: their reads and leases only, never
       // the shared facade or another window's work.
@@ -393,10 +417,12 @@ export class AxioSozoServices {
     if (!this.#persistingContexts) {
       // A direct migration write is an every-project change for Understand: no
       // snapshot is captured until it settled, and a failed one keeps the flag.
+      // Native console authority is withdrawn with it.
       this.#beginUnderstandChange(null);
+      this.#invalidateNative();
       this.#persistingContexts = this.#stores.contexts.update(current => ({ ...current }))
         .then(written => { this.#contextsNeedPersistence = false; return written; })
-        .finally(() => { this.#persistingContexts = null; this.#endUnderstandChange(null); });
+        .finally(() => { this.#persistingContexts = null; this.#endUnderstandChange(null); this.#settleNative(); });
     }
     try { return await this.#persistingContexts; }
     catch (error) { console.error("AxioSozo: contexts.json v3 write failed", error); return doc; }
@@ -824,15 +850,22 @@ export class AxioSozoServices {
    * await: the projects' snapshots are withdrawn and their facade jobs and
    * acceptance leases invalidated. `understand: false` is only for the facade's
    * own guarded commit, which checks its captured authority inside the write
-   * instead (invalidating it first would cancel every save). */
+   * instead (invalidating it first would cancel every save).
+   *
+   * Native console authority (Plan 4 step 7) is withdrawn for every mutation,
+   * the facade's own commit included (it never touches the facade), with the
+   * pending marks already visible and before the first await; it is published
+   * again only by the scope that settles at global quiescence. */
   async #routingMutation(projectIds, run, { understand = true } = {}) {
     this.#markRouting(projectIds, 1);
     if (understand) this.#beginUnderstandChange(projectIds);
+    this.#invalidateNative();
     this.#invalidateAgentProjects();
     try { return await run(); } finally {
       this.#markRouting(projectIds, -1);
       if (understand) this.#endUnderstandChange(projectIds);
       this.#settleAgentProjects();
+      this.#settleNative();
     }
   }
 
@@ -1058,7 +1091,8 @@ export class AxioSozoServices {
    * probed, detected or created here. `agent_activity` is the agent channel's
    * RAM history for this project and its current root, { records, reporting,
    * sessions }, or null while that cache is unavailable; `console_errors` is
-   * null until this build collects them (Plan 4 step 7).
+   * the console owner's RAM { count, recent } for this project's tabs in this
+   * window (Plan 4 step 7), or null while it is unavailable.
    *
    * The answer is current when it is returned: the project's routing mark,
    * the container deletion/reset generation and availability are taken before
@@ -1091,13 +1125,29 @@ export class AxioSozoServices {
     // between them and the return.
     const space = project.context_uuid ? this.#liveWorkspaces().get(project.context_uuid) : null;
     const agentActivity = this.#agentActivity(id, current.root);
+    const consoleErrors = this.#consoleErrors(window, id);
     if (this.#routingMark(id) !== mark || this.#containerGeneration !== generation || this.#containerAvailability() !== availability
       || JSON.stringify(current) !== JSON.stringify(stored)) fail("PROJECT_CHANGED");
     // The window may have closed or been unregistered meanwhile.
     if (!this.#normalWindow(window, adapter)) fail("NO_WINDOW");
     const { container: _mapping, ...record } = clone(project);
     return { version: 1, project: record, space: space ? { uuid: space.uuid, name: space.name } : null, container,
-      agent_activity: agentActivity, console_errors: null };
+      agent_activity: agentActivity, console_errors: consoleErrors };
+  }
+
+  /** The console owner's RAM count and five newest messages of this
+   * project's eligible tabs in this window, { count, recent: [{ level, text }] },
+   * or null while unavailable (no owner, native authority unsettled, the
+   * window not normal). Text only; nothing of it is stored. */
+  #consoleErrors(window, id) {
+    const owner = this.#nativeOwner;
+    if (!owner) return null;
+    try {
+      const value = owner.service.readProject({ window, project_id: id });
+      if (!value || !Number.isSafeInteger(value.count) || value.count < 0 || !Array.isArray(value.recent)) return null;
+      return { count: value.count, recent: value.recent.slice(0, 5).filter(item => typeof item?.text === "string")
+        .map(item => ({ level: item.level === "warning" ? "warning" : "error", text: item.text })) };
+    } catch { return null; }
   }
 
   /** The channel's validated history of one project: null unless its cache is
@@ -1218,7 +1268,7 @@ export class AxioSozoServices {
     const browser = tab?.linkedBrowser;
     let normalBrowser = false;
     try { normalBrowser = browser?.browsingContext?.usePrivateBrowsing === false; } catch { normalBrowser = false; }
-    if (!normal || !normalBrowser || tab.ownerGlobal !== window || tab.closing || tab.isConnected === false) fail("ARRIVAL_UNAVAILABLE");
+    if (!normal || !normalBrowser || tab.documentGlobal !== window || tab.closing || tab.isConnected === false) fail("ARRIVAL_UNAVAILABLE");
     const tabId = browser.browserId;
     const url = browser.currentURI?.spec;
     if (!Number.isSafeInteger(tabId) || tabId < 1 || typeof url !== "string") fail("ARRIVAL_UNAVAILABLE");
@@ -2032,7 +2082,9 @@ export class AxioSozoServices {
    * write, such as a folder read or a disk write ahead of the profile write. */
   async #understandScope(projectIds, run) {
     this.#beginUnderstandChange(projectIds);
-    try { return await run(); } finally { this.#endUnderstandChange(projectIds); }
+    // Native console authority ends before the folder read or disk write too.
+    this.#invalidateNative();
+    try { return await run(); } finally { this.#endUnderstandChange(projectIds); this.#settleNative(); }
   }
 
   /** The facade's synchronous rootAdmission: literal true only for a root that
@@ -2099,6 +2151,8 @@ export class AxioSozoServices {
     } finally {
       const writes = (this.#understandWrites.get(id) ?? 1) - 1;
       if (writes > 0) this.#understandWrites.set(id, writes); else this.#understandWrites.delete(id);
+      // Its routing scope settled while this write was still counted.
+      this.#settleNative();
     }
     // An accepted brief can bring the inspected file's manifest with it: checks
     // start afresh, and a confirmed new name renames the project's own container.
@@ -2142,6 +2196,200 @@ export class AxioSozoServices {
     const found = byUrl && byContainer && byUrl !== byContainer ? null : byUrl ?? byContainer;
     return Object.freeze({ project: found ? Object.freeze({ id: found.id, root: found.root }) : null,
       name: found ? displayName(found) : null, check });
+  }
+
+  // ── native project authority (Plan 4 step 7; chrome only, never the actor or the wire) ──
+  /**
+   * Publishes the native snapshot of settled projects, at global quiescence
+   * only: nothing pending, in flight or failed (project writes, facade
+   * commits, container cleanups, a migration write still owed) before and
+   * after the one store read, and the routing sequence, container
+   * generation, Understand change counter, epoch and hydration unmoved by it.
+   * No await follows the final check. Metadata only: no facade, owner,
+   * client, transport, endpoint, provider, repository read or manifest write.
+   * Resolves true while a publication is current.
+   */
+  async prepareNativeProjectAuthority() {
+    if (this.#nativeShutdown || this.#nativeExhausted) return false;
+    if (this.#nativeAllowing()) return true;
+    if (!this.#snapshotQuiet()) return false;
+    const hydration = ++this.#nativeHydration, epoch = this.#nativeEpoch;
+    const sequence = this.#routingSequence, generation = this.#containerGeneration, changes = this.#understandSequence;
+    let projects;
+    try { ({ projects } = await this.#loadContexts()); } catch { return false; }
+    if (this.#nativeShutdown || hydration !== this.#nativeHydration || epoch !== this.#nativeEpoch || this.#nativeExhausted
+      || !this.#snapshotQuiet() || sequence !== this.#routingSequence || generation !== this.#containerGeneration
+      || changes !== this.#understandSequence) return false;
+    const records = [];
+    for (const stored of projects) {
+      try { records.push(deepFreeze(clone(core.upgradeProject(stored)))); } catch { /* an invalid record is never authority */ }
+    }
+    if (this.#nativeEpoch >= Number.MAX_SAFE_INTEGER - 1) { this.#nativeExhausted = true; return false; }
+    const revision = ++this.#nativeEpoch;
+    const list = Object.freeze(records);
+    this.#nativePublished = Object.freeze({ revision, hydration, projects: list, snapshot: Object.freeze({ revision, projects: list }) });
+    this.#notifyNative("settled");
+    // Availability changed: shown counts and homes read again.
+    this.#emitConsole();
+    return true;
+  }
+
+  /** The current publication, frozen { revision, projects }, or null while
+   * unpublished, exhausted, anything is pending or failed, or a newer
+   * hydration started. `revision` is the global epoch shared by every
+   * project and tab of this publication. */
+  readNativeProjectSnapshot() {
+    return this.#nativeAllowing() ? this.#nativePublished.snapshot : null;
+  }
+
+  /**
+   * One project's native authority for a registered normal window:
+   * frozen { id, root, revision, check }, or null. The record must be in the
+   * current publication, and its root admitted afresh: no denied system,
+   * home-settings, credential or profile folder, not home itself, an existing
+   * directory whose canonical path is exactly the stored root (synchronous
+   * metadata). `revision` is the global epoch. `check()` is synchronous and
+   * literally true only while the window, publication, epoch, quiescence,
+   * routing sequence, container generation, Understand change counter, the
+   * exact retained record and the root all still hold; an invalidation is
+   * caught even when the values later come back.
+   */
+  captureNativeProjectAuthority({ window, project_id } = {}) {
+    try {
+      if (!core.isProjectId(project_id)) return null;
+      const adapter = window ? this.#windows.get(window) ?? null : null;
+      if (!adapter || !this.#normalWindow(window, adapter) || !this.#nativeAllowing()) return null;
+      const published = this.#nativePublished, revision = published.revision;
+      const record = published.projects.find(item => item.id === project_id);
+      if (!record || this.#nativeRootAdmission(record.root) !== true) return null;
+      const root = record.root;
+      const sequence = this.#routingSequence, generation = this.#containerGeneration, changes = this.#understandSequence;
+      const check = () => {
+        try {
+          return this.#nativePublished === published && this.#nativeEpoch === revision && this.#nativeAllowing()
+            && this.#windows.get(window) === adapter && this.#normalWindow(window, adapter)
+            && sequence === this.#routingSequence && generation === this.#containerGeneration && changes === this.#understandSequence
+            && published.projects.find(item => item.id === project_id) === record && this.#nativeRootAdmission(root) === true;
+        } catch { return false; }
+      };
+      if (check() !== true) return null;
+      return Object.freeze({ id: project_id, root, revision, check });
+    } catch { return null; }
+  }
+
+  /** Chrome-only, synchronous: callback(frozen { phase: "invalidated" |
+   * "settled", revision }). No record, root or owner leaves this hook. */
+  onNativeProjectAuthority(callback) {
+    if (typeof callback !== "function") fail("INVALID_CALLBACK");
+    this.#nativeListeners.add(callback);
+    return () => { this.#nativeListeners.delete(callback); };
+  }
+
+  /**
+   * Chrome-only: the one process console owner (ConsoleErrorsNativeRuntime).
+   * The same object again is idempotent; another one is refused while this
+   * one is registered, and every one after profile shutdown. Its service's
+   * changes become the name-only "console" event. At profile shutdown native
+   * authority ends for good first (publication withdrawn, any hydration
+   * voided, listeners told), then the owner is unregistered and disposed once.
+   * Returns unregister (an ordinary unregistration, not a shutdown).
+   */
+  registerNativeBrowserOwner(owner) {
+    if (this.#nativeShutdown) fail("SHUTDOWN");
+    if (owner && owner === this.#nativeOwner) return this.#nativeOwnerUnregister;
+    if (this.#nativeOwner) fail("OWNER_REGISTERED");
+    if (!owner || typeof owner !== "object" || typeof owner.dispose !== "function" || typeof owner.detachWindow !== "function"
+      || typeof owner.service?.onChange !== "function") fail("INVALID_OWNER");
+    const unsubscribe = owner.service.onChange(() => this.#emitConsole());
+    this.#nativeOwner = owner;
+    const unregister = () => {
+      if (this.#nativeOwner !== owner) return;
+      this.#nativeOwner = null;
+      this.#nativeOwnerUnregister = null;
+      try { unsubscribe(); } catch {}
+      if (this.#consoleTimer !== null) { try { this.#deps.timers.clearTimeout(this.#consoleTimer); } catch {} }
+      this.#consoleTimer = null;
+      this.#consolePending = false;
+    };
+    let disposed = false;
+    const shutdown = () => {
+      this.#shutdownNative();
+      unregister();
+      if (disposed) return;
+      disposed = true;
+      try { owner.dispose(); } catch (error) { console.error("AxioSozo: console errors not closed", error); }
+    };
+    try { this.#deps.onShutdown?.(async () => shutdown(), "AxioSozo: close console errors"); }
+    catch (error) { console.error("AxioSozo: console errors shutdown not registered", error); }
+    this.#nativeOwnerUnregister = unregister;
+    return unregister;
+  }
+
+  /** Profile shutdown, irreversibly and synchronously: no publication stays
+   * readable, a hydration in flight is void, every held check() turns false
+   * and listeners hear "invalidated" before any owner is disposed. */
+  #shutdownNative() {
+    if (this.#nativeShutdown) return;
+    this.#nativeShutdown = true;
+    this.#invalidateNative();
+  }
+
+  #nativeAllowing() {
+    const published = this.#nativePublished;
+    return !this.#nativeShutdown && !!published && !this.#nativeExhausted && published.revision === this.#nativeEpoch
+      && published.hydration === this.#nativeHydration && this.#snapshotQuiet() && this.#agentAuthorityQuiet();
+  }
+
+  /** Synchronously, at the start of any change that can move project
+   * authority: the publication is withdrawn, a hydration in flight voided and
+   * the epoch moved before listeners hear "invalidated". Nested ones are fine. */
+  #invalidateNative() {
+    this.#nativeHydration++;
+    this.#nativePublished = null;
+    if (this.#nativeEpoch >= Number.MAX_SAFE_INTEGER - 1) this.#nativeExhausted = true;
+    else this.#nativeEpoch++;
+    this.#notifyNative("invalidated");
+  }
+
+  /** At quiescence, while someone uses native authority, publish again. */
+  #settleNative() {
+    if (this.#nativeShutdown || (!this.#nativeOwner && !this.#nativeListeners.size) || this.#nativeExhausted || !this.#snapshotQuiet()) return;
+    Promise.resolve().then(() => this.prepareNativeProjectAuthority()).catch(() => {});
+  }
+
+  #notifyNative(phase) {
+    const event = Object.freeze({ phase, revision: this.#nativeEpoch });
+    for (const listener of [...this.#nativeListeners]) {
+      try { listener(event); } catch (error) { console.error("AxioSozo: native authority listener failed", error); }
+    }
+  }
+
+  /** The same containment policy as Understand root admission, against the
+   * native publication: metadata only, asked afresh on every call. */
+  #nativeRootAdmission(root) {
+    try {
+      if (!normalAbsolute(root)) return false;
+      const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
+      const denied = this.#deniedRoots();
+      if (root === home || denied.some(base => within(root, base))) return false;
+      if (typeof this.#deps.rootMetadata !== "function") return false;
+      const meta = this.#deps.rootMetadata(root);
+      if (!meta || typeof meta !== "object" || typeof meta.then === "function") return false;
+      if (meta.directory !== true || meta.canonical !== root) return false;
+      return !denied.some(base => within(meta.canonical, base));
+    } catch { return false; }
+  }
+
+  /** The name-only console event, at most once per CONSOLE_EVENT_MS. */
+  #emitConsole() {
+    if (this.#consoleTimer !== null) { this.#consolePending = true; return; }
+    this.#emit("console");
+    try {
+      this.#consoleTimer = this.#deps.timers.setTimeout(() => {
+        this.#consoleTimer = null;
+        if (this.#consolePending) { this.#consolePending = false; this.#emitConsole(); }
+      }, CONSOLE_EVENT_MS);
+    } catch { this.#consoleTimer = null; }
   }
 
   // ── navigation helpers for the Overview actor ─────────────────────────

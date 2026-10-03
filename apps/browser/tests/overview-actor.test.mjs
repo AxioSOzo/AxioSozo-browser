@@ -197,6 +197,105 @@ test("an answer for a document that went away or changed window while the servic
   } finally { restore(); }
 });
 
+// ---------------------------------------------------------------- send errors to agent (Plan 4 step 7)
+
+/** A project home that is its normal window's selected tab; its native document URI object can be replaced. */
+function homeActor({ route = "p_harbor1" } = {}) {
+  const embedder = { name: "about-browser" };
+  const window = { name: "normal-window", gBrowser: { selectedBrowser: embedder } };
+  const actor = fakeActor(window);
+  actor.browsingContext.embedderElement = embedder;
+  actor.manager.documentURI = { spec: `about:axiosozo#project=${route}` };
+  return { actor, window, embedder };
+}
+function consoleProviders({ normal = true, projects = ["p_harbor1"], owner = true } = {}) {
+  const chooser = [];
+  const services = { isNormalWindow: () => normal, on: () => () => {},
+    readNativeProjectSnapshot: () => (projects ? Object.freeze({ revision: 3, projects: projects.map(id => ({ id })) }) : null) };
+  const consoleOwner = owner ? { requestProjectErrorChooser: args => chooser.push(args) } : {};
+  const restore = setProvidersForTesting({ services: () => services, consoleOwner: () => consoleOwner });
+  return { chooser, restore };
+}
+/** The message as the child sends it; reading its data is recorded. */
+function sendErrors(actor, data = { v: 1 }) {
+  const reads = [];
+  const result = actor.receiveMessage({ name: MESSAGES.SEND_PROJECT_ERRORS, get data() { reads.push("data"); return data; } });
+  return { result, reads };
+}
+
+test("Send errors to agent: only the selected, current project home asks for the native chooser, with the project from its own route", async () => {
+  const { chooser, restore } = consoleProviders();
+  try {
+    const { actor, window, embedder } = homeActor();
+    const { result, reads } = sendErrors(actor);
+    assert.deepEqual(await result, { ok: true, value: null });
+    assert.deepEqual(reads, ["data"]);
+    assert.equal(chooser.length, 1);
+    const [request] = chooser;
+    assert.deepEqual([request.window, request.project_id, request.aboutActor, Object.keys(request).sort()],
+      [window, "p_harbor1", actor, ["aboutActor", "originCurrent", "project_id", "window"]]);
+    assert.deepEqual([request.originCurrent(), request.originCurrent({ requireSelected: false })], [true, true]);
+    window.gBrowser.selectedBrowser = { name: "chosen-tab" };
+    assert.deepEqual([request.originCurrent(), request.originCurrent({ requireSelected: false })], [false, true],
+      "after the chosen tab is selected the home must stay current, not selected");
+    window.gBrowser.selectedBrowser = embedder;
+    actor.manager.documentURI = { spec: "about:axiosozo#project=p_harbor1" };
+    assert.deepEqual([request.originCurrent(), request.originCurrent({ requireSelected: false })], [false, false],
+      "a route change replaces the native URI object, even back to the same text");
+    actor.didDestroy();
+    assert.equal(request.originCurrent({ requireSelected: false }), false);
+  } finally { restore(); }
+});
+
+test("Send errors to agent refuses before reading its data: not selected, not a home, unsettled or unknown project, private window", async () => {
+  for (const [label, setup, providers, code] of [
+    ["another tab selected", ({ window }) => { window.gBrowser.selectedBrowser = {}; }, {}, "DOCUMENT_GONE"],
+    ["the project list, not a home", ({ actor }) => { actor.manager.documentURI = { spec: "about:axiosozo#projects" }; }, {}, "DOCUMENT_GONE"],
+    ["a project id with a tail", ({ actor }) => { actor.manager.documentURI = { spec: "about:axiosozo#project=p_harbor1=x" }; }, {}, "DOCUMENT_GONE"],
+    ["a project not in the settled snapshot", () => {}, { projects: ["p_inkline1"] }, "PROJECT_CHANGED"],
+    ["projects changing", () => {}, { projects: null }, "PROJECT_CHANGED"],
+    ["a window the services do not know as normal", () => {}, { normal: false }, "PRIVATE_WINDOW"],
+  ]) {
+    const { chooser, restore } = consoleProviders(providers);
+    try {
+      const home = homeActor();
+      setup(home);
+      const { result, reads } = sendErrors(home.actor);
+      assert.equal((await result).error.code, code, label);
+      assert.deepEqual([reads, chooser], [[], []], label);
+    } finally { restore(); }
+  }
+  // A private sender is refused by the sender check itself.
+  const { chooser, restore } = consoleProviders();
+  try {
+    const home = homeActor();
+    home.actor.browsingContext.usePrivateBrowsing = true;
+    home.actor.manager.documentPrincipal = { ...home.actor.manager.documentPrincipal, privateBrowsingId: 1 };
+    const { result, reads } = sendErrors(home.actor);
+    assert.equal((await result).ok, false);
+    assert.deepEqual([reads, chooser], [[], []]);
+  } finally { restore(); }
+});
+
+test("Send errors to agent takes exactly { v: 1 }: no page-chosen project, tab, root or target; never a page request method", async () => {
+  const { chooser, restore } = consoleProviders();
+  try {
+    for (const data of [{ v: 2 }, { v: 1, project_id: "p_inkline1" }, { v: 1, tab_id: "t_1" }, { v: 1, root: "/etc" }, null, [], "v1"]) {
+      assert.equal((await sendErrors(homeActor().actor, data).result).error.code, "INVALID_REQUEST", JSON.stringify(data));
+    }
+    assert.deepEqual(chooser, []);
+    for (const name of ["sendProjectErrors", "SendProjectErrors", "requestProjectErrorChooser", "openConsoleComposer", "readConsoleErrors"]) {
+      assert.equal((await request(homeActor().actor, name, {})).error.code, "UNKNOWN_METHOD", name);
+    }
+    assert.ok(!Object.keys(METHODS).some(name => /console|errors|chooser/iu.test(name)));
+    assert.deepEqual(chooser, []);
+  } finally { restore(); }
+  const missing = consoleProviders({ owner: false });
+  try {
+    assert.equal((await sendErrors(homeActor().actor).result).error.code, "UNSUPPORTED");
+  } finally { missing.restore(); }
+});
+
 // ---------------------------------------------------------------- page
 
 const HTML = readFileSync(new URL("../chrome/overview/about-axiosozo.html", import.meta.url), "utf8");
