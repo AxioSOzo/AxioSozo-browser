@@ -45,9 +45,9 @@ const state = {
   // once the first full load (and its one-time work) completed.
   active: true, started: false,
   // Agent status (AI & keys): the browser's endpoint state or the code it
-  // refused with, hook settings per agent for the listening socket, and
-  // whether a switch request is on its way.
-  agents: { endpoint: null, error: null, hooks: new Map(), socket: null, busy: false },
+  // refused with, hook and plugin settings per agent for the listening
+  // socket, and whether a switch request is on its way.
+  agents: { endpoint: null, error: null, hooks: new Map(), bridges: new Map(), socket: null, busy: false },
   // Understand (Plan 4 step 6): this visit of the shown home's Read and brief
   // acceptance work (understandVisit). A new visit starts on every route change,
   // pagehide and restore, so nothing of an earlier one can publish.
@@ -2137,8 +2137,9 @@ function renderEngineSettings() {
 
 // ---------------------------------------------------------------- agent status (inside AI & keys)
 
-/** Reads the endpoint's own state (and, while it listens, both hook settings).
- * Reading starts nothing. Only the latest read publishes, never while hidden. */
+/** Reads the endpoint's own state (and, while it listens, both hook and both
+ * plugin settings). Reading starts nothing. Only the latest read publishes,
+ * never while hidden; settings prepared for another socket are dropped. */
 async function loadAgentSettings() {
   if (!state.active || !state.connected || !state.admitted) return;
   const ticket = latest.agents = nextTicket();
@@ -2149,18 +2150,26 @@ async function loadAgentSettings() {
   state.agents.endpoint = endpoint;
   state.agents.error = error;
   const socket = endpoint?.state === "listening" && typeof endpoint.socketPath === "string" ? endpoint.socketPath : null;
-  if (socket !== state.agents.socket) { state.agents.hooks = new Map(); state.agents.socket = socket; }
+  if (socket !== state.agents.socket) { state.agents.hooks = new Map(); state.agents.bridges = new Map(); state.agents.socket = socket; }
   await keepFocus(renderAgentSettings);
-  if (!socket || M.AGENT_HOOKS.every(({ agent }) => state.agents.hooks.has(agent))) return;
-  const hooks = new Map();
-  for (const { agent } of M.AGENT_HOOKS) {
-    try { hooks.set(agent, { text: (await call("getAgentHookConfig", { agent }))?.text ?? null, error: null }); }
-    catch (failure) { hooks.set(agent, { text: null, error: failure?.code ?? "ERROR" }); }
+  if (!socket) return;
+  for (const [kind, method, list] of [["hooks", "getAgentHookConfig", M.AGENT_HOOKS], ["bridges", "getAgentBridgeConfig", M.AGENT_BRIDGES]]) {
+    if (list.every(({ agent }) => state.agents[kind].has(agent))) continue;
+    const prepared = new Map();
+    for (const { agent } of list) {
+      try {
+        const reply = await call(method, { agent });
+        prepared.set(agent, kind === "hooks" ? { text: reply?.text ?? null, error: null }
+          : reply?.agent === agent && typeof reply.text === "string" && reply.text ? { text: reply.text, error: null }
+            : { text: null, error: "CONFIG_UNAVAILABLE" });
+      } catch (failure) { prepared.set(agent, { text: null, error: failure?.code ?? "ERROR" }); }
+      if (!current()) return;
+    }
+    if (state.agents.socket !== socket) return;
+    state.agents[kind] = prepared;
+    await keepFocus(renderAgentSettings);
     if (!current()) return;
   }
-  if (state.agents.socket !== socket) return;
-  state.agents.hooks = hooks;
-  await keepFocus(renderAgentSettings);
 }
 
 /** The explicit switch: on for this browser session, or off. The page shows
@@ -2181,16 +2190,17 @@ async function setAgentStatus(enabled) {
   else if (enabled) setStatus("Agent status did not start. Nothing is listening.", "error");
 }
 
-async function copyHook(entry, hook) {
+async function copySnippet(text, copied) {
   const clipboard = window.navigator?.clipboard;
   try {
     if (typeof clipboard?.writeText !== "function") throw new Error("NO_CLIPBOARD");
-    await clipboard.writeText(entry.text);
-    setStatus(`${hook.name} settings copied. Paste them into your ${hook.name} settings yourself.`);
+    await clipboard.writeText(text);
+    setStatus(copied);
   } catch {
     setStatus("Copying did not work. Open Show settings and copy the text yourself.", "error");
   }
 }
+const copyHook = (entry, hook) => copySnippet(entry.text, `${hook.name} settings copied. Paste them into your ${hook.name} settings yourself.`);
 
 function hookRow(hook) {
   const entry = state.agents.hooks.get(hook.agent);
@@ -2206,6 +2216,41 @@ function hookRow(hook) {
     entry?.text ? h("button", { type: "button", class: "ghost small", "aria-describedby": helpId, "data-focus-key": `${key}:copy`,
       onclick: () => copyHook(entry, hook) }, `Copy for ${hook.name}`)
       : h("span", { class: "help" }, entry ? "" : "Preparing…"));
+}
+
+/** One agent's plugin settings: shown as text, copied only on a click. */
+function bridgeRow(bridge) {
+  const entry = state.agents.bridges.get(bridge.agent);
+  const key = `agents:bridge:${bridge.agent}`;
+  const helpId = `agent-bridge-${bridge.agent}-help`;
+  return h("li", { class: "row bridge-row" },
+    h("div", { class: "row-main" },
+      h("span", { class: "row-title" }, bridge.name),
+      h("span", { class: "help", id: helpId }, entry?.error ? M.agentBridgeErrorText(entry.error) : bridge.where),
+      entry?.text ? h("details", { class: "snippet" },
+        h("summary", { "data-focus-key": `${key}:show` }, "Show settings"),
+        h("pre", { tabindex: "0", "aria-label": `${bridge.name} plugin settings` }, h("code", {}, entry.text))) : null),
+    entry?.text ? h("button", { type: "button", class: "ghost small", "aria-describedby": helpId, "data-focus-key": `${key}:copy`,
+      onclick: () => copySnippet(entry.text, `${bridge.name} plugin settings copied. Paste them into your ${bridge.name} settings yourself.`) },
+    `Copy for ${bridge.name}`)
+      : h("span", { class: "help" }, entry ? "" : "Preparing…"));
+}
+
+/** What an allowed agent can do here: the browser's own answer, as text. */
+function agentTools(endpoint, listening) {
+  const tools = M.agentToolsView(endpoint);
+  return h("div", { class: "agent-tools", role: "group", "aria-labelledby": "agent-tools-heading" },
+    h("h4", { id: "agent-tools-heading" }, "Browser tools for agents"),
+    h("p", { class: "help", id: "agent-tools-text" }, tools.text),
+    tools.rows.length ? h("ul", { class: "tool-list", "aria-label": "Browser tools", "aria-describedby": "agent-tools-text" },
+      tools.rows.map(row => h("li", { class: "tool-row", "data-available": row.available ? "true" : "false" },
+        h("span", { class: "tag state", "data-tone": row.available ? "ok" : null }, row.state),
+        h("span", { class: "tool-text" }, h("span", { class: "tool-label" }, row.label),
+          row.note ? h("span", { class: "help" }, row.note) : null)))) : null,
+    listening ? h("div", { class: "agent-plugins" },
+      h("h4", {}, "Plugin settings"),
+      h("p", { class: "help" }, M.AGENT_BRIDGE_NOTE),
+      h("ul", { class: "rows" }, M.AGENT_BRIDGES.map(bridgeRow))) : null);
 }
 
 function renderAgentSettings() {
@@ -2235,6 +2280,7 @@ function renderAgentSettings() {
       h("h4", {}, "Hook settings"),
       h("p", { class: "help" }, M.AGENT_HOOKS_NOTE),
       h("ul", { class: "rows" }, M.AGENT_HOOKS.map(hookRow))) : null,
+    endpoint && !error ? agentTools(endpoint, view.listening) : null,
     h("p", { class: "footnote" }, M.AGENT_TOOLS_NOTE));
 }
 

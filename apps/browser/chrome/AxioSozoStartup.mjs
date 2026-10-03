@@ -132,6 +132,19 @@ async function installContexts({ engineProbe, aboutRegistered }) {
     if (typeof detach === "function") disposers.push(detach);
     runtime.consoleErrors = () => consoleOwner.diagnostics();
   }
+  // P4 browser tools (Plan 4 step 8): one process owner on that same console
+  // owner and registry, created with the first window and shared by every
+  // later one. It installs the agent tools into the channel but starts no
+  // endpoint (Settings alone does), captures nothing and acts on nothing. A
+  // normal window attaches its action confirmations and navigation watch.
+  const bridgeModule = consoleOwner ? optionalModule("AgentBridgeRuntime.sys.mjs") : null;
+  const bridge = bridgeModule ? guarded("agent tools", () => servicesModule.processSingleton("agent-bridge",
+    () => bridgeModule.createAgentBridgeRuntime({ services, nativeOwner: consoleOwner }))) : null;
+  if (bridge && normalWindow) {
+    const detach = guarded("agent tools window", () => bridge.attachWindow(window, { adapter: zen }));
+    if (typeof detach === "function") disposers.push(detach);
+    runtime.agentTools = () => bridge.getState();
+  }
   const installers = [
     ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings,
       consoleErrors: consoleOwner?.service ?? null }],

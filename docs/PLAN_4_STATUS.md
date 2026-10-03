@@ -100,7 +100,7 @@ Steps 1–3 have integrated source and verified builds below. Interactive arriva
 cookie isolation and reference-home admission remain unverified behind the
 recorded human gates. Step 3 synthetic light/dark rendering is verified. Step 5 source/build and light initial key presence are verified below; dark
 startup and interactive key flows remain limited. Step 6 source/build and initial light/dark rendering are verified below;
-Step 7 is in progress; steps 8–9 remain unintegrated. Step 4
+Steps 0–8 are locally integrated with the scoped evidence and open native gates below; step 9 remains unintegrated. Step 4
 source/build and status GUI are verified below.
 Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
 **NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
@@ -911,3 +911,112 @@ The source, tests/check/build and scoped real GUI review are complete for the
 local integration commit under the prompt's explicit human gate. Steps8/9
 remain ignored preparations until that commit. Product AI stays **NOT_AUTHORIZED**; E1/E2 remain unverified.
 No READY claim, push, tag or release.
+
+## Step 8 — agent bridge integration; native config and Settings render pass
+
+Codex owns the DOM-free registry/tool adapters, capture/act boundaries, PNG
+validation, BiDi reader lifetime repair, closed bridge bundle installer, contracts,
+tests/builds and native observers. Claude Opus 5.5 session
+`79445c41-a59b-42db-acce-2b2fc6d3f755` authored every frontend change: mixed
+Bridge/Capture/Action runtimes and actors, Services/Startup/About wiring,
+capability/snippet/session UI, fixture HTML and their injected tests. Codex
+edited no frontend code. Two same-session correction rounds addressed retained
+ownership, partial constructors, reentrant close, preference changes across awaits,
+created-tab adoption, exact confirmation authority and privacy cleanup.
+
+The endpoint stays off by default. Explicit endpoint enablement, one-session
+approval and each action confirmation are distinct. Copying a snippet neither
+installs a client nor grants authority. The build ships a checksum-pinned stdio
+bridge and copied Node in a private workstation namespace. Four metadata/read
+tools are presented as available after approval. Screenshot, open, navigate,
+click and type remain literally disabled in production until their separate
+native gates pass. No preference, environment or page override enables them.
+
+The reader retains raw work and uncertain native owners after public cancellation.
+Close is coalesced and positively acknowledged only after known cleanup settles;
+partial construction or uncertain native destruction permanently quarantines the
+shared allocation budget. Released session IDs remain denied across replacement.
+Parent capture observers invalidate on preference changes, retain uncertain
+registration/removal and require exact typed release acknowledgments. Created
+tabs touched by a user are conservatively retained for adoption. Fake evidence
+does not establish native event coverage or upstream child-handler disposal.
+
+Verification:
+
+- Root focused import331, installer36 and corrected reader89 cases passed;
+  these overlap broader suites and are not summed. Claude's final correction
+  reports **716/716 injected cases**, zero skips, pinned Node22.22.3.
+- `./dev test`: **PASS**, browser2151pass/10explicit native-only skips of2161.
+  Contexts165, rootPython237, bootstrap33, reader22, arrival18, manifest28,
+  socket11, bridgeinstaller36, bridge/notify53, coordinator4, probe14,
+  CEFadapter38, savedpages3 and existing provider/Cargo checks passed.
+  Native/stream CEF remain `SKIPPED_ENGINE_WORKSTREAM`.
+- `./dev check`: **PASS**. `./dev setup`: **PASS**, workstation root only.
+  Fingerprint `e1a68b615064f6c33626d66c2457133afaa646cc030539883cb80e521ceb3cea`.
+- Real Gecko native backend check: both default Codex and Claude config strings
+  matched the closed builder. Two actual copied-Node children through Gecko
+  Subprocess passed version and split UTF-8 stdin/stdout plus fixed stderr,
+  stdin close, independent EOF, owned wait/exit0 and cleanup. Gecko exit0,
+  ownership barrier settled and all pre/post source/build/bundle identities
+  matched. No bridge entrypoint, endpoint, actor, DOM or provider ran in this
+  separate check. Metadata subprocess receipts and descendant reaping were not
+  observed. The first failed attempt is retained: xpcshell/shared-module object
+  realm mismatch plus a scratch directory link-count change. Root corrected
+  only the ignored harness (null-prototype input; stable directory identity).
+- Real Settings light/dark: **PASS initial render**, four PNGs reviewed by root
+  and Claude (12-turn same-session read-only acceptance, zero edits). Nine tool
+  rows,4available/5unavailable, endpointOff, final privacy footnote and no snippets
+  matched exact assertions. Both runs exited0, direct children reaped, listeners
+  closed, source/build/profile/fixture/seed unchanged and endpoint absent.
+  Scope is `MARIONETTE_STEP8_SETTINGS_RENDER_ONLY / SEEDED_RENDER_ONLY /
+  ADMISSION_NOT_RUN`. No observer UI action, actor/service/provider/tool call.
+  Native group/private-owner disposal, keyboard/VoiceOver and occlusion are not
+  established by these screenshots.
+
+Ordinary-profile shipped bridge: **PASS**, run `98245267f78a0632`, with no
+Marionette, RemoteAgent or system-access option. CUA enabled the endpoint,
+explicitly denied one session (`NOT_APPROVED`), selected the clean fixture,
+and approved the next. Actual list/active URL and final title, project information
+and empty console result matched invented data. All five disabled methods
+returned `UNAVAILABLE`. Project home showed the approved session; CUA ended it
+and observed its removal, then disabled the endpoint and observed Off. The next
+read returned `UNAVAILABLE`. Three shipped bridge processes each had stdout and
+stderr EOF and owned exit0. CUA quit the app with visible confirmation; native
+exit0/direct children reaped, source/build/bundle/profile/fixture identities and
+known seed transition checks passed, socket absent. App/fixture pipe EOF and
+unknown descendant/private-owner disposal were not observed. This proves the
+ordinary metadata/read path, not a BiDi command or positive capture/action path.
+Receipt: `docs/evidence/plan4-8/ordinary-bridge-light-20261003-c/ordinary-report.json`;
+actual CUA sequence: `cua-sequence.json` in that directory. The first ordinary
+attempt stopped before app/bridge launch because lsof adds a descriptor field;
+a short owned-socket probe established that field and root corrected only the
+ignored parser while preserving exact PID/UID matching.
+
+Evidence (ignored):
+
+- `docs/evidence/plan4-8/settings-render-light-20261003-a/initial-light-window.png`
+- `docs/evidence/plan4-8/settings-render-light-20261003-a/initial-light-full-content.png`
+- `docs/evidence/plan4-8/settings-render-dark-20261003-b/initial-dark-window.png`
+- `docs/evidence/plan4-8/settings-render-dark-20261003-b/initial-dark-full-content.png`
+
+Logs: `.local/logs/plan4-step8-final-{test,check,build}.log`,
+`plan4-step8-native-backend-gate{-b,}.log`, `plan4-step8-gui-lead-review.json`
+and the two screenshot directories' `step8-render-report.json` files.
+Tasks/results: `.local/claude-tasks/08-agent-bridge*`.
+
+A separate CUA availability check raced the completed dark observer and opened
+an extra default workstation window (PID68959, executable without profile args).
+It was immediately excluded from test evidence and quit through its visible
+confirmation. An AX read during quit opened another default instance (PID71588);
+it too was quit, with no post-quit AX call, and exact process readback confirmed
+only the held synthetic PID86766 remained. No personal profile files were read.
+Root reset CUA and verified the synthetic Settings/fixture routes before any
+endpoint or approval action. Subsequent CUA binding requires the held runner's
+current owned process receipt; after quit, process readback replaces AX calls. This is a test-control incident,
+not synthetic-profile evidence or an explanation for any product failure.
+
+Decisions taken: preserve fail-closed capture/action capabilities; do not infer
+native privacy, native tab retirement or ordinary BiDi disposal from injected
+fakes or Marionette renders. Chromium per-container/tool integration remains an
+engine-workstream contract requirement. Product AI is **NOT_AUTHORIZED**;
+E1/E2 remain unverified. No READY claim, push, tag or release.

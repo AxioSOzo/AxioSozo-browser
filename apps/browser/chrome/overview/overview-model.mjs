@@ -997,7 +997,71 @@ export const AGENT_HOOKS = Object.freeze([
     where: "Add it to ~/.codex/config.toml. Codex reads notify only from your own settings, and only one notify line counts." }),
 ]);
 export const AGENT_HOOKS_NOTE = "AxioSozo never installs, edits or runs these. Each one calls the small notify script that ships with AxioSozo, through this profile's private connection point.";
-export const AGENT_TOOLS_NOTE = "Browser tools for agents (reading tabs, clicking, typing) are not available in this build.";
+// Only what this build's tools do: nothing here says whether Chromium tabs are listed.
+export const AGENT_TOOLS_NOTE = "Agents never see private windows. Console errors are read from Firefox tabs only, never from Chromium tabs. Clicking, typing and opening pages are not available in this build.";
+
+// ---------------------------------------------------------------- browser tools (P4)
+
+// Plugin settings for the agent bridge that ships with AxioSozo (stdio MCP).
+export const AGENT_BRIDGES = Object.freeze([
+  Object.freeze({ agent: "claude-code", name: "Claude Code",
+    where: "Merge it into the .mcp.json of a project folder. Claude Code then offers AxioSozo's browser tools in that project." }),
+  Object.freeze({ agent: "codex", name: "Codex",
+    where: "Add it to ~/.codex/config.toml. Codex then offers AxioSozo's browser tools." }),
+]);
+export const AGENT_BRIDGE_NOTE = "AxioSozo never installs, edits or runs these. Each one starts the agent bridge that ships with AxioSozo, through this profile's private connection point. Every agent session still asks you here first.";
+const AGENT_TOOL_LABELS = Object.freeze({
+  "tabs.list": "See your open tabs: address and title",
+  "tabs.active": "See which tab is in front",
+  "project.info": "Read the project's name, folder and environment links",
+  "console.errors": "Read console errors of a Firefox tab in the project",
+  "tabs.screenshot": "Take a screenshot of a tab",
+  "tabs.open": "Open a page in a new background tab",
+  "tabs.navigate": "Go to another page in a tab",
+  "page.click": "Click on a page",
+  "page.type": "Type into a page",
+});
+// Only reasons that add something to the tag; the footnote covers acting on pages.
+const AGENT_TOOL_REASONS = Object.freeze({
+  CAPTURE_NOT_ENABLED: "Not in this build yet: screenshots wait for their privacy checks.",
+  CLEANUP_PENDING: "Paused while AxioSozo finishes closing earlier agent work.",
+});
+
+/**
+ * The browser tools this build offers an agent you allow, from the browser's
+ * own capabilities (never a list of modules). With agent status on, a tool
+ * counts only when the live endpoint also offers it. Unknown entries and
+ * methods are left out; an empty answer is "unknown", never "none".
+ */
+export function agentToolsView(endpoint) {
+  const listening = endpoint?.state === "listening";
+  const live = new Map(listOf(endpoint?.methods).filter(item => typeof item?.method === "string").map(item => [item.method, item.available === true]));
+  const rows = listOf(endpoint?.capabilities).filter(item => Object.hasOwn(AGENT_TOOL_LABELS, item?.method)).map(item => {
+    const available = item.available === true && (!listening || live.get(item.method) === true);
+    const reason = typeof item.reason === "string" ? item.reason : null;
+    return { method: item.method, label: AGENT_TOOL_LABELS[item.method], available,
+      state: available ? "Available" : "Not available",
+      note: available ? null : AGENT_TOOL_REASONS[reason] ?? (listening && item.available === true ? "Not offered right now." : null) };
+  });
+  if (!rows.length) return { state: "unknown", text: "AxioSozo could not tell which browser tools are available.", rows };
+  const count = rows.filter(row => row.available).length;
+  const text = !count ? "No browser tools are available to agents in this build."
+    : listening ? "An agent you allow for its session can use the available tools until it disconnects or you end its session."
+      : "Once agent status is on, an agent you allow for its session can use the available tools.";
+  return { state: count ? "some" : "none", text, rows };
+}
+
+/** Why plugin settings cannot be shown; a fixed sentence per refusal. */
+export function agentBridgeErrorText(code) {
+  switch (code) {
+    case "AGENT_BRIDGE_CONFIG_UNAVAILABLE": case "CONFIG_UNAVAILABLE":
+      return "Not available in this build: AxioSozo found no verified copy of its agent bridge.";
+    case "ENDPOINT_UNAVAILABLE": return "Shown while agent status is on.";
+    case "TIMEOUT": return "Preparing these took too long. Try again in a moment.";
+    case "PRIVATE_WINDOW": return "Managed from a normal window.";
+    default: return "These settings could not be prepared. Try again in a moment.";
+  }
+}
 
 const ENDPOINT_PROBLEMS = Object.freeze({
   in_use: { label: "In use", text: "Something is already listening at this profile's connection point, so AxioSozo did not replace it." },

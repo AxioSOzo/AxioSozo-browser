@@ -513,6 +513,15 @@ export const METHODS = Object.freeze({
     ({ services }, p, window) => services.setAgentEndpointEnabled({ window, enabled: p.enabled })),
   getAgentHookConfig: agentMethod("getAgentHookConfig", { agent: T.hookAgent },
     ({ services }, p, window) => services.getAgentHookConfig({ window, agent: p.agent })),
+  // Copyable plugin settings for the shipped agent bridge (P4). The page names
+  // the agent only: never a socket, Node, bridge path, window or flag. Only
+  // the agent and the generated text cross back.
+  getAgentBridgeConfig: agentMethod("getAgentBridgeConfig", { agent: T.hookAgent }, async ({ services }, p, window) => {
+    if (typeof services.getAgentBridgeConfig !== "function") fail("CONFIG_UNAVAILABLE", "getAgentBridgeConfig is not available");
+    const value = await services.getAgentBridgeConfig({ window, agent: p.agent });
+    if (value?.agent !== p.agent || typeof value.text !== "string" || !value.text) fail("CONFIG_UNAVAILABLE", "getAgentBridgeConfig failed");
+    return { agent: value.agent, text: value.text };
+  }),
   listAgentActivity: agentMethod("listAgentActivity", { projectId: T.projectId },
     ({ services }, p) => services.listAgentActivity(p.projectId)),
   listAgentSessions: agentMethod("listAgentSessions", { projectId: T.projectId },

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. https://mozilla.org/MPL/2.0/ -->
+<!--
+  Plan 4 step 8 synthetic GUI fixture (P4 browser tools). Root serves this one
+  file on the fixed loopback route /agent-tools of a synthetic project's local
+  environment. Its only query key is mode, with the closed values below; no
+  mode means clean. Any other key, a repeated or empty mode, or an unknown
+  value shows only the refusal text. All data is invented. It loads nothing
+  from the network (see the CSP; the icon is inline), stores nothing, touches
+  no clipboard and talks to no provider, client or helper. It never takes
+  markup, script, a target or a URL from the query.
+
+  Each mode is its own document: the script copies exactly one inert
+  <template> into <main> while the page is parsed, then removes every
+  template and itself. No other mode's markup (no field) ever exists in a
+  clean page, and visiting a mode never changes another document.
+
+  - clean (also /agent-tools): field-free and frame-free static page with a
+    fixed colour band for visual comparison, and one inert click target
+    (#agent-click) whose visible result (#agent-click-result) counts clicks up
+    to 99. The safe capture surface; take screenshots before clicking.
+  - type: one ordinary text field (#agent-text, no password anywhere) for a
+    plain-text replacement; #agent-text-result echoes at most 80 characters.
+  - password: a synthetic password field and a text field. "Turn it into a
+    text field" keeps its password history; "Remove the password field"
+    removes it.
+  - closed-shadow: a component with a closed shadow root and no field inside
+    (initially field-free). "Add a password field inside the component" puts
+    one into that existing closed root; "Attach a new closed root" gives a
+    second host a new closed root whose password field is removed after
+    400 ms (a new persistent root with a short-lived field).
+  - opaque-focus: an embedded about:blank frame with a field;
+    "Focus inside the frame" moves focus into it.
+  - navigated, opened: field-free destinations of the fixed navigation
+    (/agent-tools?mode=navigated) and new-tab (/agent-tools?mode=opened)
+    requests, on this same origin.
+
+  Stale-document cases use an ordinary reload or navigation, not a mode.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent tools · synthetic fixture</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2212%22%20rx%3D%223%22%20fill%3D%22%232f6fdb%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  :root { color-scheme: light dark; font: 15px/1.45 system-ui, sans-serif; }
+  body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; }
+  .eyebrow { margin: 0; font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.7; }
+  h1 { font-size: 1.45rem; margin: 0.15rem 0 0.4rem; }
+  h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+  .lede { margin: 0 0 1rem; opacity: 0.8; }
+  /* Fixed colours, the same in light and dark, for comparing a screenshot. */
+  .band { display: grid; grid-template-columns: repeat(3, 1fr); height: 3.5rem; margin: 1.25rem 0; border-radius: 10px; overflow: hidden; }
+  .band span:nth-child(1) { background: #2f6fdb; }
+  .band span:nth-child(2) { background: #2da44e; }
+  .band span:nth-child(3) { background: #d29922; }
+  .band[data-band="navigated"] span:nth-child(2) { background: #8250df; }
+  .band[data-band="opened"] span:nth-child(2) { background: #cf222e; }
+  .facts { margin: 0; padding-left: 1.2rem; }
+  .facts code { font-family: ui-monospace, monospace; font-size: 0.9em; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; max-width: 22rem; margin: 0 0 0.75rem; }
+  input { font: inherit; padding: 0.3rem 0.5rem; }
+  button { font: inherit; padding: 0.35rem 0.85rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+  .result { min-height: 1.5em; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  .card { margin: 0.5rem 0; padding: 0.75rem 1rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 8px; }
+  iframe { width: 18rem; height: 3.5rem; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; }
+</style>
+</head>
+<body>
+<main id="fixture" data-mode="pending"></main>
+
+<template id="mode-clean">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: clean page</h1>
+  <p class="lede">Invented page for AxioSozo's browser tools. There is no field, frame or password on this page, and nothing here leaves this machine.</p>
+  <div class="band" data-band="clean" aria-hidden="true"><span></span><span></span><span></span></div>
+  <ul class="facts">
+    <li>Project: Harbor Suite (invented)</li>
+    <li>Fixed navigation destination: <code>/agent-tools?mode=navigated</code></li>
+    <li>Fixed new-tab destination: <code>/agent-tools?mode=opened</code></li>
+  </ul>
+  <h2 id="click-heading">Click target</h2>
+  <div class="actions"><button type="button" id="agent-click" aria-describedby="agent-click-result">Mark as seen</button></div>
+  <p class="result" id="agent-click-result" role="status" aria-live="polite">Not clicked yet.</p>
+</template>
+
+<template id="mode-type">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: plain text field</h1>
+  <p class="lede">One ordinary text field. Typing replaces what is in it. There is no password field on this page.</p>
+  <p class="field"><label for="agent-text">Synthetic note</label><input id="agent-text" type="text" autocomplete="off" spellcheck="false" maxlength="4096"></p>
+  <p class="result" id="agent-text-result" role="status" aria-live="polite">The field is empty.</p>
+</template>
+
+<template id="mode-password">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: password field</h1>
+  <p class="lede">A synthetic password field is on this page. Screenshots and typing are refused here; its value is never read.</p>
+  <p class="field" id="password-slot"><label for="agent-password">Synthetic password</label><input id="agent-password" type="password" autocomplete="off"></p>
+  <p class="field"><label for="agent-text">Synthetic note</label><input id="agent-text" type="text" autocomplete="off" spellcheck="false"></p>
+  <div class="actions" id="fixture-actions">
+    <button type="button" data-case="password-to-text">Turn it into a text field</button>
+    <button type="button" data-case="remove-password">Remove the password field</button>
+  </div>
+  <p class="result" id="fixture-result" role="status" aria-live="polite">The password field is present.</p>
+</template>
+
+<template id="mode-closed-shadow">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: closed shadow roots</h1>
+  <p class="lede">A component keeps its content in a closed shadow root. At first there is no field anywhere on this page.</p>
+  <div class="card" id="closed-host"></div>
+  <div class="card" id="late-host"><p>This host has no shadow root yet.</p></div>
+  <div class="actions" id="fixture-actions">
+    <button type="button" data-case="add-password">Add a password field inside the component</button>
+    <button type="button" data-case="attach-late">Attach a new closed root</button>
+  </div>
+  <p class="result" id="fixture-result" role="status" aria-live="polite">No field inside either host.</p>
+</template>
+
+<template id="mode-opaque-focus">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: embedded frame</h1>
+  <p class="lede">An embedded document with its own field. Pages with frames are refused.</p>
+  <p><iframe id="agent-frame" title="Synthetic embedded document"></iframe></p>
+  <div class="actions" id="fixture-actions"><button type="button" data-case="focus-frame">Focus inside the frame</button></div>
+  <p class="result" id="fixture-result" role="status" aria-live="polite">Focus is on this page.</p>
+</template>
+
+<template id="mode-navigated">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: navigated here</h1>
+  <p class="lede">The fixed destination of an approved navigation. No field, frame or password.</p>
+  <div class="band" data-band="navigated" aria-hidden="true"><span></span><span></span><span></span></div>
+</template>
+
+<template id="mode-opened">
+  <p class="eyebrow">Synthetic fixture · Plan 4 step 8</p>
+  <h1>Agent tools: opened in a new tab</h1>
+  <p class="lede">The fixed destination of an approved new background tab. No field, frame or password.</p>
+  <div class="band" data-band="opened" aria-hidden="true"><span></span><span></span><span></span></div>
+</template>
+
+<template id="mode-refused">
+  <h1>Unknown fixture mode</h1>
+  <p class="lede">This address is not one of the fixed fixture modes, so nothing else is shown.</p>
+</template>
+
+<script>
+  "use strict";
+  (() => {
+    const MODES = ["clean", "type", "password", "closed-shadow", "opaque-focus", "navigated", "opened"];
+    const TITLES = { clean: "clean page", type: "plain text field", password: "password field", "closed-shadow": "closed shadow roots",
+      "opaque-focus": "embedded frame", navigated: "navigated here", opened: "opened in a new tab", refused: "unknown mode" };
+    // Exactly one known key with one known value; anything else is refused.
+    const params = new URLSearchParams(location.search);
+    const keys = [...params.keys()];
+    const known = keys.length === 1 && keys[0] === "mode" && MODES.includes(params.get("mode"));
+    const mode = keys.length === 0 ? "clean" : known ? params.get("mode") : "refused";
+    const main = document.getElementById("fixture");
+    main.append(document.getElementById(`mode-${mode}`).content.cloneNode(true));
+    main.dataset.mode = mode;
+    document.title = `Agent tools · ${TITLES[mode]} · synthetic fixture`;
+    for (const template of [...document.querySelectorAll("template")]) template.remove();
+
+    const show = (id, text) => { document.getElementById(id).textContent = text; };
+    const passwordLabel = () => {
+      const label = document.createElement("label");
+      label.textContent = "Synthetic password ";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.autocomplete = "off";
+      label.append(input);
+      return label;
+    };
+    const onCase = actions => document.getElementById("fixture-actions").addEventListener("click", event => {
+      const name = event.target.closest?.("button[data-case]")?.dataset.case;
+      if (name && Object.hasOwn(actions, name)) actions[name]();
+    });
+    const setups = {
+      clean() {
+        let clicks = 0;
+        document.getElementById("agent-click").addEventListener("click", () => {
+          clicks = Math.min(clicks + 1, 99);
+          show("agent-click-result", `Clicked ${clicks} time${clicks === 1 ? "" : "s"}.`);
+        });
+      },
+      type() {
+        const input = document.getElementById("agent-text");
+        input.addEventListener("input", () => {
+          const points = [...input.value];
+          show("agent-text-result", points.length
+            ? `Text now: “${points.slice(0, 80).join("")}${points.length > 80 ? "…" : ""}” (${points.length} characters).`
+            : "The field is empty.");
+        });
+      },
+      password() {
+        onCase({
+          "password-to-text": () => {
+            const field = document.getElementById("agent-password");
+            if (field) { field.type = "text"; show("fixture-result", "The former password field is now a text field."); }
+          },
+          "remove-password": () => {
+            document.getElementById("password-slot")?.remove();
+            show("fixture-result", "The password field was removed.");
+          },
+        });
+      },
+      "closed-shadow"() {
+        const root = document.getElementById("closed-host").attachShadow({ mode: "closed" });
+        const note = document.createElement("p");
+        note.textContent = "Closed component: there is no field inside.";
+        root.append(note);
+        let late = null;
+        onCase({
+          "add-password": () => {
+            if (root.querySelector("input")) return;
+            root.append(passwordLabel());
+            show("fixture-result", "A password field is inside the closed component.");
+          },
+          "attach-late": () => {
+            if (late) return;
+            late = document.getElementById("late-host").attachShadow({ mode: "closed" });
+            const label = passwordLabel();
+            late.append(label);
+            show("fixture-result", "A new closed root was attached; its password field goes in 400 ms.");
+            setTimeout(() => { label.remove(); show("fixture-result", "The new closed root stays; its password field is gone."); }, 400);
+          },
+        });
+      },
+      "opaque-focus"() {
+        const inner = document.getElementById("agent-frame").contentDocument;
+        const label = inner.createElement("label");
+        label.textContent = "Embedded field ";
+        const input = inner.createElement("input");
+        input.id = "inner";
+        input.autocomplete = "off";
+        label.append(input);
+        inner.body.append(label);
+        onCase({ "focus-frame": () => { inner.getElementById("inner")?.focus(); show("fixture-result", "Focus is inside the frame."); } });
+      },
+    };
+    if (Object.hasOwn(setups, mode)) setups[mode]();
+    document.currentScript?.remove();
+  })();
+</script>
+</body>
+</html>

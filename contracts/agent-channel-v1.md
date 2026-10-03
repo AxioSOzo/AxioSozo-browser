@@ -111,6 +111,17 @@ Requests: `{"v":1,"id":<int>,"method":"…","params":{…}}`. Replies:
   agent, the action and its target; *Allow once* / *Deny*. Denial or 60 s
   without answer → `DENIED`.
 
+Confirmation is dispatch-once consent for one exact method, parameters and
+native target/document/project/root/container, bound to the original request
+signal. Final synchronous parent approval and current-owner checks precede the
+standard BiDi command invocation with no intervening await. Revoke, timeout,
+navigation or close cancels pending confirmation and undispatched/future work.
+An already-dispatched effect may complete or have an uncertain outcome; neither
+cancellation nor session close proves nonexecution or rollback. Never retry an
+uncertain effect automatically. Private dispatcher diagnostics do not extend
+wire replies with native handles or outcome fields. Effect-time child privacy
+and target proof remains required even after Allow once (§7.3).
+
 ### 4.3 Error codes
 
 `NOT_APPROVED`, `UNKNOWN_METHOD`, `INVALID_PARAMS`, `UNKNOWN_TAB`, `PRIVATE`,
@@ -128,6 +139,56 @@ channel lazily on the first tool call and maps tools 1:1:
 Channel errors become tool results with `isError: true` and the code in the
 text. Config snippets: Claude Code `.mcp.json` / `claude mcp add`, Codex
 `config.toml` `[mcp_servers.axiosozo]`.
+
+### 5.1 Verified bridge configuration
+
+The privileged process service exposes `getBridgeConfig(agent) -> Promise<string>`
+for primitive `claude-code` or `codex` only. This is not a new local-channel or
+MCP method. A trusted builder receives exactly `{agent,socketPath}` from the
+currently owned verified listening endpoint. Entry, the generator microtask and
+completion require the same config, endpoint, socket, generation, ready project
+cache and cache generation, live lifetime, non-shutdown service and no unresolved
+cleanup. Disable/re-enable and invalidate/refresh ABA discard an old result.
+The service deadline is 3,000 ms; nonempty output is at most 65,536 UTF-8 bytes.
+Missing or bad builders refuse with internal `CONFIG_UNAVAILABLE`; stale endpoint
+and deadline refuse with `ENDPOINT_UNAVAILABLE` and `TIMEOUT`. Invalid agent is
+`INVALID_INPUT`. These internal codes do not add agent wire methods or error fields.
+
+`AgentBridgeConfig` uses the direct `contexts/agent-config.mjs` `bridgeConfig`
+export. It admits only the fixed checksum-addressed seven-file namespace:
+package.json, the entry point, its four transitive source imports, and copied
+Node. Command is the installed `/node`; argv contains the installed bridge entry,
+literal `--agent` and `--socket`; `AXIOSOZO_AGENT_SOCKET` binds the identical
+current socket. No shell interpolation, PATH, home socket fallback, project script
+or actor-supplied root/executable is emitted. Native root selection uses the trusted
+`AXIOSOZO_STATIC_READER_ROOT`, then `AXIOSOZO_BUILD_ROOT`, under the existing closed
+build-root policy. Browser snippets never read or alter client configuration.
+
+Root setup/check verifies the six shipped source files and fixed pinned Node,
+then installs/checks only an absent exact namespace. Private directories are
+0700; the six package/import files are 0400 and copied Node 0500. Canonical paths,
+no symlinks, own UID, regular file type, one link, exact modes/sizes/hashes,
+inventories and repeated identities must pass. Existing unverified or partial
+namespaces are preserved and refused. Setup never executes Node or a client.
+These permissions are not OS immutable flags or a lease against a malicious same
+UID changing bytes after verification. Native admission uses path-based APIs;
+verification does not prove later execution against a same-UID filesystem race.
+
+Native metadata uses only fixed id/stat OS tools, fixed argv and C locale with
+no appended environment, 512 raw bytes per pipe, 1,000 ms metadata deadline and
+500 ms bounded cleanup attempts. Only numeric native EOF `0xff7a0001` from
+stdin.close is tolerated; real output EOF, a zero owned wait and validated
+metadata remain required for admission. Known owned wait completion suppresses unnecessary termination attempts;
+pipe closure, a timeout or kill request alone is not an exit receipt. The overall
+3,000 ms deadline does not preempt synchronous native work or guarantee child
+exit. The builder exposes no persistent owned-exit telemetry or hard native
+inventory-allocation ceiling.
+
+A normal-window wrapper and closed About agent-only method must recheck native
+window/current endpoint around await before publishing a snippet. Content supplies
+no paths, runtime callbacks or authority flags. Copying a snippet enables no
+endpoint, approves no session, launches no bridge/provider/helper and installs
+nothing. Missing installed/native admission remains unavailable.
 
 ## 6. Chromium tabs
 
@@ -176,6 +237,172 @@ configuration. No provider configuration is read, installed or executed by the
 browser. These shapes follow the [Claude hook reference](https://code.claude.com/docs/en/hooks#command-hook-fields)
 and [Codex configuration reference](https://developers.openai.com/codex/config-reference/),
 checked 2 October 2026. Live provider integration remains NOT_AUTHORIZED.
+
+### 7.1 Step 8 privileged reads and tool ownership
+
+The installed DOM-free backend defines these seams; module presence or fake-test
+success never accepts a native capability. Default endpoint enablement remains
+false. Native read/title/capture/action glue requires separately reviewed source;
+actual ordinary-profile evidence is required before claiming native verification.
+Capture and each act/open availability flag additionally remain false until their
+individual native gates are accepted. A blocked interactive read gate remains
+NOT_VERIFIED even when the source and injected tests pass.
+
+`isApprovedBridgeSession(id)` is a passive privileged boolean from Core's private
+session map, restricted to approved agent-bridge sessions that are not stopped,
+closed, read-ended or aborted. Service adds current enabled/listening endpoint,
+config/socket, ready cache/generations, lifetime/shutdown and cleanup checks, then
+rechecks. EOF draining can leave a copied public session snapshot approved while
+this private checker already denies. Copied/project-filtered `listSessions` is
+presentation, not authority. The checker supports a genuinely approved null-project
+session without a filter; existing known-project approval admission is unchanged
+and does not grant null/unknown projects. It is never exposed to About or the wire.
+
+Core passes a deeply frozen approved view and the exact original request
+AbortSignal to synchronous `listTabs(view,{signal})` and
+`getTab(id,view,{signal})`, including initial and post-confirmation target checks.
+Entry refuses reentrant revocation before metadata callbacks. Public tab fields
+remain exactly tab_id/url/title/active/project_id/engine. Opaque public IDs never
+substitute for native browsing-context/container IDs or issued registry identity.
+
+Approved native title projection may read only the current trusted
+WindowGlobalParent.documentTitle through synchronous `registry.withTrusted` with
+the exact issued expected descriptor, checking request/session authority before
+and after. It is a cached IPC string and may lag a title change. Bound/sanitize it
+to 4,096 units in a separate metadata copy; failed/absent title remains empty.
+Base console-registry title remains empty. Never use contentDocument.title,
+browser.contentTitle's nonremote fallback, page getters, a cloned expected object
+or a title-bearing copy as capture authority. These bounds are not a secret scrubber.
+
+Use the existing Step 7 process owner, registry, native project publication/check,
+ownerForTab/readTab and navigation subscription. A console read is fresh synchronous
+RAM admission under §8; it starts no new child capture or subscription. Unknown
+engine/privacy/category/root/route/document/container facts refuse. Never construct
+a second console observer, registry or navigation namespace when enabling tools.
+
+`installTools` accepts exactly six own data functions: isMethodAvailable,
+listTabs, getTab, executeMethod, confirmAction and releaseSession. Keep each
+standalone tools/action/capture/PNG owner and its private close/getState outside
+that projection. Service replacement revokes sessions but does not await private
+standalone close; Core observes release rejections but does not await disposal.
+Neither projection replacement nor service close is that owner's cleanup receipt.
+The native process owner must deny new work synchronously, retain every superseded
+or late owner, await positive cleanup and quarantine failed/pending ownership until
+explicit retry. A replacement cannot regain capture while old cleanup is unresolved.
+Window close retires only that window; it cannot dispose another window's owner.
+
+The read owner serializes screenshot acquisition/cleanup; the act owner serializes
+operations. Both retain late acquisitions and failed/pending closes, and suppress
+late image/error delivery. Pending cleanup coalesces; only explicit
+release/close retries a failed attempt. Global close denies further admission but
+allows cleanup retry. A positive disposal receipt must be literal true, not a
+closed flag, ignored Promise, undefined or false. Read/act owners retain at most
+4,096 revoked session IDs; exceeding that bound closes the owner. Diagnostics are
+categorical counts only and run no capture/probe/release/wait merely when read.
+Defaults are a 10,000 ms operation and 1,000 ms cleanup deadline, bounded to
+1..30,000 and 1..5,000 ms. A deadline does not certify OS exit or universal cleanup.
+
+### 7.2 Viewport capture, default refusal and limits
+
+`tabs.screenshot` remains unavailable until the exact native capture/privacy
+implementation and ordinary-profile evidence are accepted. Trusted `captureEnabled`
+defaults false. An actor boolean, copied document token, matching pre/post trees
+or parent cached password fact grants no image permission. The initial failed
+privacy admission causes zero native capture or PNG resize. Chromium capture
+remains unavailable through this Gecko backend.
+
+An admitted read lease binds the exact issued registry object, registered current
+child/document and selected visible live normal top-level owner, URL/principal,
+project/root/publication/route/container and caller session/consent. Parent and
+child authority bracket every acquisition, capture, PNG and resize await. Native
+privacy proof must detect transient control/password insertion/removal and type
+changes, existing and newly attached open/closed author roots, frame/navigation
+changes and async native screenshot timing. Drain monotonic mutation records and
+retain root identity; a later clean tree never restores an invalidated lease.
+An initial conservative field-free/frame-free HTML scope refuses all form/editable
+controls, historic password risk, unsafe/opaque/UA roots, subframes and unknown
+scope. Do not reject an unrelated noneditable focus change without an affected
+privacy/owner condition; do not read values or patch page methods. Unknown queue,
+modal, root, currentness or native readback semantics keep availability denied.
+
+The genuine listener-free owned WebDriverSession uses standard
+browsingContext.captureScreenshot, viewport origin and PNG. Refuse enabled/running
+RemoteAgent or Marionette, system access and preexisting WebDriver sessions.
+Every automation ownership fact must be verified literal false; missing, unknown
+or throwing facts refuse before allocation. acceptInsecureCerts remains false
+and preferences/listeners are not changed. Failed native construction/destruction
+must retain or quarantine uncertain ownership and cannot produce a positive close
+receipt; pending operations must settle before an owner is retired.
+Preserve 128 process and 16 unchanged-document native allocation slots, counting
+failed constructors. Parent session destruction does not prove all upstream
+content handlers retired; request churn never establishes universal cleanup.
+
+Close the owned reader while the child lease is still live, recheck, then perform
+terminal child commit: synchronously validate and retire the exact lease and reply
+literal true only if both succeeded. After that reply the capture orchestrator
+checks parent authority synchronously and returns the immutable completed image
+with no further await. A later publication still requires its own current caller
+approval/consent/owner; this commits a past image, not future observation authority.
+Tainted native bytes may exist privately before discard, but cannot be published
+by an invalidated operation. No secure zeroing or universal no-image-ever-painted
+claim follows. Failed/late reader, lease and PNG stream cleanup remains retained;
+timeout/abort is not disposal proof or a hard native RAM/CPU/record-queue bound.
+
+Wire max_width is 64..1920, default 1280, with at most 2 MiB decoded PNG. Trusted
+bridge raw height is at most 16,384. Decision/handoff purposes, chosen only by
+trusted callers, fit both sides within 1280 and at most 1 MiB; they cannot be
+selected from agent wire input. No upscaling; a portrait's resulting width below
+64 is valid. Full bounded PNG framing/CRCs/order, one IHDR, terminal IEND with no
+trailing bytes, admitted static RGB/RGBA formats and actual native pixel decode/
+dimensions precede acceptance. Caps are 16,384 per raw dimension, 33,554,432 pixels
+and 1,024 chunks. Resize validates exact floored targets and output byte cap;
+byte overflow refuses rather than inventing an additional resize. Images stay in RAM.
+
+Step 5 screenAvailable/watch and manual handoff include_screen remain separate
+caller/consent/privacy/publication gates. Screenshot acceptance cannot silently
+enable them or retroactively authorize earlier title/selection reads.
+
+### 7.3 Genuine act/open admission and cleanup
+
+Each click/type/navigation/open capability defaults false and returns UNAVAILABLE
+before confirmation or effect until its exact native gate is accepted. Effects
+remain standard BiDi commands under one privately owned native session per request;
+there is no generic custom actor effect RPC. A separate action actor may install,
+revoke and check only the exact one-use privileged target/privacy callback in the
+existing owned sandbox. Actor parameters cannot grant session/project/native-owner
+authority. Use only root-reviewed fixed function declarations and scalar parameters.
+
+Bind the original Document with a root-owned opaque BiDi handle and exact native
+realm/context/private sandbox; no serialized node-field traversal or broad realm
+lookup. The effect-time native checker rejects current/historic password risk,
+replacement document and unsafe/unknown/custom/frame targets immediately before
+the first effect. No await/page callback intervenes in that check-to-effect boundary.
+Type replaces plain text without reading the existing value. Standard effects
+can invoke later native/page reactions; dispatch-once consent is not rollback.
+Selectors are at most 512 Unicode code points and reject C0/C1; type text is at
+most 4,096 code points and rejects NUL. URLs retain the Core 8,192 UTF-16-unit
+bound and C0/C1 refusal. Public t_ IDs or numeric container IDs are never guessed
+BiDi context/user-context identifiers. Exact native source/ownership/realm proof
+and positive retirement receipts remain required, not inferred from naming APIs.
+
+`tabs.open` remains the approved read/open method without an extra action prompt;
+click/type/navigation require Allow once and a matching non-null session project.
+A contract-permitted genuinely approved null-project open still needs all native
+checks and the actual default container. Fresh normal reference context and native
+container mapping require exact owned registry/project identity; no new-container
+fallback or foreign target adoption is permitted.
+
+New-tab create owns a pre-dispatch allocation lease because addTab can precede an
+awaited create rejection. Unknown, failed or late creation retains that exact lease
+and native session until positive no-allocation proof, guarded retirement of only
+the still-owned untouched never-navigated blank, or positive native ownership
+transfer. Once URL navigation is invoked, automatic tab close is permanently
+forbidden; positive adoption into the browser/shared registry or retained exact
+ownership follows even after error/timeout. Session close alone neither removes
+nor adopts a tab. Never close a foreign/touched/moved/unknown target or mint a
+public tab ID from a raw native context ID. Pending/failed cleanup blocks reuse
+and requires retained-owner explicit retry. The §4.2 dispatched-effect uncertainty
+and no-automatic-retry rules apply.
 
 ## 8. Gecko console records (Plan 4 step 7)
 

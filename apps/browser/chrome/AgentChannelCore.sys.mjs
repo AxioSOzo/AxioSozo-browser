@@ -149,6 +149,14 @@ export class AgentChannelController {
   get sessions() {
     return freeze([...this.#sessions.values()].map(session => this.#view(session, true)));
   }
+  // Privileged passive authority read. Never exported over the agent wire.
+  // EOF starts draining before the presentation snapshot changes state.
+  isApprovedBridgeSession(id) {
+    if (typeof id !== "string" || !/^s_[0-9a-f]{16}$/u.test(id) || this.#stopping) return false;
+    const session = this.#sessions.get(id);
+    return !!session && session.state === "approved" && session.hello?.client.name === "agent-bridge"
+      && !session.closed && !session.readEnded && !session.abort.signal.aborted;
+  }
   accept(transport) {
     if (!transport || typeof transport.write !== "function" || typeof transport.close !== "function")
       throw error("UNAVAILABLE");
@@ -393,8 +401,8 @@ export class AgentChannelController {
       }).then(value => done(resolve, value), cause => done(reject, cause));
     });
   }
-  #tab(session, id, action = false) {
-    const tab = this.#runtime.getTab?.(id);
+  #tab(session, id, action = false, abort) {
+    const tab = this.#runtime.getTab?.(id, this.#view(session), { signal: abort?.signal });
     if (!tab || tab.tab_id !== id) throw error("UNKNOWN_TAB");
     // Missing private/safety metadata is never interpreted as permission.
     if (tab.private === true) throw error("PRIVATE");
@@ -421,16 +429,17 @@ export class AgentChannelController {
   async #request(session, message, abort) {
     const { id, method, params } = message;
     try {
+      if (!this.isApprovedBridgeSession(session.id) || abort.signal.aborted) throw error("NOT_APPROVED");
       let result;
       if (method === "project.info") {
         result = projectInfo(this.#runtime.getProjects().find(project => project.id === session.projectId));
       } else if (method === "tabs.list" || method === "tabs.active") {
         if (typeof this.#runtime.listTabs !== "function" || typeof this.#runtime.isSensitiveHost !== "function") throw error("UNAVAILABLE");
-        const tabs = this.#runtime.listTabs().map(tab => this.#publicTab(tab)).filter(Boolean);
+        const tabs = this.#runtime.listTabs(this.#view(session), { signal: abort.signal }).map(tab => this.#publicTab(tab)).filter(Boolean);
         result = method === "tabs.list" ? tabs : tabs.find(tab => tab.active) ?? null;
       } else {
         const action = ACTIONS.has(method);
-        let tab = params.tab_id ? this.#tab(session, params.tab_id, action) : null;
+        let tab = params.tab_id ? this.#tab(session, params.tab_id, action, abort) : null;
         if (method === "tabs.open") {
           if (typeof this.#runtime.isSensitiveHost !== "function") throw error("UNAVAILABLE");
           if (this.#runtime.isSensitiveHost(new URL(params.url).hostname)) throw error("BLOCKED_CATEGORY");
@@ -444,7 +453,7 @@ export class AgentChannelController {
             freeze({ session: this.#view(session), method, params: { ...params }, tab: before }), { signal: abort.signal }
           ), CHANNEL_LIMITS.actionApprovalMs, abort, "DENIED");
           if (allowed !== true || session.readEnded) throw error("DENIED");
-          tab = this.#tab(session, params.tab_id, true);
+          tab = this.#tab(session, params.tab_id, true, abort);
           if (tab.url !== before.url || (tab.document_id ?? null) !== before.document_id || session.state !== "approved") throw error("DENIED");
         }
         if (typeof this.#runtime.executeMethod !== "function") throw error("UNAVAILABLE");

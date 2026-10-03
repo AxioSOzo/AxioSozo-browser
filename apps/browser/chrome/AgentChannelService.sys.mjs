@@ -142,8 +142,8 @@ export function createAgentChannelService(deps = {}) {
     onSessionClosed(view, code) {
       try { return tools?.releaseSession?.(view.session, code); } catch { return undefined; }
     },
-    listTabs: () => tools?.listTabs?.() ?? EMPTY,
-    getTab: id => tools?.getTab?.(id) ?? null,
+    listTabs: (...args) => tools?.listTabs?.(...args) ?? EMPTY,
+    getTab: (...args) => tools?.getTab?.(...args) ?? null,
     isMethodAvailable: available,
     executeMethod: (...args) => {
       if (typeof tools?.executeMethod !== "function") throw error("UNAVAILABLE");
@@ -326,6 +326,19 @@ export function createAgentChannelService(deps = {}) {
     const view = controller.sessions.find(value => value.session === id);
     return view?.project_id === projectId && view.client?.name === "agent-bridge" ? controller.revoke(id) : false;
   }
+  // Trusted native runtime only; presentation snapshots are not authority.
+  function isApprovedBridgeSession(id) {
+    if (typeof id !== "string" || !SESSION.test(id)) return false;
+    const config = nativeConfiguration, owned = endpoint, life = lifetime;
+    const revision = generation, cacheRevision = cacheGeneration, socketPath = config?.socketPath;
+    const current = () => !closed && !shutdown.signal.aborted && wanted && cacheReady && cacheState.state === "ready"
+      && !cleanupBlocked && cleanupJob === null && config && owned && life && !life.signal.aborted
+      && config === nativeConfiguration && owned === endpoint && life === lifetime
+      && revision === generation && cacheRevision === cacheGeneration && state.state === "listening"
+      && state.socketPath === socketPath && config.socketPath === socketPath && owned.status.state === "listening";
+    try { return current() === true && controller.isApprovedBridgeSession(id) === true && current() === true; }
+    catch { return false; }
+  }
   async function getHookConfig(agent) {
     if (!["claude-code", "codex"].includes(agent)) throw error("INVALID_INPUT");
     const config = nativeConfiguration, revision = generation, owned = endpoint;
@@ -338,6 +351,33 @@ export function createAgentChannelService(deps = {}) {
     }), AGENT_SERVICE_LIMITS.nativeConfigMs, { signal: shutdown.signal });
     if (!current()) throw error("ENDPOINT_UNAVAILABLE");
     if (typeof snippet !== "string" || encoder.encode(snippet).length > AGENT_SERVICE_LIMITS.configBytes) throw error("CONFIG_UNAVAILABLE");
+    return snippet;
+  }
+  async function getBridgeConfig(agent) {
+    if (!["claude-code", "codex"].includes(agent)) throw error("INVALID_INPUT");
+    const config = nativeConfiguration, revision = generation, cacheRevision = cacheGeneration, owned = endpoint, life = lifetime;
+    const socketPath = config?.socketPath;
+    const current = () => !closed && !shutdown.signal.aborted && wanted && state.state === "listening"
+      && cacheReady && cacheState.state === "ready" && cacheRevision === cacheGeneration
+      && !cleanupBlocked && cleanupJob === null && config && owned && life && !life.signal.aborted
+      && life === lifetime && config === nativeConfiguration
+      && owned === endpoint && revision === generation && config.socketPath === socketPath
+      && state.socketPath === socketPath && owned.status.state === "listening";
+    if (!current()) throw error("ENDPOINT_UNAVAILABLE");
+    if (typeof deps.buildBridgeConfig !== "function") throw error("CONFIG_UNAVAILABLE");
+    let snippet;
+    try {
+      snippet = await timeout(Promise.resolve().then(() => {
+        if (!current()) throw error("ENDPOINT_UNAVAILABLE");
+        return deps.buildBridgeConfig({ agent, socketPath });
+      }), AGENT_SERVICE_LIMITS.nativeConfigMs, { signal: shutdown.signal });
+    } catch (cause) {
+      if (!current()) throw error("ENDPOINT_UNAVAILABLE");
+      throw error(cause?.code === "TIMEOUT" ? "TIMEOUT" : "CONFIG_UNAVAILABLE");
+    }
+    if (!current()) throw error("ENDPOINT_UNAVAILABLE");
+    if (typeof snippet !== "string" || !snippet.length || encoder.encode(snippet).length > AGENT_SERVICE_LIMITS.configBytes)
+      throw error("CONFIG_UNAVAILABLE");
     return snippet;
   }
   function installTools(value) {
@@ -361,7 +401,7 @@ export function createAgentChannelService(deps = {}) {
   }
   return Object.freeze({ initialize: refreshProjects, refreshProjects, invalidateProjects, getProjects: () => cache,
     getProjectCacheState: () => cacheState, setEnabled, getEndpointState: snapshot, registerPresenter, activatePresenter,
-    listSessions: sessions, revokeSession, getHookConfig, installTools,
+    listSessions: sessions, revokeSession, isApprovedBridgeSession, getHookConfig, getBridgeConfig, installTools,
     listActivity: projectId => activity.snapshot(projectId), needsAttention: () => activity.attention(),
     rememberReturnTarget: target => activity.rememberReturnTarget(target), returnTarget: projectId => activity.returnTarget(projectId),
     onChange(callback) { if (closed || typeof callback !== "function") throw error("INVALID_LISTENER"); listeners.add(callback); return () => listeners.delete(callback); },

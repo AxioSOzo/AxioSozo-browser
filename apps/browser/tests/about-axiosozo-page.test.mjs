@@ -724,7 +724,11 @@ test("agent status: off in every new page; Turn on asks the browser and shows wh
   assert.equal(on.className, "primary");
   assert.equal(on.getAttribute("aria-describedby"), "agent-status-text");
   assert.equal(agentBody(page).querySelectorAll(".hook-row").length, 0, "no hook settings while off");
-  assert.match(agentBody(page).textContent, /Browser tools for agents .* are not available in this build\./u);
+  assert.match(agentBody(page).textContent, /Clicking, typing and opening pages are not available in this build\./u);
+  const footnote = agentBody(page).querySelectorAll("p.footnote").find(node => /private windows/u.test(node.textContent));
+  assert.equal(footnote.textContent, "Agents never see private windows. Console errors are read from Firefox tabs only, never from Chromium tabs. "
+    + "Clicking, typing and opening pages are not available in this build.");
+  assert.doesNotMatch(agentBody(page).textContent, /Chromium tabs are listed|listed but never read/u, "no Chromium listing is claimed");
   assert.equal(page.calls.some(([name]) => name === "getAgentHookConfig" || name === "setAgentEndpointEnabled"), false, "reading starts nothing");
   on.focus();
   on.click();
@@ -822,4 +826,117 @@ test("agent status lifecycle: a hidden page publishes nothing; an agents event r
   await page.fire("pageshow", { persisted: true });
   await flush(); await flush();
   assert.equal(reads(), 3, "a restored page reads afresh");
+});
+
+// ---------------------------------------------------------------- browser tools (P4, step 8)
+
+const CAPABILITIES = [
+  { method: "tabs.list", available: true, reason: null }, { method: "tabs.active", available: true, reason: null },
+  { method: "project.info", available: true, reason: null }, { method: "console.errors", available: true, reason: null },
+  { method: "tabs.screenshot", available: false, reason: "CAPTURE_NOT_ENABLED" }, { method: "tabs.open", available: false, reason: "OPEN_NOT_ENABLED" },
+  { method: "tabs.navigate", available: false, reason: "ACT_NOT_ENABLED" }, { method: "page.click", available: false, reason: "ACT_NOT_ENABLED" },
+  { method: "page.type", available: false, reason: "ACT_NOT_ENABLED" }];
+const LIVE = CAPABILITIES.map(({ method, available }) => ({ method, available }));
+function toolHandlers(overrides = {}) {
+  const box = { endpoint: { ...ENDPOINT, capabilities: CAPABILITIES }, copied: [] };
+  const handlers = {
+    getAgentEndpointState: () => box.endpoint,
+    setAgentEndpointEnabled: ({ enabled }) => {
+      box.endpoint = enabled ? { ...ENDPOINT, enabled: true, state: "listening", socketPath: "/synthetic/profile/.a/s", methods: LIVE, capabilities: CAPABILITIES }
+        : { ...ENDPOINT, capabilities: CAPABILITIES };
+      return box.endpoint;
+    },
+    getAgentHookConfig: ({ agent }) => ({ agent, text: `hook ${agent}\n` }),
+    getAgentBridgeConfig: ({ agent }) => ({ agent, text: agent === "codex" ? "[mcp_servers.axiosozo]\ncommand = \"<b>node</b>\"\n" : "{\"mcpServers\":{}}\n" }),
+    ...overrides,
+  };
+  return { box, handlers, navigator: { clipboard: { writeText: async text => { box.copied.push(text); } } } };
+}
+const bridgeRows = page => agentBody(page).querySelectorAll(".bridge-row");
+
+test("browser tools: the browser's own list, with fixed reasons; plugin settings only while on, named by agent, shown as text and copied on request", async () => {
+  const { box, handlers, navigator } = toolHandlers();
+  const page = await loadPage({ hash: "#ai", handlers, navigator });
+  const tools = agentBody(page).querySelector(".agent-tools");
+  assert.equal(tools.getAttribute("role"), "group");
+  assert.equal(page.document.getElementById(tools.getAttribute("aria-labelledby")).textContent, "Browser tools for agents");
+  assert.equal(tools.querySelector(".tool-list").getAttribute("aria-label"), "Browser tools");
+  assert.equal(page.document.getElementById("agent-tools-text").textContent, "Once agent status is on, an agent you allow for its session can use the available tools.");
+  const rows = tools.querySelectorAll(".tool-row");
+  assert.deepEqual(rows.map(row => [row.querySelector(".tag").textContent, row.querySelector(".tool-label").textContent, row.dataset.available]), [
+    ["Available", "See your open tabs: address and title", "true"], ["Available", "See which tab is in front", "true"],
+    ["Available", "Read the project's name, folder and environment links", "true"], ["Available", "Read console errors of a Firefox tab in the project", "true"],
+    ["Not available", "Take a screenshot of a tab", "false"], ["Not available", "Open a page in a new background tab", "false"],
+    ["Not available", "Go to another page in a tab", "false"], ["Not available", "Click on a page", "false"], ["Not available", "Type into a page", "false"]]);
+  assert.equal(rows[4].querySelector(".help").textContent, "Not in this build yet: screenshots wait for their privacy checks.");
+  assert.equal(rows[0].querySelector(".tag").getAttribute("data-tone"), "ok");
+  assert.equal(rows[4].querySelector(".tag").hasAttribute("data-tone"), false, "unavailable stays a quiet tag");
+  assert.equal(bridgeRows(page).length, 0, "no plugin settings while off");
+  assert.equal(page.calls.some(([name]) => name === "getAgentBridgeConfig"), false, "reading starts nothing");
+  agentButton(page, "Turn on").click();
+  await flush();
+  assert.deepEqual(page.calls.filter(([name]) => name === "getAgentBridgeConfig").map(([, params]) => params),
+    [{ agent: "claude-code" }, { agent: "codex" }], "the page names an agent only: never a socket, Node or bridge path");
+  assert.equal(page.document.getElementById("agent-tools-text").textContent,
+    "An agent you allow for its session can use the available tools until it disconnects or you end its session.");
+  const plugins = bridgeRows(page);
+  assert.deepEqual(plugins.map(row => row.querySelector(".row-title").textContent), ["Claude Code", "Codex"]);
+  assert.match(plugins[0].querySelector(".help").textContent, /\.mcp\.json/u);
+  assert.equal(plugins[1].querySelector("pre code").textContent, "[mcp_servers.axiosozo]\ncommand = \"<b>node</b>\"\n", "text, never markup");
+  assert.equal(plugins[1].querySelectorAll("b").length, 0);
+  assert.equal(plugins[1].querySelector("pre").getAttribute("aria-label"), "Codex plugin settings");
+  const copy = plugins[1].querySelector("button");
+  assert.equal(copy.textContent, "Copy for Codex");
+  assert.equal(copy.getAttribute("aria-describedby"), "agent-bridge-codex-help");
+  copy.focus();
+  copy.click();
+  await flush();
+  assert.deepEqual(box.copied, ["[mcp_servers.axiosozo]\ncommand = \"<b>node</b>\"\n"]);
+  assert.equal(page.document.getElementById("status").textContent, "Codex plugin settings copied. Paste them into your Codex settings yourself.");
+  await page.emit("agents");
+  assert.equal(page.document.activeElement?.dataset.focusKey, "agents:bridge:codex:copy", "focus stays on the copy button across a re-render");
+  assert.equal(page.calls.filter(([name]) => name === "getAgentBridgeConfig").length, 2, "prepared settings for the same socket are kept");
+  agentButton(page, "Turn off").click();
+  await flush();
+  assert.equal(bridgeRows(page).length, 0);
+  assert.doesNotMatch(agentBody(page).textContent, /\bnull\b|\bundefined\b|\[object /u);
+});
+
+test("plugin settings: no verified bridge says so and offers no copy; an answer prepared for an earlier socket is never shown", async () => {
+  const listening = socket => ({ ...ENDPOINT, enabled: true, state: "listening", socketPath: socket, methods: LIVE, capabilities: CAPABILITIES });
+  const missing = toolHandlers({ getAgentEndpointState: () => listening("/synthetic/profile/.a/s"),
+    getAgentBridgeConfig: () => { throw { code: "AGENT_BRIDGE_CONFIG_UNAVAILABLE", message: "AGENT_BRIDGE_CONFIG_UNAVAILABLE" }; } });
+  const page = await loadPage({ hash: "#ai", handlers: missing.handlers });
+  assert.equal(bridgeRows(page).length, 2);
+  assert.ok(bridgeRows(page).every(row => /no verified copy of its agent bridge/u.test(row.textContent)));
+  assert.equal(bridgeRows(page).flatMap(row => row.querySelectorAll("button")).length, 0);
+  assert.equal(agentBody(page).querySelectorAll(".hook-row button").length, 2, "hook settings are unaffected");
+
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const box = { socket: "/synthetic/a/.a/s" };
+  const stale = toolHandlers({ getAgentEndpointState: () => listening(box.socket),
+    getAgentBridgeConfig: ({ agent }) => {
+      const socket = box.socket;
+      const answer = { agent, text: `${agent} at ${socket}\n` };
+      return socket === "/synthetic/a/.a/s" ? held.then(() => answer) : answer;
+    } });
+  const second = await loadPage({ hash: "#ai", handlers: stale.handlers });
+  assert.equal(bridgeRows(second)[0].textContent.includes("Preparing…"), true);
+  box.socket = "/synthetic/b/.a/s";
+  await second.emit("agents");
+  release();
+  await flush(); await flush();
+  const shown = bridgeRows(second).map(row => row.querySelector("pre code")?.textContent);
+  assert.deepEqual(shown, ["claude-code at /synthetic/b/.a/s\n", "codex at /synthetic/b/.a/s\n"]);
+  assert.doesNotMatch(agentBody(second).textContent, /synthetic\/a\//u, "the earlier socket's answer is dropped");
+});
+
+test("browser tools without the browser's capabilities say so; nothing is claimed as available", async () => {
+  const { handlers } = agentHandlers();
+  const page = await loadPage({ hash: "#ai", handlers });
+  assert.equal(page.document.getElementById("agent-tools-text").textContent, "AxioSozo could not tell which browser tools are available.");
+  assert.equal(agentBody(page).querySelectorAll(".tool-row").length, 0);
+  const hidden = await loadPage({ hash: "#ai", handlers: { getAgentEndpointState: () => { throw { code: "PRIVATE_WINDOW", message: "x" }; } } });
+  assert.equal(agentBody(hidden).querySelectorAll(".agent-tools").length, 0, "no tools list where agent status cannot be read");
 });

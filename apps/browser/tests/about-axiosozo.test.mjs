@@ -149,11 +149,11 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, decision keys and Understand", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, P4 plugin settings, decision keys and Understand", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "acceptProjectBrief", "activeContext", "cancelDecisionKeyOperations", "cancelProjectReadOperations", "cancelUnderstand",
     "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
-    "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings",
+    "getAgentBridgeConfig", "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings",
     "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getUnderstandAvailability", "getUnderstandState",
     "linkOrganization", "linkProject",
     "listAgentActivity", "listAgentSessions", "listContexts",

@@ -498,3 +498,69 @@ test("decision keys: what each form allows — store follows its own pref, remov
   assert.equal(M.keyRefusalText("SENDER_REJECTED"), "This page is not connected to AxioSozo.");
   assert.equal(M.keyChangedText("openai", "stored"), "OpenAI key stored in the macOS Keychain. Nothing was sent and consent did not change.");
 });
+
+test("browser tools (step 8): the browser's own capabilities, gated by the live endpoint; fixed reasons, never a module list", () => {
+  const capabilities = [
+    { method: "tabs.list", available: true, reason: null }, { method: "tabs.active", available: true, reason: null },
+    { method: "project.info", available: true, reason: null }, { method: "console.errors", available: true, reason: null },
+    { method: "tabs.screenshot", available: false, reason: "CAPTURE_NOT_ENABLED" }, { method: "tabs.open", available: false, reason: "OPEN_NOT_ENABLED" },
+    { method: "tabs.navigate", available: false, reason: "ACT_NOT_ENABLED" }, { method: "page.click", available: false, reason: "ACT_NOT_ENABLED" },
+    { method: "page.type", available: false, reason: "ACT_NOT_ENABLED" }, { method: "tabs.eval", available: true, reason: null }];
+  const off = M.agentToolsView({ state: "disabled", methods: [], capabilities });
+  assert.equal(off.state, "some");
+  assert.equal(off.text, "Once agent status is on, an agent you allow for its session can use the available tools.");
+  assert.deepEqual(off.rows.map(row => [row.method, row.available, row.state]), [["tabs.list", true, "Available"], ["tabs.active", true, "Available"],
+    ["project.info", true, "Available"], ["console.errors", true, "Available"], ["tabs.screenshot", false, "Not available"],
+    ["tabs.open", false, "Not available"], ["tabs.navigate", false, "Not available"], ["page.click", false, "Not available"], ["page.type", false, "Not available"]]);
+  assert.equal(off.rows.find(row => row.method === "tabs.screenshot").note, "Not in this build yet: screenshots wait for their privacy checks.");
+  assert.equal(off.rows.find(row => row.method === "page.click").note, null, "the footnote already says acting on pages is not available");
+  assert.equal(off.rows[0].note, null);
+  assert.equal(M.agentToolsView({ state: "disabled", capabilities: [{ method: "tabs.list", available: false, reason: "CLEANUP_PENDING" }] }).rows[0].note,
+    "Paused while AxioSozo finishes closing earlier agent work.");
+  const listening = M.agentToolsView({ state: "listening", capabilities,
+    methods: [{ method: "tabs.list", available: true }, { method: "tabs.active", available: false }, { method: "console.errors", available: true }] });
+  assert.equal(listening.text, "An agent you allow for its session can use the available tools until it disconnects or you end its session.");
+  assert.deepEqual(listening.rows.filter(row => row.available).map(row => row.method), ["tabs.list", "console.errors"], "the live endpoint must offer it too");
+  assert.equal(listening.rows.find(row => row.method === "tabs.active").note, "Not offered right now.");
+  assert.equal(M.agentToolsView({ state: "disabled", capabilities: capabilities.map(item => ({ ...item, available: false })) }).text,
+    "No browser tools are available to agents in this build.");
+  assert.deepEqual(M.agentToolsView({ state: "disabled", methods: [{ method: "tabs.list", available: true }] }),
+    { state: "unknown", text: "AxioSozo could not tell which browser tools are available.", rows: [] }, "no capabilities is unknown, never none");
+  assert.equal(M.agentToolsView(null).state, "unknown");
+  assert.equal(M.agentToolsView({ capabilities: [{ method: "tabs.list", available: "yes" }] }).rows[0].available, false);
+  assert.deepEqual(M.AGENT_BRIDGES.map(bridge => bridge.agent), ["claude-code", "codex"]);
+  assert.match(M.AGENT_BRIDGES[0].where, /\.mcp\.json/u);
+  assert.match(M.AGENT_BRIDGES[1].where, /config\.toml/u);
+  assert.match(M.AGENT_BRIDGE_NOTE, /never installs, edits or runs these/u);
+  assert.equal(M.agentBridgeErrorText("AGENT_BRIDGE_CONFIG_UNAVAILABLE"), "Not available in this build: AxioSozo found no verified copy of its agent bridge.");
+  assert.equal(M.agentBridgeErrorText("CONFIG_UNAVAILABLE"), M.agentBridgeErrorText("AGENT_BRIDGE_CONFIG_UNAVAILABLE"));
+  assert.equal(M.agentBridgeErrorText("ENDPOINT_UNAVAILABLE"), "Shown while agent status is on.");
+  assert.equal(M.agentBridgeErrorText("TIMEOUT"), "Preparing these took too long. Try again in a moment.");
+  assert.equal(M.agentBridgeErrorText("SOMETHING"), "These settings could not be prepared. Try again in a moment.");
+  assert.equal(M.AGENT_TOOLS_NOTE, "Agents never see private windows. Console errors are read from Firefox tabs only, never from Chromium tabs. "
+    + "Clicking, typing and opening pages are not available in this build.");
+});
+
+test("the browser tools footnote matches this build's actual availability and claims no Chromium listing", () => {
+  const read = name => readFileSync(new URL(`../chrome/${name}`, import.meta.url), "utf8");
+  assert.match(read("AgentBridgeRuntime.sys.mjs"), /export const CAPTURE_ENABLED = false;/u);
+  assert.match(read("AgentActionRuntime.sys.mjs"), /export const ACTION_CAPABILITIES = Object\.freeze\(\{ click: false, type: false, navigate: false, open: false \}\);/u);
+  // The capabilities those literal flags produce (agent-bridge-runtime asserts the same list).
+  const production = M.agentToolsView({ state: "disabled", methods: [], capabilities: [
+    { method: "tabs.list", available: true, reason: null }, { method: "tabs.active", available: true, reason: null },
+    { method: "project.info", available: true, reason: null }, { method: "console.errors", available: true, reason: null },
+    { method: "tabs.screenshot", available: false, reason: "CAPTURE_NOT_ENABLED" }, { method: "tabs.open", available: false, reason: "OPEN_NOT_ENABLED" },
+    { method: "tabs.navigate", available: false, reason: "ACT_NOT_ENABLED" }, { method: "page.click", available: false, reason: "ACT_NOT_ENABLED" },
+    { method: "page.type", available: false, reason: "ACT_NOT_ENABLED" }] });
+  const row = method => production.rows.find(item => item.method === method);
+  const sentences = M.AGENT_TOOLS_NOTE.split(/(?<=\.) /u);
+  assert.equal(sentences.length, 3);
+  assert.match(sentences[2], /^Clicking, typing and opening pages are not available in this build\.$/u);
+  assert.deepEqual(["page.click", "page.type", "tabs.open"].map(method => row(method).available), [false, false, false], "the footnote's unavailable tools are unavailable");
+  assert.match(sentences[1], /Firefox tabs only/u);
+  assert.match(row("console.errors").label, /of a Firefox tab/u, "console errors are offered for Firefox tabs only");
+  const chromium = [M.AGENT_TOOLS_NOTE, ...production.rows.flatMap(item => [item.label, item.note ?? ""]), production.text]
+    .flatMap(text => text.split(/(?<=\.) /u)).filter(sentence => /Chromium/u.test(sentence));
+  assert.deepEqual(chromium, ["Console errors are read from Firefox tabs only, never from Chromium tabs."]);
+  for (const sentence of chromium) assert.doesNotMatch(sentence, /\b(list|listed|lists|see|sees|seen|shown|shows|visible|available)\b/iu, "no Chromium listing or availability");
+});

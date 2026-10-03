@@ -141,6 +141,33 @@ test("agent methods: the page names closed arguments only; the actor supplies it
   } finally { restore(); }
 });
 
+test("plugin settings: the page names the agent only; only the agent and the generated text cross back", async () => {
+  const { services, calls } = agentServices();
+  let answer = args => ({ agent: args.agent, text: "{\"mcpServers\":{}}\n", socketPath: "/synthetic/.a/s", nodePath: "/synthetic/node" });
+  services.getAgentBridgeConfig = async args => { calls.push("getAgentBridgeConfig"); calls.push(["bridge", Object.keys(args), args.agent, args.window.name]); return answer(args); };
+  const restore = setProvidersForTesting({ services: () => services });
+  try {
+    const actor = fakeActor({ name: "normal-window" });
+    assert.deepEqual(await request(actor, "getAgentBridgeConfig", { agent: "claude-code" }), { ok: true, value: { agent: "claude-code", text: "{\"mcpServers\":{}}\n" } });
+    assert.deepEqual(calls.find(call => call[0] === "bridge"), ["bridge", ["window", "agent"], "claude-code", "normal-window"], "the actor supplies its own window");
+    for (const params of [{ agent: "bash" }, { agent: "codex", socketPath: "/tmp/s" }, { agent: "codex", nodePath: "/bin/sh" }, { agent: "codex", bridgePath: "/x" }, {}]) {
+      assert.equal((await request(actor, "getAgentBridgeConfig", params)).error.code, "INVALID_PARAMS", JSON.stringify(params));
+    }
+    assert.equal(serviceCalls(calls).filter(name => name === "getAgentBridgeConfig").length, 1);
+    for (const wrong of [args => ({ agent: args.agent === "codex" ? "claude-code" : "codex", text: "x" }), args => ({ agent: args.agent, text: "" }), () => null]) {
+      answer = wrong;
+      assert.equal((await request(actor, "getAgentBridgeConfig", { agent: "codex" })).error.code, "CONFIG_UNAVAILABLE");
+    }
+    delete services.getAgentBridgeConfig;
+    assert.equal((await request(actor, "getAgentBridgeConfig", { agent: "codex" })).error.code, "CONFIG_UNAVAILABLE");
+    const hidden = fakeActor();
+    hidden.browsingContext.usePrivateBrowsing = true;
+    hidden.manager.documentPrincipal = { ...hidden.manager.documentPrincipal, privateBrowsingId: 1 };
+    services.getAgentBridgeConfig = async () => { throw new Error("must not be asked"); };
+    assert.equal((await request(hidden, "getAgentBridgeConfig", { agent: "codex" })).error.code, "PRIVATE_WINDOW");
+  } finally { restore(); }
+});
+
 test("agent methods refuse private, unknown and unregistered windows before asking the service anything", async () => {
   for (const [setup, code] of [[actor => { actor.browsingContext.usePrivateBrowsing = true; actor.manager.documentPrincipal = { ...actor.manager.documentPrincipal, privateBrowsingId: 1 }; }, "PRIVATE_WINDOW"],
     [actor => { actor.browsingContext.topChromeWindow = null; }, "NO_WINDOW"]]) {

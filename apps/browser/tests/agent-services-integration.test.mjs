@@ -48,7 +48,7 @@ const record = (id, root, extra = {}) => ({ ...core.upgradeProject({ version: 1,
     environments: [{ name: "local", base_url: `http://localhost:${id === "p_alpha1" ? 4450 : id === "p_bravo1" ? 4460 : 4470}/` }] }),
   manifest_state: "none", context_uuid: null, trusted: false, created_at: 1, updated_at: 2 }), ...extra });
 
-function fixture({ projects = null, containers = false, nativeFails = 0, hookConfig = true, privateWindow = false } = {}) {
+function fixture({ projects = null, containers = false, nativeFails = 0, hookConfig = true, privateWindow = false, bridgeConfig = null } = {}) {
   const clock = new Clock();
   const seeded = projects ?? [record("p_alpha1", "/synthetic/alpha"), record("p_bravo1", "/synthetic/bravo")];
   const files = new Map([["contexts.json", JSON.stringify({ version: 3, contexts: [], projects: seeded })]]);
@@ -83,6 +83,7 @@ function fixture({ projects = null, containers = false, nativeFails = 0, hookCon
     },
     createTransportRuntime: ({ exactPosixBackend }) => { calls.push(["transport", exactPosixBackend.exactAvailable]); return runtime; },
     ...(hookConfig ? { buildHookConfig: async ({ agent, socketPath }) => { calls.push(["hook", agent, socketPath]); return `${agent} → ${socketPath}\n`; } } : {}),
+    ...(bridgeConfig ? { buildBridgeConfig: request => bridgeConfig(request) } : {}),
   };
   const gecko = new Map([[41, { userContextId: 41, public: true, name: "Alpha", icon: "briefcase", color: "blue" }]]);
   let nextIdentity = 60;
@@ -574,5 +575,117 @@ test("no verified hook builder means no hook settings, never a constructed fallb
   try {
     await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
     await assert.rejects(f.services.getAgentHookConfig({ window: f.zen.window, agent: "claude-code" }), { code: "ENDPOINT_UNAVAILABLE" });
+  } finally { await f.close(); }
+});
+
+// ---------------------------------------------------------------- P4 browser tools (Plan 4 step 8)
+
+test("plugin settings: a normal window while listening; the builder gets exactly the agent and the channel's own socket; stale answers are refused", { skip }, async () => {
+  const built = [], gates = [];
+  const f = fixture({ bridgeConfig: async request => {
+    built.push(request);
+    const gate = gates.shift();
+    if (gate) await gate.promise;
+    return `${request.agent} bridge → ${request.socketPath}\n`;
+  } });
+  const hidden = fakeZenWindow({ spaces: [], isPrivate: true });
+  try {
+    f.services.registerWindow(hidden.window, new ZenWorkspaceAdapter(hidden.window));
+    await assert.rejects(f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "codex" }), { code: "ENDPOINT_UNAVAILABLE" }, "off: nothing is built");
+    assert.deepEqual(built, []);
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
+    assert.deepEqual(await f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "codex" }), { agent: "codex", text: "codex bridge → /synthetic/profile/.a/s\n" });
+    assert.deepEqual(built, [{ agent: "codex", socketPath: "/synthetic/profile/.a/s" }]);
+    assert.deepEqual(Object.keys(built[0]), ["agent", "socketPath"], "no window, path, node or bridge field from anyone else");
+    await assert.rejects(f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "bash" }), { code: "INVALID_INPUT" });
+    await assert.rejects(f.services.getAgentBridgeConfig({ window: hidden.window, agent: "codex" }), { code: "PRIVATE_WINDOW" });
+    assert.equal(built.length, 1);
+    // The endpoint is turned off while the snippet is being prepared.
+    const held = deferred(); gates.push(held);
+    const disabled = f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "claude-code" });
+    await flush();
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: false });
+    held.resolve();
+    await assert.rejects(disabled, { code: "ENDPOINT_UNAVAILABLE" });
+    // The window goes away while the snippet is being prepared.
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
+    const gone = deferred(); gates.push(gone);
+    const late = f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "claude-code" });
+    await flush();
+    f.unregisterWindow();
+    gone.resolve();
+    await assert.rejects(late, { code: "NO_WINDOW" });
+    assert.equal(f.calls.some(([name]) => name === "hook"), false, "plugin settings never run the hook builder");
+  } finally { await f.close(); }
+});
+
+test("without a verified bridge builder no plugin settings are constructed", { skip }, async () => {
+  const f = fixture();
+  try {
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
+    await assert.rejects(f.services.getAgentBridgeConfig({ window: f.zen.window, agent: "claude-code" }), { code: "CONFIG_UNAVAILABLE" });
+  } finally { await f.close(); }
+});
+
+test("the tools owner: registered once with its shutdown; its fixed capabilities reach the endpoint state; tools install into the channel", { skip }, async () => {
+  const f = fixture();
+  let closes = 0;
+  const owner = { close: async () => { closes++; return true; }, getState: () => ({ closed: false, windows: 1, tools: { busy: false } }),
+    capabilities: () => [{ method: "tabs.list", available: true, reason: "ignored" }, { method: "tabs.screenshot", available: false, reason: "CAPTURE_NOT_ENABLED" },
+      { method: "Not a method", available: true }, { method: "page.click", available: false, reason: "free text" }] };
+  try {
+    assert.throws(() => f.services.registerAgentBridge({ capabilities: () => [] }), { code: "INVALID_OWNER" });
+    const unregister = f.services.registerAgentBridge(owner);
+    assert.throws(() => f.services.registerAgentBridge(owner), { code: "OWNER_REGISTERED" });
+    assert.deepEqual(f.services.getAgentEndpointState().capabilities, [{ method: "tabs.list", available: true, reason: null },
+      { method: "tabs.screenshot", available: false, reason: "CAPTURE_NOT_ENABLED" }, { method: "page.click", available: false, reason: "UNAVAILABLE" }]);
+    const tools = Object.freeze({ isMethodAvailable: method => method === "tabs.list", listTabs: () => [], getTab: () => null,
+      executeMethod: async () => null, confirmAction: () => false, releaseSession: async () => true });
+    assert.equal(f.services.installAgentBridgeTools(tools), true);
+    assert.throws(() => f.services.installAgentBridgeTools({ ...tools, close: () => true }), { code: "INVALID_RUNTIME" });
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
+    assert.deepEqual(f.services.getAgentEndpointState().methods.filter(item => item.available).map(item => item.method), ["tabs.list"]);
+    assert.deepEqual(f.services.getAgentDiagnostics().tools, { closed: false, windows: 1, tools: { busy: false } });
+    await f.shutdown.find(item => item.label === "AxioSozo: close agent tools").fn();
+    assert.equal(closes, 1);
+    unregister();
+    assert.deepEqual(f.services.getAgentEndpointState().capabilities, []);
+  } finally { await f.close(); }
+});
+
+test("approval for tools is the channel's own predicate: pending, denied, revoked and read-ended sessions are not approved", { skip }, async () => {
+  const f = fixture();
+  try {
+    f.services.registerAgentPresenter(f.zen.window, f.presenter("normal"));
+    await f.services.setAgentEndpointEnabled({ window: f.zen.window, enabled: true });
+    const bridge = f.connect(); bridge.receive(encode(hello("agent-bridge", "/synthetic/alpha"))); await flush();
+    const id = bridge.messages[0].session;
+    assert.equal(f.services.isApprovedBridgeSession(id), false, "pending");
+    f.presentations.at(-1).resolve(true); await flush();
+    assert.equal(f.services.isApprovedBridgeSession(id), true);
+    assert.equal(f.services.listAgentSessions({ window: f.zen.window, projectId: "p_alpha1" })[0].session, id);
+    assert.equal(f.services.isApprovedBridgeSession("s_ffffffffffffffff"), false, "an ID format is never authority");
+    f.services.revokeAgentSession({ window: f.zen.window, projectId: "p_alpha1", sessionId: id });
+    assert.equal(f.services.isApprovedBridgeSession(id), false, "revoked");
+    const second = f.connect(); second.receive(encode(hello("agent-bridge", "/synthetic/alpha"))); await flush();
+    f.presentations.at(-1).resolve(true); await flush();
+    const other = second.messages[0].session;
+    assert.equal(f.services.isApprovedBridgeSession(other), true);
+    second.end();
+    assert.equal(f.services.isApprovedBridgeSession(other), false, "EOF drains before the presentation changes");
+  } finally { await f.close(); }
+});
+
+test("project.info for tools: names, roots, environment links and integrations from the validated cache; never account labels", { skip }, async () => {
+  const f = fixture();
+  try {
+    f.services.getAgentEndpointState(); await flush();
+    await f.services.setAccountLabel("p_alpha1", { key: "vercel", label: "work Google" }); await flush();
+    const info = f.services.agentBridgeProject("p_alpha1");
+    assert.deepEqual(info, { project_id: "p_alpha1", name: "Alpha", root: "/synthetic/alpha",
+      apps: [{ app: null, environments: [{ name: "local", base_url: "http://localhost:4450/" }] }], integrations: [] });
+    assert.ok(Object.isFrozen(info) && Object.isFrozen(info.apps[0]));
+    assert.doesNotMatch(JSON.stringify(info), /work Google|accounts|container|brief/u);
+    assert.equal(f.services.agentBridgeProject("p_zzzz1"), null);
   } finally { await f.close(); }
 });

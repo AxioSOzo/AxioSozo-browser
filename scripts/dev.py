@@ -34,6 +34,8 @@ PROJECT_READER = ROOT / "scripts" / "project_reader.py"
 ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
 AGENT_SOCKET_INSTALL = ROOT / "scripts" / "agent_socket_install.py"
 AGENT_NOTIFY_INSTALL = ROOT / "scripts" / "agent_notify_install.py"
+AGENT_BRIDGE_INSTALL = ROOT / "scripts" / "agent_bridge_install.py"
+AGENT_BRIDGE_NODE = Path("/Volumes/AxioSozoBuild/toolchains/zen/node/bin/node")
 MANIFEST_ACCEPT = ROOT / "scripts" / "manifest_accept.py"
 AGENT_SOCKET_PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
@@ -174,6 +176,7 @@ def setup_components():
     results.append(component(ARRIVAL_SUBPROCESS, "setup"))
     results.append(component(AGENT_SOCKET_INSTALL, "setup"))
     results.append(component(AGENT_NOTIFY_INSTALL, "setup"))
+    results.append(component(AGENT_BRIDGE_INSTALL, "setup"))
     results.append(component(MANIFEST_ACCEPT, "setup"))
     print("SETUP: " + ("completed" if not any(results) else "incomplete; see component results"), flush=True)
     return 2 if any(results) else 0
@@ -197,6 +200,7 @@ def check():
                component(PROVIDER, "check"), component(ZEN, "check"), component(CEF, "check"),
                component(PROJECT_READER, "check"), component(ARRIVAL_SUBPROCESS, "check"),
                component(AGENT_SOCKET_INSTALL, "check"), component(AGENT_NOTIFY_INSTALL, "check"),
+               component(AGENT_BRIDGE_INSTALL, "check"),
                component(MANIFEST_ACCEPT, "check")]
     for path in [*ROOT.glob("scripts/*.py"), *ROOT.glob("scripts/release/*.py"), *ROOT.glob("tests/test_*.py")]:
         if path.name.startswith("._"):
@@ -226,8 +230,23 @@ def test():
     if storage.BUILD_ROOT == Path("/Volumes/AxioSozoBuild/workstation"):
         results.append(run([AGENT_SOCKET_PYTHON, "-I", "-S", "-B",
                             ROOT / "tools/axiosozo-agent/tests/socket-posix.test.py"], build=True))
+        results.append(run([AGENT_SOCKET_PYTHON, "-I", "-S", "-B",
+                            ROOT / "tools/axiosozo-agent/tests/bridge-install.test.py"], build=True))
+        # Verify the fixed source Node before any shipped bridge/notify fixture.
+        bridge_check = component(AGENT_BRIDGE_INSTALL, "check")
+        results.append(bridge_check)
+        if bridge_check == 0:
+            bridge_tests = [ROOT / "packages/agent-bridge/tests" / name for name in
+                            ("bridge.test.mjs", "channel.test.mjs", "notify.test.mjs")]
+            bridge_tmp = private_directory(storage.BUILD_ROOT / "tmp" / "agent-bridge-tests")
+            bridge_env = {**os.environ, "AXIOSOZO_TEST_TMP": str(bridge_tmp)}
+            results.append(run([AGENT_BRIDGE_NODE, "--test", "--test-timeout=10000",
+                                "--test-reporter=spec", *bridge_tests], build=True, env=bridge_env))
+        else:
+            print("BLOCKED_ENV: agent bridge package tests require verified installed/source Node", flush=True)
     else:
         print("SKIPPED_WORKSTATION_FIXTURE: agent socket POSIX tests require the workstation root", flush=True)
+        print("SKIPPED_WORKSTATION_FIXTURE: agent bridge installer/stdio tests require the workstation root", flush=True)
     env = {**os.environ, "AXIOSOZO_CORE_BINARY": str(CORE), "PYTHONDONTWRITEBYTECODE": "1"}
     if build_result == 0 and core_ready():
         results.append(run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"], build=True, env=env))
