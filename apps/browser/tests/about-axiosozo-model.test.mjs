@@ -348,7 +348,7 @@ test("deep links: three views, old hashes redirect, item links validated", () =>
 test("AI & keys: provider cards keep the honest labels; Jev key form rules; Keychain texts match ProviderStatus", async () => {
   const { buildProviderStatus, keychainErrorText } = await import("../chrome/ProviderStatus.sys.mjs");
   const status = buildProviderStatus({
-    discovery: [{ driver: "codex", installed: true, client_version: "0.157.1" }, { driver: "claude-code", installed: false }],
+    discovery: [{ driver: "codex", installed: true, client_version: "0.160.0" }, { driver: "claude-code", installed: false }],
     jev: { keyEntryEnabled: true, key: "missing" } });
   const cards = M.providerCards(status);
   assert.deepEqual(cards.map(card => [card.id, card.stateLabel, card.tone]), [

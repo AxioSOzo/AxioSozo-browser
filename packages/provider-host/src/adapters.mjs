@@ -9,7 +9,7 @@ import { DRIVERS, routes, discover } from './discovery.mjs';
 import { ProviderError, requireValue, object, id, prompt, matchesSchema, exactKeys } from './validation.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../schemas/codex-0.155.1.json', import.meta.url), 'utf8'));
-const currentSchemas = JSON.parse(readFileSync(new URL('../schemas/codex-0.157.1-requests.json', import.meta.url), 'utf8'));
+const currentSchemas = JSON.parse(readFileSync(new URL('../schemas/codex-0.160.0-requests.json', import.meta.url), 'utf8'));
 function textChunk(value) {
   requireValue(typeof value === 'string' && Buffer.byteLength(value) <= 65536, 'INVALID_PROTOCOL', 'Invalid streamed text');
   return value;
@@ -19,11 +19,11 @@ export function codexRequest(method, params, { current = false } = {}) {
     let rule = currentSchemas.methods[method];
     if (rule && method === 'thread/start') {
       // These opt-in fields are intentionally omitted from the published stable
-      // schema; verified in rust-v0.157.1 protocol/v2/thread.rs, not guessed.
+      // schema; verified in rust-v0.160.0 protocol/v2/thread.rs, not guessed.
       rule = { ...rule, additionalProperties: false, properties: { ...rule.properties,
         environments: { type: 'array', maxItems: 0 }, dynamicTools: { type: 'array', maxItems: 0 } } };
     }
-    requireValue(rule && matchesSchema(params, rule, rule), 'INVALID_PROTOCOL', 'Request does not match audited Codex 0.157.1 schema');
+    requireValue(rule && matchesSchema(params, rule, rule), 'INVALID_PROTOCOL', 'Request does not match audited Codex 0.160.0 schema');
     return { method, params };
   }
   const request = { id: 1, method, params };

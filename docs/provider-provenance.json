@@ -215,5 +215,80 @@
     "client_execution": false,
     "auth_access": false,
     "evidence": "docs/evidence/providers-version-results-20260923.json"
+  },
+  "codex_live_compatibility_20261003": {
+    "reviewed_at": "2026-10-03",
+    "client_version": "0.160.0",
+    "schema_path": "packages/provider-host/schemas/codex-0.160.0-requests.json",
+    "schema_sha256": "4905922c48c7d8f9a74ff42cc0b1660fb47f70ce5852809b6720aa6a086b24ff",
+    "request_schemas_structurally_identical_to_0_157_1": true,
+    "files": [
+      {
+        "method": "initialize",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v1/InitializeParams.json",
+        "sha256": "b55124e7c0f36a1789396daa5578217a92be67f053903696236686e59f6f212e"
+      },
+      {
+        "method": "thread/start",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v2/ThreadStartParams.json",
+        "sha256": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428"
+      },
+      {
+        "method": "thread/resume",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v2/ThreadResumeParams.json",
+        "sha256": "c818e26d830ac4430791eab7d4a872d2384fa6006b14c505d8caf46e7e093527"
+      },
+      {
+        "method": "turn/start",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v2/TurnStartParams.json",
+        "sha256": "2dfcf68705896fadc344ccfeb2e9fe5a6bcbbb8b9a90cf449ce232b636daf05a"
+      },
+      {
+        "method": "turn/interrupt",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v2/TurnInterruptParams.json",
+        "sha256": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b"
+      },
+      {
+        "method": "account/read",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/schema/json/v2/GetAccountParams.json",
+        "sha256": "30b545275f60975b55bd6fbaafd70f15505801d14168ee82d3931b6e93c78aab"
+      }
+    ],
+    "experimental_empty_authority_source": {
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+      "sha256": "d5e626a8f3bade6865a6274642a607124bea49cf3ebdbc202f70e8d2a976dafb",
+      "environments": [],
+      "dynamicTools": []
+    },
+    "config_schema": {
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/core/config.schema.json",
+      "sha256": "7ce31bde1ed6ef15c53a96ba460bb1d0fb7b99fd9ab719b567c94c474f62b023"
+    },
+    "native_handshake": {
+      "driver": "codex",
+      "version": "0.160.0",
+      "network": false,
+      "model_request": false,
+      "credentials_read_by_host": false,
+      "initialize": true,
+      "account_read": true,
+      "signed_in": false,
+      "status": "PASS",
+      "close": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    "live_model_turn": "NOT_RUN_AUTOMATIC_APPROVAL_REJECTED",
+    "credentials_copied_or_read_by_host": false,
+    "browser_profile_sign_in": "PENDING_OFFICIAL_CLIENT_SIGN_IN",
+    "native_menu_gui": "PASS_SCOPED_DARK_NATIVE_MENU_PANEL_AND_SETTINGS",
+    "live_test_approval": {
+      "prompt": "Reply exactly AXIOSOZO_OK",
+      "page_attached": false,
+      "request_sent": false,
+      "result": "REJECTED",
+      "reason": "Build-fix authorization did not separately authorize this external model request."
+    }
   }
 }

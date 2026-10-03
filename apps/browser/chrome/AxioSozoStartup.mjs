@@ -253,6 +253,9 @@ async function initialize() {
   const probeSheet = fixtureProbe ? document.createProcessingInstruction("xml-stylesheet",
     'href="chrome://browser/content/axiosozo/browser-experience.css" type="text/css"') : null;
   if (probeSheet) document.insertBefore(probeSheet, document.documentElement);
+  // Ask AI… in the native Tools menu opens the existing provider panel; the
+  // menu, the panel and its Settings button start nothing until Send.
+  const providerMenu = guarded("provider menu", () => optionalModule("ProviderMenu.sys.mjs")?.installProviderMenu(window, { engineProbe }));
   // Browser startup performs no provider discovery and starts no model client.
   // The optional privileged-action coordinator is also created only on demand.
   let coordinator = null; let coordinatorStarting = null;
@@ -292,7 +295,7 @@ async function initialize() {
     }
   };
   window.addEventListener("unload", () => {
-    disposed = true; probeSheet?.remove();
+    disposed = true; providerMenu?.dispose(); probeSheet?.remove();
     startPage = null;
     disposeContexts();
     engineTabs?.dispose();

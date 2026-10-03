@@ -12,7 +12,7 @@ import { providerBuildRoot } from './storage.mjs';
 import { JsonLineTransport } from './transport.mjs';
 import { id, ProviderError, requireValue } from './validation.mjs';
 
-export const LIVE_VERSIONS = Object.freeze({ codex: '0.157.1', 'claude-code': '2.1.283' });
+export const LIVE_VERSIONS = Object.freeze({ codex: '0.160.0', 'claude-code': '2.1.283' });
 export const LIVE_POLICY = 'macos-provider-chat-scoped-exec-v1';
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');

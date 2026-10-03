@@ -41,7 +41,7 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
     serviceStatus: () => [],
     getDecisionKeyStatus: ({ provider }) => decisionKeyEntry({ provider, key_entry_enabled: true, key: "missing" }),
     getProviderStatus: () => ({ version: 1, discovery: "ok", discovery_error: null, model_turns_verified: false, providers: [
-      { id: "codex", label: "Codex", state: "unverified", state_label: "Installed · not yet verified", detail: "Installed (0.157.1).", version: "0.157.1", expected_version: "0.157.1" },
+      { id: "codex", label: "Codex", state: "unverified", state_label: "Installed · not yet verified", detail: "Installed (0.160.0).", version: "0.160.0", expected_version: "0.160.0" },
       { id: "claude-code", label: "Claude Code", state: "not-installed", state_label: "Not installed", detail: "The official Claude Code client was not found." },
       { id: "antigravity", label: "Antigravity", state: "unknown", state_label: "Status unknown", detail: "Could not read installation metadata." }] }),
     // Like AxioSozoServices.projectHome: the stored record without its container mapping.

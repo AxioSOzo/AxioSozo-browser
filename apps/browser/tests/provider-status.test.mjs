@@ -102,9 +102,9 @@ test('nothing installed: three clients not-installed; decision keys are not part
 });
 
 test('installed audited clients are unverified with sign-in handled by the official client', () => {
-  const found = discovery({ codex: { client_version: '0.157.1' }, 'claude-code': { client_version: '2.1.283' } });
+  const found = discovery({ codex: { client_version: '0.160.0' }, 'claude-code': { client_version: '2.1.283' } });
   const codex = clientStatus('codex', found[0]); const claude = clientStatus('claude-code', found[1]);
-  assert.deepEqual([codex.installed, codex.version, codex.state, codex.sign_in, codex.route], [true, '0.157.1', 'unverified', 'codex-login-once', 'official-client']);
+  assert.deepEqual([codex.installed, codex.version, codex.state, codex.sign_in, codex.route], [true, '0.160.0', 'unverified', 'codex-login-once', 'official-client']);
   assert.deepEqual([claude.installed, claude.version, claude.state, claude.sign_in], [true, '2.1.283', 'unverified', 'handled-by-client-on-first-question']);
   assert.equal(claude.state_label, 'Installed · not yet verified');
   assert.match(claude.detail, /first question/); assert.match(claude.detail, /not been verified/);
@@ -114,9 +114,25 @@ test('installed audited clients are unverified with sign-in handled by the offic
 test('version mismatch, unreadable version and Antigravity are unavailable, not unverified', () => {
   const found = discovery({ codex: { client_version: '0.158.0' }, 'claude-code': { client_version: null }, antigravity: { client_version: null } });
   const [codex, claude, agy] = found.map(item => clientStatus(item.driver, item));
-  assert.equal(codex.state, 'unavailable'); assert.equal(codex.version, '0.158.0'); assert.match(codex.detail, /0\.157\.1/);
+  assert.equal(codex.state, 'unavailable'); assert.equal(codex.version, '0.158.0'); assert.match(codex.detail, /0\.160\.0/);
   assert.equal(claude.state, 'unavailable'); assert.equal(claude.version, null); assert.match(claude.detail, /could not be read/);
   assert.equal(agy.state, 'unavailable'); assert.equal(agy.installed, true); assert.match(agy.detail, /not been verified/);
+});
+
+test('Codex 0.160.0 alone is compatible and stays unverified; 0.157.1, future, prerelease and unreadable versions are unavailable', () => {
+  assert.deepEqual(LIVE_VERSIONS, { codex: '0.160.0', 'claude-code': '2.1.283' });
+  const model = buildProviderStatus({ discovery: discovery({ codex: { client_version: '0.160.0' } }) });
+  const codex = model.providers.find(item => item.id === 'codex');
+  assert.equal(model.model_turns_verified, false);
+  assert.deepEqual([codex.version, codex.expected_version, codex.state, codex.verified, codex.sign_in],
+    ['0.160.0', '0.160.0', 'unverified', false, 'codex-login-once']);
+  assert.match(codex.detail, /Sign in once with the official Codex client/); assert.match(codex.detail, /not been verified/);
+  for (const version of ['0.157.1', '0.161.0', '1.0.0', '0.160.0-alpha.1', null]) {
+    const refused = clientStatus('codex', discovery({ codex: { client_version: version } })[0]);
+    assert.deepEqual([refused.installed, refused.version, refused.state, refused.verified, refused.sign_in],
+      [true, version, 'unavailable', false, 'not-applicable'], String(version));
+    assert.match(refused.detail, /this build works only with Codex 0\.160\.0/, String(version));
+  }
 });
 
 test('discovery failure is unknown (installed null), never not-installed', () => {

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { codexRequest } from '../src/adapters.mjs';
-import { claudeArguments, codexArguments, liveMetadata, liveProfile, runtimeEnvironment } from '../src/live.mjs';
+import { claudeArguments, codexArguments, liveMetadata, liveProfile, runtimeEnvironment, resolveNativeClient, LIVE_VERSIONS } from '../src/live.mjs';
 
 test('Current exact Codex schema admits scoped chat and rejects environment grants', () => {
   const params = { ephemeral: true, approvalPolicy: 'never', sandbox: 'read-only', cwd: '/synthetic/workspace', environments: [], dynamicTools: [] };
@@ -49,4 +52,33 @@ test('Missing and unsupported live clients fail before launch', () => {
   assert.throws(() => liveMetadata('codex', { searchPath: '' }), { code: 'BLOCKED_ENV' });
   assert.throws(() => liveMetadata('claude-code', { searchPath: '' }), { code: 'BLOCKED_ENV' });
   assert.throws(() => liveMetadata('antigravity', { searchPath: '' }), { code: 'ANTIGRAVITY_PROTOCOL_UNSUPPORTED' });
+});
+
+// Installation metadata only. The fixture executables are never launched.
+test('Codex 0.160.0 accepts matching native metadata and rejects stale, future and prerelease clients', () => {
+  assert.equal(LIVE_VERSIONS.codex, '0.160.0');
+  const root = mkdtempSync(path.join(tmpdir(), 'codex-live-metadata-'));
+  try {
+    const pkgRoot = path.join(root, 'node_modules/@openai/codex');
+    const searchPath = path.join(root, 'bin');
+    const nativeRoot = path.join(pkgRoot, `node_modules/@openai/codex-darwin-${process.arch}`);
+    const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+    const executable = path.join(nativeRoot, 'vendor', triple, 'bin/codex');
+    for (const directory of [path.join(pkgRoot, 'bin'), searchPath, path.dirname(executable)]) mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(pkgRoot, 'bin/codex.js'), '// metadata-only fixture, never executed', { mode: 0o700 });
+    writeFileSync(executable, 'metadata-only native fixture, never executed', { mode: 0o700 });
+    symlinkSync(path.join(pkgRoot, 'bin/codex.js'), path.join(searchPath, 'codex'));
+    const wrapperVersion = version => writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: '@openai/codex', version }));
+    const nativeVersion = version => writeFileSync(path.join(nativeRoot, 'package.json'), JSON.stringify({ name: '@openai/codex', version: `${version}-darwin-${process.arch}` }));
+    wrapperVersion('0.160.0'); nativeVersion('0.160.0');
+    const metadata = liveMetadata('codex', { searchPath });
+    assert.equal(metadata.client_version, '0.160.0');
+    assert.equal(resolveNativeClient('codex', metadata), executable);
+    for (const version of ['0.157.1', '0.161.0', '0.160.0-beta.1', '0.160.0+unreviewed']) {
+      wrapperVersion(version);
+      assert.throws(() => liveMetadata('codex', { searchPath }), { code: 'BLOCKED_ENV' });
+    }
+    wrapperVersion('0.160.0'); nativeVersion('0.157.1');
+    assert.throws(() => resolveNativeClient('codex', liveMetadata('codex', { searchPath })), { code: 'BLOCKED_ENV' });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

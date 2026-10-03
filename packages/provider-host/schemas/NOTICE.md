@@ -18,3 +18,11 @@ They were downloaded without executing a Codex client on 26 September 2026.
 The host separately validates the exact-source experimental `environments: []`
 and `dynamicTools: []` fields as empty arrays; stable generated schemas omit them.
 Apache-2.0 attribution above applies to these schemas too.
+
+`codex-0.160.0-requests.json` contains the same six unmodified per-method
+schemas downloaded from the official `rust-v0.160.0` tag on 3 October 2026:
+https://github.com/openai/codex/tree/rust-v0.160.0/codex-rs/app-server-protocol/schema/json
+All six schemas are structurally identical to the retained 0.157.1 schemas.
+The empty experimental environments/dynamicTools authority is independently
+confirmed in that exact tag's protocol/v2/thread.rs; no client was executed for
+schema acquisition. The original Apache-2.0 attribution applies.

@@ -1,7 +1,7 @@
-# Provider backend — 26 September 2026
+# Provider backend — updated 3 October 2026
 
 AxioSozo now has an on-demand JSONL host and production launch implementations for
-**Codex 0.157.1** and **Claude Code 2.1.283**. These are real official-client routes,
+**Codex 0.160.0** and **Claude Code 2.1.283**. These are real official-client routes,
 not fixture fallback. **Model-turn verification is still pending.** The approved diagnostic reached
 Claude’s confined official authentication check, which could not use authentication;
 Codex stopped at its missing instance sign-in. No model request was sent.
@@ -29,7 +29,7 @@ ever shown as *Ready*:
 
 | State | Shown as | Meaning |
 |---|---|---|
-| `unverified` | Installed · not yet verified | Codex 0.157.1 / Claude Code 2.1.283 found; sign-in happens in the official client (Claude Code: existing sign-in; Codex: one `codex login` for the browser profile), checked on the first question |
+| `unverified` | Installed · not yet verified | Codex 0.160.0 / Claude Code 2.1.283 found; sign-in happens in the official client (Claude Code: existing sign-in; Codex: one `codex login` for the browser profile), checked on the first question |
 | `not-installed` | Not installed | Official client not on the discovery PATH |
 | `unavailable` | Unavailable in this build | Antigravity; a different or unreadable client version; or no Keychain helper (Jev) |
 | `needs-key` | No key stored | Jev without a key |
@@ -98,21 +98,21 @@ command has no fixture switch or fallback.
 
 ## Official clients and authentication
 
-**Codex:** exact upstream 0.157.1 request schemas are retained in
-`schemas/codex-0.157.1-requests.json`. They were downloaded from the official tagged
+**Codex:** exact upstream 0.160.0 request schemas are retained in
+`schemas/codex-0.160.0-requests.json`. They were downloaded from the official tagged
 source without running a client. The prior generated 0.155.1 schema remains for
 historical fixture regression tests. Discovery's fixture-version comparison does
 not decide live eligibility; `live.mjs` checks the independently audited live pin.
 
-0.157.1 rejects the former `untrusted` approval policy. The new route uses `never`,
+0.160.0 rejects the former `untrusted` approval policy. The new route uses `never`,
 read-only sandbox configuration, disabled command/hooks/plugin/app/skill capabilities,
 no project instructions, and a host-controlled Codex home. Experimental
 `environments: []` and `dynamicTools: []` are validated as strictly empty arrays against
 the exact source because published stable schemas omit them. Empty environments
 remove environment-bound tool access; independent OS confinement still applies.
 Utility tools may remain in Codex; this is not a claim that its internal tool list
-is literally empty. [Tagged thread fields](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs),
-[tagged config schema](https://raw.githubusercontent.com/openai/codex/rust-v0.157.1/codex-rs/core/config.schema.json),
+is literally empty. [Tagged thread fields](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs),
+[tagged config schema](https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/core/config.schema.json),
 [app-server documentation](https://developers.openai.com/codex/app-server).
 
 Each browser instance uses:
@@ -133,7 +133,7 @@ CODEX_HOME="/Volumes/AxioSozoBuild/providers/runtime/codex/<instance-uuid>/codex
 Run that command from the browser runtime directory or another empty directory.
 The browser never opens login automatically. Different CODEX_HOME values also
 change official Keychain identity; copying default-profile credentials is not a
-shortcut. [Official credential ownership](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/login/src/auth/storage.rs).
+shortcut. [Official credential ownership](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/login/src/auth/storage.rs).
 
 **Claude Code:** launch uses `--safe-mode --restricted --tools ""`, empty strict MCP
 configuration, disabled hooks/slash commands/Chrome integration, no permission
@@ -249,3 +249,24 @@ allowances were reverted; no retry followed the rejection.
 
 Safe structured results are recorded in
 [provider diagnostic evidence](../packages/provider-host/evidence/live-preflight-20260926.json).
+
+## Codex 0.160.0 live-build repair — 3 October 2026
+
+The current workstation route now accepts exactly Codex 0.160.0, including
+matching official wrapper/native package versions. The six official tagged
+request schemas are structurally identical to the retained 0.157.1 schemas.
+Existing empty environments/dynamicTools, isolated official authentication,
+no-shell/no-fork native confinement and no automatic replay remain unchanged.
+A real 0.160.0 app-server passed initialize and account/read inside the actual
+network-denied live sandbox using a fresh empty test home, then exited0.
+This is actual startup/protocol evidence, not a model-answer or authentication
+claim. Provenance is recorded in provider-provenance.json.
+
+Claude authored the frontend compatibility update. The live native startup had
+no installed Ask AI entry point; its separate native-menu repair and GUI outcome
+are recorded in PLAN_4_STATUS.md. Model verification remains pending until the
+user completes official sign-in for the browser-owned provider instance and
+separately authorizes the fixed live test. Automatic approval review rejected
+that Send because the build-fix request did not explicitly authorize an external
+model request. No test was sent. No personal credentials are read or copied by the host. Other provider and
+watch/decision/Understand authorization gates are unchanged.

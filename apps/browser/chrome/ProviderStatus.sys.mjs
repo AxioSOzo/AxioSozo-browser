@@ -18,7 +18,7 @@ import { DECISION_KEY_CODES, DECISION_KEY_PREFS, DECISION_KEY_PROVIDERS, decisio
 import { createNativeDecisionKeyFixtureRuntime } from "./KeyFixtureNativeConfig.sys.mjs";
 
 /** Exact client versions the live routes accept (packages/provider-host/src/live.mjs LIVE_VERSIONS). */
-export const LIVE_VERSIONS = Object.freeze({ codex: "0.157.1", "claude-code": "2.1.283" });
+export const LIVE_VERSIONS = Object.freeze({ codex: "0.160.0", "claude-code": "2.1.283" });
 export const JEV_MODEL = "jev-1.13.0";
 export const DECISION_PROVIDERS = DECISION_KEY_PROVIDERS;
 /** Product decision calls in this build (decision-v1: the browser host disables live authorization). */
