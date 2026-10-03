@@ -356,6 +356,156 @@ See [understand-v1](understand-v1.md).
 
 See [agent-channel-v1](agent-channel-v1.md).
 
-## 8. Changelog
+## 8. User-created watches (Plan 4 §4)
+
+`packages/contexts/src/watches.mjs` owns the pure version-1 store
+`{ version: 1, watches: [] }`, capped at 256 records. `validateWatch` and
+`validateWatchStore` return frozen validated copies and reject unknown keys.
+Each record has `version`, `id` (`^w_[a-z0-9]{4,32}$`), `project_id`,
+`created_by: "user"`, positive `revision`, sanitized `url`, `question`,
+`outcomes`, `observation`, `provider`, `consent`, `enabled`, `schedule`,
+`latest_result`, `created_at` and `updated_at`. Question ≤500 characters;
+2–6 unique outcome IDs and labels ≤80 characters; `unknown` is reserved.
+Observation is `none | address | outline | screen`; provider is `jev | openai`.
+Schedule is `{ interval_minutes: 1..30, last_checked_at: epoch_ms | null }`.
+The default is 5 minutes, observation `none`, provider `jev`, consent false.
+Only HTTP(S) origin/path is retained: credentials, query and fragment are removed.
+
+`createWatch`, `saveWatch` and `removeWatch` are pure transformations.
+Privileged chrome supplies ID, time and current project authority; user provenance
+in a record or a page's `userCreated` value grants no authority. Creation, edit
+and removal require an explicit user action on a current registered normal
+surface. Detection, arrival, hooks and agents never create a watch. Editing
+increments revision and clears the prior attempt/result, including same-time edits.
+
+One process `WatchController` owns the validated store and injected scheduling,
+native observation, indicator and decision adapters. `save({watch,userCreated:true})`
+and `remove({id,userCreated:true})` receive trusted provenance; `run({id})` obeys
+schedule eligibility and cannot force a not-due check. `start/stop/pulse` own
+scheduling; `cancel/invalidate/dispose` revoke their pending work. One active
+check is retained through reply and owned cleanup, including late tab/indicator
+acquisition. `retryCleanup` retries retained cleanup only when `retry_allowed`;
+`CLEANUP_REQUIRED` or `RECOVERY_REQUIRED` prevents another check. Neither a
+bounded public cancellation reply nor a dismissed page proves native cleanup.
+
+A trusted chrome caller may pass `run({id}, {signal})`; the second argument is
+an owned AbortSignal capability, never page JSON. Already-aborted signals and
+abort during the initial load refuse before check admission. A busy caller owns
+no cancellation listener; an admitted signal targets only its exact operation.
+Its listener remains through actual work settlement and late cleanup, not just
+the bounded public reply. No force, timestamp or authorization override exists.
+
+After the first admitted normal startup, the shared production scheduler starts
+only after its actual process shutdown blocker is registered. Shutdown calls
+`dispose()` synchronously, then awaits `settled()` on the retained controller.
+That join covers captured raw check work and an owned cleanup retry; it returns
+categorical status, never a literal cleanup-success acknowledgement. Hung work
+stays pending and failed cleanup stays retained/busy. Initial metadata and CRUD
+loads are outside this join; disposal prevents later check admission from an
+initial load. No individual window closes the shared controller. The scheduler
+uses the same immutable closed production gate and cannot enable native work.
+
+Production constructs the controller with immutable `liveAuthorized: false`.
+An eligible due check can persist a historical `unknown`, `NOT_AUTHORIZED`,
+`data_sent: false` result without admission, hidden opening, capture, indicator,
+budget reservation, Keychain or provider work. Saved consent, provider choice,
+enablement and the experimental home flag cannot override this gate.
+Hidden tabs in the correct project container remain a separately unverified
+native capability; foreground admission alone does not authorize them. Any
+future live path must bind the exact current project/container/document/privacy/
+consent and indicator facts around awaits and immediately before sending.
+Unknown, private, password or failed/blocked-document facts deny; sensitive
+hosts cap observations to `address`. Capture and action remain unavailable
+without their separate actual Step8 evidence and authorization.
+
+The decision wire format is [decision-v1](decision-v1.md) (`watch_v1`).
+`latest_result` is only `{ request_id, checked_at, outcome, reason, confidence,
+data_sent, provider }`; raw observations, images, titles, native handles and
+exceptions are not persisted. A non-neutral result requires current revision,
+request, document and schedule authority, an unexpired deadline, validated
+provider result and confidence ≥0.8. It remains a suggestion and grants no page
+or agent action. Unknown transmission stays conservatively disclosed even when
+cancelled or stale. Conditional stale-result compensation is eventual and
+in-memory; a busy intermediate store write is not a current positive result.
+
+## 9. Experimental home trigger (P6)
+
+The exact `axiosozo.home.enabled` product flag defaults false. The bounded
+integration targets only the ordinary `BrowserCommands.openTab` user command
+for a normal, non-AI window using the native default new-tab destination,
+without an explicit URL or clipboard paste. A synchronous private per-window
+eligibility callback may return only `about:axiosozo#home` or no override.
+It checks the actual flag, live registered normal window, initialized contexts,
+registered about module, current authority and absence of custom/extension
+new-tab override on every invocation; missing or unknown facts deny.
+
+Private/permanent-private windows and custom/extension destinations retain
+native behavior. Extension API tabs, restored/preloaded tabs, new-window start
+pages and other direct default-URL consumers are outside this hook's scope.
+Flag-off denies the next command without an observer await and does not navigate
+an existing home tab. Unload/late initialization cannot publish stale callbacks;
+old cleanup cannot remove a replacement. The home contains project/status,
+watch and attention summaries, with unavailable collectors represented as such;
+opening it starts no provider or agent endpoint and performs no watch capture.
+This is not a promise to override every new tab.
+
+## 10. Explicit durable safety choice (P7)
+
+The first-run safety offer starts checked. Opening, cancellation, dismissal or
+navigation grants nothing and does not complete the offer. Existing project
+introduction state and the experimental home flag are not safety consent.
+Only trusted activation of the current normal control supplies confirmation;
+actor JSON containing `userConfirmed: true` is not authority. Settings exposes
+later explicit choice through the same owner. An unchecked, unowned confirmed
+choice acknowledges completion without preference or DNS operations during
+that choice. Locked settings and external credential/bootstrap/OHTTP guard
+configurations refuse feature changes.
+
+Production uses `createSafetyOwner` with its closed `createSafetyOwnerSchema`,
+one serialized `JsonStore`, `ATOMIC_FLUSHED` storage and an exclusive writer
+lease. `choose({checked,userConfirmed:true,now})` receives chrome-supplied time
+and confirmation. Any native mutation follows an acknowledged durable INTENT;
+positive completion waits for the exact terminal store acknowledgement.
+Failed/unknown writes remain blocked recovery, never optimistic success.
+`initialize/status` may acknowledge ownership-metadata drift but never replay
+native preference writes or adopt ownership merely because values match.
+Compatibility exports, including pure `applySafetyChoice`, remain available;
+the older catch/`changed:false` path is not production mutation authority.
+
+`resolve({sequence,outcome,userConfirmed:true})` requires an explicit current
+recovery choice and the exact pending sequence. Fixed outcomes are `RESTORED`,
+`EXTERNAL_CHANGED`, `ACCEPTED`; required current snapshots are rechecked across
+storage awaits. Resolution verifies/acknowledges configuration and changes no
+preferences. Acceptance or external change never adopts uncertain ownership.
+Stale or unverified resolution retains the journal and refuses another choice.
+
+One `SafetyNativeOwner` registry under one module URI admits only the actual
+parent process's canonical active profile and its private immediate
+`axiosozo-safety` directory. The writer is reserved before the first await;
+lease `run` tracks operations, and shutdown/profile revocation stops intake
+synchronously. Lease `close` waits owned work and acknowledged observer cleanup;
+failed cleanup retains the writer until explicit retry, then a fresh store must
+reload. Cleanup never deletes the journal, restores preferences or releases the
+application profile lock. The 64 KiB fatal-UTF8 store uses same-directory atomic
+replacement, file flush and exact byte-count ACK; this is not parent-directory
+power-loss durability or hostile same-UID filesystem exclusion.
+
+Only the reviewed native adapter may change the paired `network.trr.uri` and
+`network.trr.mode` to the fixed family configuration, and restore them only
+while its whole ownership group is still verified. User/policy drift releases
+that entitlement. Guard reads use ownership/lock booleans, the nonempty bootstrap
+address guard and boolean OHTTP enablement; no credential or OHTTP URI strings
+are read. Pages make no independent preference or DNS reads.
+
+The actor exposes only fixed `code/reason`, `blocked`, `cleanup_blocked`,
+`sequence`, `changed` and categorical offer/status booleans (`offer`, `checked`,
+`active`, `owned`) when known. Full owner state, actual preference values,
+diagnostics, resolver strings, journal, mutations, native paths and handles
+stay private. Null/unavailable status remains uncertain. `active` describes
+configuration, not proven DNS category filtering or blocking of existing
+connections. No classifier is added; actual native safety evidence remains a
+separate gate, and AI admission never infers permission from configuration alone.
+
+## 11. Changelog
 
 - 2 October 2026 — created for Plan 4.

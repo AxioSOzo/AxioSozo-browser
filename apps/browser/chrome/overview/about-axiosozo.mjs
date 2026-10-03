@@ -52,6 +52,18 @@ const state = {
   // acceptance work (understandVisit). A new visit starts on every route change,
   // pagehide and restore, so nothing of an earlier one can publish.
   understand: understandVisit(null),
+  // Watches (Plan 4 §4): the browser's saved list and fixed status (or the code
+  // it refused with), the row asking to confirm a removal, this page's own
+  // action waiting for its outcome and the last outcome to show. A watch is
+  // changed only by the browser's actor on a trusted click of its own button;
+  // this page sends no change itself.
+  watches: { list: null, status: null, error: null, confirm: null, pending: null, matched: null, notice: null },
+  // P7: the browser's categorical safety answer (or its refusal code), this
+  // page's own choice waiting for its outcome, and a first-run offer put
+  // aside for this visit only (that grants and completes nothing).
+  safety: { reply: null, error: null, pending: null, unconfirmed: null, dismissed: false, notice: null, requested: false },
+  // P6 (experimental): the start page's project home answers (agent activity) by id.
+  start: { homes: new Map(), loading: false },
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -61,7 +73,7 @@ const state = {
 // counter for all), so clearing them cannot let an old answer match a new one.
 let ticketSerial = 0;
 const nextTicket = () => ++ticketSerial;
-const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0 };
+const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0, watches: 0, safety: 0, start: 0 };
 const statusTickets = new Map(); // project id → its latest local-server check
 /** Voids any home answer still on its way (and a retry it would schedule). */
 const invalidateHome = () => { latest.home = nextTicket(); };
@@ -265,7 +277,7 @@ function setupDialog() {
 // One modal sheet for the project review, the rule editor and the brief
 // acceptance review. onClose runs once however it closes (Cancel, Escape, done).
 let sheetClose = null;
-function openSheet({ title, body, footer, onClose = null }) {
+function openSheet({ title, body, footer, onClose = null, attrs = {} }) {
   const dialog = $("sheet");
   // A sheet opened over another one ends that one first (its onClose runs).
   sheetClose?.();
@@ -281,7 +293,7 @@ function openSheet({ title, body, footer, onClose = null }) {
     returnFocus?.focus?.();
   };
   sheetClose = close;
-  $("sheet-body").replaceChildren(h("div", { class: "sheet" },
+  $("sheet-body").replaceChildren(h("div", { ...attrs, class: "sheet" },
     h("div", { class: "sheet-head" }, h("h2", { id: "sheet-title", tabindex: "-1" }, title),
       iconButton("close", "Close", close)),
     h("div", { class: "sheet-body" }, body),
@@ -322,6 +334,10 @@ function showView(view) {
   if (view === "ai" && state.connected && state.loaded) loadAgentSettings();
   // Key presence is read when AI & keys opens, never on the other views.
   if (view === "ai" && previous !== "ai" && state.connected && state.loaded) loadDecisionKeys();
+  // The safety choice is read where it is offered or set: the project list and AI & keys.
+  if ((view === "ai" || (view === "projects" && !state.homeId)) && !state.safety.requested && state.connected && state.loaded) loadSafety();
+  // The experimental start page reads its projects' activity when it shows.
+  if (view === "home" && previous !== "home" && state.connected && state.loaded) { renderStartPage(); loadStartPage(); }
 }
 
 function renderViewCounts() {
@@ -558,6 +574,7 @@ async function refreshAllServiceStatus() {
   await keepFocus(renderProjectsView);
   await Promise.allSettled(checks);
   if (state.active) await keepFocus(renderProjectsView);
+  if (state.active && state.view === "home") await keepFocus(renderStartPage);
 }
 
 /** Rows for what static detection found (M.detectionSummary) in the
@@ -1327,6 +1344,7 @@ function renderHome() {
     open: () => homeOpen(project),
     accounts: () => homeAccounts(project, container, space),
     activity: () => homeActivity(project, agents, errors),
+    watches: () => homeWatches(project),
     about: () => homeAbout(project),
   };
   fill(root, crumbs,
@@ -1654,6 +1672,598 @@ function restoreBriefFocus() {
   if (focused && document.contains(focused) && focused !== document.body) return;
   const target = $("project-home").querySelector('[data-focus-key="brief:action"]') ?? $("home-brief-heading");
   if (target) { deliberateFocus++; target.focus({ preventScroll: true }); }
+}
+
+// ---------------------------------------------------------------- watches (Plan 4 §4)
+
+// The list and status are ordinary reads. Every change (create, edit, remove,
+// Check now, Retry) is the browser actor's own reading of a trusted click on
+// the authored button with its fixed id or row attributes; the page only keeps
+// its form honest, waits for the "watches" event and reads again.
+const WATCH_SETTLE_MS = 2500;
+const WATCH = Object.freeze({ form: "axiosozo-watch-form", save: "axiosozo-watch-save", url: "axiosozo-watch-url",
+  question: "axiosozo-watch-question", observation: "axiosozo-watch-observation", provider: "axiosozo-watch-provider",
+  consent: "axiosozo-watch-consent", enabled: "axiosozo-watch-enabled", interval: "axiosozo-watch-interval",
+  label: "axiosozo-watch-outcome-label-", key: "axiosozo-watch-outcome-id-", retry: "axiosozo-watch-retry" });
+
+/** The saved watches and the controller's status; only the latest read publishes. */
+async function loadWatches() {
+  if (!state.active || !state.admitted) return;
+  const ticket = latest.watches = nextTicket();
+  let list = null, status = null, error = null;
+  try { [list, status] = await Promise.all([call("listWatches"), call("getWatchStatus")]); }
+  catch (failure) { error = failure?.code ?? "ERROR"; }
+  if (ticket !== latest.watches || !state.active) return;
+  if (error) state.watches.error = error;
+  else Object.assign(state.watches, { list: Array.isArray(list) ? list : [], status: status ?? null, error: null });
+  const done = settleWatchAction();
+  await renderWatchViews();
+  // A removed watch took its focused button with it: focus stays in its section.
+  if (done?.removed && state.homeId === done.projectId) focusKey(`project:${done.projectId}:watches:new`);
+}
+
+/** Every place that shows watches, in place, keeping keyboard focus. */
+async function renderWatchViews() {
+  if (state.homeId && state.home?.data && state.loaded) await keepFocus(renderHome);
+  if (state.view === "home") await keepFocus(renderStartPage);
+}
+
+/** Starts waiting for the outcome of this page's own trusted action. */
+function beginWatchAction(pending) {
+  clearTimeout(state.watches.pending?.timer);
+  clearTimeout(state.watches.matched?.timer);
+  state.watches.matched = null;
+  const status = state.watches.status;
+  state.watches.pending = { ...pending, loads: 0, before: JSON.stringify(status?.last_error ?? null),
+    lastRequest: status?.last?.request_id ?? null, timer: setTimeout(() => settleWatchAction({ timedOut: true }), WATCH_SETTLE_MS) };
+  state.watches.notice = null;
+}
+
+/**
+ * Decides what this page's own action did from what the browser now reports:
+ * the list (a new, edited or removed watch), the controller's last check, or
+ * the categorical outcome it kept for its latest manual action. Nothing is
+ * shown as done that the browser does not report. A Save is never shown as
+ * done: the "watches" event names no action, so a stored record with exactly
+ * its fields is only the list's current state (another window may have saved
+ * it). The editor then stays open with that fact, and until the Save's own
+ * deadline a fresh refusal of it still takes over.
+ */
+function settleWatchAction({ timedOut = false } = {}) {
+  const live = state.watches.pending;
+  const pending = live ?? state.watches.matched;
+  if (!pending || !state.active) return;
+  if (live && !timedOut) pending.loads++;
+  const list = state.watches.list ?? [];
+  const status = state.watches.status;
+  const failure = status?.last_error?.action === pending.action
+    && (pending.watchId === null || status.last_error.watch_id === pending.watchId) ? status.last_error : null;
+  // A refusal that appeared since the click wins over everything else; one
+  // that was already shown before counts only once nothing else answered.
+  const fresh = failure && JSON.stringify(failure) !== pending.before;
+  const repeated = failure && !fresh && (pending.loads >= 2 || timedOut);
+  const refusal = () => ({ ok: false, notice: true, code: failure.code, text: M.watchActionText(failure.code), watchId: pending.watchId });
+  if (!live) {
+    // A Save already shown as matching the list: only its fresh refusal can
+    // still say more; its deadline ends the wait quietly.
+    if (!fresh && !timedOut) return;
+    clearTimeout(pending.timer);
+    state.watches.matched = null;
+    if (fresh) {
+      const text = refusal().text;
+      if (pending.sheet && !pending.sheet.closed) pending.sheet.failed(text); else setStatus(text, "error");
+    }
+    return;
+  }
+  let done = null;
+  if (fresh) done = refusal();
+  else if (pending.action === "save") {
+    // A stored record with exactly the fields this Save asked for (the edited
+    // watch at a newer revision, or exactly one new watch of this project) is
+    // the current state, never proof of this click. Another window's
+    // different change, or two identical new watches, stay unconfirmed.
+    if (pending.watchId) {
+      const stored = list.find(watch => watch.id === pending.watchId);
+      const newer = !!stored && Number.isSafeInteger(stored.revision) && stored.revision > pending.revision;
+      if (newer && M.watchMatchesIntent(stored, pending.intent)) {
+        done = { ok: false, matched: true, text: "This watch now has exactly these details, from this Save or another window; AxioSozo cannot tell which. Your entry stays here; close it if that is what you meant." };
+      } else if (newer) done = { ok: false, unconfirmed: true, text: "This watch was changed elsewhere meanwhile, so your save is not confirmed. Your edits are still here; check them and save again." };
+    } else {
+      const added = list.filter(watch => watch.project_id === pending.projectId && !pending.known.includes(watch.id));
+      const mine = added.filter(watch => M.watchMatchesIntent(watch, pending.intent));
+      if (mine.length === 1) {
+        done = { ok: false, matched: true, text: "A watch with exactly these details is now in the list, from this Save or another window; AxioSozo cannot tell which. Your entry stays here; close it if that is the one you meant." };
+      } else if (mine.length > 1) done = { ok: false, unconfirmed: true, text: "More than one matching watch appeared, so AxioSozo cannot confirm which one is yours. Check the list; your entry is still here." };
+    }
+  } else if (pending.action === "remove") {
+    if (!list.some(watch => watch.id === pending.watchId)) done = { ok: true, text: "Watch removed." };
+  } else if (pending.action === "check") {
+    const report = status?.last;
+    if (!failure && report?.watch_id === pending.watchId && report.request_id && report.request_id !== pending.lastRequest) {
+      done = { ok: true, tone: report.code === "NOT_AUTHORIZED" || report.code === "APPLIED" ? "info" : "warn", watchId: pending.watchId,
+        text: M.watchReportText(report) };
+    }
+  } else if (pending.action === "retry") {
+    if (status && !status.cleanup_required && !status.recovery_required) done = { ok: true, text: "The earlier check is cleaned up." };
+  }
+  if (!done && repeated) done = refusal();
+  if (!done && timedOut) {
+    done = { ok: false, unconfirmed: true, text: pending.action === "save"
+      ? "AxioSozo has not confirmed this save. The list shows what it has now; your entry is still here."
+      : "AxioSozo has not confirmed that yet. The list shows what it has now." };
+  }
+  if (!done) return;
+  state.watches.pending = null;
+  // A matching Save keeps its deadline for a refusal that may still come.
+  if (done.matched) state.watches.matched = pending; else clearTimeout(pending.timer);
+  if (state.watches.confirm && pending.action === "remove") state.watches.confirm = null;
+  const sheet = pending.sheet;
+  if (pending.action === "save") {
+    if (sheet && !sheet.closed) {
+      if (done.matched) { sheet.matched(done.text); setStatus(done.text); } else sheet.failed(done.text);
+    } else setStatus(done.text, done.matched ? "info" : "error");
+  } else {
+    state.watches.notice = { watchId: done.watchId ?? pending.watchId ?? null, projectId: pending.projectId ?? null,
+      tone: done.ok ? done.tone ?? "info" : "warn", text: done.text };
+    setStatus(done.text, done.ok ? "info" : "error");
+  }
+  if (timedOut) renderWatchViews();
+  return { removed: pending.action === "remove" && done.ok, projectId: pending.projectId ?? null };
+}
+
+const watchKey = (watch, suffix) => `watch:${watch.id}:${suffix}`;
+const shortQuestion = text => ([...text].length > 60 ? `${[...text].slice(0, 59).join("")}…` : text);
+
+/** One watch: its question, page, what it may see and the saved result (history,
+ * never a current reading), with Check now and its less common actions behind "…". */
+function watchItem(project, watch, view, { showProject = false } = {}) {
+  const row = M.watchRow(watch, { now: Date.now(), projectName: showProject ? projectName(project) : null, busy: view.busy });
+  // The project home's row owns `watch-<id>` (the browser reads its actions
+  // there); the start page's action-less copy has ids of its own.
+  const prefix = showProject ? "start-watch" : "watch";
+  const titleId = `${prefix}-title-${watch.id}`;
+  const pending = state.watches.pending?.watchId === watch.id ? state.watches.pending.action : null;
+  const inactive = view.busy || view.state === "blocked" || !!state.watches.pending;
+  const notice = state.watches.notice?.watchId === watch.id ? state.watches.notice : null;
+  const confirming = state.watches.confirm === watch.id && !showProject;
+  const resultId = `${prefix}-result-${watch.id}`;
+  return h("li", { class: "watch-row", id: `${prefix}-${watch.id}`, "aria-labelledby": titleId },
+    h("div", { class: "watch-main" },
+      h("h4", { class: "watch-question", id: titleId }, row.question),
+      h("p", { class: "watch-page" }, showProject && row.project ? h("span", { class: "tag" }, row.project) : null,
+        h("span", { class: "path", title: row.url }, row.address)),
+      h("p", { class: "watch-facts" },
+        h("span", { class: "fact" }, h("span", { class: "fact-label" }, "Answers:"), " ", row.answers.join(", ")),
+        h("span", { class: "fact" }, h("span", { class: "fact-label" }, "Observes:"), " ", row.observation),
+        h("span", { class: "fact" }, h("span", { class: "fact-label" }, "Answered by:"), " ", row.provider)),
+      h("p", { class: "watch-result", id: resultId, "data-tone": row.result.tone },
+        h("span", { class: "dot", "data-status": toneDot(row.result.tone === "info" ? "warn" : row.result.tone), "aria-hidden": "true" }),
+        h("span", {}, row.result.text),
+        row.result.ago ? h("span", { class: "help" }, ` · ${row.result.ago}`) : null,
+        row.result.detail ? h("span", { class: "help" }, ` · ${row.result.detail}`) : null),
+      h("p", { class: "help watch-schedule" }, row.schedule.text),
+      notice ? h("p", { class: "watch-notice", role: "status", "data-tone": notice.tone }, notice.text) : null),
+    showProject ? null : h("div", { class: "watch-actions" },
+      row.checkable ? h("button", { type: "button", class: "ghost small", "data-watch-action": "check", "data-watch-id": watch.id,
+        "data-focus-key": watchKey(watch, "check"), "aria-describedby": resultId, "aria-disabled": inactive ? "true" : null,
+        onclick: () => checkWatchClicked(project, watch, inactive) }, pending === "check" ? "Checking…" : "Check now") : null,
+      overflowMenu(`More for the watch “${shortQuestion(row.question)}”`, [
+        { label: "Edit…", focusKey: watchKey(watch, "edit"), run: () => openWatchEditor(project, watch) },
+        { label: "Remove…", destructive: true, focusKey: watchKey(watch, "ask-remove"), run: () => askRemoveWatch(watch) },
+      ], { focusKey: watchKey(watch, "menu") })),
+    confirming ? h("div", { class: "watch-confirm", role: "group", "aria-labelledby": `watch-confirm-${watch.id}` },
+      h("span", { id: `watch-confirm-${watch.id}` }, "Remove this watch? Its saved result goes with it."),
+      h("div", { class: "button-row" },
+        h("button", { type: "button", class: "ghost small", "data-focus-key": watchKey(watch, "keep"),
+          onclick: () => { state.watches.confirm = null; renderWatchViews().then(() => focusKey(watchKey(watch, "menu"))); } }, "Keep"),
+        h("button", { type: "button", class: "destructive small", "data-watch-action": "remove", "data-watch-id": watch.id,
+          "data-focus-key": watchKey(watch, "remove"), "aria-disabled": state.watches.pending ? "true" : null,
+          onclick: () => removeWatchClicked(project, watch) }, pending === "remove" ? "Removing…" : "Remove watch"))) : null);
+}
+
+function focusKey(key) {
+  const node = document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`);
+  if (node) { deliberateFocus++; node.focus({ preventScroll: true }); }
+}
+
+/** The project home's Watches: its watches, the controller's quiet status, a
+ * blocking problem with Retry when the browser allows it, and an honest note. */
+function homeWatches(project) {
+  const key = suffix => `project:${project.id}:watches:${suffix}`;
+  const add = h("button", { type: "button", class: "ghost small", "data-focus-key": key("new"), "aria-label": `New watch for ${projectName(project)}`,
+    onclick: () => openWatchEditor(project, null) }, icon("plus", 14), "New watch…");
+  const { list, error } = state.watches;
+  // A browser whose actor has no watches at all (an older build) shows no section.
+  if (!list && error === "UNKNOWN_METHOD") return null;
+  if (!list) {
+    return homeSection("watches", "Watches", h("p", { class: "quiet-text" }, error ? "Watches cannot be shown right now." : "Loading watches…"),
+      { action: error ? null : add });
+  }
+  const view = M.watchStatusView(state.watches.status, { error: state.watches.error });
+  const watches = M.projectWatches(list, project.id);
+  const body = [];
+  if (view.text || view.disclosure) {
+    body.push(h("p", { class: "watch-status", role: "status", "aria-live": "polite" },
+      h("span", { class: "dot", "data-status": "unknown", "aria-hidden": "true" }), [view.text, view.disclosure].filter(Boolean).join(" ")));
+  }
+  if (view.problem) body.push(watchProblem(view));
+  body.push(watches.length ? h("ul", { class: "watch-list", "aria-label": `Watches of ${projectName(project)}` },
+    watches.map(watch => watchItem(project, watch, view)))
+    : h("p", { class: "quiet-text" }, "No watches yet. A watch asks one question about one page of this project, for example “Is the release published?”, and answers with one of your own answers."));
+  body.push(h("p", { class: "footnote" }, `${M.WATCH_NOTE} ${M.WATCH_LIVE_NOTE}`));
+  return homeSection("watches", "Watches", body, { action: add });
+}
+
+/** A check whose cleanup or stale-answer removal failed blocks the next one;
+ * Retry repeats only that owned cleanup and starts no check. */
+function watchProblem(view) {
+  const pending = state.watches.pending?.action === "retry";
+  return h("div", { class: "watch-problem", role: "group", "aria-labelledby": "watch-problem-text" },
+    h("p", { id: "watch-problem-text" }, h("span", { class: "dot", "data-status": "down", "aria-hidden": "true" }), view.problem),
+    view.retry ? h("button", { type: "button", id: WATCH.retry, class: "small", "data-focus-key": "watches:retry",
+      "aria-disabled": state.watches.pending ? "true" : null, onclick: () => retryWatchClicked() }, pending ? "Retrying…" : "Retry cleanup")
+      : h("p", { class: "help" }, "Restart AxioSozo if this stays."));
+}
+
+// The page's side of a trusted click: the browser's actor already read it.
+function checkWatchClicked(project, watch, inactive) {
+  if (inactive || state.watches.pending) return;
+  beginWatchAction({ action: "check", watchId: watch.id, projectId: project.id });
+  renderWatchViews();
+}
+
+function askRemoveWatch(watch) {
+  if (state.watches.pending) return;
+  state.watches.confirm = watch.id;
+  renderWatchViews().then(() => focusKey(watchKey(watch, "keep")));
+}
+
+function removeWatchClicked(project, watch) {
+  if (state.watches.pending) return;
+  beginWatchAction({ action: "remove", watchId: watch.id, projectId: project.id });
+  renderWatchViews();
+}
+
+function retryWatchClicked() {
+  if (state.watches.pending) return;
+  beginWatchAction({ action: "retry", watchId: null });
+  renderWatchViews();
+}
+
+/**
+ * The watch editor, in the sheet. Its controls carry the fixed ids the
+ * browser's actor reads natively on a trusted click of Save; the page keeps
+ * their values valid (one-line question, trimmed address, answer ids derived
+ * from the labels) and Save inactive while they are not.
+ */
+function openWatchEditor(project, watch) {
+  if (state.watches.pending) { setStatus("A watch change is still finishing. Try again in a moment."); return; }
+  const form = watch ? M.watchToForm(watch) : M.emptyWatchForm();
+  const errorsList = h("ul", { class: "errors", role: "alert" });
+  const answers = h("div", { class: "form-rows watch-answers", role: "group", "aria-labelledby": "watch-answers-label" });
+  let saving = false;
+  let save = null;
+  const sync = () => {
+    const keys = M.outcomeKeys(form.outcomes.map(item => item.label));
+    form.outcomes.forEach((item, index) => {
+      item.id = keys[index];
+      const hidden = $(`${WATCH.key}${index}`);
+      if (hidden) hidden.value = item.id;
+    });
+    const invalid = M.watchFormErrors(form).length > 0;
+    if (save) {
+      if (invalid || saving) save.setAttribute("aria-disabled", "true"); else save.removeAttribute("aria-disabled");
+      save.textContent = saving ? "Saving…" : watch ? "Save watch" : "Add watch";
+    }
+  };
+  const renderAnswers = focusIndex => {
+    answers.replaceChildren(...form.outcomes.map((item, index) => h("div", { class: "review-row watch-answer" },
+      h("input", { type: "text", id: `${WATCH.label}${index}`, value: item.label, maxlength: "80", spellcheck: "true",
+        "aria-label": `Answer ${index + 1}`, oninput: event => { item.label = event.target.value.replace(/[\r\n]+/gu, " "); sync(); } }),
+      h("input", { type: "hidden", id: `${WATCH.key}${index}`, value: item.id }),
+      form.outcomes.length > M.WATCH_LIMITS.outcomesMin ? iconButton("close", `Remove answer ${index + 1}`, () => {
+        form.outcomes.splice(index, 1); renderAnswers(Math.max(0, index - 1)); }) : null)));
+    addAnswer.hidden = form.outcomes.length >= M.WATCH_LIMITS.outcomesMax;
+    sync();
+    if (focusIndex !== undefined) $(`${WATCH.label}${focusIndex}`)?.focus();
+  };
+  const addAnswer = h("button", { type: "button", class: "ghost small", onclick: () => {
+    form.outcomes.push({ id: "", label: "" });
+    renderAnswers(form.outcomes.length - 1);
+  } }, icon("plus", 14), "Add an answer");
+  const url = h("input", { type: "url", id: WATCH.url, value: form.url, spellcheck: "false", placeholder: "https://example.com/status",
+    oninput: event => { form.url = event.target.value; sync(); },
+    onchange: event => { const trimmed = event.target.value.trim(); if (trimmed !== event.target.value) event.target.value = trimmed; form.url = trimmed; sync(); } });
+  const question = h("textarea", { id: WATCH.question, rows: "2", maxlength: String(M.WATCH_LIMITS.question), value: form.question,
+    placeholder: "Is the release published?",
+    onkeydown: event => { if (event.key === "Enter") event.preventDefault(); },
+    oninput: event => {
+      const one = event.target.value.replace(/[\r\n]+/gu, " ");
+      if (one !== event.target.value) event.target.value = one;
+      form.question = one; sync();
+    } });
+  const observation = h("select", { id: WATCH.observation, onchange: event => { form.observation = event.target.value; sync(); } },
+    M.WATCH_OBSERVATIONS.map(value => option(value, M.WATCH_OBSERVATION_LABELS[value], form.observation)));
+  const provider = h("select", { id: WATCH.provider, onchange: event => { form.provider = event.target.value; sync(); } },
+    M.DECISION_PROVIDERS.map(value => option(value, M.PROVIDER_LABELS[value], form.provider)));
+  const intervals = [...new Set([...M.WATCH_INTERVALS, form.intervalMinutes])].sort((a, b) => a - b);
+  const interval = h("select", { id: WATCH.interval, onchange: event => { form.intervalMinutes = Number.parseInt(event.target.value, 10); sync(); } },
+    intervals.map(value => option(String(value), `At most every ${value} ${value === 1 ? "minute" : "minutes"}`, String(form.intervalMinutes))));
+  const consent = choice({ type: "checkbox", name: "watch-consent", checked: form.consent, label: "Allow it to send when live checks are available",
+    help: M.WATCH_CONSENT_TEXT, onchange: event => { form.consent = event.target.checked; sync(); } });
+  consent.querySelector("input").id = WATCH.consent;
+  consent.querySelector("label").setAttribute("for", WATCH.consent);
+  const enabled = choice({ type: "checkbox", name: "watch-enabled", checked: form.enabled, label: "Watch is on",
+    help: "Off keeps the watch and its answers but never checks it.", onchange: event => { form.enabled = event.target.checked; sync(); } });
+  enabled.querySelector("input").id = WATCH.enabled;
+  enabled.querySelector("label").setAttribute("for", WATCH.enabled);
+  const handle = { closed: false, close: null, failed: null, matched: null };
+  // What the list now shows for this entry; never a claim that this click did it.
+  const saveNote = h("p", { class: "help", role: "status", hidden: true });
+  save = h("button", { type: "button", id: WATCH.save, class: "primary", "aria-describedby": "watch-live-note", onclick: () => {
+    if (saving) return;
+    const errors = M.watchFormErrors(form);
+    errorsList.replaceChildren(...errors.map(text => h("li", {}, text)));
+    if (errors.length) return;
+    saving = true;
+    sync();
+    // The baseline is what the browser reported when Save was clicked (another
+    // window may have changed the watch since the editor opened), and the
+    // intent is exactly what this click asks the browser to store.
+    const list = state.watches.list ?? [];
+    const stored = watch ? list.find(item => item.id === watch.id) : null;
+    beginWatchAction({ action: "save", watchId: watch?.id ?? null, revision: stored?.revision ?? watch?.revision ?? 0, projectId: project.id,
+      known: list.map(item => item.id), intent: M.watchSaveIntent(form), sheet: handle });
+  } });
+  handle.failed = text => { saving = false; saveNote.hidden = true; saveNote.textContent = ""; errorsList.replaceChildren(h("li", {}, text)); sync(); };
+  handle.matched = text => { saving = false; errorsList.replaceChildren(); saveNote.textContent = text; saveNote.hidden = false; sync(); };
+  handle.close = openSheet({
+    title: watch ? "Edit watch" : `New watch for ${projectName(project)}`,
+    attrs: { id: WATCH.form, "data-project-id": project.id, "data-watch-id": watch?.id ?? null },
+    body: [
+      field({ label: "Page", control: url, help: "Only the address's origin and path are kept; anything after ? or # is dropped." }),
+      field({ label: "Question", control: question, help: "One plain question, answered with one of the answers below." }),
+      h("div", { class: "field" }, h("span", { class: "label", id: "watch-answers-label" }, "Answers"), answers, h("div", {}, addAnswer),
+        h("span", { class: "help" }, "2 to 6 answers. “No clear answer” is always possible too.")),
+      h("div", { class: "form-row" },
+        field({ label: "It may observe", control: observation, help: "Nothing observed means it is never checked." }),
+        field({ label: "Answered by", control: provider })),
+      field({ label: "How often", control: interval }),
+      consent, enabled,
+      h("p", { class: "notice", id: "watch-live-note" }, M.WATCH_LIVE_NOTE),
+      saveNote, errorsList],
+    footer: [h("button", { type: "button", onclick: () => handle.close() }, "Cancel"), save],
+    onClose: () => { handle.closed = true; },
+  });
+  renderAnswers();
+}
+
+// ---------------------------------------------------------------- safety (P7)
+
+// The first-run offer (on Projects) and the later choice (AI & keys) show only
+// the browser's categorical answer. Confirming is the browser actor's reading
+// of a trusted click on the authored button with its own checkbox; opening,
+// "Not now" or leaving grants and completes nothing.
+const SAFETY = Object.freeze({ offerChecked: "axiosozo-safety-offer-checked", offerConfirm: "axiosozo-safety-offer-confirm",
+  settingsChecked: "axiosozo-safety-settings-checked", settingsConfirm: "axiosozo-safety-settings-confirm",
+  offerRecovery: "axiosozo-safety-offer-recovery", settingsRecovery: "axiosozo-safety-settings-recovery" });
+
+/** The explicit offer/settings read; never asked before the page is admitted. */
+async function loadSafety() {
+  if (!state.active || !state.admitted) return;
+  const ticket = latest.safety = nextTicket();
+  state.safety.requested = true;
+  let reply = null, error = null;
+  try { reply = await call("getSafetyStatus"); } catch (failure) { error = failure?.code ?? "ERROR"; }
+  if (ticket !== latest.safety || !state.active) return;
+  // A failed read replaces the older answer: the page never keeps showing an
+  // earlier "On" or an enabled Save it can no longer vouch for.
+  Object.assign(state.safety, reply ? { reply, error: null } : { reply: null, error });
+  settleSafetyChoice({ failed: !reply });
+  await keepFocus(renderSafety);
+}
+
+function beginSafetyChoice(kind, detail = {}) {
+  clearTimeout(state.safety.pending?.timer);
+  state.safety.pending = { kind, ...detail, loads: 0, before: JSON.stringify(state.safety.reply ?? null),
+    timer: setTimeout(() => settleSafetyChoice({ timedOut: true }), WATCH_SETTLE_MS) };
+  state.safety.unconfirmed = null;
+  state.safety.notice = null;
+}
+
+/**
+ * What this page's own choice did, from the browser's later answers only. A
+ * choice whose answer did not arrive in time, or whose read failed, is shown
+ * as not confirmed (never as "nothing changed"); it keeps its baseline, so a
+ * later answer that differs still reports what happened.
+ */
+function settleSafetyChoice({ timedOut = false, failed = false } = {}) {
+  const live = state.safety.pending;
+  const pending = live ?? state.safety.unconfirmed;
+  if (!pending || !state.active) return;
+  if (live && !timedOut) pending.loads++;
+  const reply = failed ? null : state.safety.reply;
+  const changed = !!reply && JSON.stringify(reply) !== pending.before;
+  let notice;
+  if (!changed) {
+    // A late answer is still awaited; nothing new to say.
+    if (!live) return;
+    if (!failed && !timedOut && pending.loads < 2) return;
+    clearTimeout(pending.timer);
+    state.safety.pending = null;
+    if (!failed && !timedOut) {
+      // Two answers since the click, both the same as before it.
+      const view = M.safetyView(reply);
+      notice = { tone: "warn", text: view.note ?? `AxioSozo reports the same setting as before your choice. ${view.text}` };
+    } else {
+      state.safety.unconfirmed = pending;
+      notice = { tone: "warn", text: failed
+        ? "AxioSozo could not read the setting after your choice, so it is not confirmed. It is read again when you come back to this page."
+        : "AxioSozo has not confirmed your choice yet. What is shown is its latest answer." };
+    }
+  } else {
+    clearTimeout(pending.timer);
+    state.safety.pending = null;
+    state.safety.unconfirmed = null;
+    const view = M.safetyView(reply);
+    const late = !live ? "Your earlier choice has an answer now. " : "";
+    let text;
+    if (view.state === "recovery") text = "A change did not finish. See below what to do.";
+    else if (view.state !== "chosen" && view.state !== "offer") text = view.text;
+    else if (pending.kind === "resolve") text = view.note ?? "Recorded.";
+    // A saved choice is confirmed only by the owner's settled answer.
+    else text = view.note ?? (view.state === "chosen" ? (reply.status?.active ? "Saved. The family filter is on." : "Saved. The family filter is off.")
+      : `AxioSozo reports no saved choice yet. ${view.text}`);
+    const settled = view.state === "chosen" && (!view.note || ["RESTORED", "RESOLVED"].includes(reply.reason));
+    notice = { tone: settled ? "ok" : "warn", text: `${late}${text}` };
+  }
+  state.safety.notice = notice;
+  setStatus(notice.text, notice.tone === "ok" ? "info" : "error");
+  if (timedOut) renderSafety();
+}
+
+/** One safety panel: the first-run offer or the setting, a blocked state to
+ * acknowledge, or why it cannot be shown. */
+function safetyPanel(place) {
+  const view = M.safetyView(state.safety.reply, { error: state.safety.error });
+  const offer = place === "offer";
+  const pending = state.safety.pending;
+  const ids = offer ? { checked: SAFETY.offerChecked, confirm: SAFETY.offerConfirm } : { checked: SAFETY.settingsChecked, confirm: SAFETY.settingsConfirm };
+  const parts = [];
+  const notice = state.safety.notice;
+  if (view.state === "recovery") {
+    parts.push(h("p", { class: "notice", "data-tone": "warn" }, view.text));
+    if (view.recovery) {
+      // The browser reads the answer only from this authored group, with the
+      // sequence of its own latest recovery answer.
+      parts.push(h("div", { class: "button-row safety-recovery", id: offer ? SAFETY.offerRecovery : SAFETY.settingsRecovery, role: "group",
+        "aria-label": "What do you see in Firefox Settings?", "data-safety-sequence": String(view.recovery.sequence) },
+        view.recovery.outcomes.map(item => h("button", { type: "button", class: "small", "data-safety-outcome": item.outcome,
+          "data-focus-key": `safety:${place}:${item.outcome}`,
+          "aria-disabled": pending ? "true" : null, onclick: () => { if (!state.safety.pending) { beginSafetyChoice("resolve"); renderSafety(); } } },
+        item.label))));
+    }
+  } else if (view.form) {
+    const box = h("input", { type: "checkbox", id: ids.checked, checked: view.checked, "aria-describedby": `safety-${place}-help`, disabled: !!pending });
+    parts.push(h("div", { class: "choice safety-choice" }, box,
+      h("div", {}, h("label", { for: ids.checked }, M.SAFETY_TITLE),
+        h("span", { class: "help", id: `safety-${place}-help` }, offer ? `${M.SAFETY_TEXT} ${M.SAFETY_LATER}` : M.SAFETY_TEXT))));
+    parts.push(h("p", { class: "safety-now", "data-tone": view.tone }, h("span", { class: "dot", "data-status": toneDot(view.tone), "aria-hidden": "true" }),
+      h("span", {}, view.text)));
+    parts.push(h("div", { class: "button-row" },
+      offer ? h("button", { type: "button", class: "ghost", "data-focus-key": "safety:offer:later", onclick: () => {
+        state.safety.dismissed = true; renderSafety(); $("add-project")?.focus(); } }, "Not now") : null,
+      h("button", { type: "button", id: ids.confirm, class: "primary", "data-focus-key": `safety:${place}:confirm`,
+        "aria-disabled": pending ? "true" : null, onclick: () => {
+          if (state.safety.pending) return;
+          beginSafetyChoice("choose");
+          renderSafety();
+        } }, pending?.kind === "choose" ? "Saving…" : offer ? "Save my choice" : "Save")));
+  } else {
+    parts.push(h("p", { class: "quiet-text", "data-tone": view.tone }, view.text));
+  }
+  if (notice) parts.push(h("p", { class: "safety-result", role: "status", "data-tone": notice.tone }, notice.text));
+  return parts;
+}
+
+function renderSafety() {
+  const offerBox = $("safety-offer");
+  const view = M.safetyView(state.safety.reply, { error: state.safety.error });
+  // The first-run card: the offer itself, an unfinished change that needs you,
+  // or the outcome of a choice made on it (also when the next read failed).
+  const showOffer = state.connected && !state.safety.dismissed
+    && ((!!state.safety.reply && ["offer", "recovery", "cleanup"].includes(view.state)) || !!state.safety.pending || !!state.safety.notice);
+  if (offerBox) {
+    offerBox.hidden = !showOffer;
+    if (showOffer) {
+      fill(offerBox, h("div", { class: "block-head" }, h("h3", { id: "safety-offer-heading" },
+        view.state === "offer" ? "Before you start" : "Safe browsing"),
+      view.state === "offer" ? h("p", { class: "block-help" }, M.SAFETY_OFFER_HELP) : null),
+      h("div", { class: "panel settings-panel" }, safetyPanel("offer")));
+    } else offerBox.replaceChildren();
+  }
+  const settings = $("safety-settings-body");
+  if (settings) {
+    if (!state.connected) fill(settings, h("p", { class: "quiet-text" }, "This setting appears here once AxioSozo is connected."));
+    else if (!state.safety.requested) fill(settings, h("p", { class: "quiet-text" }, "Reading the current setting…"));
+    else fill(settings, safetyPanel("settings"));
+  }
+}
+
+// ---------------------------------------------------------------- start page (P6, experimental)
+
+/** The start page's per-project agent activity: each project's own guarded
+ * home answer, read only while the start page shows; unreadable is unavailable. */
+async function loadStartPage() {
+  if (!state.active || !state.admitted || state.view !== "home") return;
+  const ticket = latest.start = nextTicket();
+  state.start.loading = true;
+  const homes = new Map();
+  await Promise.all(state.projects.map(async project => {
+    try { homes.set(project.id, await call("getProjectHome", { id: project.id })); } catch { homes.set(project.id, null); }
+  }));
+  if (ticket !== latest.start || !state.active) return;
+  state.start = { homes, loading: false };
+  await keepFocus(renderStartPage);
+}
+
+function startSection(key, title, body, { count = null } = {}) {
+  const headingId = `start-${key}-heading`;
+  return h("section", { class: "start-section", "data-section": key, "aria-labelledby": headingId },
+    h("div", { class: "section-head" }, h("h3", { id: headingId }, title,
+      count ? h("span", { class: "count", "aria-label": `${count} items` }, String(count)) : null)),
+    body);
+}
+
+function renderStartPage() {
+  const root = $("start-page");
+  if (!root || state.view !== "home") return;
+  if (!state.connected) { root.removeAttribute("aria-busy"); fill(root, h("p", { class: "empty" }, "The start page appears here once AxioSozo is connected.")); return; }
+  if (!state.loaded) { root.setAttribute("aria-busy", "true"); fill(root, h("p", { class: "loading" }, "Loading…")); return; }
+  root.removeAttribute("aria-busy");
+  const view = M.startPageView({ attention: state.attention, projects: state.projects, watches: state.watches.list ?? [],
+    watchStatus: state.watches.status, homes: state.start.homes, statuses: state.serviceStatus, now: Date.now() });
+  const needs = view.needs.length ? h("ul", { class: "rows" }, view.needs.map(item => {
+    const action = item.action;
+    const link = action?.kind === "project" ? h("a", { href: M.homeHash(action.id), class: "button-link small" }, "Show project")
+      : action?.kind === "rule" ? h("a", { href: `#rule=${action.id}`, class: "button-link small" }, "Edit rule") : null;
+    return h("li", { class: "row" }, h("span", { class: "dot", "data-status": item.kind === "service_down" ? "down" : "warn", "aria-hidden": "true" }),
+      h("div", { class: "row-main" }, h("span", { class: "row-title" }, item.title), item.detail ? h("span", { class: "row-detail" }, item.detail) : null),
+      link);
+  })) : h("p", { class: "quiet-text" }, "Nothing needs you right now.");
+  const agents = view.agents.length ? h("ul", { class: "activity-list" }, view.agents.map(item => h("li", {},
+    h("span", { class: "tag state", "data-tone": item.state === "done" ? "ok" : "info" }, item.stateText),
+    h("span", { class: "activity-title" }, `${item.project}: ${item.agent}, ${item.title}`),
+    item.ago ? h("span", { class: "help" }, item.ago) : null)))
+    : h("p", { class: "quiet-text" }, state.start.loading ? "Reading agent activity…" : view.agentsUnavailable
+      ? M.AGENTS_UNAVAILABLE : "No agent finished or is working on your projects in the last day.");
+  const projects = view.projects.length ? h("ul", { class: "rows start-projects" }, view.projects.map(item => h("li", { class: "row" },
+    h("div", { class: "row-main" }, h("a", { href: item.href, class: "row-title start-link", "data-focus-key": `start:project:${item.id}` }, item.name),
+      item.local ? h("span", { class: "row-detail" }, h("span", { class: "dot", "data-status": dotStatus(item.local.tone), "aria-hidden": "true" }), item.local.text) : null))))
+    : h("p", { class: "quiet-text" }, "No projects yet. Add one under Projects.");
+  const watchView = M.watchStatusView(state.watches.status, { error: state.watches.error });
+  const watches = !state.watches.list ? h("p", { class: "quiet-text" }, state.watches.error ? "Watches cannot be shown right now." : "Loading watches…")
+    : view.watches.length ? [h("ul", { class: "watch-list", "aria-label": "Watches" }, view.watches.map(row => {
+      const watch = state.watches.list.find(item => item.id === row.id);
+      const project = state.projects.find(item => item.id === watch.project_id) ?? { id: watch.project_id, manifest: { name: "A removed project" } };
+      return watchItem(project, watch, watchView, { showProject: true });
+    })), view.moreWatches ? h("p", { class: "help" }, `${view.moreWatches} more on their projects' pages.`) : null]
+      : h("p", { class: "quiet-text" }, "No watches yet. Add one on a project's page.");
+  fill(root,
+    h("div", { class: "view-head" }, h("div", {}, h("h2", { id: "start-heading", tabindex: "-1" }, "Start"),
+      h("p", { class: "block-help" }, M.START_PAGE_NOTE))),
+    startSection("needs", "What needs you", needs, { count: view.needs.length || null }),
+    startSection("agents", "Agents", agents),
+    startSection("projects", "Projects", projects),
+    startSection("watches", "Watches", [watches, h("p", { class: "footnote" }, M.WATCH_LIVE_NOTE)]));
+}
+
+/** The start page's own link in the views, only while the flag is on. */
+function renderHomeLink() {
+  const nav = document.querySelector(".views");
+  const link = nav?.querySelector('a[data-view="home"]');
+  if (state.flags.home === true && !link) nav?.prepend(h("a", { href: "#home", "data-view": "home" }, "Start"));
+  if (state.flags.home !== true && link) link.remove();
 }
 
 // ---------------------------------------------------------------- site rules
@@ -2345,20 +2955,26 @@ async function clearLedgerFlow() {
 
 // ---------------------------------------------------------------- wiring
 
+const onStart = run => async () => { await run(); if (state.view === "home") await keepFocus(renderStartPage); };
 const loaders = {
   contexts: () => Promise.all([loadContexts(), loadOrphans(), state.homeId ? loadHome() : null]),
-  projects: () => loadProjects(),
+  projects: onStart(() => Promise.all([loadProjects(), state.view === "home" ? loadStartPage() : null])),
   rules: loadRules,
   ledger: loadLedger,
-  services: loadAttention,
-  attention: loadAttention,
+  services: onStart(loadAttention),
+  attention: onStart(loadAttention),
   // Agent status, activity or a browser session changed.
-  agents: () => Promise.all([state.view === "ai" ? loadAgentSettings() : null, state.homeId ? loadHome() : null]),
+  agents: () => Promise.all([state.view === "ai" ? loadAgentSettings() : null, state.homeId ? loadHome() : null,
+    state.view === "home" ? loadStartPage() : null]),
   // Some read changed state: this page asks for its own, if it reads at all.
   understand: async () => { if (state.understand.owned) await loadUnderstandState(state.understand); },
   // Retained console messages changed (name only): the shown home reads its
   // count and newest messages again; nothing else is asked or started.
   console: async () => { if (state.homeId) await loadHome(); },
+  // A watch changed, or a trusted watch action (this page's or another's) finished.
+  watches: () => loadWatches(),
+  // The safety choice changed, or a trusted safety action finished: read it again where it was read.
+  safety: async () => { if (state.safety.requested) await loadSafety(); },
 };
 // Events that can change what a project home shows.
 const HOME_EVENTS = new Set(["projects", "contexts", "agents", "console"]);
@@ -2434,6 +3050,8 @@ function renderDisconnected() {
   renderJevCard();
   renderAgentSettings();
   renderDecisionKeys();
+  renderSafety();
+  renderStartPage();
   for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
 }
 
@@ -2457,7 +3075,21 @@ function deactivate() {
   latest.projects = nextTicket();
   latest.contexts = nextTicket();
   latest.agents = nextTicket();
+  latest.watches = nextTicket();
+  latest.safety = nextTicket();
+  latest.start = nextTicket();
   state.agents.busy = false;
+  // An action of this page still waiting for its outcome: the next shown page reads the truth afresh.
+  clearTimeout(state.watches.pending?.timer);
+  clearTimeout(state.watches.matched?.timer);
+  clearTimeout(state.safety.pending?.timer);
+  state.watches.pending = null;
+  state.watches.matched = null;
+  state.watches.confirm = null;
+  // A safety choice keeps its baseline: the next shown page reports its answer.
+  if (state.safety.pending) state.safety.unconfirmed = state.safety.pending;
+  state.safety.pending = null;
+  state.safety.requested = false;
   statusTickets.clear();
   state.checking.clear();
   try { unsubscribe?.(); } catch (error) { console.error(error); }
@@ -2482,11 +3114,14 @@ async function boot() {
   if (!state.active) return;
   // Subscribed only once admitted: a refused subscription is never sent again by the child.
   unsubscribe ??= api.subscribe(onServicesEvent);
+  // The experimental start page's link and route follow the flag the actor read.
+  renderHomeLink();
+  if (M.isHomeHash(location.hash)) applyRoute();
   await loadActiveSpace();
   if (!state.active) return;
   // Everything the first view needs is loaded before Projects is drawn once
   // (renderProjects waits for state.loaded), so the page never shows half.
-  await Promise.allSettled([loadContexts(), loadProjects(), loadRules(), loadJev(), loadLedger(), loadOrphans(), loadAttention()]);
+  await Promise.allSettled([loadContexts(), loadProjects(), loadRules(), loadJev(), loadLedger(), loadOrphans(), loadAttention(), loadWatches()]);
   if (!state.active) return;
   // The check below covers every project, the shown home included.
   state.homeProbe = false;
@@ -2505,6 +3140,12 @@ async function boot() {
   if (state.view === "ai") await Promise.all([loadAgentSettings(), loadDecisionKeys()]);
   else { renderAgentSettings(); renderDecisionKeys(); }
   if (!state.active) return;
+  // The safety offer (project list) and setting (AI & keys) read the browser's own answer.
+  if (state.view === "ai" || (state.view === "projects" && !state.homeId)) await loadSafety();
+  else renderSafety();
+  if (!state.active) return;
+  if (state.view === "home") { renderStartPage(); await loadStartPage(); }
+  if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
   await refreshAllServiceStatus();
@@ -2519,7 +3160,7 @@ let handledHash = null;
 function routeActions() {
   const hash = location.hash;
   if (hash === handledHash || !state.connected || !state.loaded) return;
-  const route = M.routeFromHash(hash);
+  const route = currentRoute();
   if (route.addTo) {
     handledHash = hash;
     history.replaceState(null, "", "#projects");
@@ -2538,8 +3179,16 @@ function routeActions() {
   if (route.rule && state.rules.length) { handledHash = hash; openRuleEditorById(route.rule); }
 }
 
+/** #home is the experimental start page while the actor reports its flag on
+ * (and, before admission, until the flags are known); otherwise the old link
+ * to Projects, as before. */
+function currentRoute() {
+  const home = state.flags.home === true || (!state.admitted && M.isHomeHash(location.hash));
+  return M.routeFromHash(location.hash, { home });
+}
+
 function applyRoute() {
-  const route = M.routeFromHash(location.hash);
+  const route = currentRoute();
   if (route.legacy) history.replaceState(null, "", `#${route.view}`);
   const previous = state.homeId;
   const homeId = M.homeIdFromRoute(route);

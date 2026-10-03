@@ -8,6 +8,83 @@ import { createFakeWindow, createFakeAdapter, createFakeServices, createClock, f
 
 const core = await import("../../../packages/contexts/src/index.mjs");
 const { installSiteRuleRuntime, SENT_INDICATOR_MS, TICK_INTERVAL_MS, OVERVIEW_URL } = await import("../chrome/SiteRuleRuntime.sys.mjs");
+const { createDecisionBudget } = await import("../chrome/DecisionBudget.sys.mjs");
+const { createDecisionSendingRouter } = await import("../chrome/DecisionSendingRouter.sys.mjs");
+
+const neutral = (request, reason) => ({ version: 1, request_id: request?.request_id ?? null, choice_set: "site_rule_v1",
+  context_version: "site-rule-1", outcome: "none", reason_code: null, reason, data_sent: false, authority: "suggestion_only", action_authorized: false });
+
+/** The process decision runtime as AxioSozoServices composes it (Plan 4 step 9):
+ * one DecisionBudget, one DecisionSendingRouter whose beforeSending is the
+ * host's only sending hook, and decide() that hands a request to `host` only
+ * after that hook ran the window's own registered guard. `budget` may be one
+ * shared by several windows. */
+function fakeDecisions({ clock, host, limit = () => 30, budget = null, ready = () => true, hold = null, process = null }) {
+  const router = createDecisionSendingRouter();
+  const leases = new Map();
+  // Like the services: a process invalidation revokes every retained lease first.
+  process?.beforeListeners(() => { for (const lease of leases.values()) lease.revoke(); });
+  const runtime = {
+    budget: budget ?? createDecisionBudget({ clock: () => clock.fn(), getLimit: () => limit() }),
+    leases, handoffs: 0, refused: 0, registrations: 0, revisions: [],
+    registerLease({ requestId, level, beforeSending }) {
+      if (!ready() || (process && !process.snapshot().ready)) throw Object.assign(new Error("POLICY_UNAVAILABLE"), { code: "POLICY_UNAVAILABLE" });
+      const lease = router.register({ requestId, level, beforeSending });
+      runtime.registrations++;
+      if (process) runtime.revisions.push(process.snapshot().revision);
+      leases.set(requestId, lease);
+      return lease;
+    },
+    async decide(request, { signal } = {}) {
+      const lease = leases.get(request?.request_id);
+      if (!lease || lease.signal !== signal || signal.aborted) return neutral(request, "cancelled");
+      // Like createDecide: the host starts (awaited) before the constructor sending hook runs.
+      if (hold) await hold();
+      if (signal.aborted) return neutral(request, "cancelled");
+      try { router.beforeSending({ request_id: request.request_id, level: request.state.observation.level }); }
+      catch { runtime.refused++; return neutral(request, "cancelled"); }
+      runtime.handoffs++;
+      return host(request, { signal });
+    },
+  };
+  return runtime;
+}
+
+/**
+ * The services' process decision policy (Plan 4 step 9): one revision at a
+ * time, published ready or invalidated. An invalidation is synchronous: a new
+ * unready revision, every lease revoked, then each registered listener told.
+ * wire(services) gives a fake services object getDecisionPolicySnapshot and
+ * subscribeDecisionPolicyInvalidation, each registration owned by its caller.
+ */
+function fakeProcessPolicy({ ready = true } = {}) {
+  // ready: false is a fresh process whose first hydration has not published yet.
+  let snapshot = Object.freeze(ready ? { revision: 1, limit: 30, ready: true } : { revision: 0, limit: 0, ready: false });
+  const listeners = new Set();
+  const first = [];
+  const process = {
+    snapshot: () => snapshot,
+    beforeListeners: fn => first.push(fn),
+    subscribe(callback) {
+      const registration = { callback };
+      listeners.add(registration);
+      return () => { listeners.delete(registration); };
+    },
+    invalidate() {
+      snapshot = Object.freeze({ revision: snapshot.revision + 1, limit: 0, ready: false });
+      for (const fn of first) fn();
+      for (const registration of [...listeners]) registration.callback(snapshot);
+    },
+    publish(limit = 30) { snapshot = Object.freeze({ revision: snapshot.revision + 1, limit, ready: true }); },
+    listenerCount: () => listeners.size,
+    wire(services) {
+      services.getDecisionPolicySnapshot = () => snapshot;
+      services.subscribeDecisionPolicyInvalidation = callback => process.subscribe(callback);
+      return process;
+    },
+  };
+  return process;
+}
 
 const DAY = "2026-09-27";
 const utcLocalTime = now => {
@@ -33,12 +110,14 @@ function result(request, outcome = "none", { dataSent = true, reason = "validate
 }
 
 async function setup({ rules = [rule()], jev = null, privateWindow = false, decide = null, outcome = "none", hasJevKey = null,
-  shared = { budget: null, suppressions: [] }, clock = createClock(), saveBookmark = null, preload = [] } = {}) {
+  shared = { suppressions: [] }, clock = createClock(), saveBookmark = null, preload = [], budget = null, ready = () => true, hold = null,
+  process = fakeProcessPolicy() } = {}) {
   const h = createFakeWindow({ privateWindow });
   const adapter = createFakeAdapter({ privateWindow });
   const services = createFakeServices(core, { rules,
     contexts: [context(WORKSPACE_A, "project"), context(WORKSPACE_B, "organization")],
     jev: jev ?? { consent: false, interval_minutes: 5, hourly_budget: 30 } });
+  process?.wire(services);
   for (const record of preload) await services.recordForeground(record);
   services.calls.recordForeground.length = 0;
   const requests = [];
@@ -46,13 +125,14 @@ async function setup({ rules = [rule()], jev = null, privateWindow = false, deci
   const decideFn = decide ?? (async (request, { signal }) => { requests.push(request); signals.push(signal); return result(request, outcome); });
   let idleCallback = null;
   const saved = [];
-  const runtime = installSiteRuleRuntime(h.window, { services, adapter, core, decide: decideFn,
+  const decisions = fakeDecisions({ clock, host: decideFn, budget, ready, hold, process, limit: () => services.jev?.hourly_budget ?? 30 });
+  const runtime = installSiteRuleRuntime(h.window, { services, adapter, core, decisions,
     clock: clock.fn, timers: clock.timersApi, localTime: utcLocalTime, shared, hasJevKey,
     idle: { subscribe(_seconds, callback) { idleCallback = callback; return () => { idleCallback = null; }; } },
     saveBookmark: saveBookmark ?? (async info => { saved.push(info); }),
     requestId: (() => { let n = 0; return () => `req_test_${++n}`; })() });
   await runtime.ready;
-  return { h, adapter, services, clock, runtime, requests, signals, saved, shared,
+  return { h, adapter, services, clock, runtime, requests, signals, saved, shared, decisions, budget: decisions.budget, process,
     setIdle: value => idleCallback(value),
     indicator: () => h.document.getElementById("axiosozo-rule-indicator"),
     outgoing: () => h.document.getElementById("axiosozo-jev-outgoing"),
@@ -169,8 +249,10 @@ test("Edit in Overview opens about:axiosozo at the rule", async () => {
   const h = createFakeWindow();
   const services = createFakeServices(core, { rules: [rule()], contexts: [] });
   const clock = createClock();
-  const runtime = installSiteRuleRuntime(h.window, { services, adapter: createFakeAdapter(), core, decide: async () => null,
-    clock: clock.fn, timers: clock.timersApi, localTime: utcLocalTime, shared: { budget: null, suppressions: [] },
+  const process = fakeProcessPolicy().wire(services);
+  const runtime = installSiteRuleRuntime(h.window, { services, adapter: createFakeAdapter(), core,
+    decisions: fakeDecisions({ clock, host: async () => null, process }),
+    clock: clock.fn, timers: clock.timersApi, localTime: utcLocalTime, shared: { suppressions: [] },
     idle: { subscribe: () => () => {} } });
   await runtime.ready;
   h.addTab({ url: "https://x.com/" });
@@ -469,9 +551,10 @@ test("no Jev call without the outgoing-data indicator mounted and visible in thi
   const requests = [];
   const services = createFakeServices(core, { rules: [observed()], contexts: [], jev: JEV_ON });
   const clock = createClock();
+  const process = fakeProcessPolicy().wire(services);
   const runtime = installSiteRuleRuntime(h.window, { services, adapter: createFakeAdapter(), core,
-    decide: async request => { requests.push(request); return result(request); },
-    clock: clock.fn, timers: clock.timersApi, localTime: utcLocalTime, shared: { budget: null, suppressions: [] },
+    decisions: fakeDecisions({ clock, host: async request => { requests.push(request); return result(request); }, process }),
+    clock: clock.fn, timers: clock.timersApi, localTime: utcLocalTime, shared: { suppressions: [] },
     idle: { subscribe: () => () => {} } });
   await runtime.ready;
   h.addTab({ url: "https://x.com/" });
@@ -517,13 +600,14 @@ test("outline rules are capped to address in M1 and the request says so", async 
 test("OpenAI rules are refused natively: no key probe, budget, indicator or decide(); a Jev rule beside them still runs", async () => {
   let probes = 0;
   const t = await setup({ jev: JEV_ON, rules: [observed({ provider: "openai" })], hasJevKey: async () => { probes++; return true; } });
-  const budget = JSON.stringify(t.shared.budget);
+  const budget = JSON.stringify(t.budget.snapshot());
   const tab = t.h.addTab({ url: "about:blank" });
   t.h.commit(tab, "https://x.com/home");
   await t.clock.advance(30 * 60000);
   assert.equal(t.requests.length, 0);
   assert.equal(probes, 0, "Jev's key is never consulted for OpenAI");
-  assert.equal(JSON.stringify(t.shared.budget), budget, "no budget is used");
+  assert.equal(JSON.stringify(t.budget.snapshot()), budget, "no budget is used");
+  assert.equal(t.decisions.registrations, 0, "no sending lease either");
   assert.equal(t.outgoing().hidden, true, "no pre-send indicator");
   const diagnostics = t.runtime.diagnostics();
   assert.deepEqual([diagnostics.decideCalls, diagnostics.budgetSkipped, diagnostics.indicatorSkipped], [0, 0, 0]);
@@ -608,7 +692,7 @@ async function probing(options = {}) {
       if (!t.outgoing().hidden && t.outgoing().getAttribute("data-state") === "sending") seen.sendingAtDispatch++;
       return result(request, "none");
     } });
-  return Object.assign(t, { probe, seen, budgetCalls: () => t.shared.budget.calls.length });
+  return Object.assign(t, { probe, seen, budgetCalls: () => t.budget.snapshot().calls.length });
 }
 
 test("a rule changed while the key probe is pending: nothing of the old policy is sent", async () => {
@@ -959,10 +1043,12 @@ test("a new checkpoint cancels the stale in-flight request of the same tab", asy
 });
 
 test("the hourly budget is enforced browser-wide with no queue or retry", async () => {
-  const shared = { budget: null, suppressions: [] };
+  const shared = { suppressions: [] };
   const clock = createClock();
-  const one = await setup({ jev: { ...JEV_ON, hourly_budget: 2 }, rules: [observed()], shared, clock });
-  const two = await setup({ jev: { ...JEV_ON, hourly_budget: 2 }, rules: [observed()], shared, clock });
+  // One process DecisionBudget (AxioSozoServices) for every window, at the published limit.
+  const budget = createDecisionBudget({ clock: () => clock.fn(), getLimit: () => 2 });
+  const one = await setup({ jev: { ...JEV_ON, hourly_budget: 2 }, rules: [observed()], shared, clock, budget });
+  const two = await setup({ jev: { ...JEV_ON, hourly_budget: 2 }, rules: [observed()], shared, clock, budget });
   const tab = one.h.addTab({ url: "about:blank" });
   one.h.commit(tab, "https://x.com/1");
   one.h.commit(tab, "https://x.com/2");
@@ -985,6 +1071,310 @@ test("the hourly budget is enforced browser-wide with no queue or retry", async 
   assert.equal(one.requests.length, before + 1, "rolling hour frees the budget");
   await one.runtime.dispose();
   await two.runtime.dispose();
+});
+
+// ---- Process decision runtime (Plan 4 step 9) ------------------------------------------
+test("an unready process policy registers no lease: nothing is charged, shown or sent", async () => {
+  const t = await setup({ jev: JEV_ON, rules: [observed()], ready: () => false });
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await t.clock.advance(30 * 60000);
+  assert.deepEqual([t.requests.length, t.budget.snapshot().calls.length, t.decisions.registrations], [0, 0, 0]);
+  assert.ok(t.runtime.diagnostics().leaseRefused >= 1);
+  assert.equal(t.outgoing().hidden, true, "no outgoing-data notice without a lease");
+  await t.runtime.dispose();
+});
+
+test("the reservation is charged once at the admitted checkpoint, never again at sending", async () => {
+  const t = await setup({ jev: JEV_ON, rules: [observed()] });
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  assert.deepEqual([t.requests.length, t.decisions.handoffs, t.budget.snapshot().calls.length], [1, 1, 1]);
+  assert.equal(t.decisions.leases.get(t.requests[0].request_id).signal.aborted, true, "the lease is revoked once the answer arrived");
+  await t.runtime.dispose();
+});
+
+test("the window's own sending guard: what changed while the host started is never handed off, and the charge is not refunded", async () => {
+  const changes = [
+    ["another tab selected", t => { t.h.addTab({ url: "https://docs.example/" }); }],
+    ["the tab navigated", (t, tab) => { t.h.commit(tab, "https://x.com/elsewhere", { stop: false }); }],
+    ["consent revoked", t => { t.services.jev = { ...JEV_ON, consent: false }; t.services.emit("rules"); }],
+    ["the window lost focus", t => { t.h.window.dispatch("deactivate"); }],
+    ["the indicator was hidden", t => { t.outgoing().parentNode.checkVisibility = () => false; }],
+  ];
+  for (const [label, change] of changes) {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const t = await setup({ jev: JEV_ON, rules: [observed()], hold: () => gate });
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/home");
+    await flushMicrotasks();
+    assert.equal(t.budget.snapshot().calls.length, 1, `${label}: reserved once at the checkpoint`);
+    change(t, tab);
+    await flushMicrotasks();
+    release();
+    await flushMicrotasks();
+    assert.deepEqual([t.requests.length, t.decisions.handoffs], [0, 0], `${label}: nothing handed to the host`);
+    assert.equal(t.budget.snapshot().calls.length, 1, `${label}: an uncertain dispatch is never refunded`);
+    await t.runtime.dispose();
+  }
+});
+
+test("a positive answer arriving after the lease was revoked (a policy write meanwhile) applies no effect, but its disclosure stays", async () => {
+  const gate = deferred();
+  const t = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })],
+    decide: async request => { t.requests.push(request); await gate.promise; return result(request, "pause_site"); } });
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/");
+  await flushMicrotasks();
+  assert.equal(t.decisions.handoffs, 1, "handed off: the data left");
+  // The process policy was invalidated while the provider answered: every lease revoked.
+  for (const lease of t.decisions.leases.values()) lease.revoke();
+  gate.resolve();
+  await flushMicrotasks();
+  assert.equal(t.pause(tab), null, "the stale pause_site is never applied");
+  assert.deepEqual(t.runtime.diagnostics().displayed, []);
+  assert.equal(t.runtime.diagnostics().dataSent, 1, "that data was sent is still counted");
+  assert.equal(t.outgoing().getAttribute("data-state"), "sent", "and still shown");
+  await t.runtime.dispose();
+});
+
+test("process invalidation: a key probe held across another window's write and its new publication never registers against the new revision", async () => {
+  const t = await probing();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  assert.deepEqual([t.probe.calls, t.decisions.registrations, t.process.snapshot().revision], [1, 0, 1], "probing under revision 1");
+  // A rule or Jev write began elsewhere (synchronous invalidation) and its
+  // hydration already published revision 3; this window's "rules" reload has
+  // not run yet when the probe answers.
+  t.process.invalidate();
+  t.process.publish();
+  t.probe.release();
+  await flushMicrotasks();
+  nothingSent(t, "the probe that began under revision 1");
+  assert.deepEqual([t.decisions.registrations, t.decisions.handoffs], [0, 0], "no lease and no host call");
+  assert.ok(t.runtime.diagnostics().policyUnsettled >= 1);
+  // Until the write's own "rules" reload, nothing new is admitted either.
+  t.h.commit(tab, "https://x.com/meanwhile");
+  await flushMicrotasks();
+  nothingSent(t, "before this window's reload");
+  t.services.emit("rules");
+  await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/next");
+  await flushMicrotasks();
+  assert.deepEqual([t.requests.length, t.decisions.revisions], [1, [3]], "a fresh checkpoint, under the revision it read");
+  assert.equal(t.requests[0].state.observation.address.path, "/next");
+  await t.runtime.dispose();
+});
+
+test("process invalidation: a rules reload that began before another window's write never settles decisions, even after the new publication", async () => {
+  const t = await probing({ hasJevKey: null });
+  const held = holdRead(t.services, "listRules");
+  t.services.emit("rules"); // an earlier rules event: this read starts before the write
+  await flushMicrotasks();
+  t.process.invalidate();
+  t.process.publish();
+  held.answer(0);
+  await flushMicrotasks();
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  await t.clock.advance(30 * 60000);
+  nothingSent(t, "the read that predates the write");
+  assert.equal(t.decisions.registrations, 0);
+  assert.equal(t.indicator().hidden, false, "local limits keep the rule it read");
+  held.restore();
+  t.services.emit("rules"); // the write's own reload
+  await flushMicrotasks();
+  t.h.commit(tab, "https://x.com/again");
+  await flushMicrotasks();
+  assert.deepEqual([t.requests.length, t.decisions.revisions], [1, [3]]);
+  await t.runtime.dispose();
+});
+
+test("process invalidation reaches every window: two held probes send nothing; work already dispatched keeps its disclosure; a window removes only its own registration", async () => {
+  const process = fakeProcessPolicy();
+  const a = await probing({ process });
+  const gate = deferred();
+  let b;
+  b = await setup({ jev: JEV_ON, rules: [observed({ effects: ["pause_site"], override: "none" })], process, hasJevKey: async () => true,
+    decide: async request => { b.requests.push(request); await gate.promise; return result(request, "pause_site"); } });
+  const c = await probing({ process });
+  assert.equal(process.listenerCount(), 3, "one owned registration per window");
+  const tabA = a.h.addTab({ url: "about:blank" });
+  a.h.commit(tabA, "https://x.com/home");
+  const tabC = c.h.addTab({ url: "about:blank" });
+  c.h.commit(tabC, "https://x.com/home");
+  const tabB = b.h.addTab({ url: "about:blank" });
+  b.h.commit(tabB, "https://x.com/");
+  await flushMicrotasks();
+  assert.deepEqual([a.probe.calls, c.probe.calls, b.decisions.handoffs], [1, 1, 1], "A and C probing; B already handed off");
+  process.invalidate();
+  process.publish();
+  a.probe.release();
+  c.probe.release();
+  gate.resolve();
+  await flushMicrotasks();
+  for (const [label, w] of [["A", a], ["C", c]]) {
+    nothingSent(w, `window ${label}`);
+    assert.equal(w.decisions.registrations, 0, label);
+  }
+  assert.equal(b.pause(tabB), null, "B's answer from the old revision applies nothing");
+  assert.equal(b.runtime.diagnostics().dataSent, 1, "what B already sent stays disclosed");
+  assert.equal(b.outgoing().getAttribute("data-state"), "sent");
+  assert.equal(b.requests.length, 1, "no further host call");
+  // Closing A removes exactly its own registration; nothing shared is closed.
+  await a.runtime.dispose();
+  assert.equal(process.listenerCount(), 2);
+  b.services.emit("rules");
+  await flushMicrotasks();
+  b.h.commit(tabB, "https://x.com/later");
+  await flushMicrotasks();
+  assert.deepEqual([b.requests.length, b.decisions.revisions.at(-1)], [2, 3], "B still decides, under the new revision");
+  // A later invalidation still reaches B (its registration was never removed by A).
+  const before = b.runtime.diagnostics().policyUnsettled;
+  process.invalidate();
+  b.h.commit(tabB, "https://x.com/after");
+  await flushMicrotasks();
+  assert.ok(b.runtime.diagnostics().policyUnsettled > before, "B's rules are unsettled by the invalidation");
+  assert.equal(b.requests.length, 2);
+  await b.runtime.dispose();
+  await c.runtime.dispose();
+  assert.equal(process.listenerCount(), 0);
+});
+
+/** Counts every services.listRules call from now on (the fake's own answer). */
+function countReads(services) {
+  const original = services.listRules;
+  const reads = { count: 0 };
+  services.listRules = (...args) => { reads.count++; return original.apply(services, args); };
+  return reads;
+}
+
+test("process publication: a rules read begun after an invalidation, while unready, never binds the revision published before it answered", async () => {
+  for (const [label, written, expected] of [
+    ["the write switched the rule to OpenAI", [observed({ provider: "openai" })], null],
+    ["the write changed the Jev rule's instruction", [observed({ instruction: "After the write: answers only." })], "After the write: answers only."],
+  ]) {
+    const t = await probing({ hasJevKey: null });
+    const tab = t.h.addTab({ url: "about:blank" });
+    await flushMicrotasks();
+    t.process.invalidate(); // a write began (in this or another window)
+    const held = holdRead(t.services, "listRules");
+    t.services.emit("rules"); // a reload begins while unready and reads what the store holds before the write lands
+    await flushMicrotasks();
+    // The write lands and the process publishes its ready revision, with no
+    // further invalidation; then the earlier read answers with its old rules.
+    t.services.rules = written;
+    t.process.publish();
+    held.answer(0, [observed()]);
+    await flushMicrotasks();
+    held.restore();
+    const reads = countReads(t.services);
+    t.h.commit(tab, "https://x.com/home");
+    await flushMicrotasks();
+    await t.clock.advance(30 * 60000);
+    if (expected === null) {
+      nothingSent(t, `${label}: nothing from the earlier read`);
+      assert.deepEqual([t.decisions.registrations, t.budgetCalls()], [0, 0], label);
+    } else {
+      assert.ok(t.requests.length >= 1, label);
+      assert.ok(t.requests.every(request => request.state.rule.instruction === expected), `${label}: built from the fresh read only`);
+      assert.ok(t.decisions.revisions.every(revision => revision === 3), `${label}: under the published revision`);
+    }
+    assert.equal(reads.count, 1, `${label}: exactly one fresh read for that revision, however many checkpoints`);
+    await t.runtime.dispose();
+  }
+});
+
+test("process publication: an exact ready revision changing during a rules read leaves that read unbound; the next checkpoint reads once under the new one", async () => {
+  const t = await probing({ hasJevKey: null });
+  const tab = t.h.addTab({ url: "about:blank" });
+  await flushMicrotasks();
+  assert.equal(t.process.snapshot().revision, 1);
+  const held = holdRead(t.services, "listRules");
+  t.services.emit("rules"); // begins under ready revision 1
+  await flushMicrotasks();
+  t.services.rules = [observed({ instruction: "Revision two." })];
+  t.process.publish(); // ready 1 → ready 2 during the read, without an invalidation
+  held.answer(0, [observed({ instruction: "Revision one." })]);
+  await flushMicrotasks();
+  held.restore();
+  const reads = countReads(t.services);
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  assert.equal(reads.count, 1);
+  assert.deepEqual([t.requests.length, t.requests[0]?.state.rule.instruction, t.decisions.revisions], [1, "Revision two.", [2]],
+    "the checkpoint continued from the fresh read, under revision 2");
+  t.h.commit(tab, "https://x.com/again");
+  await flushMicrotasks();
+  assert.deepEqual([reads.count, t.requests.length, t.decisions.revisions], [1, 2, [2, 2]], "bound now: no further read");
+  await t.runtime.dispose();
+});
+
+test("process publication: a fresh startup becomes usable when its first hydration publishes, without a write; a failed fresh read is not retried", async () => {
+  const process = fakeProcessPolicy({ ready: false });
+  const t = await probing({ hasJevKey: null, process });
+  const tab = t.h.addTab({ url: "about:blank" });
+  t.h.commit(tab, "https://x.com/home");
+  await flushMicrotasks();
+  nothingSent(t, "before the first publication");
+  assert.equal(t.indicator().hidden, false, "local rules already work");
+  const reads = countReads(t.services);
+  process.publish(); // the first hydration: revision 1, ready
+  t.h.commit(tab, "https://x.com/first");
+  await flushMicrotasks();
+  assert.deepEqual([reads.count, t.requests.length, t.decisions.revisions], [1, 1, [1]], "one fresh read, then that same checkpoint sends");
+  assert.equal(t.requests[0].state.observation.address.path, "/first");
+  t.h.commit(tab, "https://x.com/second");
+  await flushMicrotasks();
+  assert.deepEqual([reads.count, t.requests.length], [1, 2]);
+  await t.runtime.dispose();
+
+  // The fresh read fails: nothing is sent and it is not read again for that revision.
+  const failing = await probing({ hasJevKey: null, process: fakeProcessPolicy({ ready: false }) });
+  const failingTab = failing.h.addTab({ url: "about:blank" });
+  await flushMicrotasks();
+  const listRules = failing.services.listRules;
+  let failed = 0;
+  failing.services.listRules = async () => { failed++; throw new Error("synthetic read failure"); };
+  failing.process.publish();
+  failing.h.commit(failingTab, "https://x.com/home");
+  await flushMicrotasks();
+  await failing.clock.advance(30 * 60000);
+  failing.h.commit(failingTab, "https://x.com/later");
+  await flushMicrotasks();
+  nothingSent(failing, "a failed fresh read");
+  assert.equal(failed, 1, "one read per revision, not a retry loop");
+  // The ordinary rules reload (a later write's event) restores it.
+  failing.services.listRules = listRules;
+  failing.services.emit("rules");
+  await flushMicrotasks();
+  failing.h.commit(failingTab, "https://x.com/after");
+  await flushMicrotasks();
+  assert.deepEqual([failing.requests.length, failing.decisions.revisions], [1, [1]]);
+  await failing.runtime.dispose();
+});
+
+test("without the process policy snapshot and its owned invalidation registration a window makes no decision request", async () => {
+  for (const [label, mutate] of [
+    ["no registration API", services => { delete services.subscribeDecisionPolicyInvalidation; }],
+    ["the registration throws", services => { services.subscribeDecisionPolicyInvalidation = () => { throw new Error("closed"); }; }],
+    ["the registration returns no owned unsubscribe", services => { services.subscribeDecisionPolicyInvalidation = () => true; }],
+    ["no snapshot API", services => { delete services.getDecisionPolicySnapshot; }],
+  ]) {
+    const base = fakeProcessPolicy();
+    const process = { ...base, wire(services) { base.wire(services); mutate(services); return process; } };
+    const t = await setup({ jev: JEV_ON, rules: [observed()], process });
+    const tab = t.h.addTab({ url: "about:blank" });
+    t.h.commit(tab, "https://x.com/home");
+    await t.clock.advance(30 * 60000);
+    assert.deepEqual([t.requests.length, t.decisions.registrations, t.budget.snapshot().calls.length], [0, 0, 0], label);
+    assert.equal(t.indicator().hidden, false, `${label}: the rule itself still works locally`);
+    await t.runtime.dispose();
+  }
 });
 
 test("Jev outcomes apply only when listed, still foreground and on the same host", async () => {

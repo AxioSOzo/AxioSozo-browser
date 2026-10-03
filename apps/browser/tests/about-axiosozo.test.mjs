@@ -152,17 +152,20 @@ test("wrong principal is rejected before any service call", async () => {
 test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, P4 plugin settings, decision keys and Understand", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "acceptProjectBrief", "activeContext", "cancelDecisionKeyOperations", "cancelProjectReadOperations", "cancelUnderstand",
-    "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
+    "checkWatch", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
     "getAgentBridgeConfig", "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings",
-    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getUnderstandAvailability", "getUnderstandState",
-    "linkOrganization", "linkProject",
+    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getSafetyStatus", "getUnderstandAvailability", "getUnderstandState",
+    "getWatchStatus", "linkOrganization", "linkProject",
     "listAgentActivity", "listAgentSessions", "listContexts",
-    "listOrphans", "listProjectContainers", "listProjects", "listRules", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
+    "listOrphans", "listProjectContainers", "listProjects", "listRules", "listWatches", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
     "previewProjectBriefAcceptance", "projectForUrl", "readProject", "refreshProjectDetection", "reinspectProjectBriefAcceptance",
-    "removeDecisionKey", "removeOrphans", "removeProject", "revokeAgentSession", "saveRule", "serviceStatus",
+    "removeDecisionKey", "removeOrphans", "removeProject", "removeWatch", "retryWatchCleanup", "revokeAgentSession", "saveRule", "saveWatch", "serviceStatus",
     "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeDecisionKey", "updateProject",
     "usageSummary", "writeManifest",
   ]);
+  // Watch changes and safety choices are trusted clicks only (private child messages):
+  // their page names always refuse, and the safety choices have no page name at all.
+  assert.ok(!Object.keys(METHODS).some(name => /confirm(Safety)?Choice|resolveSafety|userConfirmed|receipt|gesture/iu.test(name)));
   // Understand owners, roots, revisions, runtimes and openers never cross to the page.
   assert.ok(!Object.keys(METHODS).some(name => /owner|alias|revision|opener|snapshot|commit|invalidate/iu.test(name)));
   // Key material, runtimes and helpers are never page-named methods.
@@ -275,11 +278,11 @@ test("engine preference other than default is refused while the experimental pre
     assert.equal((await request(actor, "setEnginePreference", { uuid: UUID_A, engine: "chromium" })).ok, true);
     assert.deepEqual(calls, [["setEnginePreference", UUID_A, null], ["setEnginePreference", UUID_A, "chromium"]]);
     assert.deepEqual((await request(actor, "getOverviewFlags")).value,
-      { contexts: true, enginePreferences: true, jevKeyEntry: false, openaiKeyEntry: false });
+      { contexts: true, enginePreferences: true, jevKeyEntry: false, openaiKeyEntry: false, home: false });
     restore();
     restore = withProviders(services, { "axiosozo.jev.keyEntry.enabled": true, "axiosozo.openai.keyEntry.enabled": true });
     assert.deepEqual((await request(actor, "getOverviewFlags")).value,
-      { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true });
+      { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true, home: false });
   } finally { restore(); }
 });
 
@@ -922,11 +925,13 @@ test("validateRequest and dispatch are usable without an actor", async () => {
   // Key entry reads as ProviderKeys enforces it: an unreadable or absent pref is off
   // (defaults.yaml declares both on).
   assert.deepEqual(readFlags({ getBoolPref() { throw new Error("no prefs"); } }),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false });
   assert.deepEqual(readFlags({ getBoolPref: (_name, fallback) => fallback }),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false });
   assert.deepEqual(readFlags(prefs({ "axiosozo.openai.keyEntry.enabled": true })),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: true });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: true, home: false });
+  // P6: the experimental start page flag is read only (absent, false or unreadable is off).
+  assert.equal(readFlags(prefs({ "axiosozo.home.enabled": true })).home, true);
 });
 
 // ---------------------------------------------------------------- child

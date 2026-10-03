@@ -1,6 +1,6 @@
 # Plan 4 — status
 
-**Overall: IN PROGRESS. Not READY.** Nothing pushed, tagged or published.
+**Overall: steps 0–9 locally integrated; acceptance remains partial. Not READY.** Nothing pushed, tagged or published.
 
 ## Done so far (Claude, before the Codex hand-over)
 
@@ -96,14 +96,7 @@ Claude Opus 5.5 CLI developer readiness: **PASS**, session
 no changes. No frontend code was created or edited by Codex; actual frontend
 integration remains delegated to Claude in later steps.
 
-Steps 1–3 have integrated source and verified builds below. Interactive arrival,
-cookie isolation and reference-home admission remain unverified behind the
-recorded human gates. Step 3 synthetic light/dark rendering is verified. Step 5 source/build and light initial key presence are verified below; dark
-startup and interactive key flows remain limited. Step 6 source/build and initial light/dark rendering are verified below;
-Steps 0–8 are locally integrated with the scoped evidence and open native gates below; step 9 remains unintegrated. Step 4
-source/build and status GUI are verified below.
-Clipboard/Terminal interaction is BLOCKED_HUMAN because the Mac locked. Ignored preparation does not establish GUI passes. E1/E2 remain
-**NOT_VERIFIED**, the app is **not READY**, and nothing was pushed or released.
+Steps 0–9 now have locally integrated source, tests and isolated workstation builds, with the scoped native evidence below. Step 9 includes fresh light/dark Start captures, native flag-off/on new-tab behavior, a user-created watch with an unauthorized scheduled result, and acknowledged Safety configuration/restoration. Historical locked-Mac attempts in earlier steps remain recorded; they are not a claim that the Mac is currently locked, and later checks do not clear their missing acceptance gates. Reference-project admission, cookie isolation, Terminal/clipboard and several key/Understand/console interactions, full VoiceOver, positive native capture/actions and real macOS E1/E2 remain unverified as detailed below. The app is **not READY**.
 
 ## Step 1 — integrated source; interactive GUI BLOCKED_HUMAN
 
@@ -782,6 +775,8 @@ known non-writes report refusal, while uncertain writes require inspection.
 
 ## Step 7 — native console collection and light/dark render pass; interactions BLOCKED_HUMAN
 
+Local integration commit: `a9acfdea907ed4264461ed41a44c5f17494d8176`.
+
 Codex imported the reviewed DOM-free RAM store, capture-lease facade and 70 pure
 tests, and owns contracts, tests/builds, the read-only owned observer and local
 commit. Claude Opus 5.5 session `5a81bfde-8191-480e-8552-f0480887cdfc` authored
@@ -914,6 +909,8 @@ No READY claim, push, tag or release.
 
 ## Step 8 — agent bridge integration; native config and Settings render pass
 
+Local integration commit: `923631efeaee1772d44a41da939d854bf91cc12e`.
+
 Codex owns the DOM-free registry/tool adapters, capture/act boundaries, PNG
 validation, BiDi reader lifetime repair, closed bridge bundle installer, contracts,
 tests/builds and native observers. Claude Opus 5.5 session
@@ -1020,3 +1017,64 @@ native privacy, native tab retirement or ordinary BiDi disposal from injected
 fakes or Marionette renders. Chromium per-container/tool integration remains an
 engine-workstream contract requirement. Product AI is **NOT_AUTHORIZED**;
 E1/E2 remain unverified. No READY claim, push, tag or release.
+
+## Step 9 — watches, experimental Start and explicit Safety choice integrated
+
+Integrated on `product/workstation` after Step 8 `923631efeaee1772d44a41da939d854bf91cc12e`; this section accompanies the Step 9 local integration commit. Review4's native click-order correction, full tests/check, rebuilt app, fresh light/dark captures and three scoped ordinary GUI scenarios passed. Production AI stays unauthorized and the remaining native limits below are not passes.
+
+Root owns the DOM-free packages, native ownership helpers, tests, imports, contracts, default preference, validation and final integration. Reviewed imports cover watch/safety/admission modules, SafetyNativeOwner, DecisionBudget, DecisionSendingRouter, index/purity wiring, test-loader compatibility, the default-off preference and contracts. Root also imported WatchController's trusted owned-run cancellation and categorical settlement seam. Receipts: `.local/logs/plan4-step9-root-import-receipt.json` and `plan4-step9-owned-run-import.json`.
+
+Claude Opus 5.5 session **`b4e71aea-7e03-476e-a7a7-13220130c310`** authored every frontend/mixed change in the initial implementation and reviews 1–4: Services, Startup, SiteRuleRuntime, parent/child actors, overview/about UI/models and the narrow BrowserCommands overlay. All five results report the same session and successful completion. Review4's **717-file** audit found exactly four allowed changes: Child plus three frontend test files; the page was unchanged and all backend bytes unchanged. Codex authored or repaired no frontend code.
+
+Implementation decisions and limits:
+
+- Watches require explicit user creation. Production `liveAuthorized` stays literally false; saved enablement, provider or consent cannot authorize hidden observations, capture, actions or provider calls. Scheduled checks disclose NOT_AUTHORIZED and send nothing. Historical results are bounded scalar disclosures.
+- Watch limits: **256 records**, question **500** string units, labels **80**, **2–6 outcomes**, URL **2048** units, interval **1–30 minutes** (default **5**). Future observation schemas retain **64 KiB** state, **1 MiB PNG** and **1280-pixel side** caps; these do not enable native capture.
+- Site rules and watches share a synchronous process budget: at most **30 reservations per rolling hour** or a lower validated configured limit; request deadline at most **30 seconds**. Services holds zero initially and during pending/failed policy writes, publishes current validated settings and revokes active leases synchronously on invalidation. Clock rollback conservatively retains future reservations; uncertain dispatch is not refunded.
+- The sending router is private constructor authority for the exact request/owner; unknown requests or page callbacks cannot authorize sending. Hydration, probes and sends bind to the exact ready process revision. Review3 closed the same-generation publication gap with at most one fresh read per revision, preserving startup and the failed-write latch; this is source/fake evidence, not a native exploit reproduction.
+- Trusted `run({id}, {signal})` cancellation affects only that operation. One scheduler requires its process shutdown blocker and a successfully registered normal window. Shutdown disposes and awaits categorical `settled()`; unsettled work/failed cleanup retains ownership. Watch Save does not infer click completion from ambiguous process state; the editor stays open and editable by design.
+- P6 **`axiosozo.home.enabled` defaults false**, with a narrow normal-window/default-new-tab/no-explicit-URL/non-paste BrowserCommands trigger after actual readiness/current-owner checks. Private/custom/extension overrides, other direct tab consumers, new-window creation and restore retain native behavior; no process-global AboutNewTab replacement.
+- P7's checked DoH offer mutates preferences only after explicit trusted confirmation. The private durable SafetyNativeOwner/journal governs choice/recovery, with no automatic replay. Failed observer/native cleanup keeps exact authority and blocks admission. Store-unavailable is not available recovery; UI exposes categorical status rather than raw pref/URI values. Configuration does not prove DNS filtering efficacy or universal existing-connection behavior.
+
+Actual native defect and review4 correction:
+
+Gecko dispatches the full default event group before its system group. The Child's old system-group click listener ran after the page's bubble handler had replaced/disabled the authored Safety/watch control; its unchanged authority checks then refused the action. Claude changed only production listener options, export and explanatory comments: the listener now reads synchronously in default-group document capture, installed before page handlers. Exact authored identity, trusted click, closed input, issued IDs/sequences, pending/disabled and parent lifetime checks remain. Removal uses the same options. Production diff: `.local/logs/plan4-step9-review4-production.diff`; scope audit: `plan4-step9-review4-audit.json`. The fresh ordinary GUI runs below subsequently verified corrected native Safety and watch delivery, including keyboard activation of the unchecked first choice. The fake dispatch model alone is not native proof.
+
+Current validation:
+
+- Root pure focused **252/252 PASS**. Claude initial **364/364 PASS at 120 seconds/file**; the initial 10-second run had **272 passes and two cancelled files**, not a full pass. Reviews 1/2/3: **392/405/408** fakes PASS. Those overlapping suites and earlier root/build receipts are historical, not additive or final for review4.
+- Review4: **415/415 approved fakes**, focused **133/133**, four-file syntax checks exit0. Claude reports an actual counterfactual run restoring the old options caused **15 failures** across the three changed suites, then restored the fix; root did not repeat that mutation. Result: `.local/claude-tasks/09-watches-home-safety-review4.result.json`. Dispatch ordering is modeled from Gecko source, not executed natively by these tests.
+- Corrected Child SHA256 **`257b0706a518483654d6cf3bf5c2e19994f8c1ef77ee8a2c94d3430cddaef321`**. The **717-entry** `.local/logs/plan4-step9-post-native-source-pins.json` SHA256 is `f9eac4bc6c373948cf34fd6d2f3d310b232744b94c42593b00f5ae802462f678`. No page edit or out-of-scope/backend change was found.
+- Root post-native **`./dev test` PASS, exit0**, `.local/logs/plan4-step9-post-native-test.log`: browser **2483 total / 2473 pass / 10 native-only skips**, zero failures/cancellations; contexts **212**, provider **133**, sandbox **5**, Keychain negative **8**, bounded synthetic Keychain positive **3**, Rust **10**, all PASS.
+- Same log: Zen **33**, reader **22**, arrival supervisor **18**, manifest **28**, CEF adapter **38**, saved pages **3**, POSIX socket **11**, bridge installer **36**, bridge **53**, root Python **237**, coordinator **4**, native probe **14**, all PASS. Actual bounded native/synthetic component fixtures do not establish Step9 native interaction; CEF test-native/stream remain explicitly skipped in this sub-build root.
+- Root post-native **`./dev check` PASS, exit0**, `.local/logs/plan4-step9-post-native-check.log`: syntax checks and pinned helper/bridge checks PASS, browser **2473 pass / 10 skips / 2483 total**, Zen **33 PASS**. CEF check remains explicitly skipped.
+
+Build provenance:
+
+The initial pre-review4 setup refused `PATCH_INPUTS_CHANGED` for Claude's BrowserCommands overlay; the guard stayed enabled. Root's reviewed two-phase inactive APFS clone independently reconstructed **256 ordered patches / 266 targets**, admitting exactly one changed input/output. Prepare/publish succeeded and executed no app/build/hooks themselves. Logs: `.local/logs/plan4-step9-stage-refresh-{prepare,publish}.log`; refresh script SHA256 `7d6d54451ca5612218fe3cd88d16379255fe603fb54afdff91123dacdc794e47`.
+
+Transaction `/Volumes/AxioSozoBuild/workstation/zen/refresh-e7c29490e312f4b6` preserves old receipt/stamp; old source remains `/Volumes/AxioSozoBuild/workstation/zen/source-pre-refresh-e7c29490e312f4b6`. It is incomplete Step9 pre-refresh, not exact Step8. Absolute symlinks make it non-standalone; deliberate restoration requires the fixed source path plus saved receipt/stamp. No original source/object tree was deleted/reset. New receipt SHA256 `c06bedef34f77ac3f9c4d5327eae1d612fdfd4221a2312c9a90ad8c6d14b1f98`; BrowserCommands target SHA256 `4133548ffa8d18c188f8cabe4526592817af20f287d3068d8997082f2ef973e6`.
+
+The pre-review4 build/identity **bcf4a2…** and earlier `plan4-step9-final-{test,check,build}.log` remain historical. Corrected rebuild exec **95818 exited0**, `.local/logs/plan4-step9-post-native-build.log` ends `SETUP: completed`. `.local/logs/plan4-step9-postfix-build-identity.json` reports PASS, bundle `nl.axiosozo.browser.dev`, Gecko executable `/Volumes/AxioSozoBuild/workstation/zen/obj/dist/AxioSozo Dev.app/Contents/MacOS/axiosozo-dev`, fingerprint **`21790d832a0476e4763bd1e83882fa60872674dfd0e1ddfac4d45ce9754b8c0f`**, executable SHA256 **`c608ed4288f7bd49136079951506ea9ea7caf8e280b35917ccd5108437f12460`**. CEF embedding remains `experimental_web_mode_unverified`; build identity is not GUI/READY proof.
+
+Root's contract-only observer repin PASS is `.local/plan4-prepared/gui/step9-postfix-repin-backup/REPIN_RECEIPT.json`, preserving old contracts/receipts. Only the corrected Child source pin and fresh build bindings changed; runner/observer/page source was not edited, old GUI passes were not carried forward, and fresh GUI was required and completed separately below.
+
+Historical Step9 GUI, not corrected-build acceptance:
+
+- Four passive light/dark PNGs under `docs/evidence/plan4-9/home-render-{light,dark}-20261003-{a,b}/` passed seeded-render inspection by root and same-session Claude. They prove those historical visuals, not Safety/watch interaction on the corrected build.
+- Ordinary flag-off **`0ea57d5ae053f474`**: Safety became Saving then unconfirmed, with the offer checked again. Batched address entry dropped its initial letter and opened a Google search for `bout:axiosozo`; root corrected and verified the about URL before Return. No consent/login/provider action occurred, but this run claims no network silence. Native quit timed out; report reason `CUA_OWN_APP_QUIT_TIMEOUT`, exit **-15**, not normal exit0. Preserve as failed/incomplete, not BLOCKED_HUMAN or completed private-owner cleanup. Evidence: `ordinary-off-light-20261003-c/{cua-sequence,ordinary-report}.json`.
+- Ordinary flag-on **`1d414b670dc885cb`**: actual native Cmd+T created a selected `about:axiosozo#home` tab and native exit0 was observed. Safety/watch were intentionally NOT_RUN after the event-order defect was identified. This is scoped Cmd+T proof with a clean app exit, not full scenario acceptance or universal cleanup proof. Evidence: `ordinary-on-light-20261003-d/{cua-sequence,ordinary-report}.json`.
+
+Fresh corrected-build GUI evidence (3 October 2026):
+
+- **Light and dark Start rendering PASS, seeded-render scope.** `docs/evidence/plan4-9/home-render-light-20261003-e/` and `home-render-dark-20261003-f/` each contain `initial-<theme>-window.png`, `initial-<theme>-full-content.png` and `step9-render-report.json`. Both runs satisfied the exact source-derived sections, selected navigation, empty needs/agents/watches, Harbor Suite link, theme and geometry checks. Each exited0, reaped owned direct children, closed its app/fixture listeners and preserved source/build/profile/fixture/seed identity. Root inspected all four PNGs; same-session Claude accepted them in `09-watches-home-safety-visual-final.result.json`. Full-content pixels match the earlier captures; no blocking visual defect. These renders use inherited test-only startup URL-bar settings and do not prove ordinary Cmd+T.
+- **Flag off / unchecked first choice PASS.** `ordinary-off-light-20261003-g/`, run `f9f22d53e0f2e43e`: genuine checked offer with current state Off; root unchecked it, tabbed to Save and activated it with Return. The native app acknowledged **“Saved. The family filter is off.”** Cmd+T retained stock Zen's address dropdown over the existing Projects page, with no Start route. Terminal readback: first-run completed, sequence1, unchecked, unowned, no pending change, no temporary journal and zero watches.
+- **Flag on / user-created watch PASS with a precise manual limit.** `ordinary-on-light-20261003-h/`, run `cee4428a3388583f`: the unchecked choice was acknowledged, then native Cmd+T from Projects created a new selected `about:axiosozo#home` tab. Root opened Harbor Suite and created exactly one watch through the UI: `http://127.0.0.1:28492/agent-tools`, “Is the fixture available?”, Available/Unavailable, address/title, Jev, consent and enablement true, five-minute interval. One Save displayed truthful matching-record feedback; root closed the still-editable form manually. Before any manual Check now, the scheduler had already recorded **NOT_AUTHORIZED**, unknown, `data_sent:false`, with **“Nothing was sent.”** Manual Check now then acknowledged **NOT_DUE**. Start showed the same watch/result. Post-quit strict readback verified exactly one `created_by:user` watch, revision1, expected project/details and unauthorized no-send result. This proves the scheduled refusal and manual not-due path; it does not prove a manual eligible check, hidden tab or live provider operation.
+- **Checked Safety configuration and Settings restoration PASS.** `ordinary-safety-light-20261003-i/`, run `225e8d25104bb366`: root confirmed the genuine checked first offer, observed **“Saved. The family filter is on.”** and **“On: AxioSozo set Cloudflare's family filter.”** In AI & keys, root unchecked the actual Safety setting and clicked Save; the app acknowledged **“Your earlier DNS settings are back.”** with unchecked/Off state. This used ordinary Settings restore, not a recovery answer. Terminal journal: sequence2, first-run completed, unchecked, unowned, no pending/temporary journal and zero watches.
+- All three ordinary runs returned **exit0 and `lifecycle_and_fixed_readback_PASS:true`**. Each used a fresh owned synthetic profile, normal browser UI with no Marionette/remote-agent endpoint, actual CUA input, current PID/UID/executable binding before app access and prompt confirmation of its own native Quit dialog. Exact source/build/profile/marker/fixture checks passed; owned direct children were reaped and fixture listener/endpoint were absent. Each evidence directory contains `cua-sequence.json`, `ordinary-report.json` and the frozen `observer-contract.json`; the UI acknowledgement and durable record are separate evidence. No post-exit app/AX rebind occurred in these successful runs.
+
+Final evidence receipt: `.local/logs/plan4-step9-final-evidence-summary.json`. All 717 accepted source pins remained unchanged through the final native runs and read-only Claude visual review; only this status reconciliation follows. Evidence is git-ignored, consistent with PLAN_4.
+
+Remaining Step 9 limits: no live provider/hidden observation/capture/action proof; no positive eligible manual-check result; no interrupted-change recovery or same-profile restart scenario; no direct native private-owner disposal or unknown process-group cleanup observation; no raw `prefs.js`/TRR equality read, network-silence or DNS-filtering-efficacy claim. The Settings run deliberately permits profile-local DoH writes/cache invalidation after explicit input. Complete keyboard, VoiceOver, occlusion, alternative-width and all private/custom/extension new-tab branch verification remain unproven natively. Synthetic project seeding is **ADMISSION_NOT_RUN**, not native folder admission. Source/fake safeguards and a keyboard Save smoke test do not broaden these claims.
+
+Prior gates remain: product AI **NOT_AUTHORIZED**, production capture/actions false, OpenAI `UNVERIFIED_SHAPE`, E1/E2 unverified/`NOT_VERIFIED`; historical BLOCKED_HUMAN interactions are not cleared by tests/builds, and the repaired event-order defect was not attributed to a locked Mac. Step8 ordinary metadata/read evidence does not imply executed BiDi or positive capture/action proof. No READY claim, push, tag or release.

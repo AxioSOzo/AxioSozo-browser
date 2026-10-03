@@ -51,3 +51,15 @@ export {
   parseHookEvent, validateStatusRecord, statusBoard, hookConfig,
 } from './agent-status.mjs';
 export { bridgeConfig } from './agent-config.mjs';
+
+// Plan4 step9: user-created watches, durable safety policy and current-document admission.
+export {
+  WATCH_STORE_VERSION, WATCH_OBSERVATIONS, WATCH_PROVIDERS, WATCH_LIMITS, WATCH_RESULT_REASONS, DEFAULT_WATCH_STORE,
+  sanitizeWatchUrl, validateWatch, validateWatchStore, createWatch, saveWatch, removeWatch,
+  effectiveWatchObservation, nextWatchDueAt, watchCheckDue, markWatchChecked, buildWatchRequest, prepareWatchCheck, applyWatchResult,
+} from './watches.mjs';
+export {
+  FAMILY_DOH_URI, FAMILY_DOH_MODE, SAFETY_STATE_VERSION, SAFETY_PREF_NAMES, SAFETY_GUARD_NAMES, DEFAULT_SAFETY_STATE,
+  validateSafetySnapshot, validateSafetyState, safetyOffer, safetyStatus, planSafetyChoice, applySafetyChoice,
+} from './safety-choice.mjs';
+export { aiAdmission } from './ai-admission.mjs';

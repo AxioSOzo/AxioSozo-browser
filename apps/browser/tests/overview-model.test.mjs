@@ -381,8 +381,8 @@ test("home facts, section order and problems", () => {
   assert.deepEqual(M.folderFacts({ root: "/w/shop", manifest_state: "none", detected: null }).lastRead, null);
   assert.equal(M.folderFacts({ manifest_state: "external" }).projectFile, "Read from .axiosozo/project.json");
   const quiet = { agents: { state: "unavailable" }, errors: { state: "unavailable" } };
-  assert.deepEqual(M.homeSections(quiet), ["open", "accounts", "activity", "about"], "nothing to show stays low on the page");
-  assert.deepEqual(M.homeSections({ ...quiet, agents: { state: "list" } }), ["open", "activity", "accounts", "about"]);
+  assert.deepEqual(M.homeSections(quiet), ["open", "accounts", "activity", "watches", "about"], "nothing to show stays low on the page");
+  assert.deepEqual(M.homeSections({ ...quiet, agents: { state: "list" } }), ["open", "activity", "accounts", "watches", "about"]);
   assert.match(M.homeProblem("UNKNOWN_PROJECT").title, /not here anymore/u);
   assert.match(M.homeProblem("PRIVATE_WINDOW").title, /normal windows/u);
   assert.equal(M.homeProblem("NO_WINDOW").title, "Open this page in a browser window");

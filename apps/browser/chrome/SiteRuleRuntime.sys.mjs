@@ -18,6 +18,11 @@
 //   checkpoint waits for the committed document's load to finish so the title is
 //   that document's own (never the tab label of the previous page). Revoking
 //   consent aborts calls in flight. M1 sends `address` only (see OUTLINE_SUPPORTED).
+// - The budget is the one process DecisionBudget and the host the one shared
+//   provider host (AxioSozoServices.getDecisionRuntime). Each call is reserved
+//   once at its admitted checkpoint and handed off only through this window's
+//   own registered sending lease, whose synchronous guard checks this exact
+//   tab, document, policy, space, rule, provider, consent, key and indicator.
 // - Rules that choose OpenAI (site-rule-v1 `provider`) are never dispatched from
 //   here: OpenAI has no native admission or consent yet, and Jev's key, consent
 //   and outcome provenance are never reused for it. Screen rules send nothing:
@@ -50,9 +55,10 @@ const RANK = Object.freeze({ none: 0, nudge: 1, suggest_leave: 2, pause_site: 3 
 const INERT = Object.freeze({ dispose() {} });
 const NOTICE_INSTRUCTION_CHARS = 160;
 
-// Process-wide: the Jev budget is browser-wide (decision-v1) and a dismissal in
-// one window suppresses that rule/context everywhere. Suppressions are in-memory only.
-const SHARED = { budget: null, suppressions: [] };
+// Process-wide: a dismissal in one window suppresses that rule/context
+// everywhere. Suppressions are in-memory only. The browser-wide budget is the
+// injected process DecisionBudget (decision-v1), never per window.
+const SHARED = { suppressions: [] };
 
 /** Ledger host for an http(s) URL: lower-case ASCII (punycode) hostname, no IPv6 literals. */
 export function ledgerHost(spec) {
@@ -127,12 +133,16 @@ function rowUsage(row, day) {
 
 /**
  * F5. `services`: listRules, getJevSettings, listContexts, usageSummary,
- * recordForeground, on. `adapter`: isPrivateWindow, workspaceForTab.
- * `decide(request, { signal })` never rejects (contexts-api-v1 §3.5).
+ * recordForeground, on, and for decisions getDecisionPolicySnapshot and
+ * subscribeDecisionPolicyInvalidation. `adapter`: isPrivateWindow, workspaceForTab.
+ * `decisions`: the process decision runtime { budget, registerLease, decide }
+ * (AxioSozoServices.getDecisionRuntime); its decide(request, { signal }) never
+ * rejects (contexts-api-v1 §3.5). Without it, or without the process policy
+ * snapshot and invalidation registration, no request is ever made.
  * Optional injections for tests: core, clock, timers, localTime, idle,
- * shared ({ budget, suppressions }), saveBookmark, openOverview, requestId, hasJevKey.
+ * shared ({ suppressions }), saveBookmark, openOverview, requestId, hasJevKey.
  */
-export function installSiteRuleRuntime(window, { services, adapter, decide, core = defaultCore,
+export function installSiteRuleRuntime(window, { services, adapter, decisions = null, core = defaultCore,
   clock = () => Date.now(), timers = defaultTimers(window), localTime = defaultLocalTime, idle = defaultIdle(window),
   shared = SHARED, saveBookmark = info => defaultSaveBookmark(window, info),
   openOverview = url => (typeof window.switchToTabHavingURI === "function"
@@ -142,6 +152,8 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   if (!services || !adapter || !window?.gBrowser || !prefEnabled(window, "axiosozo.contexts.enabled", true)) return INERT;
   // Private windows: no ledger, no evaluation, no Jev, no UI.
   if (adapter.isPrivateWindow()) return INERT;
+  const offered = typeof decisions?.decide === "function" && typeof decisions.registerLease === "function"
+    && typeof decisions.budget?.reserve === "function" && typeof decisions.budget.limit === "function" ? decisions : null;
   const document = window.document;
   const gBrowser = window.gBrowser;
   const cleanups = [];
@@ -167,7 +179,7 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   const documentEpochs = new WeakMap(); // tab → count of its committed top-level documents
   const documentOf = tab => documentEpochs.get(tab) ?? 0;
   const diagnostics = { decideCalls: 0, dataSent: 0, budgetSkipped: 0, outlineCapped: 0, indicatorSkipped: 0,
-    providerUnavailable: 0, screenUnavailable: 0, policyUnsettled: 0, effects: [], flushed: 0 };
+    providerUnavailable: 0, screenUnavailable: 0, policyUnsettled: 0, leaseRefused: 0, sendingRefused: 0, effects: [], flushed: 0 };
 
   // Optional decisions follow one settled policy snapshot: the rules with the Jev
   // settings, and the contexts. Starting a reload of either makes decisions
@@ -177,16 +189,62 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   // or failed read never restores them. Deterministic limits keep using the last
   // installed rules and contexts.
   let policyEpoch = 0;
-  const policyLoads = { rules: { latest: 0, settled: false }, contexts: { latest: 0, settled: false } };
+  // rules.revision: the ready process revision the settled rules were read
+  // under, begun and finished (see loadRules); null when not exactly one.
+  const policyLoads = { rules: { latest: 0, settled: false, revision: null }, contexts: { latest: 0, settled: false } };
   const policySettled = () => !disposed && policyLoads.rules.settled && policyLoads.contexts.settled;
   function beginPolicyLoad(source) {
     const load = policyLoads[source];
     load.settled = false;
+    if (source === "rules") load.revision = null;
     policyEpoch++;
     for (const controller of [...controllers]) controller.abort(); // answers under the old snapshot are dropped
     return ++load.latest;
   }
-  shared.budget ??= core.createBudget();
+
+  // The process decision policy (AxioSozoServices): this runtime's own
+  // synchronous invalidation registration and the exact current snapshot. An
+  // invalidation (a rule or Jev settings write beginning in any window) voids
+  // this window's decision work at once: requests in flight are cancelled
+  // (their disclosure stays), the rules snapshot is unsettled until the write's
+  // own "rules" reload, and a checkpoint, key probe or rules read that began
+  // before it never continues, even once a new revision is published. Without
+  // the registration and the snapshot, this window makes no decision request.
+  let processGeneration = 0;
+  /** The current process revision when it is ready, else null. */
+  const processRevision = () => {
+    try {
+      const snapshot = services.getDecisionPolicySnapshot();
+      return snapshot?.ready === true && Number.isSafeInteger(snapshot.revision) ? snapshot.revision : null;
+    } catch { return null; }
+  };
+  let runtime = null;
+  if (offered && typeof services.getDecisionPolicySnapshot === "function" && typeof services.subscribeDecisionPolicyInvalidation === "function") {
+    let unsubscribe = null;
+    try {
+      unsubscribe = services.subscribeDecisionPolicyInvalidation(() => {
+        processGeneration++;
+        policyEpoch++;
+        policyLoads.rules.settled = false;
+        policyLoads.rules.revision = null;
+        for (const controller of [...controllers]) controller.abort();
+      });
+    } catch { unsubscribe = null; }
+    // Only this exact registration is removed at teardown.
+    if (typeof unsubscribe === "function") { cleanups.push(unsubscribe); runtime = offered; }
+  }
+  // The process publishes a ready revision without telling listeners (its
+  // first hydration, or the one after a write, which can finish before or
+  // after this window's "rules" reload of that write). Settled rules read
+  // under another or no ready revision are therefore read once more, fresh,
+  // under the exact revision a checkpoint found ready: at most one read per
+  // revision, shared by every checkpoint that needs it, never repeated.
+  let reread = { revision: null, done: null };
+  function rulesUnder(revision) {
+    // Like a "rules" reload, the fresh rules also apply to the local limits.
+    if (reread.revision !== revision) reread = { revision, done: loadRules().then(reevaluate) };
+    return reread.done;
+  }
 
   const today = now => core.localDay(localTime(now));
   const contextType = uuid => contexts.find(c => c.uuid === uuid)?.type ?? "personal";
@@ -601,7 +659,7 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   const servable = (rule, host) => NATIVE_DECISION_PROVIDERS.includes(providerOf(rule))
     && (SCREEN_SUPPORTED || observationOf(rule, host) !== "screen");
   function jevRule(target) {
-    if (!policySettled() || !jev.consent || jevKeyMissing || !(jev.hourly_budget > 0) || typeof decide !== "function") return null;
+    if (!policySettled() || !jev.consent || jevKeyMissing || !(jev.hourly_budget > 0) || !runtime) return null;
     return target.rules.find(rule => askable(rule, target.host) && servable(rule, target.host)) ?? null;
   }
   /** Local, truthful refusal: no key probe, budget, indicator or decide() for these. */
@@ -618,24 +676,47 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
     // Only a settled policy snapshot may admit a decision; while rules, Jev
     // settings or contexts reload (or after a failed read) nothing is sent.
     if (!policySettled()) { diagnostics.policyUnsettled++; return; }
-    const epoch = policyEpoch;
+    let epoch = policyEpoch;
     let target = targetFor(tab);
     if (!target) return;
     countUnservable(target);
     let rule = jevRule(target);
     if (!rule) return;
+    // Bound to the exact process revision ready now, to no invalidation since,
+    // and to settled rules read under that very revision.
+    const generation = processGeneration;
+    const revision = processRevision();
+    if (revision === null) { diagnostics.policyUnsettled++; return; }
+    const processCurrent = () => generation === processGeneration && processRevision() === revision;
+    const bound = () => processCurrent() && policyLoads.rules.revision === revision;
+    if (policyLoads.rules.revision !== revision) {
+      // The rules in hand were read under another or no ready revision: the
+      // one fresh read under this revision first, then everything is resolved
+      // again from it, for the same document (never the earlier read).
+      const readDocument = documentOf(tab);
+      await rulesUnder(revision);
+      if (!policySettled() || !bound()) { diagnostics.policyUnsettled++; return; }
+      if (disposed || tab !== gBrowser.selectedTab || !foreground() || documentOf(tab) !== readDocument) return;
+      epoch = policyEpoch;
+      const current = targetFor(tab);
+      if (!current || current.host !== target.host) return;
+      target = current;
+      rule = jevRule(target);
+      if (!rule) return;
+    }
     if (typeof hasJevKey === "function") {
       const probedDocument = documentOf(tab);
       if (!(await hasJevKey())) return;
       // The probe awaited: rules, Jev settings, the tab's document or its space may
-      // have changed meanwhile. A reload that started meanwhile voids this
-      // checkpoint, even if it already settled (a fresh checkpoint follows the new
-      // snapshot). Otherwise only the policy in force now may be sent, for the
+      // have changed meanwhile. A reload or a process invalidation that started
+      // meanwhile voids this checkpoint, even if it already settled or a new
+      // revision is published (a fresh checkpoint follows the new snapshot).
+      // Otherwise only the policy in force now may be sent, for the
       // same document: the target and the rule are resolved again from current
       // state (provider, effective observation, enabled, effects, space, consent and
       // budget settings). A rule that now chooses OpenAI or a screenshot, or no
       // longer asks at all, sends nothing; it is never reinterpreted as Jev/address.
-      if (policyEpoch !== epoch || !policySettled()) { diagnostics.policyUnsettled++; return; }
+      if (policyEpoch !== epoch || !policySettled() || !bound()) { diagnostics.policyUnsettled++; return; }
       if (disposed || tab !== gBrowser.selectedTab || !foreground() || documentOf(tab) !== probedDocument) return;
       const current = targetFor(tab);
       if (!current || current.host !== target.host) return;
@@ -671,37 +752,80 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
     } catch { request = null; }
     if (!request) return;
     if (!indicatorMounted()) { diagnostics.indicatorSkipped++; return; }
-    let taken;
-    try { taken = core.takeBudget(shared.budget, { now, limit: jev.hourly_budget }); } catch { return; }
-    shared.budget = taken.budget;
-    if (!taken.ok) { diagnostics.budgetSkipped++; return; } // no queue, no retry
+    const requestLevel = request.state.observation.level;
+    const documentEpoch = documentOf(tab);
+    const controller = new AbortController();
+    // This request's own sending checkpoint, run synchronously by the shared
+    // host right before the hand-off: still this window's foreground tab and
+    // document, the same settled policy, space, rule, provider and level, Jev
+    // consent and key, a nonzero process limit and the visible indicator.
+    const stillCurrent = () => {
+      try {
+        if (disposed || controller.signal.aborted || epoch !== policyEpoch || !policySettled() || !bound()
+          || adapter.isPrivateWindow() !== false || tab !== gBrowser.selectedTab || !foreground() || documentOf(tab) !== documentEpoch) return false;
+        const now = targetFor(tab);
+        const current = now && now.host === target.host && now.contextUuid === target.contextUuid ? jevRule(now) : null;
+        return !!current && current.id === rule.id && providerOf(current) === "jev" && observationOf(current, target.host) === level
+          && indicatorMounted() && runtime.budget.limit() > 0;
+      } catch { return false; }
+    };
+    const beforeSending = handoff => {
+      if (handoff?.request_id !== request.request_id || handoff?.level !== requestLevel || !stillCurrent()) {
+        diagnostics.sendingRefused++;
+        return false;
+      }
+      showOutgoing("sending");
+      return visible(outgoing) && stillCurrent();
+    };
+    // A lease is only ever registered under the revision this checkpoint read.
+    if (!bound()) { diagnostics.policyUnsettled++; return; }
+    let lease;
+    try { lease = runtime.registerLease({ requestId: request.request_id, level: requestLevel, beforeSending }); }
+    catch { diagnostics.leaseRefused++; return; } // process policy unready or invalidated: nothing is charged
+    // Charged once, here; never again at sending and never refunded.
+    let reserved = null;
+    try { reserved = runtime.budget.reserve(); } catch { reserved = null; }
+    if (!reserved?.ok) { lease.revoke(); diagnostics.budgetSkipped++; return; } // no queue, no retry
     if (capped) diagnostics.outlineCapped++;
     state.lastAt = now;
     state.controller?.abort(); // one in-flight request per tab
-    const controller = new AbortController();
     state.controller = controller;
+    // Cancelling this request revokes its lease, also when already aborted.
+    const forward = () => lease.revoke();
+    controller.signal.addEventListener("abort", forward, { once: true });
     // Pre-call notice: shown before anything can leave chrome, for every call.
     sendingCount++;
     showOutgoing("sending");
     if (!visible(outgoing)) {
       sendingCount--; showOutgoing("idle");
+      controller.signal.removeEventListener("abort", forward);
+      lease.revoke();
       if (state.controller === controller) state.controller = null;
       diagnostics.indicatorSkipped++;
       return;
     }
     diagnostics.decideCalls++;
     controllers.add(controller);
-    let result = null;
+    let result = null, leaseLost = true;
     try {
-      result = await decide(request, { signal: controller.signal, onSending: () => showOutgoing("sending") });
-    } catch { result = null; }
+      // The lease is kept through the host's reply or cancellation grace.
+      result = await runtime.decide(request, { signal: lease.signal });
+      // A process policy invalidation (a rule or Jev settings write that began
+      // meanwhile, before this window's own reload) or this request's own
+      // cancellation revoked the lease: the answer is no longer current.
+      leaseLost = lease.signal.aborted;
+    } catch { result = null; } finally {
+      controller.signal.removeEventListener("abort", forward);
+      lease.revoke();
+    }
     controllers.delete(controller);
     sendingCount--;
     lastJev = { at: clock(), level: request.state.observation.level, dataSent: result?.data_sent === true };
     if (result?.data_sent === true) { diagnostics.dataSent++; showOutgoing("sent"); } else showOutgoing("idle");
     if (state.controller === controller) state.controller = null;
     if (result?.reason === "disabled") { jevKeyMissing = true; return; } // no key: stop until settings change
-    if (disposed || controller.signal.aborted || !jev.consent || !result || result.request_id !== request.request_id) return;
+    // Disclosure above is kept; a stale answer applies no effect.
+    if (disposed || controller.signal.aborted || leaseLost || !jev.consent || !result || result.request_id !== request.request_id) return;
     // Jev provenance only: an answer naming another provider never applies a Jev outcome.
     if (result.provider !== undefined && result.provider !== "jev") return;
     applyJevResult(tab, rule.id, target, result, epoch);
@@ -797,6 +921,8 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
   // decision layer unavailable (deterministic limits keep the last installed data).
   async function loadRules() {
     const id = beginPolicyLoad("rules");
+    const generation = processGeneration;
+    const revision = processRevision();
     let list = null, settings = null, listRead = false, settingsRead = false;
     try { list = await services.listRules(); listRead = true; } catch {}
     try { settings = await services.getJevSettings(); settingsRead = true; } catch {}
@@ -805,7 +931,12 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
     if (listRead) rules = Array.isArray(list) ? list : [];
     if (validSettings) jev = { ...jev, ...settings };
     jevKeyMissing = false;
-    policyLoads.rules.settled = listRead && Array.isArray(list) && validSettings;
+    // A process invalidation during this read: it may predate that write, so
+    // decisions wait for the write's own "rules" reload.
+    policyLoads.rules.settled = listRead && Array.isArray(list) && validSettings && generation === processGeneration;
+    // Decisions also need the exact ready revision this read began and ended
+    // under; begun while unready, or across a publication, it binds none.
+    policyLoads.rules.revision = policyLoads.rules.settled && revision !== null && processRevision() === revision ? revision : null;
     // Consent revoked: calls already in flight are cancelled and their answers dropped.
     if (!jev.consent) for (const controller of [...controllers]) controller.abort();
   }
@@ -845,8 +976,6 @@ export function installSiteRuleRuntime(window, { services, adapter, decide, core
     flush,
     evaluate: (tab = gBrowser.selectedTab) => evaluate(tab),
     checkpoint: (kind = "interval", tab = gBrowser.selectedTab) => checkpoint(tab, kind),
-    /** For startup: route createDecide's onSending here so the indicator reflects the real send. */
-    onDecisionSending: () => showOutgoing("sending"),
     diagnostics: () => ({ ...diagnostics, effects: [...diagnostics.effects], pendingMs: [...pending.values()].reduce((a, b) => a + b, 0),
       segment: segment ? { host: segment.host, contextUuid: segment.contextUuid } : null,
       displayed: [...displayed.values()].map(e => ({ rule_id: e.ruleId, effect: e.effect, source: e.source })),

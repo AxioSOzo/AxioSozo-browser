@@ -35,6 +35,12 @@
     <div id="status" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <main id="main" tabindex="-1">
+      <!-- Start (P6, experimental, only while axiosozo.home.enabled is on): what needs
+           you, agents, projects with their status, and watches. No feed, news or shortcuts. -->
+      <section id="view-home" class="view" data-view="home" aria-labelledby="start-heading" hidden>
+        <div id="start-page" class="pane start" aria-busy="true"></div>
+      </section>
+
       <!-- Projects: the list (projects per Zen space, first-run guidance as the empty
            state) and, at #project=<id>, the home of one project. -->
       <section id="view-projects" class="view" data-view="projects" aria-labelledby="projects-heading">
@@ -47,6 +53,8 @@
             <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
           </div>
           <div id="placement" class="notice-row" role="status" hidden></div>
+          <!-- P7: the first-run safety offer (checked), or an unfinished change that needs you. -->
+          <div id="safety-offer" class="block safety-offer" aria-labelledby="safety-offer-heading" hidden></div>
           <div id="attention" class="block" aria-labelledby="attention-heading" hidden>
             <div class="block-head"><h3 id="attention-heading">Needs attention</h3></div>
             <ul id="attention-list" class="rows"></ul>
@@ -126,6 +134,14 @@
           <div id="decision-keys-body" class="panel keys-panel"></div>
         </div>
         <div id="jev-card" class="block" aria-labelledby="jev-heading"></div>
+        <!-- P7: the later safety choice, through the same browser owner as the first-run offer. -->
+        <div id="safety-settings" class="block" aria-labelledby="safety-heading">
+          <div class="block-head">
+            <h3 id="safety-heading">Other settings: safe browsing</h3>
+            <p class="block-help">For this profile only. Firefox Settings keeps its own DNS over HTTPS controls.</p>
+          </div>
+          <div id="safety-settings-body" class="panel settings-panel"></div>
+        </div>
         <div id="engine-settings" class="block"></div>
       </section>
     </main>

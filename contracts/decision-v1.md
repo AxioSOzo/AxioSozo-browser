@@ -227,6 +227,49 @@ covers host startup and the outgoing indicator as well as the written request.
   with 2–6 outcomes; `unknown` is reserved and always allowed.
 - Result `outcome` is one of the outcome ids or `unknown` (the neutral outcome
   for every failure). Host method `decision/watch`.
+- Chrome persists only bounded historical result metadata, not the observation.
+  Application additionally binds the stored watch revision, exact request,
+  project/container/document, scheduled attempt and current eligibility. A late,
+  stale or low-confidence result cannot become a positive current result.
+- Production watch execution is closed by immutable constructor
+  `liveAuthorized: false`. An eligible due check records `unknown` /
+  `NOT_AUTHORIZED` with `data_sent: false` before any native observation,
+  indicator, shared-budget or provider work. User creation and saved consent
+  are necessary policy inputs, never permission to override that gate.
+
+### Shared chrome budget and sending authority (site rules and watches)
+
+One synchronous process owner, `createDecisionBudget({clock,getLimit,initialBudget})`,
+is shared across every site's runtime and the single watch controller. Its
+`snapshot/limit/transact/reserve` operate on immutable `{calls: epoch_ms[]}`.
+The omitted limit getter defaults to 30; production supplies the actual validated
+`jev.hourly_budget` (0–30). The process settings authority publishes 0 while
+initial, pending, failed or invalidated and only the latest complete validated
+snapshot may publish its limit. Invalidation synchronously revokes affected
+send leases before awaiting settings; per-window cached settings are not the
+process budget authority.
+
+Reservation/limit checks commit synchronously, are nonreentrant and charge at
+most once for an admitted checkpoint. Transactions preserve all unexpired calls
+and stamp additions with the owner's time. Future calls and the clock high-water
+mark deny rollback rather than reopen slots; natural rolling-hour expiry is the
+only release. Uncertain/cancelled dispatch never refunds, and sending performs
+no second charge. History is process-local; the host's separate budget remains
+defense in depth and is not a second browser allowance.
+
+One `createDecisionSendingRouter()` privately registers an exact
+`{requestId,level,beforeSending}` binding to its current site/window guard or
+`WatchController.beforeSending`, returning `{signal,revoke}`. The shared
+`createDecide` constructor receives only the router's `beforeSending` as its
+`onSending` authority; request options, actors and saved records cannot supply
+it. Unknown IDs, collisions, stale/mismatched/repeated/reentrant handoffs and
+async or non-true guards deny. The guard rechecks current policy/document/
+privacy/consent/provider/key/indicator and nonzero process limit synchronously.
+Caller abort is forwarded to the lease including already-aborted signals;
+the mapping is retained through owned host reply/cancellation grace and revoked
+in final cleanup or immediately on scope invalidation. Window/watch disposal
+cannot close the process router or shared host. This grants no live provider,
+capture or action authorization.
 
 ## `highlight_v1` (M2, specified, not implemented in M1)
 

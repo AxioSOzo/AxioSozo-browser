@@ -758,14 +758,23 @@ const LEGACY_VIEWS = Object.freeze({ home: "projects", time: "rules", settings: 
 const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
 const RULE_ID = /^r_[a-z0-9]{4,32}$/;
 
+/** True for exactly the experimental start page's address fragment. */
+export function isHomeHash(hash) {
+  let text = String(hash ?? "").replace(/^#/, "");
+  try { text = decodeURIComponent(text); } catch { return false; }
+  return text === "home";
+}
+
 /** "#projects", "#rules", "#ai"; old "#home", "#time", "#settings" redirect;
  * "#project=<id>" (the project's home, see homeIdFromRoute), "#edit-project=<id>",
- * "#add-project=<space uuid>", "#rule=<id>". */
-export function routeFromHash(hash) {
+ * "#add-project=<space uuid>", "#rule=<id>". With the experimental start page
+ * on (home: true, P6) "#home" is that page instead of the old Projects link. */
+export function routeFromHash(hash, { home = false } = {}) {
   let text = String(hash ?? "").replace(/^#/, "");
   try { text = decodeURIComponent(text); } catch { return { view: "projects" }; }
   const [name, value] = text.split("=", 2);
   if (VIEWS.includes(text)) return { view: text };
+  if (text === "home" && home === true) return { view: "home" };
   if (Object.hasOwn(LEGACY_VIEWS, text)) return { view: LEGACY_VIEWS[text], legacy: true };
   // A project home: everything after "project=" (decoded) must be one valid id;
   // a tail such as "=x", "%3Dx" or "=/" is not a home, only the list.
@@ -1372,10 +1381,11 @@ export function folderFacts(project) {
   };
 }
 
-/** Section order of the home: activity moves up only when it has something to show. */
+/** Section order of the home: activity moves up only when it has something to
+ * show; the project's watches always sit just above what the project is. */
 export function homeSections({ agents, errors } = {}) {
   const busy = agents?.state === "list" || errors?.state === "list";
-  return busy ? ["open", "activity", "accounts", "about"] : ["open", "accounts", "activity", "about"];
+  return busy ? ["open", "activity", "accounts", "watches", "about"] : ["open", "accounts", "activity", "watches", "about"];
 }
 
 /** A calm explanation when a project home cannot be shown. */
@@ -1657,4 +1667,339 @@ export function attentionAction(item) {
     return pick(target.rule_id) ?? pick(target.project_id) ?? pick(target.url) ?? null;
   }
   return null;
+}
+
+// ---------------------------------------------------------------- watches (Plan 4 §4)
+
+// A watch is a page, a plain-language question and a fixed set of answers.
+// The browser checks it only on an explicit "Check now"; live checks are not
+// authorized in this build, so a check records exactly that and sends nothing.
+export const WATCH_OBSERVATIONS = Object.freeze(["none", "address", "outline", "screen"]);
+export const WATCH_OBSERVATION_LABELS = Object.freeze({ none: "Nothing yet", address: "The address and title",
+  outline: "An outline of the page", screen: "A screenshot (OpenAI only)" });
+export const WATCH_INTERVALS = Object.freeze([1, 2, 5, 10, 15, 30]);
+export const WATCH_DEFAULT_INTERVAL = 5;
+export const WATCH_LIMITS = Object.freeze({ question: 500, label: 80, outcomesMin: 2, outcomesMax: 6, url: 2048, records: 256 });
+export const WATCH_NOTE = "A watch asks one question about one page and answers with one of your own answers. You create every watch yourself; nothing else does.";
+export const WATCH_LIVE_NOTE = "Live checks are not authorized in this build. Check now records that nothing was checked, and nothing leaves this Mac.";
+export const WATCH_CONSENT_TEXT = "Allow this watch to send what it observes to the provider when live checks become available. Nothing is sent in this build.";
+const WATCH_CONTROL_CHARS = /[\u0000-\u001f\u007f]/u;
+const WATCH_OUTCOME_ID = /^[a-z][a-z0-9_]{0,31}$/u;
+
+/** A new watch: observes nothing, Jev, no consent, on, the default interval. */
+export function emptyWatchForm() {
+  return { id: null, url: "", question: "", outcomes: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
+    observation: "none", provider: "jev", consent: false, enabled: true, intervalMinutes: WATCH_DEFAULT_INTERVAL };
+}
+
+/** The editable fields of a saved watch (its id, project and history stay the browser's). */
+export function watchToForm(watch) {
+  return { id: watch.id, url: watch.url, question: watch.question,
+    outcomes: listOf(watch.outcomes).map(item => ({ id: item.id, label: item.label })),
+    observation: watch.observation, provider: watch.provider, consent: watch.consent === true, enabled: watch.enabled !== false,
+    intervalMinutes: watch.schedule?.interval_minutes ?? WATCH_DEFAULT_INTERVAL };
+}
+
+/** What one Save asks the browser to store, as the browser stores it (the
+ * address reduced to its origin and path), to recognise that save afterwards. */
+export function watchSaveIntent(form) {
+  let url = null;
+  try {
+    const parsed = new URL(String(form?.url ?? ""));
+    parsed.username = ""; parsed.password = ""; parsed.search = ""; parsed.hash = "";
+    url = parsed.href;
+  } catch { url = null; }
+  return Object.freeze({ url, question: String(form?.question ?? ""),
+    outcomes: listOf(form?.outcomes).map(item => Object.freeze({ id: String(item?.id ?? ""), label: String(item?.label ?? "") })),
+    observation: form?.observation ?? null, provider: form?.provider ?? null, consent: form?.consent === true, enabled: form?.enabled === true,
+    intervalMinutes: Number(form?.intervalMinutes) });
+}
+
+/** True only when a stored watch has exactly the fields of that intent. */
+export function watchMatchesIntent(watch, intent) {
+  if (!watch || !intent || intent.url === null) return false;
+  const outcomes = listOf(watch.outcomes);
+  return watch.url === intent.url && watch.question === intent.question && outcomes.length === intent.outcomes.length
+    && outcomes.every((item, index) => item?.id === intent.outcomes[index].id && item?.label === intent.outcomes[index].label)
+    && watch.observation === intent.observation && watch.provider === intent.provider && watch.consent === intent.consent
+    && watch.enabled === intent.enabled && watch.schedule?.interval_minutes === intent.intervalMinutes;
+}
+
+/** A short lowercase answer id from its label: unique among `taken`, never
+ * "unknown" (reserved for no answer), at most 32 characters. */
+export function outcomeKey(label, taken = []) {
+  let base = String(label ?? "").normalize("NFKD").replace(/[̀-ͯ]/gu, "").toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_").replace(/^_+|_+$/gu, "");
+  if (!/^[a-z]/u.test(base)) base = base ? `answer_${base}` : "answer";
+  base = base.slice(0, 28).replace(/_+$/u, "") || "answer";
+  if (base === "unknown") base = "unknown_answer";
+  let key = base;
+  for (let n = 2; taken.includes(key); n++) key = `${base}_${n}`;
+  return key;
+}
+
+/** Answer ids for the current labels, in order (the form keeps them in step). */
+export function outcomeKeys(labels) {
+  const taken = [];
+  for (const label of labels) taken.push(outcomeKey(label, taken));
+  return taken;
+}
+
+/** What is wrong with the form, as sentences; [] when it can be saved. Same
+ * limits as the browser's own validation (contexts core watches). */
+export function watchFormErrors(form) {
+  const errors = [];
+  const url = String(form?.url ?? "");
+  if (!isHttpUrl(url) || /\s/u.test(url)) errors.push("Enter the page's address, starting with https:// or http://.");
+  else if (url.length > WATCH_LIMITS.url) errors.push("The address is too long.");
+  const question = String(form?.question ?? "");
+  if (!question.trim()) errors.push("Write the question this watch asks.");
+  else if (question.length > WATCH_LIMITS.question) errors.push(`Keep the question under ${WATCH_LIMITS.question} characters.`);
+  else if (WATCH_CONTROL_CHARS.test(question)) errors.push("Write the question on one line.");
+  const outcomes = listOf(form?.outcomes);
+  if (outcomes.length < WATCH_LIMITS.outcomesMin || outcomes.length > WATCH_LIMITS.outcomesMax) errors.push("Give 2 to 6 possible answers.");
+  const labels = outcomes.map(item => String(item?.label ?? ""));
+  if (labels.some(label => !label.trim())) errors.push("Every answer needs a short label.");
+  else if (labels.some(label => label.length > WATCH_LIMITS.label || WATCH_CONTROL_CHARS.test(label))) errors.push(`Keep each answer under ${WATCH_LIMITS.label} characters, on one line.`);
+  else if (new Set(labels.map(label => label.trim().toLowerCase())).size !== labels.length) errors.push("Each answer needs its own label.");
+  const ids = outcomes.map(item => item?.id);
+  if (ids.some(id => typeof id !== "string" || !WATCH_OUTCOME_ID.test(id) || id === "unknown") || new Set(ids).size !== ids.length) {
+    if (!errors.length) errors.push("The answers could not be named. Change a label and try again.");
+  }
+  if (!WATCH_OBSERVATIONS.includes(form?.observation)) errors.push("Choose what the watch may observe.");
+  if (!DECISION_PROVIDERS.includes(form?.provider)) errors.push("Choose who would answer.");
+  if (!Number.isInteger(form?.intervalMinutes) || form.intervalMinutes < 1 || form.intervalMinutes > 30) errors.push("Choose how often it may be checked.");
+  return errors;
+}
+
+const WATCH_REASON_TEXT = Object.freeze({
+  validated: "No clear answer", disabled: "The watch was off", cancelled: "Cancelled", timeout: "No answer in time",
+  BLOCKED_AUTH: "The provider refused the key", HTTP_ERROR: "The provider could not be reached", NETWORK_ERROR: "The provider could not be reached",
+  KEYCHAIN_ERROR: "The key could not be read", malformed_output: "The answer could not be read", budget_exhausted: "The hourly limit was reached",
+  INVALID_INPUT: "The page could not be described", HOST_UNAVAILABLE: "The decision helper was not available",
+  IMAGE_UNSUPPORTED: "Screenshots need OpenAI", UNVERIFIED_SHAPE: "OpenAI's answer format is not verified",
+  NOT_AUTHORIZED: "Not checked: live checks are not authorized in this build",
+});
+
+/** The saved historical result of a watch: what it answered (or why not),
+ * when, and whether anything was sent. Never a current observation; while a
+ * check runs (busy) an earlier answer is not presented as a current one. */
+export function watchResultView(latest, watch, { now = null, busy = false } = {}) {
+  if (!latest) return { tone: "none", text: "Not checked yet", detail: null, ago: null };
+  const ago = Number.isSafeInteger(now) && Number.isSafeInteger(latest.checked_at) ? timeAgo(now - latest.checked_at) : null;
+  const sent = latest.data_sent === true ? `Data was sent to ${PROVIDER_LABELS[latest.provider] ?? "the provider"}.` : "Nothing was sent.";
+  if (latest.reason === "validated" && latest.outcome !== "unknown") {
+    const label = listOf(watch?.outcomes).find(item => item.id === latest.outcome)?.label ?? latest.outcome;
+    const confidence = typeof latest.confidence === "number" ? ` · ${Math.round(latest.confidence * 100)}% sure` : "";
+    return busy ? { tone: "none", text: `Earlier answer: ${label}${confidence}`, detail: sent, ago }
+      : { tone: "ok", text: `Answer: ${label}${confidence}`, detail: sent, ago };
+  }
+  return { tone: latest.reason === "NOT_AUTHORIZED" ? "info" : "warn", text: WATCH_REASON_TEXT[latest.reason] ?? "No answer", detail: sent, ago };
+}
+
+/** Why a watch is or is not checked, from its saved fields only. */
+export function watchScheduleView(watch, { now = null } = {}) {
+  if (watch?.enabled === false) return { state: "off", text: "Turned off" };
+  if (watch?.observation === "none") return { state: "unobserved", text: "Observes nothing yet, so it is never checked" };
+  if (watch?.consent !== true) return { state: "no-consent", text: "Not checked until you allow it to send" };
+  const interval = watch.schedule?.interval_minutes ?? WATCH_DEFAULT_INTERVAL;
+  const last = watch.schedule?.last_checked_at ?? null;
+  const every = `every ${interval} ${interval === 1 ? "minute" : "minutes"} at most`;
+  if (last === null || !Number.isSafeInteger(now)) return { state: "due", text: `Can be checked now · ${every}` };
+  const due = last + interval * 60_000;
+  return now >= due ? { state: "due", text: `Can be checked now · ${every}` }
+    : { state: "waiting", text: `Can be checked again in ${Math.max(1, Math.ceil((due - now) / 60_000))} min · ${every}` };
+}
+
+/** One watch row: question, page, what it may observe and who would answer. */
+export function watchRow(watch, { now = null, projectName: owner = null, busy = false } = {}) {
+  const schedule = watchScheduleView(watch, { now });
+  return { id: watch.id, question: watch.question, url: watch.url, address: displayAddress(watch.url), project: owner,
+    observation: WATCH_OBSERVATION_LABELS[watch.observation] ?? watch.observation,
+    provider: PROVIDER_LABELS[watch.provider] ?? watch.provider, answers: listOf(watch.outcomes).map(item => item.label),
+    schedule, checkable: schedule.state === "due" || schedule.state === "waiting",
+    result: watchResultView(watch.latest_result, watch, { now, busy }) };
+}
+
+/** A project's own watches, newest first (the saved list is profile-wide). */
+export function projectWatches(watches, projectId) {
+  return listOf(watches).filter(watch => watch?.project_id === projectId).sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1));
+}
+
+const WATCH_ACTION_TEXT = Object.freeze({
+  NOT_DUE: "Not checked: it was checked less than its interval ago.",
+  disabled: "Not checked: the watch is off, observes nothing or may not send.",
+  BUSY: "Not checked: another check is still running.",
+  NOT_FOUND: "That watch is not here anymore.", UNKNOWN_WATCH: "That watch is not here anymore.",
+  CLEANUP_REQUIRED: "Not checked: an earlier check still needs its cleanup.",
+  RECOVERY_REQUIRED: "Not checked: an earlier result still needs to be cleared.",
+  CHECK_CANCELLED: "The check was cancelled when the page changed.",
+  INVALID_INPUT: "The watch could not be saved. Check the address, the question and the answers.",
+  INVALID_WATCH: "The watch could not be saved. Check the address, the question and the answers.",
+  UNKNOWN_PROJECT: "This project is not here anymore.", PROJECT_CHANGED: "The project was changing. Try again in a moment.",
+  PROJECT_MISMATCH: "That watch belongs to another project.", WATCH_ID_CONFLICT: "The watch could not be saved. Try again.",
+  WATCH_LIMIT: `There are already ${WATCH_LIMITS.records} watches. Remove one first.`,
+  // Neither of these knows whether the change reached the saved list.
+  DOCUMENT_GONE: "The page changed before that finished, so it cannot be confirmed here. The list shows what AxioSozo has now.",
+  NO_WINDOW: "Watches are managed from a normal browser window.", PRIVATE_WINDOW: "Watches are managed from a normal browser window.",
+  STORAGE_ERROR: "Saving the watches on this Mac failed, so the change is not confirmed. The list shows what AxioSozo has now.",
+  INVALID_STORE: "The saved watches could not be read, so nothing was changed.",
+  CLOSED: "Watches are closing with AxioSozo.", NOTHING_TO_RETRY: "There was nothing left to retry.",
+});
+export function watchActionText(code) {
+  return WATCH_ACTION_TEXT[code] ?? "That did not work. Try again.";
+}
+
+/** One finished check as the browser reported it, with its disclosure: a
+ * check that may have sent data says so even when it was cancelled. */
+export function watchReportText(report) {
+  if (report?.code === "NOT_AUTHORIZED") return "Recorded: not checked, because live checks are not authorized in this build. Nothing was sent.";
+  const sent = report?.data_sent === true
+    ? report.disclosure === "conservative" ? "Data may have left this Mac." : "Data was sent." : "Nothing was sent.";
+  const what = report?.code === "APPLIED" ? "Checked; the answer is shown above."
+    : WATCH_ACTION_TEXT[report?.code] ?? (WATCH_REASON_TEXT[report?.reason] ? `${WATCH_REASON_TEXT[report.reason]}.` : "The check did not finish.");
+  return `${what} ${sent}`;
+}
+// Manual outcomes that are not failures, only "nothing was checked".
+const WATCH_NOTICES = Object.freeze(["NOT_DUE", "disabled", "BUSY"]);
+
+const WATCH_PHASE_TEXT = Object.freeze({ starting: "A check is starting…", opening: "Opening the page…", capture: "Looking at the page…",
+  indicator: "Showing the sending notice…", provider: "Waiting for the answer…", cleanup: "Cleaning up after a check…",
+  compensation: "Clearing a stale answer…" });
+
+/** The controller's fixed status for a page: one quiet line, the problem that
+ * blocks further checks (and whether Retry may be offered), the latest manual
+ * outcome and an honest disclosure while an answer is still owed. */
+export function watchStatusView(status, { error = null } = {}) {
+  if (!status) return { state: error ? "unavailable" : "loading", text: error ? "Watch status cannot be shown right now." : null,
+    problem: null, retry: false, notice: null, busy: false, disclosure: null };
+  const problem = status.recovery_required ? "A stale answer could not be cleared from a watch. No other check runs until it is."
+    : status.cleanup_required ? "A check could not finish its cleanup. No other check runs until it does." : null;
+  const failure = status.last_error && typeof status.last_error.code === "string" ? status.last_error : null;
+  return {
+    state: problem ? "blocked" : status.busy ? "busy" : "idle",
+    text: status.busy ? WATCH_PHASE_TEXT[status.phase] ?? "A check is running…" : null,
+    problem, retry: !!problem && status.retry_allowed === true,
+    notice: failure ? { action: failure.action ?? null, code: failure.code, watchId: failure.watch_id ?? null,
+      tone: WATCH_NOTICES.includes(failure.code) ? "info" : "warn", text: watchActionText(failure.code) } : null,
+    busy: status.busy === true,
+    disclosure: status.pending_disclosure ? "Data may have left this Mac for the running check; its answer has not arrived."
+      : status.last?.data_sent === true && status.last?.disclosure === "conservative"
+        ? "The last check may have sent data to the provider before it ended." : null,
+  };
+}
+
+// ---------------------------------------------------------------- safety (P7)
+
+export const SAFETY_TITLE = "Block adult and malicious sites";
+// What the setting does, and no more: it only chooses the DNS resolver.
+export const SAFETY_TEXT = "When on, this profile looks up site addresses with DNS over HTTPS through Cloudflare's family resolver (family.cloudflare-dns.com), which declines sites on Cloudflare's adult and malware lists. It is not a complete filter, and AxioSozo does not look at pages to decide.";
+// The first-run offer: a proposal that changes nothing until it is saved.
+export const SAFETY_OFFER_HELP = "One choice for this profile. The box starts checked; nothing changes until you save your choice.";
+export const SAFETY_LATER = "You can change this later under AI & keys, or in Firefox Settings under Privacy & Security.";
+export const SAFETY_OUTCOME_LABELS = Object.freeze({
+  RESTORED: "My earlier settings are back", EXTERNAL_CHANGED: "I changed them myself", ACCEPTED: "Keep them as they are now" });
+export const SAFETY_OUTCOMES = Object.freeze(["RESTORED", "EXTERNAL_CHANGED", "ACCEPTED"]);
+const SAFETY_REASON_TEXT = Object.freeze({
+  PREF_LOCKED: "DNS over HTTPS is locked by a policy on this Mac, so AxioSozo changed nothing.",
+  EXTERNAL_DOH_CONFIGURATION: "Another DNS over HTTPS setup is in place, so AxioSozo changed nothing.",
+  PREF_READ_FAILED: "The DNS settings could not be read, so nothing was changed.",
+  PREFS_CHANGED: "The DNS settings changed meanwhile, so AxioSozo left them as they are.",
+  RESTORED: "Your earlier DNS settings are back.",
+  RESOLUTION_REJECTED: "That answer does not match the current settings. Check them again.",
+  RESOLVED: "Thanks. The unfinished change is closed.",
+});
+const SAFETY_ERROR_TEXT = Object.freeze({
+  SAFETY_WRITER_BUSY: "Another AxioSozo window is using the safety setting. Try again in a moment.",
+  SAFETY_NATIVE_CLEANUP_REQUIRED: "A DNS setting change could not be cleaned up. Restart AxioSozo before choosing again.",
+  SAFETY_SEQUENCE_MISMATCH: "That question is out of date. The current one is shown.",
+  PRIVATE_WINDOW: "This setting is changed from a normal window.", NO_WINDOW: "This setting is changed from a normal window.",
+});
+/** Why the setting cannot be shown; a failed read says nothing about changes. */
+export function safetyErrorText(code) {
+  return SAFETY_ERROR_TEXT[code] ?? "The safety setting cannot be read right now.";
+}
+
+// The owner's own answers for a settled, acknowledged state.
+const SAFETY_SETTLED = Object.freeze(["CURRENT", "INITIALIZED"]);
+// The owner's record cannot be read (STORE_UNAVAILABLE), or the browser's
+// answer had no known code at all (the actor's SAFETY_UNAVAILABLE).
+const SAFETY_UNREADABLE = Object.freeze(["STORE_UNAVAILABLE", "SAFETY_UNAVAILABLE"]);
+const SAFETY_UNREADABLE_VIEW = Object.freeze({ state: "unavailable", tone: "warn", form: false, checked: true, recovery: null, note: null,
+  text: "AxioSozo could not read its record of this choice, so it changes nothing. Restart AxioSozo to try again." });
+
+/**
+ * What the page shows for the safety choice, from the browser's latest
+ * categorical answer only: loading, unavailable (also whenever the latest read
+ * failed, whatever an older answer said), a blocked state (an unfinished change
+ * to acknowledge only when the owner itself answers RECOVERY_REQUIRED, a
+ * cleanup, or a record that cannot be read), the first-run offer (a checked
+ * proposal awaiting Save), or the saved choice with what is set now. Nothing is
+ * shown as configured unless the owner's settled answer says so.
+ */
+export function safetyView(reply, { error = null } = {}) {
+  if (!reply || error) return { state: error ? "unavailable" : "loading", tone: error ? "warn" : "none",
+    text: error ? safetyErrorText(error) : "Reading the current setting…", form: false, checked: true, recovery: null, note: null };
+  const note = SAFETY_REASON_TEXT[reply.reason] ?? SAFETY_ERROR_TEXT[reply.reason] ?? null;
+  const cleanup = { state: "cleanup", tone: "warn", form: false, checked: true, recovery: null, note: null,
+    text: "A DNS setting change could not be cleaned up. Restart AxioSozo before choosing again." };
+  if (reply.code === "NATIVE_CLEANUP_REQUIRED") return cleanup;
+  // A record that cannot be read is that, whatever the unknown cleanup fact
+  // projects as: never a claim that a DNS change failed its cleanup.
+  if (SAFETY_UNREADABLE.includes(reply.code)) return { ...SAFETY_UNREADABLE_VIEW };
+  if (reply.cleanup_blocked) return cleanup;
+  if (reply.code === "RECOVERY_REQUIRED") {
+    return { state: "recovery", tone: "warn", form: false, checked: true, note: null,
+      text: "A change to DNS over HTTPS did not finish, so AxioSozo changes nothing until you tell it what you see. Open Firefox Settings → Privacy & Security → DNS over HTTPS, then choose. Your answer is only recorded; it changes no setting.",
+      recovery: Number.isSafeInteger(reply.sequence) && reply.sequence > 0 ? { sequence: reply.sequence, outcomes: SAFETY_OUTCOMES.map(outcome =>
+        ({ outcome, label: SAFETY_OUTCOME_LABELS[outcome] })) } : null };
+  }
+  // Anything else blocked or unsettled stays unavailable, with or without a
+  // sequence; only the owner's own code above asks for recovery.
+  if (reply.blocked || !SAFETY_SETTLED.includes(reply.code)) return { ...SAFETY_UNREADABLE_VIEW };
+  const offer = reply.offer, status = reply.status;
+  const now = !status ? "The current DNS setting could not be read, so it is shown as unknown."
+    : status.active ? (status.owned ? "On: AxioSozo set Cloudflare's family filter." : "On: the family filter is set, outside AxioSozo.")
+      : "Off: DNS over HTTPS does not use the family filter.";
+  if (offer?.offer === true) {
+    return { state: "offer", tone: "none", form: true, checked: offer.checked !== false, recovery: null, note, text: now };
+  }
+  return { state: "chosen", tone: status?.active ? "ok" : "none", form: true, checked: offer ? offer.checked === true : status?.active === true,
+    recovery: null, note, text: now };
+}
+
+// ---------------------------------------------------------------- start page (P6, experimental)
+
+export const START_PAGE_NOTE = "Experimental. Turned on with axiosozo.home.enabled; only Firefox's own new-tab page is replaced.";
+
+/** The start page from data the page already reads: what needs you (attention
+ * and watch problems), agents that finished or are working, projects with
+ * their local servers, and every watch with its saved result, newest first.
+ * `homes` maps a project id to its home answer (null: not readable now). */
+export function startPageView({ attention = [], projects = [], watches = [], watchStatus = null, homes = new Map(), statuses = new Map(), now = null } = {}) {
+  const names = new Map(listOf(projects).map(project => [project.id, projectName(project)]));
+  const status = watchStatusView(watchStatus);
+  const needs = listOf(attention).map(item => ({ kind: item?.kind ?? "other", title: item?.title ?? "Needs attention",
+    detail: item?.detail ?? "", action: attentionAction(item) }));
+  if (status.problem) needs.unshift({ kind: "watch", title: "A watch needs you", detail: status.problem, action: null });
+  const agents = [];
+  let agentsUnavailable = false;
+  for (const project of listOf(projects)) {
+    if (!homes.has(project.id)) continue;
+    const home = homes.get(project.id);
+    const view = homeAgentActivity(home?.agent_activity ?? null, { root: project.root, now });
+    if (view.state === "unavailable") { agentsUnavailable = true; continue; }
+    for (const item of view.items) if (item.state === "done" || item.state === "started") agents.push({ ...item, project: names.get(project.id), projectId: project.id });
+  }
+  agents.sort((a, b) => b.at - a.at);
+  const rows = listOf(watches).map(watch => watchRow(watch, { now, projectName: names.get(watch.project_id) ?? null }));
+  const at = id => listOf(watches).find(watch => watch.id === id)?.latest_result?.checked_at ?? -1;
+  rows.sort((a, b) => at(b.id) - at(a.id) || (a.id < b.id ? -1 : 1));
+  return {
+    needs,
+    agents: agents.slice(0, 8), agentsUnavailable: agentsUnavailable && !agents.length,
+    projects: listOf(projects).map(project => ({ id: project.id, name: names.get(project.id), href: homeHash(project.id),
+      local: localSummary(project, statuses.get(project.id) ?? []) })),
+    watches: rows.slice(0, 12), moreWatches: Math.max(0, rows.length - 12), status,
+  };
 }

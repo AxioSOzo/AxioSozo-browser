@@ -20,10 +20,23 @@ function guarded(label, install) {
   catch (error) { console.error(`AxioSozo: ${label} failed`, error); return null; }
 }
 
-function neutralDecision(request, reason) {
-  return { version: 1, request_id: typeof request?.request_id === "string" ? request.request_id : null,
-    choice_set: "site_rule_v1", context_version: "site-rule-1", outcome: "none", reason_code: null,
-    reason, data_sent: false, authority: "suggestion_only", action_authorized: false };
+// P6 (Plan 4): the facts the start-page gate reads on every new-tab command.
+// Each lookup that fails or is unknown denies (the gate turns it into null).
+function aiWindowActive() {
+  const { AIWindow } = ChromeUtils.importESModule("moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs");
+  if (typeof AIWindow?.isAIWindowActive !== "function") throw new Error("AI_WINDOW_UNKNOWN");
+  const active = AIWindow.isAIWindowActive(window);
+  return typeof active === "boolean" ? active : null;
+}
+// Firefox's own default new-tab page only: this window's native default URL,
+// AboutNewTab's process value and its override flag, and the separate pref an
+// extension's chrome_url_overrides sets (ext-url-overrides.js). A pref of the
+// wrong type throws (unknown denies); an absent one is the native false.
+const NEW_TAB_EXTENSION_CONTROLLED = "browser.newtab.extensionControlled";
+function defaultNewTabPage() {
+  const { AboutNewTab } = ChromeUtils.importESModule("resource:///modules/AboutNewTab.sys.mjs");
+  return window.BROWSER_NEW_TAB_URL === "about:newtab" && AboutNewTab.newTabURL === "about:newtab"
+    && AboutNewTab.newTabURLOverridden === false && Services.prefs.getBoolPref(NEW_TAB_EXTENSION_CONTROLLED, false) === false;
 }
 
 // about:axiosozo and its actor (overview workstream). Both calls are idempotent
@@ -72,7 +85,7 @@ function introduceOnce(openOverview, zen) {
 }
 
 // F1–F6, gated by axiosozo.contexts.enabled. Returns disposers in install order.
-async function installContexts({ engineProbe, aboutRegistered }) {
+async function installContexts({ engineProbe, aboutRegistered, alive }) {
   const disposers = [];
   const runtime = {};
   if (!Services.prefs.getBoolPref("axiosozo.contexts.enabled", true)) return { disposers, services: null, zen: null, runtime };
@@ -84,8 +97,21 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   const services = guarded("services", () => servicesModule.AxioSozoServices.get());
   if (!services) return { disposers, services: null, zen, runtime };
   const unregister = guarded("window registration", () => services.registerWindow(window, zen));
+  // This window's own registration succeeded (it ends with the disposers).
+  const registered = typeof unregister === "function";
   if (unregister) disposers.push(unregister);
-  await zen.whenReady().catch(error => console.error("AxioSozo: Zen workspaces not ready", error));
+  // Zen's own readiness promise must exist and fulfil. The adapter's
+  // whenReady() also resolves when that promise is missing, so a registered
+  // window with populated fields is not, by itself, a ready one.
+  let readiness;
+  try { readiness = window.gZenWorkspaces?.promiseInitialized; } catch { readiness = undefined; }
+  const knownReadiness = typeof readiness?.then === "function";
+  let workspacesReady = false;
+  try {
+    await zen.whenReady();
+    if (knownReadiness) { await readiness; workspacesReady = true; }
+    else console.error("AxioSozo: Zen workspace readiness is unknown");
+  } catch (error) { console.error("AxioSozo: Zen workspaces not ready", error); }
 
   // Reuses an open AxioSozo tab; a #fragment selects a view or item inside it.
   const openOverview = aboutRegistered ? (fragment = "") => window.switchToTabHavingURI(`about:axiosozo${fragment}`, true,
@@ -106,21 +132,17 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   if (menu) disposers.push(() => menu.dispose());
 
   // ── Runtime workstream installers (contexts-api-v1 §3.5), each { dispose() }.
-  const decisionModule = optionalModule("ProviderDecision.sys.mjs");
-  const hostDecide = decisionModule
-    ? guarded("decision provider", () => servicesModule.processSingleton("decide", () => decisionModule.createDecide()))
-    : null;
-  // Never rejects: any failure is the neutral outcome (decision-v1).
-  const decide = async (request, options = {}) => {
-    if (!hostDecide) return neutralDecision(request, "HOST_UNAVAILABLE");
-    try { return await hostDecide(request, options); } catch { return neutralDecision(request, "HOST_UNAVAILABLE"); }
-  };
   // P5 console errors (Plan 4 step 7): one process owner of the shared tab
   // registry, the RAM console facade and the ConsoleErrors actor, created on
   // the first window and shared by every later one. It starts no endpoint,
   // provider or Understand facade. A normal window is attached after its
   // registration and Zen readiness, before Send to agent is installed.
   const normalWindow = !!guarded("arrival privacy check", () => zen.isPrivateWindow() === false);
+  // Decisions (Plan 4 step 9): the services' one process runtime (budget,
+  // sending router, lazily started provider host), the same frozen interface
+  // for every normal window. A window never builds a host or a budget of its
+  // own, and closing it closes neither.
+  const decisions = normalWindow ? guarded("decision runtime", () => services.getDecisionRuntime()) : null;
   const consoleModule = optionalModule("ConsoleErrorsNativeRuntime.sys.mjs");
   const consoleOwner = consoleModule ? guarded("console errors", () => servicesModule.processSingleton("console-errors-native",
     () => consoleModule.createConsoleErrorsNativeRuntime({ services }))) : null;
@@ -148,7 +170,7 @@ async function installContexts({ engineProbe, aboutRegistered }) {
   const installers = [
     ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings,
       consoleErrors: consoleOwner?.service ?? null }],
-    ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decide }],
+    ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decisions }],
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],
   ];
   // P1 arrival: one native "keep as project?" notification for a localhost
@@ -170,12 +192,38 @@ async function installContexts({ engineProbe, aboutRegistered }) {
     if (typeof installed?.diagnostics === "function") runtime[name] = installed.diagnostics;
   }
   // Read-only runtime counters for GUI evidence (e.g. Jev decideCalls, provider host state).
-  if (typeof hostDecide?.diagnostics === "function") runtime.decisionHost = hostDecide.diagnostics;
+  if (typeof decisions?.diagnostics === "function") runtime.decisionHost = () => decisions.diagnostics();
   // Understand (Plan 4 step 6): counts only. Reading them creates no facade and
   // starts nothing; this window's owners end with its registration above, and
   // the shared facade closes once at profile shutdown, never per window.
   if (typeof services.getUnderstandDiagnostics === "function") runtime.understand = () => services.getUnderstandDiagnostics();
-  return { disposers, services, zen, runtime };
+  // P7 safety: counts only; reading them acquires nothing.
+  if (typeof services.getSafetyDiagnostics === "function") runtime.safety = () => services.getSafetyDiagnostics();
+  // Watches (Plan 4 §4): the one process schedule starts after the first
+  // admitted normal window: its own registration succeeded, the services
+  // still hold it as a registered normal window, and it is live and actually
+  // ready. Later windows reuse it and closing a window stops nothing.
+  // Production checks stay NOT_AUTHORIZED.
+  if (registered && normalWindow && workspacesReady && alive() && typeof services.startWatchScheduler === "function"
+    && guarded("watch schedule admission", () => services.isNormalWindow(window)) === true) {
+    guarded("watch schedule", () => services.startWatchScheduler());
+  }
+  if (typeof services.getWatchDiagnostics === "function") runtime.watches = () => services.getWatchDiagnostics();
+  // P6: this window's start-page gate for the ordinary new-tab command, only
+  // after Zen's workspaces actually became ready. It reads the flag and every
+  // window fact again on each command; disposing it at unload ends this
+  // window's gate only.
+  const startPage = aboutRegistered && normalWindow && workspacesReady && alive() && typeof servicesModule.createStartPageGate === "function"
+    ? guarded("start page", () => servicesModule.createStartPageGate({ window, services, prefs: Services.prefs, aboutRegistered,
+      authority: () => zen.isAuthoritative() === true,
+      isPrivate: () => {
+        if (window.PrivateBrowsingUtils?.permanentPrivateBrowsing !== false) return true;
+        return zen.isPrivateWindow();
+      },
+      isAIWindow: aiWindowActive, defaultNewTab: defaultNewTabPage }))
+    : null;
+  if (startPage) disposers.push(() => startPage.dispose());
+  return { disposers, services, zen, runtime, startPage };
 }
 
 // Loaded only by ZenPreloadedScripts in the trusted browser window.
@@ -183,8 +231,13 @@ async function installContexts({ engineProbe, aboutRegistered }) {
 // switch and an address-bar badge on Chromium tabs; no shortcut is taken over.
 async function initialize() {
   if (!Services.prefs.getBoolPref("axiosozo.foundation.enabled", true)) return;
+  // This window's lifetime starts before the first await: a close during any
+  // await below ends it, and nothing is installed or published afterwards.
+  let disposed = false;
+  window.addEventListener("unload", () => { disposed = true; }, { once: true });
   const aboutRegistered = registerOverview();
   await window.gZenStartup.promiseInitialized;
+  if (disposed) return;
   const adapter = new GeckoEngineAdapter(window);
   // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
   // (`./dev engine-probe`) adds its own explicit toolbar action.
@@ -202,7 +255,7 @@ async function initialize() {
   if (probeSheet) document.insertBefore(probeSheet, document.documentElement);
   // Browser startup performs no provider discovery and starts no model client.
   // The optional privileged-action coordinator is also created only on demand.
-  let coordinator = null; let coordinatorStarting = null; let disposed = false;
+  let coordinator = null; let coordinatorStarting = null;
   const ensureCoordinator = () => {
     if (disposed) return Promise.reject(new Error("WINDOW_CLOSED"));
     if (coordinator) return Promise.resolve(coordinator);
@@ -212,14 +265,27 @@ async function initialize() {
       .finally(() => { coordinatorStarting = null; });
     return coordinatorStarting;
   };
-  let contexts = { disposers: [], services: null, zen: null, runtime: {} };
-  window.AxioSozo = Object.freeze({ version: 5, engine: adapter, engineProbe, ensureCoordinator,
+  let contexts = { disposers: [], services: null, zen: null, runtime: {}, startPage: null };
+  // P6: browser-commands.js asks this for the ordinary new-tab command only. It
+  // synchronously answers "about:axiosozo#home" or null; until this window's
+  // gate is installed, after unload, and whenever window.AxioSozo is no longer
+  // this very object (a newer owner), it is always null. It never removes or
+  // replaces that newer owner.
+  let startPage = null;
+  let owner = null;
+  const startPageForNewTab = () => {
+    const gate = disposed || window.AxioSozo !== owner ? null : startPage;
+    if (!gate) return null;
+    try { return gate.check() === "about:axiosozo#home" ? "about:axiosozo#home" : null; } catch { return null; }
+  };
+  owner = Object.freeze({ version: 5, engine: adapter, engineProbe, ensureCoordinator, startPageForNewTab,
     get coordinator() { return coordinator; },
     // Diagnostics for GUI evidence (stored context types, container identities).
     get contexts() { return Object.freeze({ services: contexts.services, workspaces: contexts.zen,
       diagnostics: () => Object.fromEntries(Object.entries(contexts.runtime ?? {}).map(([name, read]) => {
         try { return [name, JSON.parse(JSON.stringify(read()))]; } catch { return [name, null]; }
       })) }); } });
+  window.AxioSozo = owner;
   const disposeContexts = () => {
     for (const dispose of contexts.disposers.splice(0).reverse()) {
       try { dispose(); } catch (error) { console.error("AxioSozo: dispose failed", error); }
@@ -227,6 +293,7 @@ async function initialize() {
   };
   window.addEventListener("unload", () => {
     disposed = true; probeSheet?.remove();
+    startPage = null;
     disposeContexts();
     engineTabs?.dispose();
     spaceSwitcher?.dispose();
@@ -234,8 +301,10 @@ async function initialize() {
     adapter.dispose();
   }, { once: true });
   try {
-    contexts = await installContexts({ engineProbe, aboutRegistered });
+    contexts = await installContexts({ engineProbe, aboutRegistered, alive: () => !disposed });
+    // A late installation never publishes a gate after unload; its disposer ends it.
     if (disposed) disposeContexts();
+    else startPage = contexts.startPage ?? null;
   } catch (error) { console.error("AxioSozo: contexts unavailable", error); }
 }
 window.addEventListener("MozBeforeInitialXULLayout", () => { initialize().catch(console.error); }, { once: true });

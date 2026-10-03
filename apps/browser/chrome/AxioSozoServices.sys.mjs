@@ -31,9 +31,19 @@ import { createAgentChannelService } from "./AgentChannelService.sys.mjs";
 import { createGeckoAgentTransportRuntime } from "./AgentChannelTransport.sys.mjs";
 import { createUnderstandService, createOfflineUnderstandService } from "./UnderstandService.sys.mjs";
 import { createNativeManifestAcceptIO } from "./ProjectManifestAccept.sys.mjs";
+import { createDecisionBudget } from "./DecisionBudget.sys.mjs";
+import { createDecisionSendingRouter } from "./DecisionSendingRouter.sys.mjs";
+import { createDecide } from "./ProviderDecision.sys.mjs";
+import { createWatchController } from "./WatchController.sys.mjs";
+import { createSafetyOwner, createSafetyOwnerSchema } from "./SafetyOwner.sys.mjs";
+import { createSafetyPreferenceFactory } from "./SafetyPreferenceFactory.sys.mjs";
+import { createSafetyPreferences } from "./SafetyPreferences.sys.mjs";
+import { createSafetyNativeOwnerRegistry } from "./SafetyNativeOwner.sys.mjs";
+import { createSafetyAtomicStorage } from "./SafetyAtomicStorage.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console",
+  "watches", "safety"]);
 // Console retention changes reach pages and the sidebar as one name-only
 // event at most this often (Plan 4 step 7); a burst ends with a trailing one.
 export const CONSOLE_EVENT_MS = 250;
@@ -50,7 +60,8 @@ export const AGENT_HOOK_AGENTS = Object.freeze(["claude-code", "codex"]);
 const AGENT_NAMES = Object.freeze({ "claude-code": "Claude Code", codex: "Codex", other: "An agent" });
 const AGENT_SESSION = /^s_[0-9a-f]{16}$/u;
 const AGENT_CHANNEL_EVENTS = new Set(["endpoint", "enablement", "activity", "cleanup", "capabilities"]);
-export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json" });
+export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json",
+  watches: "watches.json" });
 export const PROBE_MIN_INTERVAL_MS = 5000;
 export const PROBE_TIMEOUT_MS = 2000;
 export const LEDGER_FLUSH_MS = 30000;
@@ -83,6 +94,32 @@ export const CONTAINERS_PREF = "privacy.userContext.enabled";
 // no resource://gre/modules/ copy. Same URL as BrowserExperience.sys.mjs and
 // the engine's own tabbrowser/content/tab-hover-preview.mjs.
 export const CONTEXTUAL_IDENTITY_MODULE = "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs";
+
+// P6 (Plan 4): the experimental start page. Only the ordinary new-tab command
+// of a normal window may open it, and only while this exact flag is true.
+export const START_PAGE_PREF = "axiosozo.home.enabled";
+export const START_PAGE_URL = "about:axiosozo#home";
+// Watches (Plan 4 §4): the closed outcomes a user action can end with. They
+// reach pages as a fixed category only (getWatchStatus last_error).
+const WATCH_ID = /^w_[a-z0-9]{4,32}$/u;
+const WATCH_ACTION_CODES = new Set(["INVALID_INPUT", "INVALID_WATCH", "UNKNOWN_WATCH", "UNKNOWN_PROJECT", "PROJECT_CHANGED",
+  "PROJECT_MISMATCH", "WATCH_LIMIT", "WATCH_ID_CONFLICT", "DOCUMENT_GONE", "PRIVATE_WINDOW", "NO_WINDOW", "STORAGE_ERROR",
+  "INVALID_STORE", "INVALID_CLOCK", "CLOSED", "NOTHING_TO_RETRY", "CHECK_CANCELLED"]);
+// A manual check that performed nothing: shown as what it is, never as a check.
+const WATCH_RUN_NOTICES = new Set(["NOT_DUE", "disabled", "BUSY", "NOT_FOUND", "CLEANUP_REQUIRED", "RECOVERY_REQUIRED"]);
+const WATCH_PHASES = Object.freeze(["starting", "opening", "capture", "indicator", "provider", "cleanup", "compensation"]);
+const WATCH_REPORT_CODES = new Set(["APPLIED", "STALE", "NOT_AUTHORIZED", "disabled", "timeout", "cancelled", "budget_exhausted",
+  "malformed_output", "HOST_UNAVAILABLE", "IMAGE_UNSUPPORTED", "INVALID_INPUT", "ADMISSION_DENIED", "CLEANUP_REQUIRED",
+  "RECOVERY_REQUIRED", "CLOCK_ROLLBACK", "STORAGE_ERROR", "INVALID_STORE", "INVALID_CLOCK", "INVALID_BUDGET_ADAPTER",
+  ...WATCH_RUN_NOTICES]);
+// P7: the durable safety owner. Only these fixed categories leave it.
+export const SAFETY_REVOKE_TOPICS = Object.freeze(["quit-application", "profile-change-net-teardown", "profile-before-change", "xpcom-will-shutdown"]);
+const SAFETY_ERRORS = new Set(["SAFETY_UNAVAILABLE", "SAFETY_PROFILE_AUTHORITY_LOST", "SAFETY_PROFILE_UNVERIFIED", "SAFETY_DIRECTORY_UNVERIFIED",
+  "SAFETY_PATH_UNVERIFIED", "SAFETY_LEAF_UNVERIFIED", "SAFETY_WRITER_BUSY", "SAFETY_WRITER_LEASE_LOST", "SAFETY_OWNER_CLOSED",
+  "SAFETY_NATIVE_CLEANUP_REQUIRED", "SAFETY_SEQUENCE_MISMATCH", "SAFETY_RESOLUTION_REQUIRED", "SAFETY_CONFIRMATION_REQUIRED",
+  "DOCUMENT_GONE", "NO_WINDOW", "PRIVATE_WINDOW", "INVALID_INPUT"]);
+const FIXED_CODE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+const DECISION_REQUEST_ID = /^[A-Za-z0-9_.:-]{1,160}$/u;
 
 export class ServicesError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "ServicesError"; this.code = code; }
@@ -136,6 +173,92 @@ function countsOnly(value, depth = 0) {
 function displayName(project) {
   const name = typeof project?.manifest?.name === "string" ? project.manifest.name.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ").trim() : "";
   return name ? [...name].slice(0, 80).join("") : "This project";
+}
+
+/** The neutral decision-v1 outcome: never handed off (data_sent false), or a
+ * stale answer whose own disclosure is kept while its outcome is dropped. */
+function neutralDecision(request, reason, dataSent = false) {
+  const requestId = typeof request?.request_id === "string" && DECISION_REQUEST_ID.test(request.request_id) ? request.request_id : null;
+  if (request?.choice_set === "watch_v1") {
+    const provider = request.provider === "openai" ? "openai" : "jev";
+    return { version: 1, request_id: requestId, choice_set: "watch_v1", context_version: "watch-1", outcome: "unknown", reason,
+      data_sent: dataSent === true, authority: "suggestion_only", action_authorized: false, provider, confidence: null,
+      ...(provider === "openai" ? { shape_status: "UNVERIFIED_SHAPE" } : {}) };
+  }
+  return { version: 1, request_id: requestId, choice_set: "site_rule_v1", context_version: "site-rule-1", outcome: "none",
+    reason_code: null, reason, data_sent: dataSent === true, authority: "suggestion_only", action_authorized: false };
+}
+
+const fixedCode = value => (typeof value === "string" && FIXED_CODE.test(value) ? value : null);
+const watchIdOrNull = value => (typeof value === "string" && WATCH_ID.test(value) ? value : null);
+
+/** A controller check report rebuilt from its fixed fields; nothing else crosses. */
+function watchReport(report) {
+  if (!report || typeof report !== "object" || !WATCH_REPORT_CODES.has(report.code)) return null;
+  const out = { code: report.code };
+  if (watchIdOrNull(report.watch_id)) out.watch_id = report.watch_id;
+  if (typeof report.request_id === "string" && DECISION_REQUEST_ID.test(report.request_id)) out.request_id = report.request_id;
+  if (typeof report.outcome === "string" && /^[a-z][a-z0-9_]{0,31}$/u.test(report.outcome)) out.outcome = report.outcome;
+  if (Object.hasOwn(report, "reason")) out.reason = fixedCode(report.reason);
+  if (typeof report.data_sent === "boolean") out.data_sent = report.data_sent;
+  if (report.disclosure === "confirmed" || report.disclosure === "conservative") out.disclosure = report.disclosure;
+  if (typeof report.persisted === "boolean") out.persisted = report.persisted;
+  if (report.provider === "jev" || report.provider === "openai") out.provider = report.provider;
+  return out;
+}
+
+/** The categorical safety projection: no state, preference values, journal,
+ * diagnostics, resolver, native gate, path or handle ever crosses. Unknown
+ * stays null; blocked and cleanup_blocked are only false when known false. */
+function safetyProjection(result) {
+  const status = result?.status;
+  const known = !!status && typeof status === "object" && ["offer", "checked", "active", "owned"].every(key => typeof status[key] === "boolean");
+  let offer = null;
+  try {
+    if (result?.state) {
+      const value = core.safetyOffer(result.state);
+      offer = { offer: value.offer === true, checked: value.checked === true };
+    }
+  } catch { offer = null; }
+  return {
+    code: fixedCode(result?.code) ?? "SAFETY_UNAVAILABLE", reason: fixedCode(result?.reason),
+    blocked: result?.blocked !== false, cleanup_blocked: result?.cleanup_blocked !== false,
+    sequence: Number.isSafeInteger(result?.sequence) && result.sequence >= 0 ? result.sequence : null,
+    changed: typeof result?.changed === "boolean" ? result.changed : null,
+    status: known ? { offer: status.offer, checked: status.checked, active: status.active, owned: status.owned } : null,
+    offer,
+  };
+}
+
+const safetyCode = error => {
+  let code = null;
+  try { code = error?.code; } catch { code = null; }
+  return SAFETY_ERRORS.has(code) ? code : "SAFETY_UNAVAILABLE";
+};
+
+/**
+ * P6: one window's synchronous start-page decision for the ordinary new-tab
+ * command (window.AxioSozo.startPageForNewTab). check() returns exactly
+ * START_PAGE_URL or null and reads every fact again on each call: the flag
+ * itself (no observer), the about module registered, this window alive,
+ * known normal (not private, not permanently private, not an AI window) and
+ * registered with authoritative contexts, and Firefox's own default new-tab
+ * page without a custom or extension override. Missing, throwing or unknown
+ * facts are null. dispose() ends this gate only.
+ */
+export function createStartPageGate({ window, services, prefs, aboutRegistered, authority, isPrivate, isAIWindow, defaultNewTab } = {}) {
+  let live = true;
+  const check = () => {
+    if (!live) return null;
+    try {
+      if (aboutRegistered !== true || prefs.getBoolPref(START_PAGE_PREF, false) !== true) return null;
+      if (!window || window.closed !== false) return null;
+      if (isPrivate() !== false || isAIWindow() !== false || authority() !== true) return null;
+      if (services.isNormalWindow(window) !== true || defaultNewTab() !== true) return null;
+      return live ? START_PAGE_URL : null;
+    } catch { return null; }
+  };
+  return Object.freeze({ check, dispose() { live = false; } });
 }
 
 /** Opaque arrival token: a browser crypto UUID without braces (36 characters),
@@ -268,6 +391,38 @@ export class AxioSozoServices {
   // The one process console owner (ConsoleErrorsNativeRuntime) and its
   // throttled name-only console event.
   #nativeOwner = null; #nativeOwnerUnregister = null; #consoleTimer = null; #consolePending = false;
+  // Shared decision runtime (Plan 4 step 9; chrome only, never the actor or
+  // the wire): one budget, one sending router and their frozen interface,
+  // built on the first getDecisionRuntime(); the provider host built at its
+  // first admitted request; every retained lease by request id. The policy
+  // publication is the one synchronous authority over the process limit.
+  #decision = null; #decisionHost = null; #decisionHostTried = false; #decisionLeases = new Map(); #decisionClosed = false;
+  // Whether the process shutdown owner (router and host close) registered;
+  // without it the policy is never published, so no host is ever admitted.
+  #decisionOwned = false;
+  #policy = Object.freeze({ revision: 0, limit: 0, ready: false });
+  #policyListeners = new Set(); #policyWrites = 0; #policyHydration = 0; #policyExhausted = false;
+  // A rule-store write that rejected (for example a lowered budget or revoked
+  // consent that was not saved) keeps the policy unready: the cached older
+  // document is never published again. Only a later write that started after
+  // it and succeeded publishes afresh. #policyWriteSerial orders them.
+  #policyWriteSerial = 0; #policyFailedAt = 0;
+  // Watches (Plan 4 §4): one process controller over its own store, created
+  // on first use; the store-update guard of the one manual call in progress;
+  // the serialized manual actions and the latest one's fixed failure.
+  #watchController = null; #watchCapture = null; #watchActions = Promise.resolve(); #watchActionError = null; #watchActionsOpen = 0;
+  // Its process shutdown owner registered; the one schedule start (a promise);
+  // and how its shutdown ended (null, "settled", "uncertain" or "failed").
+  #watchOwned = false; #watchSchedule = null; #watchShutdown = null;
+  // P7 safety: the native registry/observers (created on the first offer or
+  // choice, never at startup), the one held lease and owner, the shared
+  // acquisition, a lease whose close failed (it keeps the writer until a
+  // retry closes it), retirement and the serialized trusted actions.
+  #safetyNative = null; #safety = null; #safetyAcquiring = null; #safetyRetained = null; #safetyClosing = null; #safetyObservers = null;
+  #safetyRetired = false; #safetyActions = Promise.resolve(); #safetyInitialized = new WeakSet();
+  // The latest trusted choice's fixed reason (for example PREF_LOCKED), shown
+  // with a settled status so a refused choice is explained, never as success.
+  #safetyLastReason = null;
 
   /** Chrome singleton; created lazily on first use. */
   static get() {
@@ -305,6 +460,11 @@ export class AxioSozoServices {
    * only when the native environment explicitly requests the synthetic fixture
    * (absent: the always-closed production facade); createManifestAcceptIO() →
    * the pinned manifest helper's { snapshot, accept }, built on first explicit use.
+   * Decisions: createDecisionHost({ onSending }) → the shared provider host
+   * (chrome: ProviderDecision createDecide), called once, at the first
+   * admitted request. Safety: createSafetyNative() → { registry, prefs, dns,
+   * observe(topics, revoke) → unobserve }, called at the first offer read or
+   * choice (absent = unavailable).
    */
   constructor(deps = {}) {
     this.#deps = { clock: Date.now, localTime: defaultLocalTime, randomId: defaultRandomId, randomHex: defaultRandomHex,
@@ -326,6 +486,9 @@ export class AxioSozoServices {
         validate: core.validateRuleStore, empty: core.DEFAULT_RULE_STORE }),
       ledger: new JsonStore({ storage: storageFor(STORE_FILES.ledger),
         validate: core.validateLedger, empty: core.DEFAULT_LEDGER }),
+      // Read only by the one watch controller (Plan 4 §4).
+      watches: new JsonStore({ storage: storageFor(STORE_FILES.watches),
+        validate: core.validateWatchStore, empty: core.DEFAULT_WATCH_STORE }),
     };
     try { this.#deps.onShutdown?.(() => this.flushLedger()); }
     catch (error) { console.error("AxioSozo: ledger shutdown flush not registered", error); }
@@ -1471,7 +1634,7 @@ export class AxioSozoServices {
   async saveRule(rule) {
     if (!rule || typeof rule !== "object") fail("INVALID_RULE");
     let saved;
-    await this.#stores.rules.update(doc => {
+    await this.#policyWrite(() => this.#stores.rules.update(doc => {
       const now = this.#deps.clock();
       const existing = rule.id ? doc.rules.find(item => item.id === rule.id) : null;
       if (rule.id && !existing) fail("UNKNOWN_RULE");
@@ -1480,16 +1643,16 @@ export class AxioSozoServices {
         created_at: base.created_at, updated_at: now });
       const rules = existing ? doc.rules.map(item => (item.id === saved.id ? saved : item)) : [...doc.rules, saved];
       return { ...doc, rules };
-    });
+    }));
     this.#emit("rules", "attention");
     return clone(saved);
   }
 
   async deleteRule(id) {
-    await this.#stores.rules.update(doc => {
+    await this.#policyWrite(() => this.#stores.rules.update(doc => {
       if (!doc.rules.some(item => item.id === id)) fail("UNKNOWN_RULE");
       return { ...doc, rules: doc.rules.filter(item => item.id !== id) };
-    });
+    }));
     this.#emit("rules", "attention");
     return { removed: true };
   }
@@ -1502,9 +1665,203 @@ export class AxioSozoServices {
     const allowed = ["consent", "interval_minutes", "hourly_budget"];
     if (!patch || typeof patch !== "object" || Object.keys(patch).some(key => !allowed.includes(key)))
       fail("INVALID_JEV_SETTINGS");
-    const doc = await this.#stores.rules.update(current => ({ ...current, jev: { ...current.jev, ...patch } }));
+    const doc = await this.#policyWrite(() => this.#stores.rules.update(current => ({ ...current, jev: { ...current.jev, ...patch } })));
     this.#emit("rules");
     return clone(doc.jev);
+  }
+
+  // ── shared decision runtime (Plan 4 step 9; chrome only, never the actor or the wire) ──
+  /**
+   * The process decision policy: frozen exact { revision, limit, ready }. No
+   * I/O, no await. revision is this process's own monotonic counter (never
+   * reused), limit the validated jev.hourly_budget 0–30 and ready a literal
+   * boolean. It starts, and stays while anything is pending, failed,
+   * superseded, exhausted or shut down, unready at limit 0.
+   */
+  getDecisionPolicySnapshot() {
+    return this.#policy;
+  }
+
+  /** Chrome-only: callback(frozen invalidated snapshot), synchronously, at
+   * every invalidation. Returns the unsubscribe of this registration only;
+   * the callback's return value is ignored and grants nothing. */
+  subscribeDecisionPolicyInvalidation(callback) {
+    if (typeof callback !== "function") fail("INVALID_CALLBACK");
+    const registration = { callback };
+    this.#policyListeners.add(registration);
+    return () => { this.#policyListeners.delete(registration); };
+  }
+
+  /**
+   * The one frozen privileged interface, the same on every call: { budget,
+   * registerLease, decide, diagnostics }. Built on the first call (normal-window
+   * startup wiring, never an About method); the provider host itself waits for
+   * the first admitted request. budget is the process DecisionBudget whose
+   * limit is the published policy. registerLease({ requestId, level,
+   * beforeSending }) → { signal, revoke } binds the caller's own synchronous
+   * guard to the router, under the current ready policy only. decide(request,
+   * { signal }) never rejects: without the exact live lease for that request
+   * id, level and signal under its policy revision it answers the neutral
+   * outcome before any host exists. diagnostics() is counts and state only.
+   */
+  getDecisionRuntime() {
+    if (!this.#decision) {
+      const budget = createDecisionBudget({ clock: () => this.#deps.clock(),
+        getLimit: () => (this.#policy.ready ? this.#policy.limit : 0) });
+      const router = createDecisionSendingRouter();
+      const api = Object.freeze({
+        budget,
+        registerLease: input => this.#registerLease(input),
+        decide: (request, options) => this.#decide(request, options),
+        diagnostics: () => this.#decisionDiagnostics(),
+      });
+      this.#decision = Object.freeze({ budget, router, api });
+      // The router and the host are closed only by this process shutdown
+      // owner. Without a registered owner no policy is published: no lease,
+      // no reservation and no host, never a guessed cleanup.
+      try {
+        if (typeof this.#deps.onShutdown !== "function") fail("SHUTDOWN_OWNER_UNAVAILABLE");
+        this.#deps.onShutdown(() => this.#closeDecisions(), "AxioSozo: close decisions");
+        this.#decisionOwned = true;
+      } catch (error) { console.error("AxioSozo: decision shutdown not registered; decisions stay unavailable", error); }
+    }
+    if (!this.#policy.ready) void this.#hydratePolicy();
+    return this.#decision.api;
+  }
+
+  /** A rule or Jev settings write: before its first await the policy is
+   * invalidated (leases revoked). A successful write that started after any
+   * failed one hydrates again once nothing else is written; a rejected write
+   * keeps the policy unready (the cached older document is not authority). */
+  async #policyWrite(run) {
+    const serial = ++this.#policyWriteSerial;
+    this.#policyWrites++;
+    this.#invalidatePolicy();
+    let failed = true;
+    try {
+      const value = await run();
+      failed = false;
+      return value;
+    } finally {
+      this.#policyWrites--;
+      if (failed) this.#policyFailedAt = Math.max(this.#policyFailedAt, serial);
+      if (this.#policyWrites === 0 && !failed && serial > this.#policyFailedAt) {
+        this.#policyFailedAt = 0;
+        void this.#hydratePolicy();
+      }
+    }
+  }
+
+  /** Synchronously: a new unready revision at limit 0, every retained lease
+   * revoked, then the listeners told. Nothing a listener does restores it. */
+  #invalidatePolicy() {
+    this.#policyHydration++;
+    const revision = this.#policy.revision;
+    if (revision >= Number.MAX_SAFE_INTEGER - 1) this.#policyExhausted = true;
+    this.#policy = Object.freeze({ revision: this.#policyExhausted ? revision : revision + 1, limit: 0, ready: false });
+    for (const lease of [...this.#decisionLeases.values()]) lease.revoke();
+    const snapshot = this.#policy;
+    for (const registration of [...this.#policyListeners]) {
+      try { registration.callback(snapshot); } catch (error) { console.error("AxioSozo: decision policy listener failed", error); }
+    }
+  }
+
+  /** One complete validated rule-store read (rules and Jev settings together).
+   * Only the latest hydration, finished with nothing written meanwhile and its
+   * revision still current, publishes ready with that document's limit. */
+  async #hydratePolicy() {
+    if (!this.#decision || !this.#decisionOwned || this.#decisionClosed || this.#policyExhausted || this.#policyWrites > 0
+      || this.#policyFailedAt > 0) return false;
+    const hydration = ++this.#policyHydration, revision = this.#policy.revision;
+    let limit = null;
+    try { limit = core.validateRuleStore(await this.#stores.rules.load()).jev.hourly_budget; } catch { limit = null; }
+    if (hydration !== this.#policyHydration || revision !== this.#policy.revision || this.#policyWrites > 0
+      || this.#decisionClosed || this.#policyExhausted) return false;
+    if (!Number.isInteger(limit) || limit < 0 || limit > 30) return false;
+    if (revision >= Number.MAX_SAFE_INTEGER - 1) { this.#policyExhausted = true; return false; }
+    this.#policy = Object.freeze({ revision: revision + 1, limit, ready: true });
+    return true;
+  }
+
+  #registerLease(input) {
+    const decision = this.#decision;
+    if (!decision || this.#decisionClosed) fail("DECISIONS_CLOSED");
+    if (!input || typeof input !== "object" || Object.keys(input).length !== 3
+      || !["requestId", "level", "beforeSending"].every(key => Object.hasOwn(input, key))) fail("INVALID_INPUT");
+    const { requestId, level, beforeSending } = input;
+    if (typeof beforeSending !== "function") fail("INVALID_INPUT");
+    const policy = this.#policy;
+    if (!policy.ready || policy.limit <= 0) fail("POLICY_UNAVAILABLE");
+    const revision = policy.revision;
+    const current = () => { const now = this.#policy; return now.ready === true && now.revision === revision && now.limit > 0; };
+    // The router's guard: this captured policy, then the caller's literal
+    // synchronous true, then the policy again. A throw or a promise is false.
+    const guard = handoff => {
+      if (!current()) return false;
+      let allowed = false;
+      try { allowed = beforeSending(handoff) === true; } catch { allowed = false; }
+      return allowed && current();
+    };
+    const lease = decision.router.register({ requestId, level, beforeSending: guard });
+    const entry = { level, revision, signal: lease.signal, live: true, revoke: null };
+    entry.revoke = () => {
+      if (!entry.live) return;
+      entry.live = false;
+      if (this.#decisionLeases.get(requestId) === entry) this.#decisionLeases.delete(requestId);
+      lease.revoke();
+    };
+    this.#decisionLeases.set(requestId, entry);
+    return Object.freeze({ signal: lease.signal, revoke: entry.revoke });
+  }
+
+  async #decide(request, { signal } = {}) {
+    const id = typeof request?.request_id === "string" ? request.request_id : null;
+    const entry = id === null ? undefined : this.#decisionLeases.get(id);
+    const policy = this.#policy;
+    // Preflight only: the router's one-use sending checkpoint is not spent here.
+    if (this.#decisionClosed || !entry || !entry.live || entry.level !== request?.state?.observation?.level || entry.signal !== signal
+      || signal.aborted !== false || !policy.ready || policy.revision !== entry.revision || policy.limit <= 0) {
+      return neutralDecision(request, "cancelled");
+    }
+    if (!this.#decisionOwned) return neutralDecision(request, "HOST_UNAVAILABLE");
+    if (!this.#decisionHostTried) {
+      this.#decisionHostTried = true;
+      try {
+        const host = this.#deps.createDecisionHost?.({ onSending: this.#decision.router.beforeSending }) ?? null;
+        this.#decisionHost = typeof host === "function" ? host : null;
+      } catch (error) { console.error("AxioSozo: decision host unavailable", error); }
+    }
+    if (!this.#decisionHost) return neutralDecision(request, "HOST_UNAVAILABLE");
+    let reply;
+    try { reply = await this.#decisionHost(request, { signal }); } catch { return neutralDecision(request, "HOST_UNAVAILABLE"); }
+    // The answer is current only while this exact lease, its signal and its
+    // policy revision still hold now that the host answered. A policy write
+    // that began meanwhile makes it stale: its outcome is dropped, its
+    // disclosure (data_sent) is kept.
+    const now = this.#policy;
+    if (this.#decisionClosed || this.#decisionLeases.get(id) !== entry || !entry.live || signal.aborted !== false
+      || !now.ready || now.revision !== entry.revision) {
+      return neutralDecision(request, "cancelled", reply?.data_sent === true);
+    }
+    return reply;
+  }
+
+  #decisionDiagnostics() {
+    let host = null, calls = 0;
+    try { host = this.#decisionHost?.diagnostics?.() ?? null; } catch { host = null; }
+    try { calls = this.#decision?.budget.snapshot().calls.length ?? 0; } catch { calls = 0; }
+    return countsOnly({ created: !!this.#decision, closed: this.#decisionClosed, ready: this.#policy.ready, revision: this.#policy.revision,
+      limit: this.#policy.limit, leases: this.#decisionLeases.size, calls, host_created: !!this.#decisionHost,
+      host: host && typeof host === "object" ? { running: host.running === true, closed: host.closed === true } : null });
+  }
+
+  /** Profile shutdown only: never a policy reload or a window's cleanup. */
+  async #closeDecisions() {
+    if (this.#decisionClosed) return;
+    this.#decisionClosed = true;
+    this.#invalidatePolicy();
+    try { this.#decision?.router.close(); } catch (error) { console.error("AxioSozo: decision router not closed", error); }
+    if (typeof this.#decisionHost?.close === "function") await this.#decisionHost.close();
   }
 
   // ── usage ledger ──────────────────────────────────────────────────────
@@ -1651,6 +2008,489 @@ export class AxioSozoServices {
     let total = 0;
     for (const uuid of scope) total += await this.usageFor({ hosts, contextUuid: uuid });
     return total;
+  }
+
+  // ── watches (Plan 4 §4; production live checks stay NOT_AUTHORIZED) ────
+  /**
+   * The one process WatchController over the validated watch store, created
+   * on first use. Production is immutably liveAuthorized: false: an eligible
+   * due check persists a historical unknown / NOT_AUTHORIZED, data_sent: false
+   * result without admission, opening, capture, indicator, budget or
+   * provider work. Every native port is explicitly unavailable and throws;
+   * no fact is invented. Its process shutdown owner (dispose, then join the
+   * owned work) is registered with it; the schedule starts only through
+   * startWatchScheduler() and only when that owner exists.
+   */
+  #watches() {
+    if (this.#watchController) return this.#watchController;
+    const store = this.#stores.watches;
+    // The guard of a manual save/remove is attached to its own store write
+    // only (the last one its synchronous call queued), inside the serialized
+    // mutator; the controller's own bookkeeping never carries it. Every
+    // acknowledged write (scheduled results included) is a "watches" event,
+    // announced by a manual action's own completion while one is open.
+    const watchStore = Object.freeze({
+      load: () => store.load(),
+      update: mutator => {
+        const slot = { guard: null };
+        this.#watchCapture?.push(slot);
+        return store.update(raw => { slot.guard?.(raw); return mutator(raw); })
+          .then(value => { if (this.#watchActionsOpen === 0) this.#emit("watches"); return value; });
+      },
+    });
+    const unavailable = () => { throw new ServicesError("NATIVE_WATCH_UNAVAILABLE"); };
+    const budget = () => this.#decision?.budget ?? fail("INVALID_BUDGET_ADAPTER");
+    const controller = createWatchController({
+      store: watchStore,
+      clock: () => this.#deps.clock(),
+      timers: { setTimeout: (fn, ms) => this.#deps.timers.setTimeout(fn, ms), clearTimeout: id => this.#deps.timers.clearTimeout(id) },
+      requestId: () => this.#deps.randomId("wreq_"),
+      budget: Object.freeze({ snapshot: () => budget().snapshot(), transact: fn => budget().transact(fn), limit: () => budget().limit() }),
+      admission: Object.freeze({ read: unavailable }),
+      tabs: Object.freeze({ open: unavailable, capture: unavailable, close: unavailable }),
+      indicator: Object.freeze({ show: unavailable, isVisible: unavailable, hide: unavailable }),
+      decide: (request, options) => this.#watchDecide(controller, request, options),
+      liveAuthorized: false,
+    });
+    this.#watchController = controller;
+    try {
+      if (typeof this.#deps.onShutdown !== "function") fail("SHUTDOWN_OWNER_UNAVAILABLE");
+      this.#deps.onShutdown(() => this.#shutdownWatches(controller), "AxioSozo: stop watches");
+      this.#watchOwned = true;
+    } catch (error) { console.error("AxioSozo: watch shutdown not registered; the schedule stays off", error); }
+    return controller;
+  }
+
+  /**
+   * Chrome-only, from a normal window's admitted startup (never the actor or
+   * a page): starts the one process schedule, once. It requires the watch
+   * shutdown owner; without it scheduling stays off. Production stays
+   * liveAuthorized: false, so a due watch records only unknown /
+   * NOT_AUTHORIZED, data_sent: false. Resolves whether the schedule runs.
+   */
+  startWatchScheduler() {
+    if (this.#watchSchedule) return this.#watchSchedule;
+    const controller = this.#watches();
+    this.#watchSchedule = !this.#watchOwned ? Promise.resolve(false)
+      : controller.start().then(() => true, error => {
+        console.error("AxioSozo: watch schedule not started", error?.code ?? error);
+        return false;
+      });
+    return this.#watchSchedule;
+  }
+
+  /** Profile shutdown: intake stops synchronously, then the owned work is
+   * joined. Its status is reported as it is (busy, cleanup or recovery
+   * required, an answer still owed): never turned into a cleanup success. The
+   * controller is kept, with its evidence; nothing replaces it. */
+  async #shutdownWatches(controller) {
+    controller.dispose();
+    let status;
+    try { status = await controller.settled(); } catch (error) {
+      this.#watchShutdown = "failed";
+      console.error("AxioSozo: watch work did not settle at shutdown", error?.code ?? error);
+      return;
+    }
+    const uncertain = status.busy || status.cleanup_required || status.recovery_required || status.pending_disclosure;
+    this.#watchShutdown = uncertain ? "uncertain" : "settled";
+    if (uncertain) {
+      console.error("AxioSozo: watch work remains uncertain at shutdown", { busy: status.busy, cleanup_required: status.cleanup_required,
+        recovery_required: status.recovery_required, pending_disclosure: status.pending_disclosure });
+    }
+  }
+
+  /** Privileged evidence only: booleans and fixed states, never records. */
+  getWatchDiagnostics() {
+    const status = this.#watchController?.status() ?? null;
+    return Object.freeze({ created: !!status, owned: this.#watchOwned, scheduled: status?.scheduled === true, closed: status?.closed === true,
+      busy: status?.busy === true, shutdown: this.#watchShutdown });
+  }
+
+  /** The controller's decide: its own beforeSending registered as the lease
+   * guard; its signal (already aborted included) forwarded to the lease. */
+  async #watchDecide(controller, request, { signal } = {}) {
+    if (!this.#decision) return neutralDecision(request, "HOST_UNAVAILABLE");
+    let lease;
+    try {
+      lease = this.#registerLease({ requestId: request?.request_id, level: request?.state?.observation?.level,
+        beforeSending: handoff => controller.beforeSending(handoff) });
+    } catch { return neutralDecision(request, "cancelled"); }
+    const forward = () => lease.revoke();
+    if (signal?.aborted) forward(); else signal?.addEventListener?.("abort", forward, { once: true });
+    try { return await this.#decide(request, { signal: lease.signal }); } finally {
+      signal?.removeEventListener?.("abort", forward);
+      lease.revoke();
+    }
+  }
+
+  /** Every saved watch (the validated store records; project views filter by project_id). */
+  async listWatches() {
+    return clone((await this.#watches().load()).watches);
+  }
+
+  /** The fixed status projection. last_error is the latest manual action's
+   * categorical outcome ({ action, code, watch_id }), else the controller's own. */
+  getWatchStatus() {
+    const status = this.#watches().status();
+    const residual = status.residual && watchIdOrNull(status.residual.watch_id)
+      && typeof status.residual.request_id === "string" && DECISION_REQUEST_ID.test(status.residual.request_id)
+      && Number.isSafeInteger(status.residual.revision) && status.residual.revision > 0
+      ? { watch_id: status.residual.watch_id, request_id: status.residual.request_id, revision: status.residual.revision } : null;
+    const own = fixedCode(status.last_error);
+    return {
+      closed: status.closed === true, scheduled: status.scheduled === true, loaded: status.loaded === true, busy: status.busy === true,
+      phase: WATCH_PHASES.includes(status.phase) ? status.phase : null,
+      cleanup_required: status.cleanup_required === true, recovery_required: status.recovery_required === true,
+      retry_allowed: status.retry_allowed === true, pending_disclosure: status.pending_disclosure === true,
+      last: watchReport(status.last),
+      last_error: this.#watchActionError ? { ...this.#watchActionError } : own ? { action: null, code: own, watch_id: null } : null,
+      residual,
+    };
+  }
+
+  /**
+   * One trusted manual action (the actor's consumed one-use receipt): `current`
+   * is the receipt's synchronous predicate, `window` its native window. Actions
+   * are serialized process-wide and checked again before their work; the
+   * outcome is kept as a fixed category and every completion emits "watches".
+   */
+  async #watchAction(action, { window, current }, watchId, run) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    const live = () => {
+      try { return !!adapter && typeof current === "function" && this.#normalWindow(window, adapter) && current() === true; }
+      catch { return false; }
+    };
+    if (!live()) fail(adapter ? "DOCUMENT_GONE" : "NO_WINDOW");
+    const task = this.#watchActions.then(() => { if (!live()) fail("DOCUMENT_GONE"); return run(live); });
+    this.#watchActions = task.catch(() => {});
+    // Store writes while manual actions are queued or running are announced
+    // once, by this completion; scheduled writes otherwise announce themselves.
+    this.#watchActionsOpen++;
+    try {
+      const { value, notice = null } = await task;
+      this.#watchActionError = notice ? Object.freeze({ action, code: notice, watch_id: watchId }) : null;
+      return value;
+    } catch (error) {
+      let code = null;
+      try { code = error?.code; } catch { code = null; }
+      code = WATCH_ACTION_CODES.has(code) ? code : code === "INVALID_WATCH_STORE" ? "WATCH_LIMIT" : "STORAGE_ERROR";
+      this.#watchActionError = Object.freeze({ action, code, watch_id: watchId });
+      throw new ServicesError(code);
+    } finally { this.#watchActionsOpen--; this.#emit("watches"); }
+  }
+
+  /** Runs one manual controller.save/remove with `guard` applied inside its own
+   * queued store write. The capture spans only the synchronous call. */
+  async #manualWatchCall(guard, invoke) {
+    let refused = null;
+    const checked = raw => { try { guard(raw); } catch (error) { refused = error; throw error; } };
+    const slots = [], previous = this.#watchCapture;
+    this.#watchCapture = slots;
+    let promise;
+    try { promise = invoke(); } finally { this.#watchCapture = previous; }
+    if (slots.length) slots.at(-1).guard = checked;
+    try { return await promise; } catch (error) { throw refused ?? error; }
+  }
+
+  /**
+   * Creates (no watch.id: a fresh w_ id, now, userCreated: true) or edits a
+   * known watch of `projectId`. An edit keeps its id, project, provenance and
+   * creation time, and clears its result and last check before validation.
+   * Inside the write the action is still current, the project's routing mark
+   * unchanged and the record still the one edited (never recreated).
+   */
+  async saveWatch({ window, current, projectId, watch } = {}) {
+    if (!core.isProjectId(projectId) || !watch || typeof watch !== "object" || Array.isArray(watch)) fail("INVALID_INPUT");
+    const id = watch.id === undefined ? null : watch.id;
+    if (id !== null && !watchIdOrNull(id)) fail("INVALID_INPUT");
+    return this.#watchAction("save", { window, current }, id, async live => {
+      const controller = this.#watches();
+      const mark = this.#routingMark(projectId);
+      if (mark === null) fail("PROJECT_CHANGED");
+      if (!(await this.getProject(projectId))) fail("UNKNOWN_PROJECT");
+      const known = (await controller.load()).watches;
+      if (!live()) fail("DOCUMENT_GONE");
+      let record;
+      if (id === null) {
+        if (known.length >= 256) fail("WATCH_LIMIT");
+        record = core.createWatch({ id: this.#deps.randomId("w_"), projectId, url: watch.url, question: watch.question,
+          outcomes: clone(watch.outcomes), now: this.#deps.clock(), userCreated: true, observation: watch.observation,
+          provider: watch.provider, consent: watch.consent, enabled: watch.enabled, intervalMinutes: watch.intervalMinutes });
+      } else {
+        const existing = known.find(item => item.id === id);
+        if (!existing) fail("UNKNOWN_WATCH");
+        if (existing.project_id !== projectId) fail("PROJECT_MISMATCH");
+        record = core.validateWatch({ ...clone(existing), url: watch.url, question: watch.question, outcomes: clone(watch.outcomes),
+          observation: watch.observation, provider: watch.provider, consent: watch.consent, enabled: watch.enabled,
+          schedule: { interval_minutes: watch.intervalMinutes, last_checked_at: null }, latest_result: null });
+      }
+      const saved = await this.#manualWatchCall(raw => {
+        if (!live()) fail("DOCUMENT_GONE");
+        if (this.#routingMark(projectId) !== mark) fail("PROJECT_CHANGED");
+        const stored = raw.watches.find(item => item.id === record.id);
+        if (id === null && stored) fail("WATCH_ID_CONFLICT");
+        if (id === null && raw.watches.length >= 256) fail("WATCH_LIMIT");
+        if (id !== null && (!stored || stored.project_id !== projectId)) fail("UNKNOWN_WATCH");
+      }, () => controller.save({ watch: record, userCreated: true }));
+      return { value: saved ? clone(saved) : null };
+    });
+  }
+
+  /** Removes one known watch; `projectId` is the actor's native route scope (null: the home). */
+  async removeWatch({ window, current, id, projectId = null } = {}) {
+    if (!watchIdOrNull(id) || (projectId !== null && !core.isProjectId(projectId))) fail("INVALID_INPUT");
+    return this.#watchAction("remove", { window, current }, id, async live => {
+      const controller = this.#watches();
+      const known = (await controller.load()).watches.find(item => item.id === id);
+      if (!known) fail("UNKNOWN_WATCH");
+      if (projectId !== null && known.project_id !== projectId) fail("PROJECT_MISMATCH");
+      if (!live()) fail("DOCUMENT_GONE");
+      await this.#manualWatchCall(raw => {
+        if (!live()) fail("DOCUMENT_GONE");
+        const stored = raw.watches.find(item => item.id === id);
+        if (!stored || stored.project_id !== known.project_id) fail("UNKNOWN_WATCH");
+      }, () => controller.remove({ id, userCreated: true }));
+      return { value: { removed: true } };
+    });
+  }
+
+  /** controller.run({ id }, { signal }) for one known watch of a settled
+   * project: its schedule is obeyed (no force). Not due, disabled and busy are
+   * their own categories, never a performed check. The action's own trusted
+   * signal is the controller's owned-run capability: losing the native
+   * lifetime cancels exactly the operation this run acquired (or refuses
+   * before it is acquired), never another window's or the schedule's work. */
+  async checkWatch({ window, current, signal, id, projectId = null } = {}) {
+    if (!watchIdOrNull(id) || (projectId !== null && !core.isProjectId(projectId))) fail("INVALID_INPUT");
+    return this.#watchAction("check", { window, current }, id, async live => {
+      const controller = this.#watches();
+      const known = (await controller.load()).watches.find(item => item.id === id);
+      if (!known) fail("UNKNOWN_WATCH");
+      if (projectId !== null && known.project_id !== projectId) fail("PROJECT_MISMATCH");
+      if (this.#routingMark(known.project_id) === null) fail("PROJECT_CHANGED");
+      if (!(await this.getProject(known.project_id))) fail("UNKNOWN_PROJECT");
+      if (!live() || signal?.aborted) fail("DOCUMENT_GONE");
+      const reply = await controller.run({ id }, signal ? { signal } : undefined);
+      const report = watchReport(reply);
+      if (!report) fail("STORAGE_ERROR");
+      return { value: report, notice: WATCH_RUN_NOTICES.has(report.code) ? report.code : report.code === "cancelled" ? "CHECK_CANCELLED" : null };
+    });
+  }
+
+  /** Retries the controller's retained finalized cleanup/recovery only; never starts a check. */
+  async retryWatchCleanup({ window, current } = {}) {
+    return this.#watchAction("retry", { window, current }, null, async () => {
+      const controller = this.#watches();
+      if (controller.status().retry_allowed !== true) fail("NOTHING_TO_RETRY");
+      await controller.retryCleanup();
+      const after = controller.status();
+      return { value: { retried: true }, notice: after.cleanup_required || after.recovery_required
+        ? (after.recovery_required ? "RECOVERY_REQUIRED" : "CLEANUP_REQUIRED") : null };
+    });
+  }
+
+  // ── P7 safety: explicit durable choice (chrome only; categorical projection on the wire) ──
+  /** The native registry, its synchronous lifecycle revocation and its process
+   * shutdown blocker, created on the first offer read or choice. Nothing is
+   * published or acquired unless both registrations succeeded. Observers a
+   * failed attempt could not remove (a part-way registration's rollback, or
+   * the removal after a refused blocker) stay owned here, exactly: each later
+   * admission first retries their removal, and nothing new is constructed,
+   * published or acquired while any of them remains. */
+  #safetyNativeOwner() {
+    if (this.#safetyNative) return this.#safetyNative;
+    if (this.#safetyRetired || typeof this.#deps.createSafetyNative !== "function") fail("SAFETY_UNAVAILABLE");
+    if (!this.#releaseSafetyObservers()) fail("SAFETY_UNAVAILABLE");
+    let native;
+    try { native = this.#deps.createSafetyNative(); } catch { fail("SAFETY_UNAVAILABLE"); }
+    if (typeof native?.registry?.acquire !== "function" || typeof native.registry.revoke !== "function"
+      || !native.prefs || typeof native.dns?.clearCache !== "function" || typeof native.observe !== "function") fail("SAFETY_UNAVAILABLE");
+    let unobserve;
+    try { unobserve = native.observe(SAFETY_REVOKE_TOPICS, () => this.#revokeSafety()); } catch (error) {
+      // A part-way registration whose rollback failed hands back its exact cleanup.
+      let cleanup = null;
+      try { cleanup = error?.cleanup; } catch { cleanup = null; }
+      if (typeof cleanup === "function") this.#safetyObservers = cleanup;
+      fail("SAFETY_UNAVAILABLE");
+    }
+    if (typeof unobserve !== "function") fail("SAFETY_UNAVAILABLE");
+    try {
+      if (typeof this.#deps.onShutdown !== "function") fail("SHUTDOWN_OWNER_UNAVAILABLE");
+      this.#deps.onShutdown(() => this.#shutdownSafety(), "AxioSozo: close safety owner");
+    } catch (error) {
+      console.error("AxioSozo: safety shutdown not registered; safety stays unavailable", error);
+      this.#safetyObservers = unobserve;
+      if (!this.#releaseSafetyObservers()) console.error("AxioSozo: safety observers not all removed; kept for a retry");
+      fail("SAFETY_UNAVAILABLE");
+    }
+    this.#safetyNative = Object.freeze({ registry: native.registry, prefs: native.prefs, dns: native.dns, unobserve });
+    return this.#safetyNative;
+  }
+
+  /** Retries the retained observer cleanup. Only its own positive answer
+   * (literal true: every topic's removal returned) releases it; a throw or
+   * anything else keeps it owned. True when nothing is retained. */
+  #releaseSafetyObservers() {
+    const cleanup = this.#safetyObservers;
+    if (!cleanup) return true;
+    let removed = false;
+    try { removed = cleanup() === true; } catch { removed = false; }
+    if (removed && this.#safetyObservers === cleanup) this.#safetyObservers = null;
+    return removed;
+  }
+
+  /** Profile/quit lifecycle, synchronously: no new work; the lease closes. */
+  #revokeSafety() {
+    this.#safetyRetired = true;
+    try { this.#safetyNative?.registry.revoke(); } catch (error) { console.error("AxioSozo: safety registry not revoked", error); }
+    this.#closeSafety().catch(() => {});
+  }
+
+  /** The shutdown blocker: retire first (no new work), join an acquisition
+   * still in flight (it closes its own lease on seeing the retirement, or
+   * composes one that is closed here), then close what is held or retained.
+   * A failed close keeps the lease, its writer and the observers. */
+  async #shutdownSafety() {
+    this.#revokeSafety();
+    const acquiring = this.#safetyAcquiring;
+    if (acquiring) { try { await acquiring; } catch { /* its own failure path closed or retained its lease */ } }
+    try {
+      await this.#closeSafety();
+      // That may have joined an earlier close: whatever is still held or retained closes now.
+      if (this.#safety || this.#safetyRetained) await this.#closeSafety();
+      // Each observer is forgotten only once its own removal returned; the
+      // rest stay with the published owner for the next attempt.
+      let removed = true;
+      try { removed = !this.#safetyNative || this.#safetyNative.unobserve() === true; } catch { removed = false; }
+      if (!removed) console.error("AxioSozo: safety observers not all removed; kept for a retry");
+    } catch (error) { console.error("AxioSozo: safety owner not closed", error?.code ?? error); }
+    if (!this.#releaseSafetyObservers()) console.error("AxioSozo: earlier safety observers not all removed; kept for a retry");
+  }
+
+  /** Closes the held (or retained) lease with its actual factory cleanup; a
+   * failed close keeps the lease and its writer until a retry succeeds. */
+  #closeSafety() {
+    if (this.#safetyClosing) return this.#safetyClosing;
+    const held = this.#safety ?? this.#safetyRetained;
+    if (!held) return Promise.resolve(true);
+    const closing = Promise.resolve().then(() => held.lease.close(() => (held.factory ? held.factory.cleanup() : true))).then(result => {
+      if (this.#safety === held) this.#safety = null;
+      if (this.#safetyRetained === held) this.#safetyRetained = null;
+      return result;
+    }, error => {
+      if (this.#safety === held) this.#safety = null;
+      this.#safetyRetained = held;
+      throw error;
+    });
+    this.#safetyClosing = closing;
+    closing.then(() => {}, () => {}).then(() => { if (this.#safetyClosing === closing) this.#safetyClosing = null; });
+    return closing;
+  }
+
+  /** The one held owner: a shared acquisition, composed once over the lease.
+   * A failed composition closes the lease with its actual cleanup. */
+  async #safetyHeld() {
+    if (this.#safetyRetired) fail("SAFETY_UNAVAILABLE");
+    if (this.#safetyRetained || this.#safetyClosing) {
+      try { await this.#closeSafety(); } catch { fail("SAFETY_NATIVE_CLEANUP_REQUIRED"); }
+    }
+    if (this.#safetyRetired) fail("SAFETY_UNAVAILABLE");
+    if (this.#safety) return this.#safety;
+    if (!this.#safetyAcquiring) {
+      const native = this.#safetyNativeOwner();
+      const attempt = (async () => {
+        const lease = await native.registry.acquire();
+        let factory = null;
+        try {
+          if (this.#safetyRetired) fail("SAFETY_UNAVAILABLE");
+          const schema = createSafetyOwnerSchema(core);
+          const store = new JsonStore({ storage: lease.storage, validate: schema.validate, empty: schema.empty });
+          factory = createSafetyPreferenceFactory({ nativeCreate: options => createSafetyPreferences(options), prefs: native.prefs, dns: native.dns });
+          const created = factory;
+          const owner = createSafetyOwner({ core, createPreferences: options => created.create(options), store,
+            storageAssurance: lease.storage.assurance, assertExclusiveWriter: lease.assertExclusiveWriter, cleanupPreferences: () => created.cleanup() });
+          this.#safety = Object.freeze({ lease, factory, owner });
+          return this.#safety;
+        } catch (error) {
+          const held = Object.freeze({ lease, factory, owner: null });
+          try { await lease.close(() => (held.factory ? held.factory.cleanup() : true)); } catch { this.#safetyRetained = held; }
+          throw error;
+        }
+      })();
+      this.#safetyAcquiring = attempt;
+      attempt.then(() => {}, () => {}).then(() => { if (this.#safetyAcquiring === attempt) this.#safetyAcquiring = null; });
+    }
+    return this.#safetyAcquiring;
+  }
+
+  /** The admitted explicit offer/settings read for a registered normal window:
+   * the owner's status through its lease, as the categorical projection. */
+  async getSafetyStatus({ window } = {}) {
+    if (!this.isNormalWindow(window)) fail("PRIVATE_WINDOW");
+    let result;
+    try {
+      const held = await this.#safetyHeld();
+      const first = !this.#safetyInitialized.has(held);
+      this.#safetyInitialized.add(held);
+      result = await held.lease.run(() => (first ? held.owner.initialize() : held.owner.status()));
+    } catch (error) { throw new ServicesError(safetyCode(error)); }
+    if (!this.isNormalWindow(window)) fail("NO_WINDOW");
+    const projection = safetyProjection(result);
+    // A settled status explains the latest choice's outcome (code stays the owner's).
+    if (this.#safetyLastReason && (projection.code === "CURRENT" || projection.code === "INITIALIZED")) projection.reason = this.#safetyLastReason;
+    return projection;
+  }
+
+  /** A consumed ConfirmSafetyChoice receipt: owner.choose with the selected
+   * boolean, userConfirmed: true and trusted now. Serialized; the surface is
+   * checked again before the owner runs and a stale result is refused. */
+  async confirmSafetyChoice({ window, current, checked } = {}) {
+    if (typeof checked !== "boolean") fail("INVALID_INPUT");
+    return this.#safetyAction({ window, current }, owner => owner.choose({ checked, userConfirmed: true, now: this.#deps.clock() }));
+  }
+
+  /** A consumed ResolveSafetyRecovery receipt: owner.resolve for the exact
+   * current sequence and fixed outcome. It acknowledges verified state and
+   * writes no preference; a stale sequence refuses. */
+  async resolveSafetyRecovery({ window, current, sequence, outcome } = {}) {
+    if (!Number.isSafeInteger(sequence) || sequence < 1 || !["RESTORED", "EXTERNAL_CHANGED", "ACCEPTED"].includes(outcome)) fail("INVALID_INPUT");
+    return this.#safetyAction({ window, current }, owner => owner.resolve({ sequence, outcome, userConfirmed: true }));
+  }
+
+  async #safetyAction({ window, current }, operation) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    const live = () => {
+      try { return !!adapter && typeof current === "function" && this.#normalWindow(window, adapter) && current() === true; }
+      catch { return false; }
+    };
+    if (!live()) fail(adapter ? "DOCUMENT_GONE" : "NO_WINDOW");
+    const task = this.#safetyActions.then(async () => {
+      if (!live()) fail("DOCUMENT_GONE");
+      const held = await this.#safetyHeld();
+      if (!live()) fail("DOCUMENT_GONE");
+      this.#safetyInitialized.add(held);
+      return held.lease.run(() => { if (!live()) fail("DOCUMENT_GONE"); return operation(held.owner); });
+    });
+    this.#safetyActions = task.catch(() => {});
+    let result;
+    try { result = await task; } catch (error) {
+      this.#safetyLastReason = safetyCode(error);
+      this.#emit("safety");
+      throw new ServicesError(safetyCode(error));
+    }
+    const projection = safetyProjection(result);
+    this.#safetyLastReason = projection.reason;
+    this.#emit("safety");
+    if (!live()) fail("DOCUMENT_GONE");
+    return projection;
+  }
+
+  /** Privileged evidence only: booleans, never paths, prefs or the journal. */
+  getSafetyDiagnostics() {
+    let factory = null;
+    try { factory = this.#safety?.factory?.diagnostics() ?? null; } catch { factory = null; }
+    return countsOnly({ native: !!this.#safetyNative, held: !!this.#safety, retained: !!this.#safetyRetained,
+      acquiring: !!this.#safetyAcquiring, retired: this.#safetyRetired, observers_retained: !!this.#safetyObservers, factory });
   }
 
   // ── agent channel (P3; agent-channel-v1 §1, §7) ───────────────────────
@@ -2678,7 +3518,70 @@ function chromeDependencies() {
         createTransport: async options => (await import("./ProviderUnderstand.sys.mjs")).createUnderstandTransport(options) }) })
       : null,
     createManifestAcceptIO: () => createNativeManifestAcceptIO(),
+    // The one shared provider host, with the router's beforeSending as its
+    // only constructor sending hook (ProviderDecision itself is unchanged).
+    createDecisionHost: ({ onSending }) => createDecide({ onSending }),
+    // P7: built at the first offer read or choice. The profile is the actual
+    // parent process's active ProfD and its startup lock; nothing comes from a
+    // page, provider or caller path, and no personal profile is discovered.
+    createSafetyNative: () => nativeSafety(),
   };
+}
+
+/** The native safety registry (SafetyNativeOwner), Gecko's preference branch
+ * and DNS service for the reviewed adapter, and observer registration for the
+ * synchronous lifecycle revocation (all or nothing). */
+function nativeSafety() {
+  const registry = createSafetyNativeOwnerRegistry({
+    gate: {
+      parent: () => Services.appinfo.processType === Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT,
+      profileDir: () => PathUtils.profileDir,
+      lockTime: () => Services.appinfo.replacedLockTime,
+      shuttingDown: () => Services.startup.shuttingDown,
+      attemptingQuit: () => Services.startup.attemptingQuit,
+    },
+    files: path => localFile(path),
+    isMissing: error => error?.result === Cr.NS_ERROR_FILE_NOT_FOUND,
+    io: IOUtils, paths: PathUtils, createStorage: createSafetyAtomicStorage,
+  });
+  const branch = Services.prefs;
+  const prefs = Object.freeze(Object.fromEntries(["getPrefType", "getStringPref", "getIntPref", "getBoolPref", "prefHasUserValue",
+    "prefIsLocked", "setStringPref", "setIntPref", "clearUserPref", "getDefaultBranch", "addObserver", "removeObserver"]
+    .map(name => [name, (...args) => branch[name](...args)])));
+  const service = Cc["@mozilla.org/network/dns-service;1"].getService(Ci.nsIDNSService);
+  const dns = Object.freeze({ clearCache: trr => service.clearCache(trr) });
+  const observe = (topics, revoke) => observeSafetyLifecycle(Services.obs, topics, revoke);
+  return { registry, prefs, dns, observe };
+}
+
+/**
+ * The safety owner's synchronous lifecycle revocation on an observer service
+ * `obs` ({ addObserver, removeObserver }; chrome: Services.obs): every topic or
+ * none. Returns unobserve(), which tries each still-registered topic on its own
+ * and forgets a topic only once its removal returned; it answers true when
+ * none remains, else false, keeping exactly the failed ones for a retry. A
+ * registration that fails part-way rolls back the same way; if that rollback
+ * cannot remove everything, the thrown error carries `cleanup` (that same
+ * unobserve), so the owner of what is still registered is never lost.
+ */
+export function observeSafetyLifecycle(obs, topics, revoke) {
+  const observer = { observe() { revoke(); } };
+  const registered = [];
+  const unobserve = () => {
+    for (const topic of [...registered]) {
+      try { obs.removeObserver(observer, topic); } catch { continue; }
+      registered.splice(registered.indexOf(topic), 1);
+    }
+    return registered.length === 0;
+  };
+  try {
+    for (const topic of topics) { obs.addObserver(observer, topic); registered.push(topic); }
+  } catch (error) {
+    if (unobserve()) throw error;
+    throw Object.assign(new Error("SAFETY_OBSERVER_CLEANUP_REQUIRED", { cause: error }),
+      { code: "SAFETY_OBSERVER_CLEANUP_REQUIRED", cleanup: unobserve });
+  }
+  return unobserve;
 }
 
 /** Whether this process's native environment explicitly requests the synthetic

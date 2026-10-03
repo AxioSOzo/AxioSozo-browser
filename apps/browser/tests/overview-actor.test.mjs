@@ -11,7 +11,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { AboutAxioSozoParent, METHODS, MESSAGES, setProvidersForTesting } from "../chrome/AboutAxioSozoParent.sys.mjs";
-import { Node, parseHtml } from "./support/mini-dom.mjs";
+import { Node, parseHtml, makeEvent } from "./support/mini-dom.mjs";
+import { AboutAxioSozoChild, CLICK_OPTIONS, SEND_ERRORS_BUTTON } from "../chrome/AboutAxioSozoChild.sys.mjs";
 
 const UUID_A = "{11111111-2222-3333-4444-555555555555}";
 
@@ -302,6 +303,68 @@ test("Send errors to agent refuses before reading its data: not selected, not a 
     assert.equal((await result).ok, false);
     assert.deepEqual([reads, chooser], [[], []]);
   } finally { restore(); }
+});
+
+// Gecko's dispatch of a trusted click (EventDispatcher::HandleEventTargetChain,
+// EventDispatcher.cpp lines 587-692): the whole default group (capture from
+// the window down, the target, bubbling back up), then the system group, with
+// propagation reset between them. Listeners added with options are recorded
+// with their phase and group; listeners the mini-dom keeps without options
+// (page handlers on elements) are default-group bubble listeners.
+function recordListeners(target) {
+  const entries = [];
+  const add = target.addEventListener?.bind(target);
+  target.addEventListener = (type, fn, options) => {
+    entries.push({ type, fn, capture: options === true || options?.capture === true, system: options?.mozSystemGroup === true });
+    add?.(type, fn, options);
+  };
+  target.trackedListeners = entries;
+  return target;
+}
+function geckoClick(target, win, init = {}) {
+  const event = { ...makeEvent("click", init), target };
+  const path = [];
+  for (let node = target; node; node = node.parentNode) path.push(node);
+  path.push(win);
+  const listeners = (node, system, capture) => (node.trackedListeners
+    ? node.trackedListeners.filter(entry => entry.type === "click" && entry.system === system && entry.capture === capture).map(entry => entry.fn)
+    : !system && !capture ? [...(node.listeners?.get("click") ?? [])] : []);
+  for (const system of [false, true]) {
+    event.cancelBubble = false;
+    const run = (node, capture) => { for (const fn of listeners(node, system, capture)) fn.call(node, event); };
+    for (let i = path.length - 1; i > 0 && !event.cancelBubble; i--) run(path[i], true);
+    if (!event.cancelBubble) { run(path[0], true); run(path[0], false); }
+    for (let i = 1; i < path.length && !event.cancelBubble; i++) run(path[i], false);
+  }
+}
+
+test("Send errors to agent under native click order: the real child reads before a page handler that removes the button", () => {
+  const previous = globalThis.Cu;
+  globalThis.Cu = { cloneInto: (value, _target, options) => (options?.cloneFunctions ? { ...value } : structuredClone(value)),
+    waiveXrays: value => value, exportFunction: fn => fn };
+  try {
+    const document = recordListeners(parseHtml(`<html><body><main><div class="inline-action send-errors">
+      <button type="button" id="${SEND_ERRORS_BUTTON}"><span>Send errors to agent…</span></button></div></main></body></html>`));
+    document.documentURI = "about:axiosozo#project=p_harbor1";
+    const win = recordListeners({ Promise, JSON, TypeError });
+    const sent = [];
+    const child = new AboutAxioSozoChild();
+    Object.assign(child, { contentWindow: win, document, sendQuery: async () => ({ ok: true }), sendAsyncMessage: (name, data) => sent.push([name, data]) });
+    child.handleEvent({ type: "DOMDocElementInserted" });
+    assert.deepEqual(document.trackedListeners.map(({ type, capture, system }) => [type, capture, system]), [["click", true, false]],
+      "the default group's capture phase on its own document, not the system group");
+    assert.deepEqual({ ...CLICK_OPTIONS }, { capture: true });
+    // A page handler added later replaces the button at once, as page re-renders do.
+    const button = document.getElementById(SEND_ERRORS_BUTTON);
+    let pageRan = false;
+    button.addEventListener("click", () => { pageRan = true; button.remove(); });
+    geckoClick(button.querySelector("span"), win);
+    assert.equal(pageRan, true);
+    assert.deepEqual(sent, [[MESSAGES.SEND_PROJECT_ERRORS, { v: 1 }]], "read before the page removed it");
+    geckoClick(document.querySelector("main"), win);
+    assert.equal(sent.length, 1, "nothing for another target");
+    child.didDestroy();
+  } finally { if (previous === undefined) delete globalThis.Cu; else globalThis.Cu = previous; }
 });
 
 test("Send errors to agent takes exactly { v: 1 }: no page-chosen project, tab, root or target; never a page request method", async () => {

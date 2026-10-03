@@ -945,6 +945,77 @@ p.errors:empty { display: none; }
 .activity-list.sessions { margin-top: var(--space-xsmall); }
 a.button-link.small { min-height: var(--button-min-height-small); padding-inline: var(--space-small); font-size: var(--font-caption); }
 
+/* ---- Watches (Plan 4 §4) -------------------------------------------------------------------- */
+
+/* One quiet list per project: the question is the title, the page and what it
+ * may see are facts, the saved result is history with its own dot. Check now
+ * stays in the row; editing and removal sit behind "…". */
+.watch-list { margin: 0; padding: var(--space-xsmall); list-style: none; border-radius: var(--radius); background: var(--surface);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline); }
+.watch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-small) var(--space-medium);
+  padding: var(--space-medium); border-radius: var(--radius-small); }
+.watch-row + .watch-row { box-shadow: 0 -1px 0 var(--hairline); }
+.watch-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-weight: var(--font-weight-semibold); overflow-wrap: anywhere; }
+.watch-page { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); color: var(--ink-soft); }
+.watch-facts { display: flex; flex-wrap: wrap; gap: 2px var(--space-medium); font-size: var(--font-caption); }
+.watch-facts .fact { overflow-wrap: anywhere; }
+.watch-result { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-small); margin-top: 2px; font-size: var(--font-caption); }
+.watch-result > .dot { align-self: center; }
+.watch-result[data-tone="ok"] > span:nth-child(2) { color: var(--good-ink); font-weight: 500; }
+.watch-result[data-tone="warn"] > span:nth-child(2) { color: var(--warn-ink); }
+.watch-result .help, .watch-schedule { font-size: var(--font-caption); }
+.watch-actions { display: flex; align-items: flex-start; gap: var(--space-xsmall); }
+.watch-actions button[aria-disabled="true"], .watch-confirm button[aria-disabled="true"], .watch-problem button[aria-disabled="true"] { opacity: 0.45; }
+.watch-notice, .watch-status, .safety-result, .safety-now { display: flex; align-items: baseline; gap: var(--space-small); max-width: 40rem; font-size: var(--font-caption); }
+.watch-notice[data-tone="warn"], .safety-result[data-tone="warn"] { color: var(--warn-ink); }
+.safety-result[data-tone="ok"] { color: var(--good-ink); }
+.watch-status > .dot, .safety-now > .dot { align-self: center; }
+/* Confirming a removal happens in the row itself, under a hairline. */
+.watch-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-small);
+  padding-top: var(--space-small); box-shadow: 0 -1px 0 var(--hairline); font-size: var(--font-caption); }
+.watch-confirm .button-row { margin-top: 0; }
+/* A check that could not clean up blocks the next one: said once, with Retry when allowed. */
+.watch-problem { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-small) var(--space-medium);
+  padding: var(--space-medium); border-radius: var(--radius); background: var(--surface);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline), inset 3px 0 0 var(--bad); }
+.watch-problem > p:first-child { display: flex; align-items: baseline; gap: var(--space-small); flex: 1 1 20rem; }
+.watch-problem > p:first-child > .dot { align-self: center; }
+/* The editor's answers: one text field each, with its remove button. */
+.field > .label { font-weight: 500; font-size: var(--font-caption); }
+.watch-answers { gap: var(--space-xsmall); }
+.watch-answer input[type="text"] { flex: 1 1 14rem; min-width: 0; }
+
+/* ---- Safe browsing (P7) ---------------------------------------------------------------------- */
+
+/* The first-run offer: the same calm panel as Settings, with the choice first. */
+.safety-offer .settings-panel { gap: var(--space-medium); }
+.safety-choice label { font-weight: 500; }
+.safety-choice .help { max-width: 38rem; }
+.safety-now[data-tone="none"] > .dot { display: none; }
+.safety-recovery { justify-content: flex-start; flex-wrap: wrap; }
+.safety-recovery button[aria-disabled="true"], #safety-settings button[aria-disabled="true"], .safety-offer button[aria-disabled="true"] { opacity: 0.45; }
+
+/* ---- Start page (P6, experimental) ------------------------------------------------------------ */
+
+/* What needs you, agents, projects and watches: sections like a project home,
+ * never a grid of shortcuts or a feed. */
+.start { gap: var(--space-xxlarge); }
+.start[aria-busy="true"]:empty { min-height: 6rem; }
+.start-section { display: flex; flex-direction: column; gap: var(--space-medium); }
+.start-section h3 { display: flex; align-items: center; gap: var(--space-small); }
+.start-section h3 .count { padding: 0 6px; border-radius: var(--radius-round); background: var(--surface-hover); color: var(--ink-soft);
+  font-size: var(--font-micro); font-weight: var(--font-weight-bold); }
+.start-section > .activity-list { padding: var(--space-medium) var(--space-large); border-radius: var(--radius); background: var(--surface);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline); }
+.start-projects .row-main { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-medium); }
+/* A plain link bounded to its own text, with the normal visible focus ring
+ * (not the project card's stretched link, whose card draws the focus). */
+.start-link { color: inherit; text-decoration: none; border-radius: var(--radius-small); }
+.start-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.start-link:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+.start-projects .row-detail { display: inline-flex; align-items: center; gap: var(--space-small); }
+
 /* ---- Toast ------------------------------------------------------------------------------ */
 
 .toast {
@@ -986,6 +1057,8 @@ a.button-link.small { min-height: var(--button-min-height-small); padding-inline
   .bar-row { grid-template-columns: 1fr 4rem; }
   .bar-row .bar { display: none; }
   .tool-row { grid-template-columns: 1fr; gap: 2px; }
+  .watch-row { grid-template-columns: 1fr; }
+  .watch-actions { justify-content: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

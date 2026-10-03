@@ -65,8 +65,10 @@ const BRIEF = { version: 1, cli: "claude-code", generated_at: Date.UTC(2026, 9, 
   start: [{ label: "Web", command: "bun run dev --filter web", cwd: "apps/web" }], risks: ["Payments are not tested end to end."] } };
 
 // getUnderstandState reads a status only (Plan 4 step 6): no read, metadata check or client starts.
+// Watches (Plan 4 §4): the saved list and the controller status are reads too; the safety status is read on the list only.
 const READS = new Set(["getOverviewFlags", "activeContext", "listContexts", "listProjects", "listProjectContainers", "getProjectHome",
-  "serviceStatus", "listRules", "getJevSettings", "usageSummary", "listOrphans", "needsAttention", "getJevKeyStatus", "getUnderstandState"]);
+  "serviceStatus", "listRules", "getJevSettings", "usageSummary", "listOrphans", "needsAttention", "getJevKeyStatus", "getUnderstandState",
+  "listWatches", "getWatchStatus", "getSafetyStatus"]);
 
 async function loadPage({ hash = "#projects", projects = [HARBOR, INKLINE], handlers = {}, home = {} } = {}) {
   const document = parseHtml(HTML);

@@ -18,8 +18,18 @@ export const MESSAGES = Object.freeze({
   // The child's own trusted click on the home's "Send errors to agent…"
   // button (Plan 4 step 7): fixed metadata { v: 1 }, never a page request.
   SEND_PROJECT_ERRORS: "AxioSozoOverview:SendProjectErrors",
+  // Plan 4 step 9: the child's own trusted activation of one authored watch
+  // or safety control, with exactly that action's closed params. Never a page
+  // request; the page cannot send these or obtain their one-use receipt.
+  SAVE_WATCH: "AxioSozoOverview:SaveWatch",
+  REMOVE_WATCH: "AxioSozoOverview:RemoveWatch",
+  CHECK_WATCH: "AxioSozoOverview:CheckWatch",
+  RETRY_WATCH_CLEANUP: "AxioSozoOverview:RetryWatchCleanup",
+  CONFIRM_SAFETY_CHOICE: "AxioSozoOverview:ConfirmSafetyChoice",
+  RESOLVE_SAFETY_RECOVERY: "AxioSozoOverview:ResolveSafetyRecovery",
 });
-export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console"]);
+export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console",
+  "watches", "safety"]);
 export const SERVICES_URL = "chrome://browser/content/axiosozo/AxioSozoServices.sys.mjs";
 // The process console owner (Plan 4 step 7): it shows the native tab chooser.
 export const CONSOLE_RUNTIME_URL = "chrome://browser/content/axiosozo/ConsoleErrorsNativeRuntime.sys.mjs";
@@ -31,6 +41,8 @@ export const PREFS = Object.freeze({
   enginePreferences: "axiosozo.engine.preferences.enabled",
   jevKeyEntry: "axiosozo.jev.keyEntry.enabled",
   openaiKeyEntry: "axiosozo.openai.keyEntry.enabled",
+  // P6: read only here; the page never sets it.
+  home: "axiosozo.home.enabled",
 });
 const MAX_PARAMS_BYTES = 512 * 1024;
 const DOCUMENT_URI = /^about:axiosozo(?:[?#].*)?$/;
@@ -358,6 +370,148 @@ export function projectHomeRoute(spec) {
   return T.projectId(id) ? id : null;
 }
 
+const ABOUT_DOCUMENT = /^about:axiosozo(?:\?[^#]*)?(?:#(.*))?$/u;
+/** The route of a native about:axiosozo document URI for private actions: a
+ * project home ({ kind: "project", id }), the experimental home ({ kind:
+ * "home" }), any other view ({ kind: "page" }), or null for anything else. */
+export function actionRoute(spec) {
+  const match = typeof spec === "string" ? ABOUT_DOCUMENT.exec(spec) : null;
+  if (!match) return null;
+  const project = projectHomeRoute(spec);
+  if (project) return { kind: "project", id: project };
+  let fragment = match[1] ?? "";
+  try { fragment = decodeURIComponent(fragment); } catch { return { kind: "page", id: null }; }
+  return fragment === "home" ? { kind: "home", id: null } : { kind: "page", id: null };
+}
+
+// ---------------------------------------------------------------- watches and safety (Plan 4 step 9)
+
+const WATCH_ID = /^w_[a-z0-9]{4,32}$/u;
+const OUTCOME_ID = /^[a-z][a-z0-9_]{0,31}$/u;
+const CONTROLS = /[\u0000-\u001f\u007f]/u;
+export const WATCH_OBSERVATIONS = Object.freeze(["none", "address", "outline", "screen"]);
+export const SAFETY_OUTCOMES = Object.freeze(["RESTORED", "EXTERNAL_CHANGED", "ACCEPTED"]);
+const text = (value, max) => typeof value === "string" && value.length >= 1 && value.length <= max && !CONTROLS.test(value);
+const invalid = (name, what) => fail("INVALID_PARAMS", `${name}: ${what}`);
+/** Exactly these own keys (optional ones may be absent), nothing else. */
+function exactKeys(name, value, required, optional = []) {
+  if (!isPlainObject(value)) invalid(name, "params must be an object");
+  for (const key of Object.keys(value)) if (!required.includes(key) && !optional.includes(key)) invalid(name, `unknown parameter "${key}"`);
+  for (const key of required) if (!Object.hasOwn(value, key)) invalid(name, `missing "${key}"`);
+  return value;
+}
+/** The closed editable watch fields, rebuilt from primitives; the services
+ * validate them again with the contexts core and keep only origin/path. */
+export function parseWatchInput(name, watch) {
+  exactKeys(name, watch, ["url", "question", "outcomes", "observation", "provider", "consent", "enabled", "intervalMinutes"], ["id"]);
+  let url = null;
+  try { url = T.url(watch.url) && !CONTROLS.test(watch.url) ? new URL(watch.url) : null; } catch { url = null; }
+  if (!url || !["http:", "https:"].includes(url.protocol)) invalid(name, "the address must be an http(s) URL");
+  if (!text(watch.question, 500)) invalid(name, "invalid question");
+  if (!Array.isArray(watch.outcomes) || watch.outcomes.length < 2 || watch.outcomes.length > 6) invalid(name, "2 to 6 outcomes");
+  const seen = new Set();
+  const outcomes = watch.outcomes.map(item => {
+    exactKeys(name, item, ["id", "label"]);
+    if (typeof item.id !== "string" || !OUTCOME_ID.test(item.id) || item.id === "unknown" || seen.has(item.id)) invalid(name, "invalid outcome id");
+    if (!text(item.label, 80)) invalid(name, "invalid outcome label");
+    seen.add(item.id);
+    return { id: item.id, label: item.label };
+  });
+  if (!WATCH_OBSERVATIONS.includes(watch.observation)) invalid(name, "invalid observation");
+  if (!T.decisionProvider(watch.provider)) invalid(name, "invalid provider");
+  if (typeof watch.consent !== "boolean" || typeof watch.enabled !== "boolean") invalid(name, "consent and enabled are booleans");
+  if (!Number.isInteger(watch.intervalMinutes) || watch.intervalMinutes < 1 || watch.intervalMinutes > 30) invalid(name, "interval 1 to 30 minutes");
+  if (Object.hasOwn(watch, "id") && (typeof watch.id !== "string" || !WATCH_ID.test(watch.id))) invalid(name, "invalid watch id");
+  return { ...(Object.hasOwn(watch, "id") ? { id: watch.id } : {}), url: watch.url, question: watch.question, outcomes,
+    observation: watch.observation, provider: watch.provider, consent: watch.consent, enabled: watch.enabled, intervalMinutes: watch.intervalMinutes };
+}
+
+// Fixed codes a watch or safety action may end with; anything else is generic.
+const ACTION_ERRORS = new Set(["INVALID_PARAMS", "INVALID_INPUT", "INVALID_WATCH", "UNKNOWN_WATCH", "UNKNOWN_PROJECT", "PROJECT_CHANGED",
+  "PROJECT_MISMATCH", "WATCH_LIMIT", "WATCH_ID_CONFLICT", "STORAGE_ERROR", "INVALID_STORE", "INVALID_CLOCK", "CLOSED", "NOTHING_TO_RETRY",
+  "CHECK_CANCELLED", "SAFETY_UNAVAILABLE", "SAFETY_PROFILE_AUTHORITY_LOST", "SAFETY_PROFILE_UNVERIFIED", "SAFETY_DIRECTORY_UNVERIFIED",
+  "SAFETY_PATH_UNVERIFIED", "SAFETY_LEAF_UNVERIFIED", "SAFETY_WRITER_BUSY", "SAFETY_WRITER_LEASE_LOST", "SAFETY_OWNER_CLOSED",
+  "SAFETY_NATIVE_CLEANUP_REQUIRED", "SAFETY_SEQUENCE_MISMATCH", "SAFETY_RESOLUTION_REQUIRED", "SAFETY_CONFIRMATION_REQUIRED",
+  "PRIVATE_WINDOW", "NO_WINDOW", "DOCUMENT_GONE", "ROUTE_MISMATCH", "ACTION_REVOKED"]);
+const actionError = (error, name) => {
+  let code = null;
+  try { code = error?.code; } catch { code = null; }
+  code = ACTION_ERRORS.has(code) ? code : /Safety/u.test(name) ? "SAFETY_UNAVAILABLE" : "ACTION_FAILED";
+  return new OverviewError(code, `${name} failed (${code})`);
+};
+
+/** Watch reads: the requesting tab's registered normal window and current
+ * document before the service is asked, and again once it answered. */
+const watchRead = (name, run) => ({ params: {}, run: async ctx => {
+  const window = normalWindow(ctx, name, "watches");
+  const value = await run(ctx);
+  if (normalWindow(ctx, name, "watches") !== window) fail("NO_WINDOW", `${name}: the window changed`);
+  return value;
+} });
+/** A mutation name a page may know but never call: only the child's trusted
+ * activation of the authored control reaches it, through its private message. */
+const activationRequired = name => ({ raw: true, params: {}, run: () => fail("USER_ACTIVATION_REQUIRED",
+  `${name} happens only when you click its button on the page`) });
+
+const bool = value => typeof value === "boolean";
+/** The categorical safety reply, rebuilt from closed primitives again here. */
+export function safetyReply(value) {
+  const status = value?.status;
+  const offer = value?.offer;
+  return {
+    code: codeOrNull(value?.code) ?? "SAFETY_UNAVAILABLE", reason: codeOrNull(value?.reason),
+    blocked: value?.blocked !== false, cleanup_blocked: value?.cleanup_blocked !== false,
+    sequence: Number.isSafeInteger(value?.sequence) && value.sequence >= 0 ? value.sequence : null,
+    changed: bool(value?.changed) ? value.changed : null,
+    status: status && ["offer", "checked", "active", "owned"].every(key => bool(status[key]))
+      ? { offer: status.offer, checked: status.checked, active: status.active, owned: status.owned } : null,
+    offer: offer && bool(offer.offer) && bool(offer.checked) ? { offer: offer.offer, checked: offer.checked } : null,
+  };
+}
+
+/**
+ * The private trusted actions (child messages, never page requests): their
+ * closed params, the native route they need and the service call. Watch
+ * changes need the project home the native route names (a save: exactly its
+ * project; remove and check: that project's own watch); safety choices need
+ * any current about:axiosozo route.
+ */
+export const USER_ACTIONS = Object.freeze({
+  [MESSAGES.SAVE_WATCH]: Object.freeze({ name: "saveWatch", event: "watches",
+    parse: data => {
+      exactKeys("saveWatch", data, ["projectId", "watch"]);
+      if (!T.projectId(data.projectId)) invalid("saveWatch", "invalid project");
+      return { projectId: data.projectId, watch: parseWatchInput("saveWatch", data.watch) };
+    },
+    route: (route, params) => route?.kind === "project" && route.id === params.projectId,
+    run: (services, authority, params) => services.saveWatch({ ...authority, projectId: params.projectId, watch: params.watch }) }),
+  [MESSAGES.REMOVE_WATCH]: Object.freeze({ name: "removeWatch", event: "watches",
+    parse: data => { exactKeys("removeWatch", data, ["id"]); if (!WATCH_ID.test(String(data.id))) invalid("removeWatch", "invalid watch id"); return { id: data.id }; },
+    route: route => route?.kind === "project",
+    run: (services, authority, params, route) => services.removeWatch({ ...authority, id: params.id, projectId: route.id }) }),
+  [MESSAGES.CHECK_WATCH]: Object.freeze({ name: "checkWatch", event: "watches",
+    parse: data => { exactKeys("checkWatch", data, ["id"]); if (!WATCH_ID.test(String(data.id))) invalid("checkWatch", "invalid watch id"); return { id: data.id }; },
+    route: route => route?.kind === "project",
+    run: (services, authority, params, route) => services.checkWatch({ ...authority, id: params.id, projectId: route.id }) }),
+  [MESSAGES.RETRY_WATCH_CLEANUP]: Object.freeze({ name: "retryWatchCleanup", event: "watches",
+    parse: data => { exactKeys("retryWatchCleanup", data, []); return {}; },
+    route: route => route?.kind === "project",
+    run: (services, authority) => services.retryWatchCleanup({ window: authority.window, current: authority.current }) }),
+  [MESSAGES.CONFIRM_SAFETY_CHOICE]: Object.freeze({ name: "confirmSafetyChoice", event: "safety",
+    parse: data => { exactKeys("confirmSafetyChoice", data, ["checked"]); if (!bool(data.checked)) invalid("confirmSafetyChoice", "checked is a boolean"); return { checked: data.checked }; },
+    route: route => !!route,
+    run: (services, authority, params) => services.confirmSafetyChoice({ window: authority.window, current: authority.current, checked: params.checked }) }),
+  [MESSAGES.RESOLVE_SAFETY_RECOVERY]: Object.freeze({ name: "resolveSafetyRecovery", event: "safety",
+    parse: data => {
+      exactKeys("resolveSafetyRecovery", data, ["sequence", "outcome"]);
+      if (!Number.isSafeInteger(data.sequence) || data.sequence < 1 || !SAFETY_OUTCOMES.includes(data.outcome)) invalid("resolveSafetyRecovery", "invalid recovery");
+      return { sequence: data.sequence, outcome: data.outcome };
+    },
+    route: route => !!route,
+    run: (services, authority, params) => services.resolveSafetyRecovery({ window: authority.window, current: authority.current,
+      sequence: params.sequence, outcome: params.outcome }) }),
+});
+
 // ---------------------------------------------------------------- methods
 
 // The closed method list: every §3.3 service method (pickFolder is called
@@ -563,6 +717,25 @@ export const METHODS = Object.freeze({
   // The page left the project home: this actor's Understand owner ends (its
   // reads and leases), nobody else's. A later operation makes a new one.
   cancelProjectReadOperations: { params: {}, run: ctx => { ctx.releaseUnderstand?.(); return null; } },
+  // Watches (Plan 4 §4): the saved list and the controller's fixed status are
+  // ordinary reads. Creating, editing, removing, checking and retrying happen
+  // only through the child's trusted click on their own buttons (USER_ACTIONS):
+  // as page requests they are always refused, whatever the params.
+  listWatches: watchRead("listWatches", async ({ services }) => jsonCopy(listOf(await services.listWatches()))),
+  getWatchStatus: watchRead("getWatchStatus", async ({ services }) => jsonCopy(await services.getWatchStatus())),
+  saveWatch: activationRequired("saveWatch"),
+  removeWatch: activationRequired("removeWatch"),
+  checkWatch: activationRequired("checkWatch"),
+  retryWatchCleanup: activationRequired("retryWatchCleanup"),
+  // P7: the safety offer and its settings read the durable owner's categorical
+  // status (exactly an empty object). Choosing and recovery are trusted clicks only.
+  getSafetyStatus: { params: {}, run: async ctx => {
+    const window = normalWindow(ctx, "getSafetyStatus", "safety settings");
+    let value;
+    try { value = await ctx.services.getSafetyStatus({ window }); } catch (error) { throw actionError(error, "getSafetyStatus"); }
+    if (normalWindow(ctx, "getSafetyStatus", "safety settings") !== window) fail("NO_WINDOW", "getSafetyStatus: the window changed");
+    return safetyReply(value);
+  } },
 });
 
 export function validateRequest(data) {
@@ -599,6 +772,8 @@ export function readFlags(prefs) {
     // (defaults.yaml turns both on); an absent or unreadable pref is off.
     jevKeyEntry: get(PREFS.jevKeyEntry, false),
     openaiKeyEntry: get(PREFS.openaiKeyEntry, false),
+    // The experimental start page (P6); absent or unreadable is off.
+    home: get(PREFS.home, false),
   };
 }
 
@@ -636,6 +811,9 @@ export class AboutAxioSozoParent extends Base {
   // for one project and separate from the key lifetime. Its alias stays in
   // this actor and the services; it is never revived once it ended.
   #understand = null;
+  // The live one-use receipts of private trusted actions (Plan 4 step 9):
+  // never sent to the page or kept beyond their own action; ended on destroy.
+  #receipts = new Set();
 
   #context() {
     const services = servicesProvider();
@@ -853,6 +1031,7 @@ export class AboutAxioSozoParent extends Base {
       // ends its key and Understand work at once, before the next authority check would.
       this.#cancelKeyOperations();
       this.#releaseUnderstand();
+      this.#endReceipts();
       console.error(error.message);
       return toErrorReply(error);
     }
@@ -881,8 +1060,92 @@ export class AboutAxioSozoParent extends Base {
       case MESSAGES.SEND_PROJECT_ERRORS:
         return this.#sendProjectErrors(message);
       default:
+        if (Object.hasOwn(USER_ACTIONS, message.name)) return this.#userAction(message);
         return toErrorReply(new OverviewError("UNKNOWN_MESSAGE", "unknown message"));
     }
+  }
+
+  /** This document's surface for a private action, read live: current,
+   * explicitly normal, top-level, the selected browser of its window, and its
+   * native document URI object with the route it names. Unknown facts are null. */
+  #actionSurface() {
+    const surface = this.#surface();
+    if (!surface) return null;
+    try {
+      const embedder = surface.context.embedderElement;
+      if (!embedder || surface.window.gBrowser?.selectedBrowser !== embedder) return null;
+      const documentURI = surface.manager.documentURI;
+      const route = actionRoute(documentURI?.spec);
+      return documentURI && route ? { ...surface, embedder, documentURI, route } : null;
+    } catch { return null; }
+  }
+
+  /**
+   * One trusted watch or safety action, as the child reports its own trusted
+   * activation of an authored control (never a page request). The sender is
+   * already admitted. Before the data is looked at: this document natively
+   * shown as the selected tab of a registered normal window and the route the
+   * action needs; then the closed params. A one-use receipt is minted for
+   * exactly this action: its predicate holds only while this manager, browsing
+   * context, embedder, window and the very document URI object stay the same
+   * (a route change, also away and back, ends it for good), the sender is
+   * admitted and the window is a registered normal one. Leaving the tab, a
+   * location change and destruction revoke it at once. It is consumed once
+   * when the service is called and never leaves this actor.
+   */
+  async #userAction(message) {
+    const spec = USER_ACTIONS[message.name];
+    const refuse = (code, text) => toErrorReply(new OverviewError(code, `${spec.name}: ${text}`));
+    const surface = this.#actionSurface();
+    if (!surface) return refuse("DOCUMENT_GONE", "this page is not the selected, current tab");
+    let services = null;
+    try { services = servicesProvider(); } catch { services = null; }
+    if (services?.isNormalWindow?.(surface.window) !== true) return refuse("PRIVATE_WINDOW", "watches and safety are used from a normal window");
+    let params;
+    try { params = spec.parse(message?.data); } catch (error) { return toErrorReply(error); }
+    if (spec.route(surface.route, params) !== true) return refuse("ROUTE_MISMATCH", "this page does not show that");
+    if (typeof services[spec.name] !== "function") return refuse("UNSUPPORTED", "not available");
+    const receipt = this.#mintReceipt(surface, services);
+    try {
+      if (!receipt.consume()) return refuse("ACTION_REVOKED", "the page changed before it ran");
+      let value;
+      try { value = await spec.run(services, receipt.authority, params, surface.route); }
+      catch (error) { return toErrorReply(actionError(error, spec.name)); }
+      // An outcome for a page that went away or changed is not handed to whatever is shown now.
+      if (!receipt.authority.current()) return refuse("DOCUMENT_GONE", "the page changed while it ran");
+      return { ok: true, value: spec.event === "safety" ? safetyReply(value) : { done: true } };
+    } finally { receipt.release(); }
+  }
+
+  #mintReceipt(surface, services) {
+    const controller = new AbortController();
+    let revoked = false, consumed = false;
+    const end = () => { revoked = true; controller.abort(); };
+    const current = () => {
+      if (revoked) return false;
+      try {
+        const now = this.#destroyed ? null : this.#actionSurface();
+        revoked = !now || now.manager !== surface.manager || now.context !== surface.context || now.embedder !== surface.embedder
+          || now.window !== surface.window || now.documentURI !== surface.documentURI || !this.#current()
+          || services.isNormalWindow(surface.window) !== true;
+      } catch { revoked = true; }
+      if (revoked) controller.abort();
+      return !revoked;
+    };
+    const unwatch = [this.#watchSelection(surface, end), this.#watchLocation(surface, end)];
+    const receipt = {
+      authority: Object.freeze({ window: surface.window, current, signal: controller.signal }),
+      consume: () => { if (consumed || !current()) return false; consumed = true; return true; },
+      end,
+      // Its action finished: the predicate ends with it and is never true again.
+      release: () => { revoked = true; for (const stop of unwatch.splice(0)) stop?.(); this.#receipts.delete(receipt); },
+    };
+    this.#receipts.add(receipt);
+    return receipt;
+  }
+
+  #endReceipts() {
+    for (const receipt of [...this.#receipts]) { receipt.end(); receipt.release(); }
   }
 
   /**
@@ -945,10 +1208,13 @@ export class AboutAxioSozoParent extends Base {
       try { unsubscribe(); } catch (error) { console.error(error); }
     }
     this.#releaseUnderstand();
+    // The page was hidden: its trusted actions still running end here too.
+    this.#endReceipts();
   }
 
   didDestroy() {
     this.#destroyed = true;
+    this.#endReceipts();
     this.#unsubscribe();
     this.#pickedRoots.clear();
     this.#cancelKeyOperations();

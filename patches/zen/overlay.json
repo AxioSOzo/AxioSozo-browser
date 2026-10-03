@@ -95,5 +95,28 @@
         "    \"window-drag\",\n]\n\n# AxioSozo native Gecko components, mirrored by scripts/zen.py while apps/browser/native has sources.\nDIRS += [\"axiosozo-native\"]"
       ]
     ]
+  },
+  {
+    "path": "src/browser/base/content/browser-commands-js.patch",
+    "before_sha256": "593820654f8f5d8a32bf6535e5b3594659a8b0c6d457dd8695be24d5c2c8c864",
+    "after_sha256": "de04145b86167056d00a4d1024f58c664979e321db2e6f2fe7b6d7bfc7e4ef3c",
+    "replacements": [
+      [
+        "@@ -230,6 +234,10 @@ var BrowserCommands = {",
+        "@@ -230,6 +234,23 @@ var BrowserCommands = {"
+      ],
+      [
+        "+    if (gZenUIManager.handleNewTab(werePassedURL, searchClipboard, where)) {\n+      return;\n+    }\n",
+        "+    // AxioSozo P6 (experimental): an ordinary new-tab command for Firefox's\n+    // own default page may open the start page instead; window.AxioSozo\n+    // answers synchronously with exactly that URL or null. All else is native.\n+    let axiosozoStartPage = null;\n+    if (!werePassedURL && url === \"about:newtab\" && !searchClipboard && where == \"tab\") {\n+      try {\n+        axiosozoStartPage = window.AxioSozo?.startPageForNewTab?.() ?? null;\n+      } catch (ex) {\n+        axiosozoStartPage = null;\n+      }\n+    }\n+    if (axiosozoStartPage === \"about:axiosozo#home\") {\n+      url = axiosozoStartPage;\n+    } else if (gZenUIManager.handleNewTab(werePassedURL, searchClipboard, where)) {\n+      return;\n+    }\n"
+      ],
+      [
+        "@@ -346,6 +354,14 @@ var BrowserCommands = {",
+        "@@ -346,6 +367,14 @@ var BrowserCommands = {"
+      ],
+      [
+        "@@ -353,8 +369,8 @@ var BrowserCommands = {",
+        "@@ -353,8 +382,8 @@ var BrowserCommands = {"
+      ]
+    ]
   }
 ]
