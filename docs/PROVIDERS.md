@@ -270,3 +270,11 @@ separately authorizes the fixed live test. Automatic approval review rejected
 that Send because the build-fix request did not explicitly authorize an external
 model request. No test was sent. No personal credentials are read or copied by the host. Other provider and
 watch/decision/Understand authorization gates are unchanged.
+
+
+On 4 October Wout explicitly authorized the fixed no-page Codex test. Native
+Send reached the repaired route but returned `CODEX_LOGIN_REQUIRED` at the
+owned-home authentication-file existence gate before any Codex/model spawn.
+The separate browser home is now prepared; its official sign-in command is
+visible in Settings. The prior automatic-review refusal is historical; this
+fixed test is authorized, and official browser-profile sign-in remains pending.
