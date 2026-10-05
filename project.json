@@ -1,0 +1,41 @@
+{
+  "name": "browser",
+  "projectType": "application",
+  "tags": [
+    "scope:browser"
+  ],
+  "targets": {
+    "doctor": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 tools/workspace.py browser doctor",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 tools/workspace.py browser check",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "check-native": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 tools/workspace.py browser check-native",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "test-native": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 tools/workspace.py browser test-native",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}
