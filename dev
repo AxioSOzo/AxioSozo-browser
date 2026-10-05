@@ -2,4 +2,8 @@
 set -eu
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1
+if [ -z "${AXIOSOZO_BUILD_ROOT:-}" ] && [ -f "$PROJECT_DIR/.local/runtime.json" ]; then
+  AXIOSOZO_BUILD_ROOT=$(/usr/bin/python3 "$PROJECT_DIR/scripts/local_runtime.py")
+  export AXIOSOZO_BUILD_ROOT
+fi
 exec /usr/bin/python3 "$PROJECT_DIR/scripts/dev.py" "$@"
