@@ -57,7 +57,7 @@ export function createProjectRecords({ core, clock, newToken, browserContainerFo
     if (!pathValue(result.root) || !pathValue(result.canonicalRoot) || !Number.isSafeInteger(result.detectedAt)
       || result.detectedAt < 0 || result.detectedAt > at || (result.manifestText !== null && typeof result.manifestText !== "string")) fail("INVALID_DETECTION");
     const draft = core.validateDetectionDraft(result.draft);
-    if (draft.version !== 2 || bytes(draft) > PROJECT_STATE_LIMITS.entryBytes
+    if (draft.version !== 3 || bytes(draft) > PROJECT_STATE_LIMITS.entryBytes
       || (result.manifestText !== null && bytes(result.manifestText) > PROJECT_STATE_LIMITS.entryBytes)) fail("INVALID_DETECTION");
     const value = Object.freeze({ root: result.root, canonicalRoot: result.canonicalRoot, detectedAt: result.detectedAt,
       draft, manifestText: result.manifestText, expiresAt: expires(at, limits.snapshotTtl) });

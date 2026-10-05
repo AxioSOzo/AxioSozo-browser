@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "pnpm-monorepo",
   "kind": "web",
   "kind_source": {
@@ -35,6 +35,8 @@
       "url": "http://localhost:3001/",
       "port": 3001,
       "app": "admin",
+      "command": "npm run dev",
+      "cwd": "apps/admin",
       "source": "apps/admin/package.json scripts.dev (next port 3001)",
       "guess": false
     },
@@ -43,6 +45,8 @@
       "url": "http://localhost:5174/",
       "port": 5174,
       "app": "web",
+      "command": "npm run dev",
+      "cwd": "apps/web",
       "source": "apps/web/package.json scripts.dev (vite port 5174)",
       "guess": false
     }
@@ -105,6 +109,7 @@
   ],
   "refused": [],
   "warnings": [],
+  "icon": null,
   "integrations": [
     {
       "id": "cloudflare",

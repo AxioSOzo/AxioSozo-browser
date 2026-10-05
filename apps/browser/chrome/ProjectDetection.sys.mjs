@@ -6,6 +6,8 @@
 // reader that binds no-follow reads to opened root/file identities. No profile writes.
 export const MAX_LISTING_ENTRIES = 512;
 export const MAX_WORKSPACE_LISTS = 16;
+// workstation-v1 §1.5 icon search: listing rounds and metadata-only candidates.
+export const MAX_ICON_ROUNDS = 6;
 
 export class ProjectDetectionError extends Error {
   constructor(code) { super(code); this.name = "ProjectDetectionError"; this.code = code; }
@@ -61,6 +63,19 @@ export function createProjectDetection({ fs, reader, core, clock = () => Date.no
       catch { return false; }
     };
     const files = {}, refused = [];
+    // File and folder names seen by any listing, for the icon search (names only).
+    const iconListing = {};
+    // A small listing is certainly complete (the helper's cap counts omitted
+    // links too), so it also answers which names are absent there and their
+    // presence checks need no helper call.
+    const listedNames = new Map();
+    const remember = (relative, entries) => {
+      if (entries.length < MAX_LISTING_ENTRIES / 2) listedNames.set(relative, new Set(entries.map(entry => entry?.name)));
+      iconListing[relative] = {
+        dirs: entries.filter(entry => entry?.type === "directory" && childName(entry.name)).map(entry => entry.name),
+        files: entries.filter(entry => entry?.type === "regular" && childName(entry.name)).map(entry => entry.name),
+      };
+    };
 
     async function readAllowlisted(relative, refusalFor) {
       const full = fs.join(rootReal, relative);
@@ -109,6 +124,7 @@ export function createProjectDetection({ fs, reader, core, clock = () => Date.no
         const result = await reader.listContained({ root: rootReal, relative: parent, expectedRoot: rootIdentity,
           expectedDirectory: target.identity, limit: MAX_LISTING_ENTRIES });
         if (!Array.isArray(result?.entries) || !sameIdentity(target.identity, result.identity)) return null;
+        if (parent === "") remember("", result.entries.slice(0, MAX_LISTING_ENTRIES));
         return result.entries.slice(0, MAX_LISTING_ENTRIES)
           .filter(entry => entry && (entry.type === "directory" || entry.type === "symlink") && childName(entry.name))
           .map(entry => entry.name);
@@ -158,13 +174,24 @@ export function createProjectDetection({ fs, reader, core, clock = () => Date.no
         const result = await reader.listContained({ root: rootReal, relative, expectedRoot: rootIdentity,
           expectedDirectory: resolved.identity, limit: MAX_LISTING_ENTRIES });
         if (!Array.isArray(result?.entries) || !sameIdentity(resolved.identity, result.identity)) continue;
+        if (packageDirs.includes(relative)) remember(relative, result.entries.slice(0, MAX_LISTING_ENTRIES));
         // Names only; child symlinks never authorize following their targets.
         inventory.listing[relative] = result.entries.slice(0, MAX_LISTING_ENTRIES)
           .filter(entry => entry?.type === "directory" && childName(entry.name))
           .map(entry => entry.name);
       } catch (error) { if (error?.code === "READ_CONTAINMENT_UNAVAILABLE") throw error; }
     }
+    // Only the setup checks (start scripts, lockfiles) take this shortcut;
+    // agent files and native app folders always get their own presence check.
+    const setupChecks = new Set([...(core.ROOT_SCRIPTS ?? []), ...(core.LOCKFILES ?? []).map(([file]) => file)]);
+    const knownAbsent = relative => {
+      if (!setupChecks.has(relative)) return false;
+      const cut = relative.lastIndexOf("/");
+      const names = listedNames.get(cut < 0 ? "" : relative.slice(0, cut));
+      return names !== undefined && !names.has(relative.slice(cut + 1));
+    };
     for (const relative of inventoryPlan.check) {
+      if (knownAbsent(relative)) continue;
       const resolved = await inventoryTarget(relative);
       if (resolved) inventory.present[relative] = resolved.kind;
     }
@@ -174,6 +201,37 @@ export function createProjectDetection({ fs, reader, core, clock = () => Date.no
       await readInto(relative, docs, (resolvedPath, target) => core.documentRefusal({ path: relative,
         resolvedPath, isFile: target.type === "regular", size: target.size }));
     }
+    // Icon search (workstation-v1 §1.5): the core names the folders to list,
+    // round by round, then the few candidate images whose metadata (type and
+    // size, never content) decides which one is shown.
+    let icons;
+    if (typeof core.iconListPlan === "function" && typeof core.iconCandidatesFor === "function") {
+      const units = ["", ...packageDirs];
+      for (let round = 0; round < MAX_ICON_ROUNDS; round++) {
+        const next = core.iconListPlan({ units, listing: iconListing });
+        if (!next.length) break;
+        for (const relative of next) {
+          iconListing[relative] = { dirs: [], files: [] };
+          try {
+            const target = relative ? await reader.presenceMetadata({ root: rootReal, relative, expectedRoot: rootIdentity })
+              : await reader.rootMetadata(rootReal);
+            if (target?.type !== "directory" || !validIdentity(target.identity)) continue;
+            const result = await reader.listContained({ root: rootReal, relative, expectedRoot: rootIdentity,
+              expectedDirectory: target.identity, limit: MAX_LISTING_ENTRIES });
+            if (Array.isArray(result?.entries) && sameIdentity(target.identity, result.identity)) remember(relative, result.entries.slice(0, MAX_LISTING_ENTRIES));
+          } catch (error) { if (error?.code === "READ_CONTAINMENT_UNAVAILABLE") throw error; }
+        }
+      }
+      const sizes = {};
+      for (const candidate of core.iconCandidatesFor({ files, packages, listing: iconListing })) {
+        try {
+          const target = await reader.presenceMetadata({ root: rootReal, relative: candidate.path, expectedRoot: rootIdentity });
+          if (target && Number.isSafeInteger(target.size)) sizes[candidate.path] = { kind: target.type === "regular" ? "file" : "other", size: target.size };
+        } catch (error) { if (error?.code === "READ_CONTAINMENT_UNAVAILABLE") throw error; }
+      }
+      icons = { listing: iconListing, sizes };
+    }
+
     admitCanonicalRoot(rootReal);
     if (!await unchanged(root, rootReal)) fail("ROOT_CHANGED");
     let finalRoot;
@@ -182,7 +240,7 @@ export function createProjectDetection({ fs, reader, core, clock = () => Date.no
     if (!sameIdentity(rootIdentity, finalRoot?.identity)) fail("ROOT_CHANGED");
     const detectedAt = clock();
     if (!Number.isSafeInteger(detectedAt) || detectedAt < 0) fail("INVALID_TIME");
-    const draft = core.detectProject({ rootName: fs.basename(root), files, refused, packages, inventory, docs });
+    const draft = core.detectProject({ rootName: fs.basename(root), files, refused, packages, inventory, docs, ...(icons ? { icons } : {}) });
     return Object.freeze({ root, canonicalRoot: rootReal, detectedAt, draft,
       manifestText: files[core.MANIFEST_PATH] ?? null });
   }

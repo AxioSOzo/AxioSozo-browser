@@ -9,7 +9,16 @@ export const UNDERSTAND_LIMITS = Object.freeze({ queued: 4, minTimeoutMs: 10000,
   maxTimeoutMs: 300000, defaultTimeoutMs: 180000, outputBytes: 262144,
   metadataBytes: 8192, requestBytes: 73728, briefBytes: 262144, cancelGraceMs: 1000 });
 const CLIS = Object.freeze(["claude-code", "codex"]);
-const KINDS = Object.freeze(["brief", "explain_errors"]);
+const KINDS = Object.freeze(["brief", "explain_errors", "setup"]);
+// understand-v1 §3.3: the cheapest suitable model per client for a setup check
+// (display only; the provider host passes the model to the client).
+export const SETUP_MODELS = Object.freeze({ codex: "gpt-6-luna", "claude-code": "claude-sonnet-5-5" });
+const SETUP_PREFERENCE = Object.freeze(["codex", "claude-code"]);
+/** Automatic client choice for a setup check: Codex, else Claude Code, else null. */
+export function pickSetupCli(clis) {
+  const names = Array.isArray(clis) ? clis : [];
+  return SETUP_PREFERENCE.find(cli => names.includes(cli)) ?? null;
+}
 const RESULT_KEYS = Object.freeze(["version", "request_id", "kind", "cli", "status",
   "reason", "document", "data_sent", "duration_ms"]);
 const REASONS = Object.freeze({ failed: ["SPAWN_FAILED", "EXIT_NONZERO", "CLI_REPORTED_ERROR", "HOST_CLOSED", "HOST_UNAVAILABLE"],
@@ -124,7 +133,8 @@ export function validateUnderstandResult(value, request, { core, now = Date.now(
       const document = request.kind === "brief"
         ? core.validateBriefRecord({ version: 1, cli: request.cli, generated_at: now, accepted: false,
           document: value.document }).document
-        : strictErrorsDocument(value.document);
+        : request.kind === "setup" ? core.validateSetupDocument(value.document)
+          : strictErrorsDocument(value.document);
       return freeze({ ...value, document });
     }
     if (!REASONS[value.status]?.includes(value.reason) || value.document !== null
@@ -289,7 +299,7 @@ export function createUnderstand({ runtime = null, lookupProject, core, onState 
     const { projectId, kind = "brief", cli, timeoutMs = UNDERSTAND_LIMITS.defaultTimeoutMs } = params;
     if (typeof projectId !== "string" || !ID.test(projectId) || !KINDS.includes(kind) || !CLIS.includes(cli)
         || !Number.isSafeInteger(timeoutMs) || timeoutMs < UNDERSTAND_LIMITS.minTimeoutMs || timeoutMs > UNDERSTAND_LIMITS.maxTimeoutMs
-        || (kind === "brief" ? Object.hasOwn(params, "input") : !Object.hasOwn(params, "input"))) fail("INVALID_INPUT");
+        || (kind === "explain_errors" ? !Object.hasOwn(params, "input") : Object.hasOwn(params, "input"))) fail("INVALID_INPUT");
     const binding = snapshot(projectId);
     const request_id = `${uuid()}:${++sequence}`;
     if (!ID.test(request_id)) fail("INVALID_DEPENDENCIES");

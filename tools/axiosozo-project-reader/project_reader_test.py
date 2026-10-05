@@ -268,6 +268,37 @@ class ReaderTests(unittest.TestCase):
         for path in [".env", "AGENTS.md", "CLAUDE.md", ".codex/package.json", "apps/.hidden/package.json", "apps/node_modules/package.json", "a/b/c/d/e/package.json", "docs/a/b/domains.md", "docs/constructor/domains.md", "docs/node_modules/domains.md", "../package.json", "/package.json", "apps//package.json", "apps/../package.json", "convex/schema.ts", "ios/project.pbxproj", "package.json/anything"]:
             self.assertFalse(reader.allowed_relative(path), path)
 
+    def test_setup_icon_policy_parity_with_core(self):
+        setup = (HERE.parents[1] / "packages" / "contexts" / "src" / "setup.mjs").read_text()
+        schema = (HERE.parents[1] / "packages" / "contexts" / "src" / "schema.mjs").read_text()
+        for name, source in (("ICON_DIR_NAMES", setup), ("BRAND_DIR_NAMES", setup), ("ICON_EXTENSIONS", schema)):
+            body = re.search(r"export const " + name + r" = Object.freeze\(\[(.*?)\]\);", source, re.S).group(1)
+            self.assertEqual(set(getattr(reader, name)), set(re.findall(r"'([^']*)'", body)), name)
+        for path in ["README.md", "Makefile", "justfile", "Procfile.dev", "project.json", "icon.png", "public/favicon.svg",
+                     "assets/brand/logo-v2/app-icon.SVG", "src-tauri/icons/128x128.png", "build/icon.png", "apps/web/public/logo.webp"]:
+            self.assertTrue(reader.allowed_relative(path), path)
+        for path in ["readme.md", "docs/README.md", "dev", "icon.gif", "branding/app.icns", ".github/logo.png", "a/../icon.png", "node_modules/x/icon.png",
+                     "a/b/c/d/e/f/g/h/i/icon.png", ".env.png", "public/.env.png", "apps//icon.png"]:
+            self.assertFalse(reader.allowed_relative(path), path)
+        for path in ["public", "apps/web/public", "assets/brand", "assets/brand/browser-logo-v2", "src-tauri", "src/app"]:
+            self.assertTrue(reader.allowed_list(path), path)
+        # Package-shaped folders were already listable (names only); icon folders add deeper brand/logo folders.
+        for path in ["node_modules/public", ".github", "dist/assets", "a/b/c/d/e/f/g/h/public", "../public", "x/y/z/w/logo-v2", "public/.hidden"]:
+            self.assertFalse(reader.allowed_list(path), path)
+        for path in ["dev", "bin/dev", "pnpm-lock.yaml", "branding/app.icns", "public/icon.png", "assets/brand"]:
+            self.assertTrue(reader.allowed_presence(path), path)
+        for path in [".env.icns", "public/.env.png", "a/b/c/d/e/f/g/h/i/icon.png", "../x.png", "node_modules/x/icon.png"]:
+            self.assertFalse(reader.allowed_presence(path), path)
+
+    def test_icon_bytes_are_read_through_the_same_descriptor_checks(self):
+        (self.root / "public").mkdir()
+        image = self.root / "public" / "icon.png"
+        image.write_bytes(b"\x89PNG\r\n\x1a\nicon")
+        self.assertEqual(self.result_bytes(self.payload("public/icon.png")), b"\x89PNG\r\n\x1a\nicon")
+        (self.root / "public" / "logo.png").symlink_to(self.outside)
+        self.assert_refused(lambda: reader.operation("presence", {"root": str(self.root), "relative": "public/logo.png",
+                                                                   "expectedRoot": self.payload()["expectedRoot"]}), ("READ_CONTAINMENT_REFUSED",))
+
     def test_unallowlisted_content_has_zero_descriptor_opens(self):
         payload = self.payload()
         for relative in [".env", "AGENTS.md", "../package.json", str(self.trap), "docs/notes.md"]:

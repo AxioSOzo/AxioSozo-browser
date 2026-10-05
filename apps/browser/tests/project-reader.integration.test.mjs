@@ -98,6 +98,11 @@ async function syntheticFixture(t) {
     dependencies: { "@clerk/nextjs": "1.0.0", stripe: "1.0.0" } });
   await put("apps/web/package.json", { name: "harbor-web", dependencies: { next: "1.0.0", convex: "1.0.0" } });
   await put("convex.json", { functions: "convex" });
+  // workstation-v1 §1.5: a README start command and logo, icon folders, and image traps.
+  await put("README.md", '<img src="apps/web/public/logo-v2.svg" alt="Harbor logo">\n\n```sh\nnpm install\nnpm run dev\n```\n');
+  await put("apps/web/public/logo-v2.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  await put("apps/web/public/icon-192.png", "PNG_PLACEHOLDER");
+  await put("apps/web/public/.secret-icon.png", "TRAP_HIDDEN_IMAGE_NEVER_READ");
   await put("docs/domains.md", "# Domains\nhttps://app.harbor-reader-fixture.io\n");
   await put("docs/production/domains.md", "# Production\n`api.harbor-reader-fixture.io`\n");
   await put("AGENTS.md", "TRAP_AGENT_CONTENT_NEVER_READ");
@@ -111,6 +116,8 @@ async function syntheticFixture(t) {
   await mkdir(join(outside, "OUTSIDE_TRAP.xcodeproj"));
   await symlink(join(outside, "domains.md"), join(root, "docs/escape/domains.md"));
   await symlink(outside, join(root, "apps/linked-outside"));
+  await writeFile(join(outside, "logo.png"), "TRAP_OUTSIDE_IMAGE");
+  await symlink(join(outside, "logo.png"), join(root, "apps/web/public/logo.png"));
   await symlink(join(outside, "OUTSIDE_TRAP.xcodeproj"), join(root, "apps/native-mobile/ios/OUTSIDE_TRAP.xcodeproj"));
   return { root: await realpath(root), outside };
 }
@@ -148,8 +155,15 @@ test("real secure helper feeds all four detection phases from a synthetic projec
   assert.deepEqual([...operations].sort(), ["list", "metadata", "presence", "read"]);
   const reads = Subprocess.calls.filter(call => call.operation === "read");
   assert.deepEqual(reads.map(call => call.payload.relative).sort(), [
-    "apps/web/package.json", "convex.json", "docs/domains.md", "docs/production/domains.md", "package.json",
+    "README.md", "apps/web/package.json", "convex.json", "docs/domains.md", "docs/production/domains.md", "package.json",
   ]);
+  // The icon is chosen from names and metadata only: the README logo, never an image's bytes, a hidden file or a link out.
+  assert.deepEqual(result.draft.icon, { path: "apps/web/public/logo-v2.svg", source: "README.md image", guess: false });
+  assert.deepEqual(result.draft.services.filter(s => s.command).map(s => s.command), ["npm run dev"]);
+  const presence = Subprocess.calls.filter(call => call.operation === "presence").map(call => call.payload.relative);
+  assert.ok(presence.includes("apps/web/public/logo-v2.svg") && !presence.some(p => p.includes(".secret")), JSON.stringify(presence));
+  const listed = Subprocess.calls.filter(call => call.operation === "list").map(call => call.payload.relative);
+  assert.ok(listed.includes("apps/web/public") && !listed.includes("apps/linked-outside"), JSON.stringify(listed));
   for (const { operation, payload } of Subprocess.calls) {
     assert.equal(payload.root, root);
     assert.ok(!JSON.stringify(payload).includes(outside));

@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import {
   ContextsError, CONTEXT_STORE_VERSION, DEFAULT_CONTEXT_STORE, DEFAULT_SHARED_SITES, MAX_USER_CONTEXT_ID, INTEGRATION_IDS, PLATFORM_KINDS, DOMAIN_ORIGINS,
   migrateContextStore, projectsInContext, upgradeProject, validateBriefRecord, validateContextStore, validateProject, validateDetectionDraft,
+  validateManifest, validateSetupDocument,
 } from '../src/index.mjs';
 import { UUID_A, UUID_B, manifest } from './samples.mjs';
 
@@ -207,8 +208,28 @@ test('contracts/context-v2.schema.json agrees with the validators', async () => 
   bad('detectionDraft', { ...draft, agents: { ...draft.agents, names: ['wt-a'] } });
   const { integrations: _i, ...noV2 } = draft;
   bad('detectionDraft', noV2);
-  const { platforms: _p, domains: _d, agents: _a, ...draftV1 } = noV2;
-  ok('detectionDraft', JSON.parse(JSON.stringify(validateDetectionDraft({ ...draftV1, version: 1 }))));
+  const { platforms: _p, domains: _d, agents: _a, icon: _icon, ...draftV1 } = noV2;
+  const v1Services = draftV1.services.map(({ command: _c, cwd: _w, ...s }) => s);
+  ok('detectionDraft', JSON.parse(JSON.stringify(validateDetectionDraft({ ...draftV1, services: v1Services, version: 1 }))));
+  // workstation-v1 §1.5: draft v3 (icon, command-only services), manifest v3 and the setup document.
+  ok('detectionDraft', JSON.parse(await readFile(new URL('./expected/desktop-browser.json', import.meta.url), 'utf8')));
+  bad('detectionDraft', { ...draft, icon: { path: '.hidden/icon.png', source: 's', guess: true } });
+  bad('detectionDraft', { ...draft, icon: { path: 'icon.gif', source: 's', guess: true } });
+  bad('detectionDraft', { ...draft, services: [{ name: 'x', source: 's', guess: true }] });
+  const m3 = { version: 3, name: 'Browser', kind: 'desktop', icon: 'assets/icon.svg', environments: [], surfaces: [],
+    services: [{ name: 'Desktop app', command: './dev' }, { name: 'Web', url: 'http://localhost:5173/', port: 5173, command: 'pnpm dev', cwd: 'apps/web' }] };
+  ok('manifest', m3);
+  ok('manifest', JSON.parse(JSON.stringify(validateManifest(m3))));
+  bad('manifest', { ...m3, version: 2 });
+  bad('manifest', { ...m3, icon: '../icon.png' });
+  bad('manifest', { ...m3, services: [{ name: 'Nothing' }] });
+  bad('manifest', { ...m3, services: [{ name: 'x', command: 'a\nb' }] });
+  const setup = { version: 1, name: 'Browser', kind: 'desktop', kind_reason: 'A desktop browser', icon: 'assets/icon.svg',
+    services: [{ name: 'Desktop app', kind: 'desktop', command: './dev', cwd: null, url: null }, { name: 'Web', kind: 'web', command: 'pnpm dev', cwd: 'apps/web', url: 'http://localhost:5173' }] };
+  ok('setupDocument', setup);
+  ok('setupDocument', JSON.parse(JSON.stringify(validateSetupDocument(setup))));
+  bad('setupDocument', { ...setup, kind: 'game' });
+  bad('setupDocument', { ...setup, services: [{ ...setup.services[1], url: 'https://example.com:443' }] });
   ok('project', JSON.parse(JSON.stringify(validateProject(v2('p_abcd')))));
   ok('project', v1('p_abcd'));
   ok('container', { user_context_id: null });

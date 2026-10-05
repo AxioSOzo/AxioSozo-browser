@@ -11,9 +11,10 @@ import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeF
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  DETECTION_FILES, PACKAGE_DETECTION_FILES, detectProject, detectionRefusal, documentFiles, documentRefusal, expandWorkspaceGlobs, inventoryPlan,
-  inventoryRefusal, packageDetectionRefusal, workspaceCandidates,
+  DETECTION_FILES, PACKAGE_DETECTION_FILES, detectProject, detectionRefusal, documentFiles, documentRefusal, expandWorkspaceGlobs, iconCandidatesFor,
+  inventoryPlan, inventoryRefusal, packageDetectionRefusal, workspaceCandidates,
 } from '../src/detect.mjs';
+import { iconListPlan, isIconDir, isIconFile } from '../src/setup.mjs';
 
 export const TESTS_DIR = dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = join(TESTS_DIR, 'fixtures');
@@ -129,14 +130,49 @@ export async function readFixtureDocs(root, inventory) {
   return { paths, docs, refused, opened, touched };
 }
 
-// All four phases, as chrome runs them, then detectProject.
+// Test-only emulation of the chrome icon reader (workstation-v1 §1.5): lists
+// the file and folder names of iconListPlan folders, round by round, then
+// takes lstat/realpath/size metadata of exactly iconCandidatesFor's paths.
+// Nothing is opened. `touched` records every relative path handed to fs.
+export async function readFixtureIcons(root, { units, files, packages }) {
+  const realRoot = await realpath(root);
+  const listing = {}, sizes = {}, touched = [];
+  const resolve = async rel => {
+    touched.push(rel);
+    const full = rel ? join(root, ...rel.split('/')) : root;
+    try { await lstat(full); } catch { return null; }
+    let real, info;
+    try { real = await realpath(full); info = await stat(real); } catch { return null; }
+    const resolved = relative(realRoot, real).split(sep).join('/');
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
+    return { real, info, resolved };
+  };
+  for (let round = 0; round < 8; round++) {
+    const next = iconListPlan({ units, listing });
+    if (!next.length) break;
+    for (const dir of next) {
+      const r = await resolve(dir);
+      if (!r || !r.info.isDirectory() || (r.resolved && !isIconDir(r.resolved) && !units.includes(r.resolved))) { listing[dir] = { dirs: [], files: [] }; continue; }
+      const entries = (await readdir(r.real, { withFileTypes: true })).filter(e => !e.name.startsWith('._'));
+      listing[dir] = { dirs: entries.filter(e => e.isDirectory()).map(e => e.name), files: entries.filter(e => e.isFile()).map(e => e.name) };
+    }
+  }
+  for (const c of iconCandidatesFor({ files, packages, listing })) {
+    const r = await resolve(c.path);
+    if (r && isIconFile(r.resolved, { readable: true })) sizes[c.path] = { kind: r.info.isFile() ? 'file' : 'other', size: r.info.size };
+  }
+  return { icons: { listing, sizes }, touched };
+}
+
+// All five phases, as chrome runs them, then detectProject.
 export async function detectFixture(root, rootName) {
   const repo = await readFixtureRepo(root);
   const ws = await readFixtureWorkspace(root, repo.files);
   const inv = await readFixtureInventory(root, ws.dirs);
   const doc = await readFixtureDocs(root, inv.inventory);
-  const draft = detectProject({ rootName, files: repo.files, refused: [...repo.refused, ...doc.refused], packages: ws.packages, inventory: inv.inventory, docs: doc.docs });
-  return { draft, repo, ws, inv, doc, opened: [...repo.opened, ...ws.opened, ...doc.opened] };
+  const ico = await readFixtureIcons(root, { units: ['', ...ws.dirs], files: repo.files, packages: ws.packages });
+  const draft = detectProject({ rootName, files: repo.files, refused: [...repo.refused, ...doc.refused], packages: ws.packages, inventory: inv.inventory, docs: doc.docs, icons: ico.icons });
+  return { draft, repo, ws, inv, doc, ico, opened: [...repo.opened, ...ws.opened, ...doc.opened] };
 }
 
 // Copies a committed fixture into tests/.tmp/<unique>/<name>, restoring the

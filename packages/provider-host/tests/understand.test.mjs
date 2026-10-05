@@ -8,8 +8,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProviderHost } from '../src/host.mjs';
-import { claudeUnderstandArgs, codexUnderstandArgs, understandEnvironment, understandPrompt, UnderstandRunner, UNDERSTAND_LIVE,
-  validateBrief, validateErrorExplanation, validateUnderstandRequest } from '../src/understand.mjs';
+import { BRIEF_SCHEMA, claudeUnderstandArgs, codexUnderstandArgs, ERROR_EXPLANATION_SCHEMA, pickSetupCli, SETUP_MODELS, SETUP_SCHEMA,
+  understandArgs, understandEnvironment, understandPrompt, UnderstandRunner, UNDERSTAND_KINDS, UNDERSTAND_LIVE,
+  validateBrief, validateDocument, validateErrorExplanation, validateSetup, validateUnderstandRequest } from '../src/understand.mjs';
 
 const fixture = name => fileURLToPath(new URL(`../fixtures/understand/${name}.mjs`, import.meta.url));
 const launch = (claude, codex = claude) => ({ 'claude-code': { command: process.execPath, prefix: [fixture(claude)] },
@@ -144,6 +145,7 @@ test('Request validation: project root, kind/cli, input shape, timeout bounds, u
   const root = projectRoot(); const home = projectRoot();
   const base = { request_id: 'v1', kind: 'brief', cli: 'claude-code', project_root: root };
   assert.equal(validateUnderstandRequest(base, { home }).timeout_ms, 180000);
+  assert.equal(validateUnderstandRequest({ ...base, kind: 'setup', cli: 'codex' }, { home }).input, undefined);
   const cases = {
     'root slash': { ...base, project_root: '/' },
     'home': { ...base, project_root: home },
@@ -153,6 +155,8 @@ test('Request validation: project root, kind/cli, input shape, timeout bounds, u
     'unknown kind': { ...base, kind: 'chat' },
     'unknown cli': { ...base, cli: 'antigravity' },
     'input on brief': { ...base, input: errorsInput },
+    'input on setup': { ...base, kind: 'setup', input: errorsInput },
+    'null input on setup': { ...base, kind: 'setup', input: null },
     'no input on explain': { ...base, kind: 'explain_errors' },
     'url with query': { ...base, kind: 'explain_errors', input: { ...errorsInput, url: 'https://x.test/a?token=1' } },
     'url with fragment': { ...base, kind: 'explain_errors', input: { ...errorsInput, url: 'https://x.test/a#b' } },
@@ -217,4 +221,137 @@ test('Host understand/* methods: available, run, cancel; host close kills; UNSUP
   const bare = new ProviderHost({ createAdapter: () => {} }); const out = []; bare.on('message', m => out.push(m));
   try { await bare.handle({ version: 1, id: 'x', method: 'understand/available', params: {} }); assert.equal(out.at(-1).error.code, 'UNSUPPORTED'); }
   finally { await bare.close(); }
+});
+
+// ---------------------------------------------------------------------------------------
+// setup kind
+const CLAUDE_TAIL = ['--permission-mode', 'plan', '--permission-prompts', 'none', '--safe-mode', '--restricted', '--tools', 'Read,Glob,Grep',
+  '--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'mcp__*', 'Read(.env*)', 'Read(**/.env*)', 'Edit(.env*)',
+  '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+  '--settings', '{"disableAllHooks":true,"disableClaudeAiConnectors":true,"permissions":{"deny":["Read(.env*)","Read(**/.env*)","Edit(.env*)"]}}',
+  '--disable-slash-commands', '--no-chrome', '--no-session-persistence', '--max-turns', '40'];
+const CODEX_TAIL = ['--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
+  '-c', 'approval_policy="never"', '-c', 'web_search="disabled"', '-'];
+
+test('setup: kinds, exact argv with the cheapest model per CLI; brief and explain_errors argv unchanged', () => {
+  assert.deepEqual(UNDERSTAND_KINDS, ['brief', 'explain_errors', 'setup']);
+  assert.deepEqual(claudeUnderstandArgs('setup'), ['--print', '--model', 'claude-sonnet-5-5', '--output-format', 'json',
+    '--json-schema', JSON.stringify(SETUP_SCHEMA), ...CLAUDE_TAIL]);
+  assert.deepEqual(codexUnderstandArgs('setup'), ['exec', '-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"', ...CODEX_TAIL]);
+  assert.deepEqual(understandArgs('codex', 'setup'), codexUnderstandArgs('setup'));
+  assert.deepEqual(understandArgs('claude-code', 'setup'), claudeUnderstandArgs('setup'));
+  // Byte-identical to the pre-setup argv: no model flags for brief and explain_errors.
+  assert.deepEqual(claudeUnderstandArgs('brief'), ['--print', '--output-format', 'json', '--json-schema', JSON.stringify(BRIEF_SCHEMA), ...CLAUDE_TAIL]);
+  assert.deepEqual(claudeUnderstandArgs('explain_errors'), ['--print', '--output-format', 'json', '--json-schema', JSON.stringify(ERROR_EXPLANATION_SCHEMA), ...CLAUDE_TAIL]);
+  for (const kind of ['brief', 'explain_errors']) {
+    assert.deepEqual(codexUnderstandArgs(kind), ['exec', ...CODEX_TAIL]);
+    assert.deepEqual(understandArgs('codex', kind), ['exec', ...CODEX_TAIL]);
+  }
+  assert.throws(() => codexUnderstandArgs('chat'), { code: 'INVALID_INPUT' });
+  assert.throws(() => claudeUnderstandArgs('chat'), { code: 'INVALID_INPUT' });
+  assert.deepEqual(SETUP_MODELS, { codex: { model: 'gpt-6-luna', args: ['-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"'] },
+    'claude-code': { model: 'claude-sonnet-5-5', args: ['--model', 'claude-sonnet-5-5'] }, antigravity: { model: 'gemini-3.8-flash-low', args: null } });
+  assert(Object.isFrozen(SETUP_MODELS) && Object.isFrozen(SETUP_MODELS.codex) && Object.isFrozen(SETUP_MODELS.codex.args));
+  assert(Object.isFrozen(SETUP_SCHEMA)); assert.equal(SETUP_SCHEMA.additionalProperties, false);
+  assert.deepEqual(SETUP_SCHEMA.required, ['version', 'name', 'kind', 'kind_reason', 'icon', 'services']);
+  assert.equal(UNDERSTAND_LIVE, 'NOT_AUTHORIZED');
+});
+
+test('setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section', () => {
+  const prompt = understandPrompt('setup');
+  assert(prompt.startsWith('AxioSozo understand request: setup.\n'));
+  assert(prompt.includes(JSON.stringify(SETUP_SCHEMA)));
+  assert.match(prompt, /Read-only/); assert.match(prompt, /\.env/); assert.match(prompt, /exactly one JSON object/);
+  assert.match(prompt, /a browser or other native app is desktop/); assert.match(prompt, /256 KB/); assert.match(prompt, /exact command typed in a terminal/);
+  assert(!prompt.includes('untrusted data'));
+  assert.equal(understandPrompt('brief'), understandPrompt('brief', undefined));
+  assert.throws(() => understandPrompt('chat'), { code: 'INVALID_INPUT' });
+});
+
+test('setup: pickSetupCli prefers Codex, then Claude Code, else null', () => {
+  assert.equal(pickSetupCli(['claude-code', 'codex']), 'codex');
+  assert.equal(pickSetupCli(['claude-code']), 'claude-code');
+  assert.equal(pickSetupCli(['antigravity', 'codex']), 'codex');
+  assert.equal(pickSetupCli(['antigravity']), null);
+  assert.equal(pickSetupCli([]), null);
+  assert.equal(pickSetupCli(null), null);
+  assert.equal(pickSetupCli('codex'), null);
+});
+
+test('setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes', async () => {
+  const { SETUP } = await import('../fixtures/understand/common.mjs');
+  const setup = () => JSON.parse(JSON.stringify(SETUP));
+  const expected = { ...setup(), services: [{ ...SETUP.services[0], url: 'http://localhost:5173' }, SETUP.services[1]] };
+  const valid = validateSetup(setup());
+  assert.deepEqual(valid, expected);
+  assert(Object.isFrozen(valid) && Object.isFrozen(valid.services) && valid.services.every(Object.isFrozen));
+  assert.deepEqual(validateDocument('setup', setup()), expected);
+  const good = {
+    'name null': d => { d.name = null; }, 'trimmed name': d => { d.name = '  Harbor Suite  '; }, 'empty reason': d => { d.kind_reason = ''; },
+    'icon null': d => { d.icon = null; }, 'icon svg upper': d => { d.icon = 'branding/Logo.SVG'; }, 'no services': d => { d.services = []; },
+    'eight services': d => { d.services = Array(8).fill(d.services[1]); }, 'ipv4 https': d => { d.services[0].url = 'https://127.0.0.1:8443/app'; },
+    'ipv6': d => { d.services[0].url = 'http://[::1]:3000'; }, 'desktop no url': d => { d.kind = 'desktop'; d.services[0] = { name: 'browser', kind: 'desktop', command: './dev', cwd: null, url: null }; },
+    'duplicate names': d => { d.services[1].name = 'web'; },
+  };
+  for (const [name, mutate] of Object.entries(good)) { const d = setup(); mutate(d); assert.doesNotThrow(() => validateSetup(d), name); }
+  const trimmed = setup(); trimmed.name = '  Harbor Suite  '; assert.equal(validateSetup(trimmed).name, 'Harbor Suite');
+  const ipv6 = setup(); ipv6.services[0].url = 'http://[::1]:3000/'; assert.equal(validateSetup(ipv6).services[0].url, 'http://[::1]:3000');
+  const pathUrl = setup(); pathUrl.services[0].url = 'http://LOCALHOST:5173/docs/'; assert.equal(validateSetup(pathUrl).services[0].url, 'http://localhost:5173/docs/');
+  const bad = {
+    'unknown key': d => { d.extra = 1; }, 'unknown service key': d => { d.services[0].env = 'x'; }, 'missing key': d => { delete d.icon; },
+    'version 2': d => { d.version = 2; }, 'bad kind': d => { d.kind = 'api'; }, 'bad service kind': d => { d.services[0].kind = 'database'; },
+    'empty name': d => { d.name = '  '; }, 'name over 80': d => { d.name = 'n'.repeat(81); }, 'name newline': d => { d.name = 'Har\nbor'; },
+    'reason over 160': d => { d.kind_reason = 'r'.repeat(161); }, 'reason tab': d => { d.kind_reason = 'a\tb'; },
+    'icon parent': d => { d.icon = 'apps/../icon.png'; }, 'icon dot env': d => { d.icon = '.env.png'; }, 'icon env segment': d => { d.icon = 'config/.ENV.local/icon.png'; },
+    'icon wrong extension': d => { d.icon = 'apps/web/public/icon.gif'; }, 'icon no extension': d => { d.icon = 'apps/web/public/icon'; },
+    'icon hidden segment': d => { d.icon = 'apps/.branding/icon.png'; }, 'icon hidden file': d => { d.icon = '.icon.png'; },
+    'icon absolute': d => { d.icon = '/Users/x/icon.png'; }, 'icon home': d => { d.icon = '~/icon.png'; }, 'icon backslash': d => { d.icon = 'apps\\icon.png'; },
+    'icon url': d => { d.icon = 'https://cdn.test/icon.png'; }, 'icon data': d => { d.icon = 'data:image/png;base64,AAAA.png'; },
+    'icon query': d => { d.icon = 'icon.png?x'; }, 'icon fragment': d => { d.icon = 'icon.png#x'; }, 'icon empty segment': d => { d.icon = 'apps//icon.png'; },
+    'icon dot segment': d => { d.icon = './icon.png'; }, 'icon too deep': d => { d.icon = `${'a/'.repeat(16)}icon.png`; }, 'icon over 200': d => { d.icon = `${'a'.repeat(197)}.png`; },
+    'url non-loopback': d => { d.services[0].url = 'http://example.test:5173'; }, 'url lan': d => { d.services[0].url = 'http://192.168.1.2:5173'; },
+    'url 0.0.0.0': d => { d.services[0].url = 'http://0.0.0.0:5173'; }, 'url without port': d => { d.services[0].url = 'http://localhost'; },
+    'url default port': d => { d.services[0].url = 'http://localhost:80'; },
+    'url query': d => { d.services[0].url = 'http://localhost:5173/?token=1'; }, 'url empty query': d => { d.services[0].url = 'http://localhost:5173/?'; },
+    'url hash': d => { d.services[0].url = 'http://localhost:5173/#x'; }, 'url credentials': d => { d.services[0].url = 'http://u:p@localhost:5173'; },
+    'url scheme': d => { d.services[0].url = 'ws://localhost:5173'; }, 'url file': d => { d.services[0].url = 'file:///etc/passwd'; },
+    'url not url': d => { d.services[0].url = 'localhost:5173'; }, 'url over 200': d => { d.services[0].url = `http://localhost:5173/${'p'.repeat(180)}`; },
+    'cwd absolute': d => { d.services[0].cwd = '/srv/app'; }, 'cwd parent': d => { d.services[0].cwd = '..'; }, 'cwd dot': d => { d.services[0].cwd = '.'; },
+    'cwd trailing slash': d => { d.services[0].cwd = 'apps/web/'; }, 'cwd env': d => { d.services[0].cwd = '.env'; }, 'cwd scheme': d => { d.services[0].cwd = 'c:/x'; },
+    'too many services': d => { d.services = Array(9).fill(d.services[1]); }, 'services not array': d => { d.services = {}; },
+    'command newline': d => { d.services[0].command = 'pnpm dev\nrm -rf /'; }, 'command empty': d => { d.services[0].command = ' '; },
+    'command over 200': d => { d.services[0].command = 'c'.repeat(201); }, 'service name over 64': d => { d.services[0].name = 's'.repeat(65); },
+    'service null': d => { d.services[0] = null; }, 'name number': d => { d.name = 1; },
+  };
+  for (const [name, mutate] of Object.entries(bad)) { const d = setup(); mutate(d); assert.throws(() => validateSetup(d), { code: 'INVALID_OUTPUT' }, name); }
+  for (const doc of [null, [], 'x']) assert.throws(() => validateSetup(doc), { code: 'INVALID_OUTPUT' });
+  assert.throws(() => validateDocument('chat', setup()), { code: 'INVALID_INPUT' });
+  assert.throws(() => validateBrief(setup()), { code: 'INVALID_OUTPUT' });
+});
+
+test('setup: Codex and Claude fakes run with model args and return the validated document', async () => {
+  for (const [cli, name] of [['codex', 'codex-ok'], ['claude-code', 'claude-ok']]) {
+    const root = projectRoot();
+    const result = await new UnderstandRunner({ testOnlyLaunch: launch(name) }).run({ request_id: `s_${name}`, kind: 'setup', cli, project_root: root });
+    assert.equal(result.status, 'ok', name); assert.equal(result.reason, null); assert.equal(result.kind, 'setup'); assert.equal(result.data_sent, true);
+    assert.equal(result.document.name, 'Harbor Suite'); assert.equal(result.document.icon, 'apps/web/public/icon.png');
+    assert.deepEqual(result.document.services.map(service => service.url), ['http://localhost:5173', null]);
+    const record = JSON.parse(readFileSync(path.join(root, 'fixture-record.json'), 'utf8'));
+    assert.deepEqual(record.argv, understandArgs(cli, 'setup'));
+    assert.deepEqual(record.argv.slice(record.argv.indexOf(SETUP_MODELS[cli].args[0]), record.argv.indexOf(SETUP_MODELS[cli].args[0]) + SETUP_MODELS[cli].args.length), SETUP_MODELS[cli].args);
+    assert.equal(record.prompt, understandPrompt('setup'));
+  }
+  const wrong = await new UnderstandRunner({ testOnlyLaunch: launch('extra-key') }).run({ request_id: 's_extra', kind: 'setup', cli: 'codex', project_root: projectRoot() });
+  assert.equal(wrong.status, 'invalid_output'); assert.equal(wrong.reason, 'SCHEMA_MISMATCH'); assert.equal(wrong.document, null);
+});
+
+test('setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing', async () => {
+  const root = projectRoot(); let discoveries = 0;
+  const installed = () => { discoveries++; return [{ driver: 'codex', installed: true, executable: fixture('codex-ok'), client_version: '0.160.0' }]; };
+  for (const cli of ['codex', 'claude-code']) {
+    const result = await new UnderstandRunner({ discover: installed }).run({ request_id: `live_${cli}`, kind: 'setup', cli, project_root: root });
+    assert.deepEqual(result, { version: 1, request_id: `live_${cli}`, kind: 'setup', cli, status: 'unavailable', reason: 'NOT_AUTHORIZED',
+      document: null, data_sent: false, duration_ms: 0 });
+  }
+  assert.equal(discoveries, 0); assert.equal(existsSync(path.join(root, 'fixture-record.json')), false);
 });

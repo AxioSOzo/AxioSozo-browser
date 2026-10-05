@@ -8,7 +8,7 @@ import { readdir, readFile, access } from 'node:fs/promises';
 import * as api from '../src/index.mjs';
 
 const SRC = new URL('../src/', import.meta.url);
-const EXPECTED_MODULES = ['agent-config.mjs', 'agent-status.mjs', 'ai-admission.mjs', 'arrival.mjs', 'checkpoints.mjs', 'containers.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'safety-choice.mjs', 'schema.mjs', 'watches.mjs'];
+const EXPECTED_MODULES = ['agent-config.mjs', 'agent-status.mjs', 'ai-admission.mjs', 'arrival.mjs', 'checkpoints.mjs', 'containers.mjs', 'detect.mjs', 'environments.mjs', 'errors.mjs', 'index.mjs', 'ledger.mjs', 'manifest.mjs', 'rules.mjs', 'safety-choice.mjs', 'schema.mjs', 'setup.mjs', 'watches.mjs'];
 const FORBIDDEN = [
   [/['"]node:/, 'node: specifier'], [/\brequire\s*\(/, 'require()'], [/\bimport\s*\(/, 'dynamic import()'], [/\bimport\.meta\b/, 'import.meta'],
   [/\bprocess\s*[.[]/, 'process'], [/\bBuffer\s*[.(]/, 'Buffer'], [/\bfetch\s*\(/, 'fetch'],

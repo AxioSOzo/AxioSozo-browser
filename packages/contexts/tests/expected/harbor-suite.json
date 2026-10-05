@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "Harbor Suite",
   "kind": "desktop",
   "kind_source": {
@@ -35,6 +35,7 @@
       "url": "http://localhost:1420/",
       "port": 1420,
       "app": "desktop",
+      "command": "npm run dev:desktop",
       "source": "src-tauri/tauri.conf.json build.devUrl",
       "guess": false
     },
@@ -43,6 +44,8 @@
       "url": "http://localhost:3001/",
       "port": 3001,
       "app": "admin-web",
+      "command": "npm run dev",
+      "cwd": "apps/admin-web",
       "source": "apps/admin-web/package.json scripts.dev (next port 3001)",
       "guess": false
     },
@@ -51,6 +54,8 @@
       "url": "http://localhost:5175/",
       "port": 5175,
       "app": "api-portal-web",
+      "command": "npm run dev",
+      "cwd": "apps/api-portal-web",
       "source": "apps/api-portal-web/package.json scripts.dev (vite port 5175)",
       "guess": false
     }
@@ -115,6 +120,7 @@
   ],
   "refused": [],
   "warnings": [],
+  "icon": null,
   "integrations": [
     {
       "id": "vercel",

@@ -21,6 +21,7 @@ import { JsonStore, profileStorage } from "./JsonStore.sys.mjs";
 import { isContextEngine, toContextEngine } from "./EngineRegistry.sys.mjs";
 import { createProjectDetection } from "./ProjectDetection.sys.mjs";
 import { createProjectRecords } from "./ProjectRecords.sys.mjs";
+import { readProjectIcon } from "./ProjectIcon.sys.mjs";
 import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
 import { createProjectArrival } from "./ProjectArrival.sys.mjs";
 import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
@@ -78,6 +79,10 @@ export const HOME_DENIED_FOLDERS = Object.freeze(["Library", ".mozilla", ".thund
   ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".codex", ".claude"]);
 export const SYSTEM_DENIED_ROOTS = Object.freeze(["/System", "/Library", "/dev", "/etc", "/private/etc", "/usr", "/bin", "/sbin", "/cores"]);
 const DAY_MS = 86400000;
+// Project icons (workstation-v1 §1.5): a short session cache, so lists and homes
+// do not start a reader for every render.
+const ICON_CACHE_MS = 600000;
+const ICON_CACHE_ENTRIES = 64;
 const CONTEXT_TYPES = ["personal", "organization", "project"];
 // Only services on this machine are ever contacted, and only by a TCP connect to
 // a loopback address on the declared port. URL.hostname keeps IPv6 brackets.
@@ -338,6 +343,9 @@ export class AxioSozoServices {
   // held v1 project records; cleared only after the migrated document was written.
   #contextsNeedPersistence = false; #persistingContexts = null;
   #records; #arrival;
+  // Project icons as data: URLs, by canonical root and icon path (bounded, session only).
+  #icons = new Map();
+  #setupSerial = 0;
   // Arrival acceptances between token consumption and the store append.
   #acceptances = new Set();
   // Project containers: one controller per process (assignment is serialized),
@@ -787,6 +795,46 @@ export class AxioSozoServices {
     return clone(this.#records.rememberDetection(result));
   }
 
+  /** The icon a still-cached preview of a picked folder names (or the
+   * assistant proposed for it), as a data: URL or null. `path` is validated
+   * by the core; the folder must resolve to the previewed one. */
+  async previewIcon({ root, path } = {}) {
+    if (typeof root !== "string" || !root.startsWith("/")) fail("INVALID_ROOT");
+    try { core.validateIconPath(path); } catch { fail("INVALID_ICON"); }
+    const fs = this.#fs();
+    await this.#refuseDeniedRoot(fs, root);
+    let canonical;
+    try { canonical = await fs.realpath(root); } catch { fail("ROOT_NOT_FOUND"); }
+    if (!this.#records.detectionFor(root, canonical)) fail("NO_DETECTION");
+    return this.#icon(canonical, path);
+  }
+
+  /** A registered project's icon (its manifest `icon`), as a data: URL or null. */
+  async projectIcon(id) {
+    const project = await this.getProject(id);
+    if (!project) fail("UNKNOWN_PROJECT");
+    const path = project.manifest.icon;
+    if (typeof path !== "string") return null;
+    const fs = this.#fs();
+    await this.#refuseDeniedRoot(fs, project.root);
+    let canonical;
+    try { canonical = await fs.realpath(project.root); } catch { return null; }
+    if (canonical !== project.root) return null; // a registered root that now resolves elsewhere is not opened
+    return this.#icon(canonical, path);
+  }
+
+  async #icon(canonical, path) {
+    if (this.#deniedRoots().some(base => within(canonical, base))) fail("ROOT_DENIED");
+    const key = `${canonical}\u0000${path}`, at = this.#deps.clock(), cached = this.#icons.get(key);
+    if (cached && at - cached.at < ICON_CACHE_MS) return cached.url;
+    const reader = await this.#containmentReader();
+    const url = await readProjectIcon({ reader, core, canonicalRoot: canonical, path });
+    this.#icons.delete(key);
+    this.#icons.set(key, { url, at });
+    while (this.#icons.size > ICON_CACHE_ENTRIES) this.#icons.delete(this.#icons.keys().next().value);
+    return url;
+  }
+
   #deniedRoots() {
     const home = normalAbsolute(this.#deps.home) ? this.#deps.home : null;
     const profile = normalAbsolute(this.#deps.profileDir) ? this.#deps.profileDir : null;
@@ -887,6 +935,7 @@ export class AxioSozoServices {
       // The registered root is canonical; a folder that now resolves elsewhere is not opened.
       const result = await this.#detectSecurely(project.root, { expectedCanonicalRoot: project.root });
       this.#records.rememberDetection(result);
+      for (const key of [...this.#icons.keys()]) if (key.startsWith(`${project.root}\u0000`)) this.#icons.delete(key);
       await this.#routingMutation([id], () => this.#updateContexts(doc => {
         const current = doc.projects.find(item => item.id === id);
         if (!current) fail("UNKNOWN_PROJECT");
@@ -1583,7 +1632,8 @@ export class AxioSozoServices {
     this.#serviceStatus.set(projectId, cache);
     const now = this.#deps.clock();
     let changed = false;
-    const results = await Promise.all(project.manifest.services.map(async service => {
+    // A service with a start command only (manifest v3) has no address to check.
+    const results = await Promise.all(project.manifest.services.filter(service => typeof service.url === "string").map(async service => {
       const key = `${service.url}|${service.port}`;
       const previous = cache.get(key);
       if (!loopbackAddresses(service.url)) {
@@ -2885,6 +2935,27 @@ export class AxioSozoServices {
   previewProjectBriefAcceptance(alias, params) { return this.#understandCall("preview", alias, params); }
   acceptProjectBrief(alias, params) { return this.#understandCall("accept", alias, params); }
   reinspectProjectBriefAcceptance(alias, params) { return this.#understandCall("reinspect", alias, params); }
+
+  /** The setup check of a picked folder (understand-v1 §3.3, §5.1), bound to
+   * its still-cached preview: the facade gets that canonical root and a
+   * predicate that holds only while the same preview is cached. Production
+   * goes straight to the facade's closed branch (NOT_AUTHORIZED) without
+   * looking at the folder. */
+  async suggestSetup(alias, { root } = {}) {
+    let facade = this.#understandFor(alias);
+    if (!this.#understandOffline) return facade.setup(alias, {});
+    if (typeof root !== "string" || !root.startsWith("/")) fail("INVALID_ROOT");
+    const fs = this.#fs();
+    await this.#refuseDeniedRoot(fs, root);
+    let canonical;
+    try { canonical = await fs.realpath(root); } catch { fail("ROOT_NOT_FOUND"); }
+    const preview = this.#records.detectionFor(root, canonical);
+    if (!preview) fail("NO_DETECTION");
+    facade = this.#understandFor(alias);
+    const binding = { id: `s_setup${++this.#setupSerial}`, revision: preview.detectedAt, canonicalRoot: canonical };
+    const current = () => { try { return this.#records.detectionFor(root, canonical) === preview; } catch { return false; } };
+    return facade.setup(alias, { binding, current });
+  }
 
   /** Production read/state/availability go straight to the facade's closed
    * branch: no snapshot is prepared and no project looked up. Off it, and for

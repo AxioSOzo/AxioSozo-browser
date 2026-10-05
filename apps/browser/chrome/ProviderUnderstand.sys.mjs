@@ -42,7 +42,7 @@ function validateParams(method, params) {
   if (method === "understand/cancel") { requireValue(keys(params, ["request_id"]) && typeof params.request_id === "string" && ID.test(params.request_id)); return; }
   requireValue(keys(params, ["request_id", "kind", "cli", "project_root"], ["input", "timeout_ms"])
     && typeof params.request_id === "string" && ID.test(params.request_id)
-    && ["brief", "explain_errors"].includes(params.kind) && ["claude-code", "codex"].includes(params.cli)
+    && ["brief", "explain_errors", "setup"].includes(params.kind) && ["claude-code", "codex"].includes(params.cli)
     && absolute(params.project_root) && params.project_root !== "/"
     && (params.kind === "explain_errors" ? Object.hasOwn(params, "input") : !Object.hasOwn(params, "input"))
     && (params.timeout_ms === undefined || Number.isSafeInteger(params.timeout_ms)

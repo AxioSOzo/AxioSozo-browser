@@ -2,7 +2,7 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { ContextsError } from './errors.mjs';
 import {
-  PRIMARY_SURFACE_KINDS, environmentKey, isPlainObject, needsManifestV2, own, stripQueryAndFragment, utf8Length, validateBaseUrl,
+  PRIMARY_SURFACE_KINDS, environmentKey, isPlainObject, needsManifestV2, needsManifestV3, own, stripQueryAndFragment, utf8Length, validateBaseUrl,
   validateDetectionDraft, validateManifest,
 } from './schema.mjs';
 
@@ -41,17 +41,19 @@ export function assertNoSecrets(manifest) {
   return manifest;
 }
 
-// Stable key order. Optional v2 fields are emitted only when present; the
-// version is raised to 2 exactly when one is used (never lowered).
+// Stable key order. Optional v2/v3 fields are emitted only when present; the
+// version is raised exactly as far as the fields need (never lowered).
 const opt = (key, v) => (v === undefined ? {} : { [key]: v });
 const ordered = m => {
   const out = {
-    name: m.name, kind: m.kind,
+    name: m.name, kind: m.kind, ...opt('icon', own(m, 'icon')),
     environments: m.environments.map(e => ({ name: e.name, ...opt('app', own(e, 'app')), base_url: e.base_url })),
-    services: m.services.map(s => ({ name: s.name, ...opt('app', own(s, 'app')), url: s.url, port: s.port })),
+    services: m.services.map(s => ({ name: s.name, ...opt('app', own(s, 'app')), ...opt('url', own(s, 'url')), ...opt('port', own(s, 'port')),
+      ...opt('command', own(s, 'command')), ...opt('cwd', own(s, 'cwd')) })),
     surfaces: m.surfaces.map(s => ({ name: s.name, url: s.url, kind: s.kind, ...opt('prominence', own(s, 'prominence')) })),
   };
-  return { version: needsManifestV2(out) || m.version === 2 ? 2 : 1, ...out };
+  const needed = needsManifestV3(out) ? 3 : needsManifestV2(out) ? 2 : 1;
+  return { version: Math.max(needed, [1, 2, 3].includes(m.version) ? m.version : 1), ...out };
 };
 // Drafts carry an explicit prominence on every surface; a manifest keeps it
 // only where it differs from the default for the kind.
@@ -73,6 +75,8 @@ const stripDraftUrls = draft => {
 // environments, services or surfaces (manifest shapes, no source/guess). Draft
 // URLs lose any query or fragment; edited URLs with one are rejected.
 //
+// `edits.icon` replaces the detected icon path (null for none).
+//
 // `edits.production_url` is the optional "Production URL" field of the review
 // UI: a string (for the project's main web app), `{ [app]: url }` for
 // multi-app projects, or null/"" for none. It is applied after the other edits
@@ -80,10 +84,11 @@ const stripDraftUrls = draft => {
 export function draftToManifest(draft, edits = {}) {
   const d = validateDetectionDraft(stripDraftUrls(draft));
   if (!isPlainObject(edits)) throw new ContextsError('INVALID_INPUT', '$.edits: expected an object', '$.edits');
-  for (const k of Object.keys(edits)) if (!['name', 'kind', 'environments', 'services', 'surfaces', 'production_url'].includes(k)) throw new ContextsError('INVALID_INPUT', `$.edits.${k}: unknown key`, `$.edits.${k}`);
+  for (const k of Object.keys(edits)) if (!['name', 'kind', 'icon', 'environments', 'services', 'surfaces', 'production_url'].includes(k)) throw new ContextsError('INVALID_INPUT', `$.edits.${k}: unknown key`, `$.edits.${k}`);
   const pick = (k, fallback) => own(edits, k) !== undefined ? own(edits, k) : fallback;
+  const icon = own(edits, 'icon') !== undefined ? own(edits, 'icon') : own(d, 'icon')?.path ?? null;
   let m = validateManifest(ordered({
-    name: pick('name', d.name), kind: pick('kind', d.kind),
+    name: pick('name', d.name), kind: pick('kind', d.kind), ...(icon === null ? {} : { icon }),
     environments: pick('environments', d.environments.map(plain)), services: pick('services', d.services.map(plain)),
     surfaces: mapList(pick('surfaces', d.surfaces), s => (isPlainObject(s) ? draftSurface(s) : s)),
   }));

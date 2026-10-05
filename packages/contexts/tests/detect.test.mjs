@@ -19,10 +19,13 @@ test('allowlist is exactly the contract list', () => {
     // Workspace roots (monorepo detection, contexts-api-v1 §2.2).
     'pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json',
     // workstation-v1 §1.1.
-    'convex.json']);
+    'convex.json',
+    // workstation-v1 §1.5: start commands, images and the Nx project type.
+    'README.md', 'Makefile', 'justfile', 'Procfile.dev', 'project.json']);
   assert.ok(Object.isFrozen(DETECTION_FILES));
   for (const bad of ['.env', '.env.local', '.git/HEAD', '.git/credentials', './package.json', '/package.json', 'a/package.json', 'node_modules/x/package.json',
-    'src-tauri/../package.json', 'PACKAGE.JSON', 'package.json ', 'id_rsa', '.npmrc', '.git-credentials', '', null, undefined, {}]) {
+    'src-tauri/../package.json', 'PACKAGE.JSON', 'package.json ', 'id_rsa', '.npmrc', '.git-credentials', 'AGENTS.md', 'CLAUDE.md', 'docs/README.md',
+    'readme.md', 'dev', '', null, undefined, {}]) {
     assert.equal(isAllowedPath(bad), false, String(bad));
   }
 });

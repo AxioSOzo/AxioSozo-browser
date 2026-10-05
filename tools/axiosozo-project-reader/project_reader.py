@@ -26,6 +26,7 @@ DETECTION_FILES = frozenset({
     "src-tauri/tauri.conf.json", "tauri.conf.json", "electron-builder.json", "electron-builder.yml",
     "Cargo.toml", "pyproject.toml", "go.mod", ".git/config", ".axiosozo/project.json",
     "pnpm-workspace.yaml", "lerna.json", "turbo.json", "nx.json", "convex.json",
+    "README.md", "Makefile", "justfile", "Procfile.dev", "project.json",
 })
 PACKAGE_DETECTION_FILES = frozenset({
     "package.json", ".vercel/project.json", "vercel.json", "netlify.toml", "wrangler.toml", "wrangler.json",
@@ -36,9 +37,20 @@ INV_LIST_SUFFIXES = ("", "/ios", "/macos")
 INV_CHECK_FIXED = frozenset({
     "AGENTS.md", "CLAUDE.md", ".claude", ".codex", ".agent-worktrees", "convex", "convex/schema.ts", "convex/http.ts",
     "android", "build.gradle", "build.gradle.kts", "android/build.gradle", "android/build.gradle.kts",
+    "dev", "bin/dev", "script/dev", "scripts/dev", "script/server", "dev.sh", "start.sh", "run.sh", "scripts/dev.sh",
+    "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "package-lock.json",
 })
 INV_CHECK_SUFFIXES = ("/convex", "/build.gradle", "/build.gradle.kts", "/android/build.gradle", "/android/build.gradle.kts")
 SKIP_DIRS = frozenset({"node_modules", "dist", "build", "out", "target", "coverage"})
+# Project icon search (workstation-v1 §1.5): names of folders whose entries may
+# be listed, logo folders inside brand folders, and image files whose metadata
+# and bytes (at most MAX_FILE_BYTES) may be read. Mirrors packages/contexts/src/setup.mjs.
+ICON_DIR_NAMES = frozenset({"public", "static", "assets", "branding", "brand", "icons", "images", "img", "logo", "logos",
+                            "resources", "media", "app", "src", "src-tauri"})
+BRAND_DIR_NAMES = frozenset({"brand", "branding", "logo", "logos", "icons"})
+BRAND_CHILD = re.compile(r"logo|icon|brand|mark|symbol", re.IGNORECASE)
+ICON_EXTENSIONS = frozenset({"png", "svg", "ico", "webp", "jpg", "jpeg"})
+MAX_ICON_DEPTH = 8
 BAD_KEYS = frozenset({"__proto__", "constructor", "prototype"})
 SEGMENT = re.compile(r"[A-Za-z0-9_@+][A-Za-z0-9._@+-]{0,99}\Z", re.ASCII)
 DEVICE_DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,19})\Z", re.ASCII)
@@ -74,10 +86,37 @@ def package_dir(value):
     return 1 <= len(parts) <= 4 and len(value) <= 200 and all(safe_segment(part) for part in parts)
 
 
+def icon_segments(value, skip=True):
+    if not isinstance(value, str) or not 0 < len(value) <= 400:
+        return None
+    parts = value.split("/")
+    if len(parts) > MAX_ICON_DEPTH or not all(SEGMENT.fullmatch(part) and part not in BAD_KEYS for part in parts):
+        return None
+    if any(part.lower() == "node_modules" or (skip and part.lower() in SKIP_DIRS) for part in parts):
+        return None
+    return parts
+
+
+def icon_dir(value):
+    parts = icon_segments(value)
+    if parts is None:
+        return False
+    last = parts[-1].lower()
+    return last in ICON_DIR_NAMES or (len(parts) >= 2 and parts[-2].lower() in BRAND_DIR_NAMES and bool(BRAND_CHILD.search(last)))
+
+
+def icon_file(value, readable):
+    parts = icon_segments(value, skip=False)
+    if parts is None or "." not in parts[-1]:
+        return False
+    extension = parts[-1].rsplit(".", 1)[1].lower()
+    return extension in ICON_EXTENSIONS or (not readable and extension == "icns")
+
+
 def allowed_relative(value):
     if not isinstance(value, str):
         return False
-    if value in DETECTION_FILES or value == "docs/domains.md":
+    if value in DETECTION_FILES or value == "docs/domains.md" or icon_file(value, readable=True):
         return True
     parts = value.split("/")
     if len(parts) == 3 and parts[0] == "docs" and parts[2] == "domains.md" and safe_segment(parts[1]):
@@ -94,11 +133,12 @@ def plan_path(value, fixed, suffixes):
 
 
 def allowed_list(value):
-    return value == "" or plan_path(value, INV_LIST_FIXED, INV_LIST_SUFFIXES)
+    return value == "" or plan_path(value, INV_LIST_FIXED, INV_LIST_SUFFIXES) or icon_dir(value)
 
 
 def allowed_presence(value):
-    return plan_path(value, INV_LIST_FIXED, INV_LIST_SUFFIXES) or plan_path(value, INV_CHECK_FIXED, INV_CHECK_SUFFIXES)
+    return (plan_path(value, INV_LIST_FIXED, INV_LIST_SUFFIXES) or plan_path(value, INV_CHECK_FIXED, INV_CHECK_SUFFIXES)
+            or icon_dir(value) or icon_file(value, readable=False))
 
 
 def child_name(value):

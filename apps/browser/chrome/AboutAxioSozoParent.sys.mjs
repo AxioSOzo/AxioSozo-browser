@@ -144,6 +144,8 @@ const T = {
   requestId: value => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}$/u.test(value),
   acceptToken: value => typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/u.test(value),
   understandTimeout: value => Number.isSafeInteger(value) && value >= 10000 && value <= 300000,
+  // Shape only: the contexts core validates a project icon path (image file inside the folder).
+  iconPath: value => typeof value === "string" && value.length >= 1 && value.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(value),
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -258,7 +260,9 @@ const UNDERSTAND_ERRORS = new Set(["INVALID_PARAMS", "OWNER_REVOKED", "SERVICE_C
   "PROJECT_CHANGED", "UNDERSTAND_UNAVAILABLE", "BRIEF_SAVE_FAILED", "BRIEF_UNAVAILABLE", "BUSY", "STALE_ACCEPTANCE",
   "MANIFEST_REINSPECTION_REQUIRED", "WRITE_CONTAINMENT_UNAVAILABLE", "WRITE_CONTAINMENT_REFUSED", "WRITE_OUTCOME_UNKNOWN",
   "WRITE_FAILED", "INVALID_MANIFEST", "MANIFEST_SECRET", "TOO_LARGE", "DIRECTORY_REFUSED", "MANIFEST_REFUSED", "IDENTITY_CHANGED",
-  "MANIFEST_CHANGED", "UNCONFIRMED_FIELDS", "SERVICE_FAILURE", "PRIVATE_WINDOW", "NO_WINDOW", "DOCUMENT_GONE"]);
+  "MANIFEST_CHANGED", "UNCONFIRMED_FIELDS", "SERVICE_FAILURE", "PRIVATE_WINDOW", "NO_WINDOW", "DOCUMENT_GONE",
+  // Setup checks of a folder being added (its preview must still be cached).
+  "NO_DETECTION", "ROOT_DENIED", "ROOT_NOT_FOUND", "ROOT_CHANGED", "INVALID_ROOT"]);
 const UNDERSTAND_JOB_STATES = Object.freeze(["queued", "running", "persisting", "complete"]);
 const UNDERSTAND_STATUSES = Object.freeze(["ok", "failed", "cancelled", "timeout", "unavailable", "invalid_output", "busy"]);
 const ACCEPTANCE_STATUSES = Object.freeze(["ACCEPTED", "REFUSED", "REINSPECTION_REQUIRED", "INSPECTED", "CHANGED", "UNCHANGED"]);
@@ -268,6 +272,23 @@ const codeOrNull = value => (typeof value === "string" && FIXED_CODE.test(value)
 const oneOf = (value, list) => (list.includes(value) ? value : null);
 const listOf = value => (Array.isArray(value) ? value : []);
 const jsonCopy = value => JSON.parse(JSON.stringify(value));
+
+// A setup document (the facade validated it with the contexts core) rebuilt
+// from closed primitives; anything unexpected drops the whole document.
+const SETUP_KINDS = Object.freeze(["web", "desktop", "mobile", "api", "worker", "docs", "other"]);
+const lineOf = (value, max, min = 1) => typeof value === "string" && [...value].length >= min && [...value].length <= max
+  && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+const pathOrNull = value => (value === null || (lineOf(value, 200) && !value.startsWith("/") && !value.split("/").includes("..")) ? value : undefined);
+function setupDocument(value) {
+  if (!isPlainObject(value) || value.version !== 1 || !(value.name === null || lineOf(value.name, 80)) || !MANIFEST_KINDS.includes(value.kind)
+      || !lineOf(value.kind_reason, 160, 0) || pathOrNull(value.icon) === undefined || !Array.isArray(value.services) || value.services.length > 8) return null;
+  const services = value.services.map(item => (isPlainObject(item) && lineOf(item.name, 64) && SETUP_KINDS.includes(item.kind)
+    && lineOf(item.command, 200) && pathOrNull(item.cwd) !== undefined
+    && (item.url === null || (lineOf(item.url, 200) && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]):[0-9]{1,5}(\/|$)/u.test(item.url)))
+    ? { name: item.name, kind: item.kind, command: item.command, cwd: item.cwd, url: item.url } : null));
+  if (services.includes(null)) return null;
+  return { version: 1, name: value.name, kind: value.kind, kind_reason: value.kind_reason, icon: value.icon, services };
+}
 
 // The answers, rebuilt from closed primitives: only these fields cross to the
 // page, whatever else a reply held. Authorization is always NOT_AUTHORIZED.
@@ -286,6 +307,19 @@ const UNDERSTAND_REPLIES = Object.freeze({
     return { version: 1, request_id: value.request_id, kind: "brief", cli: T.understandCli(value.cli) ? value.cli : null, status,
       reason: codeOrNull(value.reason), document: status === "ok" && isPlainObject(value.document) ? jsonCopy(value.document) : null,
       data_sent: value.data_sent === true, duration_ms: Number.isSafeInteger(value.duration_ms) && value.duration_ms >= 0 ? value.duration_ms : 0 };
+  },
+  // A setup check (understand-v1 §3.3): the chosen client and model, and the
+  // setup document validated again by the contexts core (inert data).
+  setup: value => {
+    const status = oneOf(value?.status, UNDERSTAND_STATUSES);
+    if (!status || !T.requestId(value?.request_id)) fail("UNDERSTAND_UNAVAILABLE", "suggestSetup failed (UNDERSTAND_UNAVAILABLE)");
+    const document = status === "ok" ? setupDocument(value.document) : null;
+    const cli = T.understandCli(value.cli) ? value.cli : null;
+    return { version: 1, request_id: value.request_id, kind: "setup", cli,
+      model: cli && typeof value.model === "string" && /^[a-z0-9][a-z0-9.-]{0,63}$/u.test(value.model) ? value.model : null,
+      status: status === "ok" && !document ? "invalid_output" : status, reason: status === "ok" && !document ? "SCHEMA_MISMATCH" : codeOrNull(value.reason),
+      document, data_sent: value.data_sent === true,
+      duration_ms: Number.isSafeInteger(value.duration_ms) && value.duration_ms >= 0 ? value.duration_ms : 0 };
   },
   cancel: value => ({ cancelled: value?.cancelled === true }),
   preview: value => {
@@ -579,6 +613,14 @@ export const METHODS = Object.freeze({
       ctx.pickedRoots.delete(p.root);
       return project;
     } },
+  // Project icons (workstation-v1 §1.5) as data: URLs: for the folder being
+  // added (picked, previewed) or a registered project by id. Never a path the
+  // page did not get from detection or the setup check, never outside the folder.
+  previewIcon: { params: { root: T.root, path: T.iconPath }, run: (ctx, p) => {
+    requirePickedRoot(ctx, "previewIcon", p.root);
+    return ctx.services.previewIcon({ root: p.root, path: p.path });
+  } },
+  projectIcon: { params: { id: T.projectId }, run: ({ services }, p) => services.projectIcon(p.id) },
   // A registered project's own folder, read again; the page names the project
   // id only, never a path, and the detected snapshot is never page-supplied.
   refreshProjectDetection: { params: { id: T.projectId },
@@ -714,6 +756,24 @@ export const METHODS = Object.freeze({
   // Never a write retry: inspects a write whose outcome is owed.
   reinspectProjectBriefAcceptance: understandMethod("reinspectProjectBriefAcceptance", { projectId: T.projectId },
     "reinspectProjectBriefAcceptance", { reply: UNDERSTAND_REPLIES.outcome }),
+  // The setup check of the folder being added (understand-v1 §3.3, §5.1): the
+  // picked root only; the client is chosen automatically and nothing is saved.
+  // Product checks stay NOT_AUTHORIZED. cancelSetup ends this page's check.
+  suggestSetup: { params: { root: T.root }, run: async (ctx, p) => {
+    requirePickedRoot(ctx, "suggestSetup", p.root);
+    const window = normalWindow(ctx, "suggestSetup", "projects");
+    if (typeof ctx.setupOwner !== "function") fail("UNSUPPORTED", "suggestSetup needs the page's own actor");
+    const owner = ctx.setupOwner(p.root, { window });
+    let value = null, failure = null;
+    try { value = await ctx.services.suggestSetup(owner.alias, { root: p.root }); } catch (error) { failure = error; }
+    if (!owner.isActive()) fail("OWNER_REVOKED", "suggestSetup: this page is no longer the one that asked");
+    if (failure) {
+      const code = UNDERSTAND_ERRORS.has(failure?.code) ? failure.code : "UNDERSTAND_UNAVAILABLE";
+      fail(code, `suggestSetup failed (${code})`);
+    }
+    return UNDERSTAND_REPLIES.setup(value);
+  } },
+  cancelSetup: { params: {}, run: ctx => { ctx.releaseSetup?.(); return null; } },
   // The page left the project home: this actor's Understand owner ends (its
   // reads and leases), nobody else's. A later operation makes a new one.
   cancelProjectReadOperations: { params: {}, run: ctx => { ctx.releaseUnderstand?.(); return null; } },
@@ -811,6 +871,10 @@ export class AboutAxioSozoParent extends Base {
   // for one project and separate from the key lifetime. Its alias stays in
   // this actor and the services; it is never revived once it ended.
   #understand = null;
+  // The setup check of the folder this document is adding (understand-v1
+  // §5.1): at most one owner lifetime, for one picked root, on this very
+  // document; it ends with the sheet, a navigation, another tab or the actor.
+  #setup = null;
   // The live one-use receipts of private trusted actions (Plan 4 step 9):
   // never sent to the page or kept beyond their own action; ended on destroy.
   #receipts = new Set();
@@ -835,6 +899,8 @@ export class AboutAxioSozoParent extends Base {
       understandOwner: (projectId, options) => this.#understandOwner(projectId, { ...options, services }),
       heldUnderstand: () => this.#heldUnderstand(),
       releaseUnderstand: () => this.#releaseUnderstand(),
+      setupOwner: (root, options) => this.#setupOwner(root, { ...options, services }),
+      releaseSetup: () => this.#releaseSetup(),
     };
   }
 
@@ -997,6 +1063,61 @@ export class AboutAxioSozoParent extends Base {
     return () => { try { tabbrowser.removeTabsProgressListener(listener); } catch { /* window closing */ } };
   }
 
+  /**
+   * This document's setup owner for one picked folder: the current one when it
+   * is for that root and still holds, else a new one. Like the project-home
+   * owner its predicate is synchronous and stays false once false: the same
+   * manager, browsing context, embedder browser (still selected), registered
+   * normal window and native document URI object it was minted with, and the
+   * sender still admitted. Any navigation (a hash change included), another
+   * tab, unsubscription or destruction ends it at once.
+   */
+  #setupOwner(root, { window, services } = {}) {
+    const held = this.#setup;
+    if (held && held.root === root && held.isActive()) return held;
+    if (held) this.#releaseSetup();
+    const surface = this.#surface();
+    let embedder = null, documentURI = null;
+    try { embedder = surface?.context.embedderElement ?? null; documentURI = surface?.manager.documentURI ?? null; } catch { embedder = null; }
+    if (!surface || !embedder || !documentURI || surface.window.gBrowser?.selectedBrowser !== embedder) fail("DOCUMENT_GONE", "the requesting page is not the selected, current page");
+    if (surface.window !== window || services?.isNormalWindow?.(window) !== true) fail("NO_WINDOW", "the window changed");
+    if (typeof services.registerUnderstandOwner !== "function") fail("UNSUPPORTED", "setup checks are not available yet");
+    const controller = new AbortController();
+    let revoked = false;
+    const isActive = () => {
+      if (revoked) return false;
+      try {
+        const now = this.#destroyed || controller.signal.aborted ? null : this.#surface();
+        revoked = !now || now.manager !== surface.manager || now.context !== surface.context || now.window !== surface.window
+          || now.context.embedderElement !== embedder || now.window.gBrowser?.selectedBrowser !== embedder
+          || now.manager.documentURI !== documentURI || !this.#current() || services.isNormalWindow(surface.window) !== true;
+      } catch { revoked = true; }
+      return !revoked;
+    };
+    const lifetime = { root, isActive, controller, services, alias: null, unwatch: [] };
+    try { lifetime.alias = services.registerUnderstandOwner({ window, current: isActive, signal: controller.signal }); }
+    catch (error) {
+      controller.abort();
+      const code = UNDERSTAND_ERRORS.has(error?.code) ? error.code : "UNDERSTAND_UNAVAILABLE";
+      fail(code, `setup checks are not available here (${code})`);
+    }
+    this.#setup = lifetime;
+    const end = () => { if (this.#setup === lifetime) this.#releaseSetup(); };
+    const watched = { ...surface, embedder };
+    lifetime.unwatch = [this.#watchSelection(watched, end), this.#watchLocation(watched, end)];
+    return lifetime;
+  }
+
+  /** Ends this document's setup owner (its check only), synchronously. */
+  #releaseSetup() {
+    const lifetime = this.#setup;
+    if (!lifetime) return;
+    this.#setup = null;
+    for (const unwatch of lifetime.unwatch) unwatch?.();
+    lifetime.controller.abort();
+    try { lifetime.services.releaseUnderstandOwner?.(lifetime.alias); } catch (error) { console.error(error); }
+  }
+
   /** This document's current owner for a refusal only (a malformed acceptance
    * spends its own token through it); one whose predicate failed is ended,
    * which ends its leases too. Never makes an owner. */
@@ -1031,6 +1152,7 @@ export class AboutAxioSozoParent extends Base {
       // ends its key and Understand work at once, before the next authority check would.
       this.#cancelKeyOperations();
       this.#releaseUnderstand();
+      this.#releaseSetup();
       this.#endReceipts();
       console.error(error.message);
       return toErrorReply(error);
@@ -1208,6 +1330,7 @@ export class AboutAxioSozoParent extends Base {
       try { unsubscribe(); } catch (error) { console.error(error); }
     }
     this.#releaseUnderstand();
+    this.#releaseSetup();
     // The page was hidden: its trusted actions still running end here too.
     this.#endReceipts();
   }

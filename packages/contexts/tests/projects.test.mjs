@@ -93,7 +93,7 @@ test('manifest v2: app-scoped environments, unique per (app, name), written as v
   throwsCode(() => validateManifest(manifest({ version: 2, environments: [{ name: 'local', app: 'web', base_url: 'http://a.com' }, { name: 'local', app: 'web', base_url: 'http://b.com' }] })), 'INVALID_MANIFEST', '$.environments[1]');
   throwsCode(() => validateManifest(manifest({ environments: [{ name: 'local', app: 'web', base_url: 'http://a.com' }] })), 'INVALID_MANIFEST', '$.environments[0].app');
   for (const app of ['', 'Web', 'a b', '-x', 'x'.repeat(41), 7]) throwsCode(() => validateManifest(manifest({ version: 2, environments: [{ name: 'local', app, base_url: 'http://a.com' }] })), 'INVALID_MANIFEST');
-  throwsCode(() => validateManifest(manifest({ version: 3 })), 'INVALID_MANIFEST', '$.version');
+  throwsCode(() => validateManifest(manifest({ version: 4 })), 'INVALID_MANIFEST', '$.version');
   const text = serializeManifest(m);
   assert.match(text, /^\{\n {2}"version": 2,/);
   assert.deepEqual(Object.keys(JSON.parse(text).environments[0]), ['name', 'app', 'base_url']);
@@ -105,8 +105,9 @@ test('manifest v2: app-scoped environments, unique per (app, name), written as v
 test('draftToManifest: multi-app drafts, secondary Vercel, the optional production URL', async () => {
   const draft = await expected('tauri-plus-web');
   const m = draftToManifest(draft);
-  assert.equal(m.version, 2);
+  assert.equal(m.version, 3, 'service start commands need manifest v3');
   assert.deepEqual(m.environments, [{ name: 'local', app: 'desktop', base_url: 'http://localhost:1420/' }, { name: 'local', app: 'web', base_url: 'http://localhost:5173/' }]);
+  assert.deepEqual(m.services.map(s => [s.command, s.cwd ?? null]), [['npm run tauri -- dev', null], ['npm run dev', 'apps/web']]);
   assert.deepEqual(m.services.map(s => s.app), ['desktop', 'web']);
   assert.ok(m.surfaces.every(s => s.prominence === undefined), 'default prominence is not written');
   assert.equal(mainWebApp(m), 'web');
@@ -115,8 +116,9 @@ test('draftToManifest: multi-app drafts, secondary Vercel, the optional producti
   const byApp = draftToManifest(draft, { production_url: { web: 'https://www.example.com', desktop: '' } });
   assert.deepEqual(byApp.environments.filter(e => e.name === 'production'), [{ name: 'production', app: 'web', base_url: 'https://www.example.com/' }]);
   assert.equal(draftToManifest(draft, { production_url: null }).environments.length, 2);
-  // Single-app projects: the production URL is project-wide and the manifest stays v1.
-  const single = draftToManifest(await expected('next-app'), { production_url: 'https://next.example.com/app/' });
+  // Single-app projects: the production URL is project-wide; without commands the manifest stays v1.
+  const nextDraft = await expected('next-app');
+  const single = draftToManifest({ ...nextDraft, services: nextDraft.services.map(({ command: _c, ...s }) => s) }, { production_url: 'https://next.example.com/app/' });
   assert.equal(single.version, 1);
   assert.deepEqual(single.environments.at(-1), { name: 'production', base_url: 'https://next.example.com/app' });
   assert.ok(!single.environments.some(e => e.base_url.includes('vercel.com')), 'the Vercel dashboard is never a production URL');
@@ -129,8 +131,10 @@ test('draftToManifest: multi-app drafts, secondary Vercel, the optional producti
   // An edited surface keeps an explicit non-default prominence (→ v2), drops a default one.
   const edited = draftToManifest(await expected('vite-app'), { surfaces: [
     { name: 'CI', url: 'https://ci.example/', kind: 'ci', prominence: 'primary' }, { name: 'Repo', url: 'https://git.example/r', kind: 'repository', prominence: 'primary' }] });
-  assert.deepEqual([edited.version, edited.surfaces[0].prominence, edited.surfaces[1].prominence], [2, 'primary', undefined]);
-  assert.equal(draftToManifest(await expected('vite-app')).version, 1, 'single-app drafts still confirm to v1 manifests');
+  assert.deepEqual([edited.version, edited.surfaces[0].prominence, edited.surfaces[1].prominence], [3, 'primary', undefined]);
+  const vite = await expected('vite-app');
+  assert.equal(draftToManifest({ ...vite, services: vite.services.map(({ command: _c, ...s }) => s) }).version, 1, 'drafts without v2/v3 fields still confirm to v1 manifests');
+  assert.equal(draftToManifest(vite, { services: [] }).version, 1);
 });
 
 test('detection drafts: optional app and prominence, unique per (app, name)', () => {

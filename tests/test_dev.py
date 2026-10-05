@@ -17,6 +17,12 @@ class EntrypointGates(unittest.TestCase):
         with patch.dict(os.environ, {"AXIOSOZO_ENGINE_SWITCHING": "1"}):
             self.assertEqual(dev.browser_environment()["AXIOSOZO_ENGINE_SWITCHING"], "0")
 
+    def test_browser_uses_volume_root_cef_from_any_build_root(self):
+        environment = dev.browser_environment()
+        self.assertEqual(environment["AXIOSOZO_CEF_ROOT"], str(dev.storage.VOLUME))
+        self.assertEqual(environment["AXIOSOZO_CEF_BINARY"],
+                         str(dev.storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"))
+
     def test_failed_build_does_not_test_stale_binary(self):
         with patch.object(dev, "run", return_value=0) as run, \
              patch.object(dev, "build_core", return_value=1), \

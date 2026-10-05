@@ -10,7 +10,7 @@ export const UNDERSTAND_FIXTURE_INPUTS = Object.freeze([
   },
   {
     "relative": "packages/provider-host/fixtures/understand/common.mjs",
-    "sha256": "d07ea433278b132d43845427db37589b2a234352a49d5b8038061baa7d90967a",
+    "sha256": "a7970176dff6e3f6305331e5a25ac4128d9fd10ec97f4ff326102c3463a37936",
     "maxBytes": 65536
   },
   {
@@ -25,7 +25,7 @@ export const UNDERSTAND_FIXTURE_INPUTS = Object.freeze([
   },
   {
     "relative": "packages/provider-host/src/understand.mjs",
-    "sha256": "d33974e47c875277bf036f344a87be1768c46a30cce44d2766257f13375b7a06",
+    "sha256": "4fb3555468fc4d5983b967c15bd3bd384ba1f24b0de5dc491ec0b27428206496",
     "maxBytes": 65536
   },
   {
@@ -40,12 +40,12 @@ export const UNDERSTAND_FIXTURE_INPUTS = Object.freeze([
   },
   {
     "relative": "policy.json",
-    "sha256": "422eb7e6350873c38fd6ac35435eec63fc053ea94be313d5ccbcc49329b9b4b6",
+    "sha256": "2eb957e809c1b0c3e0edfeab0055460c2c1fbb42816ec55f17d7152bedd1b982",
     "maxBytes": 32768
   },
   {
     "relative": "understand_fixture.py",
-    "sha256": "afd9cd9de936a957e9fd8b948e07cb7d9eabafabab8cc3faf7138ede0daa227e",
+    "sha256": "703a5199a6d6cf8831ff32acc4b7f1261ac6663d92a37ec1c9e0ff2bb87f2b1a",
     "maxBytes": 65536
   }
 ].map(Object.freeze));

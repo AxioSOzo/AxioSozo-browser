@@ -71,7 +71,7 @@ for (const name of ['harbor-suite', 'inkline']) {
 
 test('harbor-suite: Convex, Clerk, Vercel and Sentry; Tauri, macOS, iOS and Android; vercel.json domains; agent presence', async () => {
   const d = await expected('harbor-suite');
-  assert.equal(d.version, 2);
+  assert.equal(d.version, 3);
   assert.deepEqual(d.integrations.map(i => i.id), ['vercel', 'convex', 'clerk', 'sentry'], 'INTEGRATIONS order');
   assert.deepEqual(d.integrations.find(i => i.id === 'convex').sources.slice(0, 1), ['package.json#dependencies']);
   assert.ok(d.integrations.find(i => i.id === 'convex').sources.includes('convex/'), 'the convex directory is evidence');
@@ -107,7 +107,7 @@ test('inkline: Convex, Stripe, Vercel; native apps; documented domains unconfirm
 });
 
 test('convex.json joins the root allowlist only, parsed for functions only', () => {
-  assert.equal(DETECTION_FILES.at(-1), 'convex.json');
+  assert.ok(DETECTION_FILES.includes('convex.json'));
   assert.ok(!PACKAGE_DETECTION_FILES.includes('convex.json'));
   const d = detect({ files: { 'convex.json': JSON.stringify({ functions: 'src/convex/', authInfo: [{ domain: 'https://secret.example-auth.com' }], node: { externalPackages: ['x'] } }) } });
   assert.deepEqual(d.integrations, [{ id: 'convex', name: 'Convex', dashboard_url: 'https://dashboard.convex.dev/', sources: ['convex.json#functions'] }]);
@@ -120,14 +120,16 @@ test('inventoryPlan: fixed entries, per package dir, caps, invalid dirs dropped'
   const base = inventoryPlan();
   assert.deepEqual(base.list, ['docs', '.agent-worktrees', 'ios', 'macos']);
   assert.deepEqual(base.check, ['AGENTS.md', 'CLAUDE.md', '.claude', '.codex', '.agent-worktrees', 'convex', 'convex/schema.ts', 'convex/http.ts',
-    'android', 'build.gradle', 'build.gradle.kts', 'android/build.gradle', 'android/build.gradle.kts']);
+    'android', 'build.gradle', 'build.gradle.kts', 'android/build.gradle', 'android/build.gradle.kts',
+    'dev', 'bin/dev', 'script/dev', 'scripts/dev', 'script/server', 'dev.sh', 'start.sh', 'run.sh', 'scripts/dev.sh',
+    'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock', 'package-lock.json']);
   assert.ok(Object.isFrozen(base) && Object.isFrozen(base.list));
   const p = inventoryPlan({ packageDirs: ['apps/web', 'apps/web', '../x', '.hidden', 'node_modules/a', '/abs', 7, 'apps/ios'] });
   assert.deepEqual(p.list.slice(4), ['apps/web', 'apps/web/ios', 'apps/web/macos', 'apps/ios', 'apps/ios/ios', 'apps/ios/macos']);
-  assert.deepEqual(p.check.slice(13, 18), ['apps/web/convex', 'apps/web/build.gradle', 'apps/web/build.gradle.kts', 'apps/web/android/build.gradle', 'apps/web/android/build.gradle.kts']);
+  assert.deepEqual(p.check.slice(27, 32), ['apps/web/convex', 'apps/web/build.gradle', 'apps/web/build.gradle.kts', 'apps/web/android/build.gradle', 'apps/web/android/build.gradle.kts']);
   const many = inventoryPlan({ packageDirs: Array.from({ length: 40 }, (_, i) => `packages/p${i}`) });
   assert.equal(many.list.length, MAX_INVENTORY_LIST);
-  assert.equal(many.check.length, 13 + 24 * 5, 'at most 24 package dirs');
+  assert.equal(many.check.length, 27 + 24 * 5, 'at most 24 package dirs');
   assert.ok(many.check.length <= MAX_INVENTORY_CHECK);
   throwsCode(() => inventoryPlan({ packageDirs: 'apps/*' }), 'INVALID_INPUT', '$.packageDirs');
   for (const ok of ['docs', 'apps/web', 'apps/web/ios', 'macos']) assert.ok(isInventoryListPath(ok), ok);
@@ -285,15 +287,20 @@ test('integrations: dependency names and config presence only, never keys or env
   assert.equal(detect({ packages }).integrations[0].sources.length, 8);
 });
 
-test('without inventory or docs: version 2 with empty agents; drafts v1 still validate; v2 validation is strict', () => {
+test('without inventory or docs: version 3 with empty agents; drafts v1 and v2 still validate; validation is strict', () => {
   const d = detect({ files: { 'package.json': JSON.stringify({ name: 'plain', scripts: { dev: 'vite' } }) } });
-  assert.equal(d.version, 2);
-  assert.deepEqual([d.integrations, d.platforms, d.domains, d.agents], [[], [], [], { files: [], dirs: [], worktrees: 0 }]);
-  const { integrations: _i, platforms: _p, domains: _d, agents: _a, ...v1 } = d;
+  assert.equal(d.version, 3);
+  assert.deepEqual([d.integrations, d.platforms, d.domains, d.agents, d.icon], [[], [], [], { files: [], dirs: [], worktrees: 0 }, null]);
+  assert.equal(d.services[0].command, 'npm run dev');
+  const { integrations: _i, platforms: _p, domains: _d, agents: _a, icon: _icon, ...withCommands } = d;
+  const v1 = { ...withCommands, services: d.services.map(({ command: _c, ...s }) => s) };
+  throwsCode(() => validateDetectionDraft({ ...d, version: 2 }), 'INVALID_DRAFT', '$.icon');
+  throwsCode(() => validateDetectionDraft({ ...withCommands, version: 1 }), 'INVALID_DRAFT', '$.services[0].command');
+  assert.equal(validateDetectionDraft({ ...v1, integrations: [], platforms: [], domains: [], agents: d.agents, version: 2 }).version, 2, 'version 2 drafts keep validating');
   assert.equal(validateDetectionDraft({ ...v1, version: 1 }).version, 1, 'version 1 drafts keep validating');
   throwsCode(() => validateDetectionDraft({ ...v1, version: 1, agents: d.agents }), 'INVALID_DRAFT', '$.agents');
   throwsCode(() => validateDetectionDraft({ ...v1, version: 2 }), 'INVALID_DRAFT', '$.integrations');
-  throwsCode(() => validateDetectionDraft({ ...d, version: 3 }), 'INVALID_DRAFT');
+  throwsCode(() => validateDetectionDraft({ ...d, version: 4 }), 'INVALID_DRAFT');
   const dom = { host: 'app.acme.io', origin: 'docs', source: 'docs/domains.md', confirmed: false };
   assert.equal(validateDetectionDraft({ ...d, domains: [dom] }).domains[0].host, 'app.acme.io');
   throwsCode(() => validateDetectionDraft({ ...d, domains: [{ ...dom, confirmed: true }] }), 'INVALID_DRAFT', '$.domains[0].confirmed');

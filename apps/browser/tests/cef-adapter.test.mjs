@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { CEFEngineAdapter, CEF_VERSION, CHROMIUM_VERSION, readAXCF,
-  validateCEFTarget, validateSurface, fitCEFRenderSurface, validCEFSessionRuntime,
+  validateCEFTarget, validateSurface, fitCEFRenderSurface, validCEFSessionRuntime, validCEFRoot,
   validateCEFInput, allowedFixtureURL, allowedWebURL } from '../chrome/CEFEngineAdapter.sys.mjs';
 import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey, transferableGeckoURL } from '../chrome/CEFPresenter.sys.mjs';
 
@@ -313,6 +313,19 @@ test('CEF runtime must be the owned session of the actual Gecko profile',()=>{
     [root+'/runtime/0123456789abcdef/../other',session+'/gecko'],
     ['/Volumes/DevStorage/runtime/0123456789abcdef/development','/Volumes/DevStorage/runtime/0123456789abcdef/development/gecko']
   ]) assert.equal(validCEFSessionRuntime(root,candidate,gecko),false);
+  const sub=root+'/workstation', subSession=sub+'/runtime/0123456789abcdef/development';
+  assert.equal(validCEFSessionRuntime(sub,subSession,subSession+'/gecko'),true);
+  assert.equal(validCEFSessionRuntime(sub+'/nested',sub+'/nested/runtime/0123456789abcdef/development',sub+'/nested/runtime/0123456789abcdef/development/gecko'),false);
+});
+
+test('a sub build root shares the volume-root CEF host only',()=>{
+  const volume='/Volumes/AxioSozoBuild';
+  assert.equal(validCEFRoot(volume,volume),true);
+  assert.equal(validCEFRoot(volume+'/workstation',volume),true);
+  for(const [root,cef] of [[volume+'/workstation',volume+'/workstation'],[volume,volume+'/workstation'],
+    [volume+'/workstation','/Volumes/DevStorage'],['/Volumes/AxioSozoBuildX/workstation',volume],
+    [volume+'/a/b',volume],[volume+'/..',volume],[volume,''],[volume,undefined]])
+    assert.equal(validCEFRoot(root,cef),false,`${root} ${cef}`);
 });
 
 test('unsupported native resize restores the previous authorized geometry',async()=>{

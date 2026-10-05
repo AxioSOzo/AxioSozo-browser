@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "Tauri Plus Web",
   "kind": "desktop",
   "kind_source": {
@@ -28,6 +28,7 @@
       "url": "http://localhost:1420/",
       "port": 1420,
       "app": "desktop",
+      "command": "npm run tauri -- dev",
       "source": "src-tauri/tauri.conf.json build.devUrl",
       "guess": false
     },
@@ -36,6 +37,8 @@
       "url": "http://localhost:5173/",
       "port": 5173,
       "app": "web",
+      "command": "npm run dev",
+      "cwd": "apps/web",
       "source": "Vite default port (apps/web/package.json scripts.dev)",
       "guess": true
     }
@@ -95,6 +98,7 @@
   ],
   "refused": [],
   "warnings": [],
+  "icon": null,
   "integrations": [
     {
       "id": "vercel",

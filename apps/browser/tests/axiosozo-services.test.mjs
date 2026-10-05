@@ -842,7 +842,7 @@ const neverRead = /\.env|AGENTS|CLAUDE|\.claude|xcodeproj|pbxproj/u;
 test("detection v2 runs every phase through the containment reader; agent files and native folders are names only", { skip }, async () => {
   const h = harness({ tree: RICH_TREE });
   const draft = await h.services.detect("/work/shop");
-  assert.equal(draft.version, 2);
+  assert.equal(draft.version, 3);
   assert.deepEqual(draft.integrations.map(item => item.id), ["vercel", "convex", "clerk"]);
   assert.deepEqual(draft.platforms.map(item => [item.kind, item.name]), [["ios", "Shop"]]);
   assert.deepEqual(draft.domains.map(item => [item.host, item.origin, item.confirmed]),
@@ -865,7 +865,7 @@ test("without a containment reader nothing is read; the native reader is made on
   await lazy.services.listProjects();
   await lazy.services.listContexts();
   assert.equal(created, 0, "loading the service or the store creates no reader");
-  assert.equal((await lazy.services.detect("/work/shop")).version, 2);
+  assert.equal((await lazy.services.detect("/work/shop")).version, 3);
   assert.equal(created, 1);
   const broken = harness({ tree: RICH_TREE, deps: { reader: null, createReader: async () => { throw new Error("helper checksum mismatch"); } } });
   await assert.rejects(broken.services.detect("/work/shop"), error => error.code === "READ_CONTAINMENT_UNAVAILABLE" && !/checksum/u.test(error.message));

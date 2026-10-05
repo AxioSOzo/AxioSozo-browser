@@ -2,7 +2,7 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { createProjectReader } from "./ProjectReader.sys.mjs";
 
-export const PROJECT_READER_SHA256 = "e8656e89f7d9ce57b47f6b55a707b0535d39796af35ef60e92b3a331714d6356";
+export const PROJECT_READER_SHA256 = "518683c0d572cfa2ad3b3f2c7c5ecacd73e266023fac1648a98e323059fbf0a8";
 export const PROJECT_READER_PYTHON = "/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11";
 const VOLUME = "/Volumes/AxioSozoBuild";
 const RESERVED = new Set(["zen", "toolchains", "cargo-home", "cargo-target", "caches", "runtime", "tmp",

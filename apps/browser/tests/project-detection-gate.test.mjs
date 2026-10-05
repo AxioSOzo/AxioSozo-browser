@@ -64,7 +64,7 @@ test('an admitted canonical root is checked before metadata and again before the
   const f = fixture({ allowCanonicalRoot: path => { seen.push({ path, metadataBefore: f.calls.rootMetadata }); return true; } });
   const result = await f.detector.detect(f.root);
   assert.equal(result.canonicalRoot, f.canonical);
-  assert.equal(result.draft.version, 2);
+  assert.equal(result.draft.version, 3);
   assert.equal(seen.length, 2);
   assert.deepEqual(seen.map(check => check.path), [f.canonical, f.canonical]);
   assert.equal(seen[0].metadataBefore, 0);
@@ -91,7 +91,7 @@ test('omitting admission preserves the generic detector API', async () => {
   const f = fixture();
   const result = await f.detector.detect(f.root);
   assert.equal(result.canonicalRoot, f.canonical);
-  assert.equal(result.draft.version, 2);
+  assert.equal(result.draft.version, 3);
 });
 
 test('a non-function admission dependency is rejected at construction', () => {

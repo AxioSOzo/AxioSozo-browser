@@ -19,4 +19,9 @@ export const BRIEF = { version: 1, product: '  Synthetic shop for testing.  ',
   risks: ['No tests for checkout'] };
 export const EXPLANATION = { version: 1, summary: 'The API base URL is missing.',
   items: [{ error: 'TypeError: x is undefined', likely_cause: 'config not loaded', where: 'src/config.ts' }] };
-export const documentFor = prompt => prompt.includes('understand request: explain_errors') ? EXPLANATION : BRIEF;
+export const SETUP = { version: 1, name: 'Harbor Suite', kind: 'web', kind_reason: 'Web storefront with a background worker, started with pnpm',
+  icon: 'apps/web/public/icon.png',
+  services: [{ name: 'web', kind: 'web', command: 'pnpm dev', cwd: 'apps/web', url: 'http://localhost:5173/' },
+    { name: 'worker', kind: 'worker', command: 'pnpm run worker', cwd: null, url: null }] };
+export const documentFor = prompt => prompt.includes('understand request: explain_errors') ? EXPLANATION
+  : prompt.includes('understand request: setup') ? SETUP : BRIEF;

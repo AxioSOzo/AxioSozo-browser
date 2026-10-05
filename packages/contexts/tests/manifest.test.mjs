@@ -15,8 +15,8 @@ test('draftToManifest strips provenance and applies edits', async () => {
   const draft = await expected('vite-app');
   const m = draftToManifest(draft);
   assert.deepEqual(m, {
-    version: 1, name: 'vite-app', kind: 'web', environments: [{ name: 'local', base_url: 'http://localhost:5173/' }],
-    services: [{ name: 'Vite dev server', url: 'http://localhost:5173/', port: 5173 }],
+    version: 3, name: 'vite-app', kind: 'web', environments: [{ name: 'local', base_url: 'http://localhost:5173/' }],
+    services: [{ name: 'Vite dev server', url: 'http://localhost:5173/', port: 5173, command: 'npm run dev' }],
     surfaces: draft.surfaces.map(({ name, url, kind }) => ({ name, url, kind })),
   });
   assert.ok(Object.isFrozen(m));

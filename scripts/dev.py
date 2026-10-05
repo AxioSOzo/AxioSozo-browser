@@ -275,7 +275,9 @@ def browser_environment():
             "AXIOSOZO_PROVIDER_HOME": str(Path.home()),
             "AXIOSOZO_DISCOVERY_PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "AXIOSOZO_ENGINE_SWITCHING": "0",
-            "AXIOSOZO_CEF_BINARY": str(storage.BUILD_ROOT / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"),
+            # The CEF component is built only at the volume root; sub build roots share it.
+            "AXIOSOZO_CEF_ROOT": str(storage.VOLUME),
+            "AXIOSOZO_CEF_BINARY": str(storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"),
             "AXIOSOZO_PYTHON": sys.executable}
 
 

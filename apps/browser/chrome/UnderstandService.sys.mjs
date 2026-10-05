@@ -4,13 +4,15 @@
 // DOM-free privileged facade. Production and offline construction are separate.
 // Every project/filesystem/process boundary is an injected trusted callback.
 import { createUnderstand, projectBinding, sameProjectBinding, makeBriefRecord,
-  withProjectBrief, UNDERSTAND_LIVE } from "./Understand.sys.mjs";
+  withProjectBrief, UNDERSTAND_LIVE, SETUP_MODELS, pickSetupCli } from "./Understand.sys.mjs";
 import { createManifestAcceptance, acceptanceSnapshot }
   from "./ProjectManifestAccept.sys.mjs";
 
 export const SERVICE_LIMITS = Object.freeze({ owners: 64, history: 8, leases: 32, publications: 32,
   leaseMs: 120000, startupMs: 5000, closeMs: 1000 });
 const PROJECT = /^p_[a-z0-9]{4,32}$/u;
+// A folder being added (understand-v1 §5.1): a privileged preview binding, never a project id.
+const PREVIEW = /^s_[a-z0-9]{6,40}$/u;
 const REQUEST = /^[A-Za-z0-9_.:-]{1,160}$/u;
 const TOKEN = /^[A-Za-z0-9_-]{16,128}$/u;
 const OFFLINE_ROOT = /^\/Volumes\/AxioSozoBuild\/workstation\/gui-fixtures\/understand-[0-9a-f]{32}\/projects\/(?:harbor|inkline)$/u;
@@ -41,6 +43,10 @@ const sameJSON = (left, right) => JSON.stringify(left) === JSON.stringify(right)
 const denied = (request_id, cli) => freeze({ version: 1, request_id, kind: "brief", cli,
   status: "unavailable", reason: UNDERSTAND_LIVE, document: null, data_sent: false, duration_ms: 0 });
 const stale = result => freeze({ ...result, status: "cancelled", reason: "STALE_PROJECT", document: null });
+// Setup answers name the automatically chosen client (or none) and its model.
+const setupAnswer = (result, cli) => freeze({ ...result, kind: "setup", cli, model: cli ? SETUP_MODELS[cli] ?? null : null });
+const deniedSetup = (request_id, reason = UNDERSTAND_LIVE) => setupAnswer({ version: 1, request_id, kind: "setup", cli: null,
+  status: "unavailable", reason, document: null, data_sent: false, duration_ms: 0 }, null);
 
 /** Always closed: accepts no runtime/opener/test flag. */
 export function createUnderstandService(dependencies) { return createFacade(dependencies, null); }
@@ -63,6 +69,9 @@ function createFacade(dependencies, openRuntime) {
       || manifestIO !== null && (typeof manifestIO?.snapshot !== "function" || typeof manifestIO?.accept !== "function")) fail("INVALID_DEPENDENCIES");
   const owners = new Map(), jobs = new Map(), epochs = new Map(), leases = new Map(), reservations = new Set();
   const publications = new Map(), writing = new Set(), inspecting = new Set(), lifetime = new AbortController();
+  // Setup checks in flight: preview id → { binding, current } (never persisted).
+  const previews = new Map();
+  let previewSequence = 0;
   let closed = false, retired = false, controller = null, opening = null, runtime = null, roots = null;
   let metadata = Object.freeze([]), submitting = null, immediateSequence = 0, readsReserved = 0, lastClock = -1;
   const now = () => { const at = clock(); if (!Number.isSafeInteger(at) || at < lastClock || at < 0) fail("INVALID_TIME"); lastClock = at; return at; };
@@ -206,9 +215,10 @@ function createFacade(dependencies, openRuntime) {
           runtime = Object.freeze({ request: (...args) => value.transport.request(...args),
             cancel: (...args) => value.transport.cancel(...args), close: dispose });
           controller = createUnderstand({ core, runtime, timers, now, uuid, testOnlyAllowRun: true,
-            lookupProject: id => snapshot(id).binding, onState: controllerState,
+            lookupProject: id => (previews.has(id) ? previews.get(id).binding : snapshot(id).binding), onState: controllerState,
             authorizeContext: (context, binding) => roots.includes(binding.canonicalRoot)
-              && current(context.owner, binding, context.stamp) });
+              && (context.setup === true ? previewCurrent(context.owner, binding)
+                : current(context.owner, binding, context.stamp)) });
           return controller;
         } catch { abandoned = true; retired = true; lifetime.abort(); if (returned) await dispose(); fail("UNDERSTAND_UNAVAILABLE"); }
         finally { timers.clearTimeout(timer); lifetime.signal.removeEventListener("abort", onAbort); }
@@ -220,6 +230,11 @@ function createFacade(dependencies, openRuntime) {
     shape(params, ["projectId", "cli"], ["timeoutMs"]);
     if (typeof params.projectId !== "string" || !PROJECT.test(params.projectId) || !["claude-code", "codex"].includes(params.cli)
         || params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 10000 || params.timeoutMs > 300000)) fail("INVALID_PARAMS");
+  }
+  function previewCurrent(owner, binding) {
+    const item = previews.get(binding.id);
+    if (!item || !live(owner) || !sameProjectBinding(item.binding, binding) || !admitted(binding.canonicalRoot)) return false;
+    try { return item.current() === true; } catch { return false; }
   }
   function projectParams(params) { shape(params, ["projectId"]); if (typeof params.projectId !== "string" || !PROJECT.test(params.projectId)) fail("INVALID_PARAMS"); }
   function immediateId() {
@@ -313,6 +328,50 @@ function createFacade(dependencies, openRuntime) {
         const terminal = jobs.get(completedId)?.terminal;
         if (terminal) finishRead(completedId, { status: "cancelled", reason: "STALE_PROJECT", data_sent: terminal.data_sent });
       }
+      readsReserved--;
+    }
+  }
+  /**
+   * Setup check of a folder being added (understand-v1 §3.3, §5.1). The
+   * privileged caller (Services) supplies the preview binding of a picked,
+   * detected folder and its synchronous `current` predicate; pages never do.
+   * Production answers NOT_AUTHORIZED before looking at either. The client is
+   * chosen automatically from what is installed (Codex, else Claude Code) and
+   * runs with its cheapest suitable model. Nothing is persisted: the validated
+   * document goes back to the caller only while owner and preview still hold.
+   */
+  async function setup(owner, params) {
+    const ownerData = requireOwner(owner);
+    if (!openRuntime) return deniedSetup(immediateId());
+    shape(params, ["binding", "current"], ["timeoutMs"]);
+    const binding = projectBinding(params.binding);
+    if (!PREVIEW.test(binding.id) || typeof params.current !== "function" || params.timeoutMs !== undefined
+        && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 10000 || params.timeoutMs > 300000)) fail("INVALID_PARAMS");
+    if (!OFFLINE_ROOT.test(binding.canonicalRoot) || !admitted(binding.canonicalRoot)) fail("INVALID_PROJECT");
+    if (readsReserved >= 5) return deniedSetup(immediateId(), "QUEUE_FULL");
+    readsReserved++;
+    const id = `${binding.id}${++previewSequence}`;
+    const bound = freeze({ ...binding, id: PREVIEW.test(id) ? id : binding.id });
+    try {
+      previews.set(bound.id, { binding: bound, current: params.current });
+      const active = () => previewCurrent(owner, bound);
+      const api = await ensureRuntime();
+      requireOwner(owner);
+      if (!active() || !roots.includes(bound.canonicalRoot)) fail("STALE_PROJECT");
+      if (!metadata.length) {
+        const value = await api.available({ isActive: active });
+        metadata = freeze(value.clis.map(({ cli, version }) => ({ cli, version })));
+      }
+      const cli = pickSetupCli(metadata.map(item => item.cli));
+      if (!cli) return deniedSetup(immediateId(), "CLI_NOT_INSTALLED");
+      const completion = await api.run({ projectId: bound.id, kind: "setup", cli,
+        ...(params.timeoutMs === undefined ? {} : { timeoutMs: params.timeoutMs }) },
+      { signal: ownerData.abort.signal, context: { owner, setup: true }, isActive: active });
+      requireOwner(owner);
+      if (!active() || !sameProjectBinding(completion.binding, bound)) return setupAnswer(stale(completion.result), cli);
+      return setupAnswer(completion.result, cli);
+    } finally {
+      previews.delete(bound.id);
       readsReserved--;
     }
   }
@@ -433,7 +492,7 @@ function createFacade(dependencies, openRuntime) {
       throw new UnderstandServiceError(ALLOWED_ERRORS.has(error?.code) ? error.code : "SERVICE_FAILURE");
     }
   };
-  return Object.freeze({ createOwner, releaseOwner, invalidateProject, state: safe(state), available: safe(available), read: safe(read),
+  return Object.freeze({ createOwner, releaseOwner, invalidateProject, state: safe(state), available: safe(available), read: safe(read), setup: safe(setup),
     cancel, preview: safe(preview), accept: safe(accept), reinspect: safe(reinspect), close,
     diagnostics: () => freeze({ closed, retired, owners: owners.size, leases: leases.size, previews: reservations.size,
       publications: publications.size, writes: writing.size, inspections: inspecting.size, reads: readsReserved, runtime: controller !== null, ...controller?.diagnostics() }) });

@@ -13,10 +13,12 @@ export {
   DEFAULT_CONTEXT_STORE, DEFAULT_RULE_STORE, DEFAULT_LEDGER, EFFECTS, OUTCOMES, REASON_CODES, JEV_REASON_CODES,
   CONTEXT_TYPES, PROJECT_KINDS, SURFACE_KINDS, OBSERVATIONS, OVERRIDES, AGENT_ACCESS, REFUSAL_REASONS, MANIFEST_STATES,
   SURFACE_PROMINENCE, PRIMARY_SURFACE_KINDS, MANIFEST_VERSIONS, CONTEXT_STORE_VERSION, surfaceProminence, environmentKey,
-  needsManifestV2, migrateContextStore, projectsInContext,
+  needsManifestV2, needsManifestV3, migrateContextStore, projectsInContext,
   // workstation-v1 §1–§2: detection draft v2, project record v2, context store v3.
   CONTEXT_STORE_VERSIONS, PROJECT_RECORD_VERSIONS, INTEGRATION_IDS, PLATFORM_KINDS, DOMAIN_ORIGINS, AGENT_FILES, AGENT_DIRS, DEFAULT_SHARED_SITES,
   BRIEF_APP_KINDS, UNDERSTAND_CLIS, MAX_USER_CONTEXT_ID, EMPTY_AGENT_PRESENCE, validateBriefRecord, upgradeProject, isProjectId,
+  // Project setup: manifest v3 icon and service commands, the Understand setup answer.
+  SETUP_SERVICE_KINDS, ICON_EXTENSIONS, validateIconPath, validateSetupDocument,
 } from './schema.mjs';
 export {
   MAX_FILE_BYTES, DETECTION_FILES, isAllowedPath, detectionRefusal, detectProject,
@@ -25,7 +27,14 @@ export {
   // workstation-v1 §1: inventory and documented-domains phases, integrations, domains.
   MAX_INVENTORY_LIST, MAX_INVENTORY_CHECK, MAX_DOCUMENT_CHILDREN, inventoryPlan, inventoryRefusal, isInventoryListPath, isInventoryCheckPath,
   documentFiles, documentRefusal, isDocumentPath, INTEGRATIONS, integrationForPackage, VENDOR_HOST_SUFFIXES, isProductHost, documentedHosts,
+  iconCandidatesFor,
 } from './detect.mjs';
+// workstation-v1 §1.5: start commands and the project icon.
+export {
+  ROOT_SCRIPTS, LOCKFILES, PACKAGE_MANAGERS, packageManager, runScript, startCommand, readmeFacts, makeTargets, procfileProcesses,
+  MAX_ICON_BYTES, MAX_ICON_LISTINGS, MAX_ICON_CANDIDATES, ICON_DIR_NAMES, BRAND_DIR_NAMES, isIconDir, isIconFile, iconRefusal, iconListPlan,
+  iconCandidates, chooseIcon, appIconFiles,
+} from './setup.mjs';
 export {
   MANIFEST_PATH, draftToManifest, parseManifest, serializeManifest, assertNoSecrets, draftManifestState, withProductionUrl, mainWebApp,
 } from './manifest.mjs';

@@ -20,7 +20,9 @@ Reached from chrome over the existing provider-host stdio transport
 | `understand/cancel` | `{ request_id }` | `{ cancelled: boolean }` |
 | `understand/available` | `{}` | `{ clis: [{ cli, path, version }] }` from metadata discovery only (no auth or process launch, including `--version`) |
 
-- `kind` ∈ `brief`, `explain_errors`. `cli` ∈ `claude-code`, `codex`.
+- `kind` ∈ `brief`, `explain_errors`, `setup`. `cli` ∈ `claude-code`, `codex`.
+  `setup` is used while the user adds a project folder (§3.3); it takes no
+  `input`, like `brief`.
 - `project_root`: absolute, existing directory, not `/`, not `$HOME`.
 - `input` (`explain_errors` only): `{ url, errors: [{ level, text, source, line }] }`
   (≤ 50 errors, text ≤ 1000 chars, url http(s) without query/fragment).
@@ -54,7 +56,7 @@ Reached from chrome over the existing provider-host stdio transport
 { "version": 1, "request_id": "…", "kind": "brief", "cli": "claude-code",
   "status": "ok" | "failed" | "cancelled" | "timeout" | "unavailable" | "invalid_output" | "busy",
   "reason": null | <fixed reason below>,
-  "document": <brief | error_explanation> | null,
+  "document": <brief | error_explanation | setup> | null,
   "data_sent": true | false,       // true once the CLI was started (it may contact its provider)
   "duration_ms": 1234 }
 ```
@@ -84,6 +86,57 @@ explicit test launch seam.
 ```jsonc
 { "version": 1, "summary": "≤ 400", "items": [ { "error": "≤ 200", "likely_cause": "≤ 400", "where": "relative path ≤ 200 | null" } ] }  // ≤ 10
 ```
+
+### 3.3 `setup` document
+
+The agent reads the folder (read-only) and reports the project type, its most
+likely logo/icon file, and the services with their development start commands.
+
+```jsonc
+{ "version": 1,
+  "name": "1–80, single line | null",          // product name as the project presents itself; null if unclear
+  "kind": "web|desktop|mobile|cli|library",     // a browser or other native app is desktop, even in Rust/C++
+  "kind_reason": "0–160, single line",          // e.g. "Custom Firefox/Zen desktop browser started with ./dev"
+  "icon": "relative image path | null",
+  "services": [ { "name": "1–64, single line",
+                  "kind": "web|desktop|mobile|api|worker|docs|other",
+                  "command": "1–200, single line",   // exact dev start command typed in a terminal, e.g. "./dev", "pnpm dev"
+                  "cwd": "relative directory | null", // null = project root
+                  "url": "local URL | null" } ] }    // ≤ 8; null when nothing is served (desktop apps, workers)
+```
+
+- Single line: no U+0000–U+001F or U+007F. Strings are trimmed, then
+  length-checked.
+- Relative path (`icon`, `cwd`): ≤ 200 chars; not starting with `/` or `~`; no
+  `\`, `?`, `#` or URL scheme (`^[a-z][a-z0-9+.-]*:`); ≤ 16 `/`-separated
+  segments, each non-empty, not `.`/`..`, not matching `^\.env` (any case).
+  `icon` additionally: no segment starting with `.`, and the extension is one
+  of `png`, `svg`, `ico`, `webp`, `jpg`, `jpeg` (any case).
+- `url`: ≤ 200 chars, `http:`/`https:`, hostname exactly `localhost`,
+  `127.0.0.1` or `[::1]`, explicit port, no credentials, query or fragment (the
+  raw string contains no `?` or `#`). Normalized to the URL's `href`, without
+  the trailing `/` when the path is `/` (`http://localhost:5173`).
+- Service names need not be unique. One invalid item makes the whole document
+  invalid; nothing is dropped silently. The validated document is frozen.
+
+#### Models and provider selection (`setup` only)
+
+`setup` uses the cheapest suitable model per CLI (`SETUP_MODELS`); `brief` and
+`explain_errors` keep the CLI's default model and their argument arrays are
+unchanged.
+
+| CLI | Model | Arguments |
+| --- | --- | --- |
+| `codex` | `gpt-6-luna` | `exec -m gpt-6-luna -c model_reasoning_effort="low" --sandbox read-only …` |
+| `claude-code` | `claude-sonnet-5-5` | `--print --model claude-sonnet-5-5 --output-format json --json-schema <SETUP_SCHEMA> …` |
+| `antigravity` | `gemini-3.8-flash-low` | planned, not runnable: no Understand route in this build |
+
+Source: the model ids were taken from the installed CLIs' own model lists, with
+no provider call (Codex 0.160.0 ships `gpt-6-luna`; Claude Code ships
+`claude-sonnet-5-5`; agy ships `gemini-3.8-flash-low/medium/high`).
+
+Automatic selection (`pickSetupCli(availableClis)`): the first of `codex`,
+`claude-code` present in the given CLI names (Codex preferred), else `null`.
 
 Validation is strict (unknown keys rejected, strings trimmed and capped,
 hosts validated). Anything else → `invalid_output`, `document: null`.
@@ -136,3 +189,6 @@ never become global event payloads.
 - 2 October 2026 — created for Plan 4.
 - 3 October 2026 — integrate the guarded browser facade, manifest acceptance and
   accurate direct-child cleanup limits; retain live authorization closed.
+- 5 October 2026 — add the `setup` kind (§3.3) with its strict document,
+  cheapest-model table and Codex-first automatic CLI selection; live runs
+  remain NOT_AUTHORIZED.

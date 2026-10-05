@@ -182,6 +182,12 @@ export function ruleToForm(rule) {
   };
 }
 
+// Manifest v3 shapes, checked again by the contexts core when the project is saved.
+const validCommand = text => typeof text === "string" && text.length >= 1 && [...text].length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/u.test(text);
+const validFolder = text => typeof text === "string" && text.length <= 200 && !text.startsWith("/") && !text.includes("\\")
+  && text.split("/").length <= 16 && text.split("/").every(part => part && part !== "." && part !== ".." && !/[\u0000-\u001f\u007f]/u.test(part));
+const validIcon = text => validFolder(text) && !text.split("/").some(part => part.startsWith(".")) && /\.(png|svg|ico|webp|jpe?g)$/iu.test(text);
+
 function parseInteger(text, min, max) {
   const trimmed = String(text ?? "").trim();
   if (!/^[0-9]+$/.test(trimmed)) return null;
@@ -358,16 +364,24 @@ function environmentRow(item) {
   return row;
 }
 
+// A service row: its address (optional since manifest v3), its start command
+// and the folder that runs in, and whether it is kept.
+function serviceRow(item) {
+  return { ...reviewRow(item, ["name", "url", "port", "command", "cwd"]), app: appOrNull(item.app), enabled: item.enabled !== false };
+}
+
 /** Review state for the add-project sheet. contextUuid: the space it will live in. */
 export function draftToReview(draft, { contextUuid = null } = {}) {
+  const icon = typeof draft.icon?.path === "string" ? draft.icon : null;
   return {
     name: draft.name ?? "",
     kind: draft.kind ?? "web",
     kindSource: { source: draft.kind_source?.source ?? "", guess: draft.kind_source?.guess === true },
+    icon: icon ? { path: icon.path, source: icon.source ?? "", guess: icon.guess === true } : null,
     contextUuid,
     productionUrl: "",
     environments: (draft.environments ?? []).map(environmentRow),
-    services: (draft.services ?? []).map(item => ({ ...reviewRow(item, ["name", "url", "port"]), app: appOrNull(item.app) })),
+    services: (draft.services ?? []).map(serviceRow),
     surfaces: (draft.surfaces ?? []).map(item => ({ ...reviewRow(item, ["name", "url", "kind"]),
       prominence: surfaceProminence(item), enabled: true })),
     frameworks: [...(draft.frameworks ?? [])],
@@ -452,6 +466,7 @@ export function projectToReview(project) {
   const confirmed = item => ({ ...item, source: "confirmed", guess: false });
   return draftToReview({
     name: manifest.name, kind: manifest.kind, kind_source: { source: "confirmed", guess: false },
+    icon: typeof manifest.icon === "string" ? { path: manifest.icon, source: "confirmed", guess: false } : null,
     environments: manifest.environments.map(confirmed),
     services: manifest.services.map(confirmed),
     surfaces: manifest.surfaces.map(confirmed),
@@ -549,23 +564,35 @@ export function reviewToManifest(review) {
 
   const services = [];
   (review.services ?? []).forEach((row, index) => {
-    if (isBlank(row, ["name", "url", "port"])) return;
+    if (row.enabled === false || isBlank(row, ["name", "url", "port", "command"])) return;
     const app = appOrNull(row.app);
     const serviceName = String(row.name ?? "").trim();
-    const url = normalizeWebUrl(String(row.url ?? "").trim());
-    const port = parseInteger(row.port, 1, 65535);
+    const label = validName(serviceName) ? serviceName : `Service ${index + 1}`;
+    const command = String(row.command ?? "").trim().replace(/\s+/g, " ");
+    const cwd = String(row.cwd ?? "").trim().replace(/^\.\/+/, "").replace(/\/+$/, "");
     if (!validName(serviceName)) add("services", `Service ${index + 1}: enter a name.`);
-    if (!url) add("services", `Service ${index + 1}: enter an http or https address without query or fragment.`);
-    if (port === null) add("services", `Service ${index + 1}: port must be 1 to 65535.`);
-    if (!validName(serviceName) || !url || port === null) return;
-    const move = moved.find(item => item.app === app && item.from === port)
-      ?? (app === null ? null : moved.find(item => item.app === null && item.from === port));
-    if (move && !move.to) return; // its environment was unticked
-    if (move && move.to.port !== port) {
-      services.push(withApp({ name: serviceName, url: `${move.to.origin}/`, port: move.to.port }, app));
+    if (command && !validCommand(command)) add("services", `${label}: the start command must be one line of at most 200 characters.`);
+    if (cwd && !validFolder(cwd)) add("services", `${label}: the folder must be a path inside the project, such as apps/web.`);
+    const start = command ? { command, ...(cwd ? { cwd } : {}) } : {};
+    if (isBlank(row, ["url", "port"])) {
+      // Manifest v3: a service with a start command only (a desktop app, a worker).
+      if (!command) add("services", `${label}: enter a start command or an address.`);
+      else if (validName(serviceName) && validCommand(command) && (!cwd || validFolder(cwd))) services.push(withApp({ name: serviceName, ...start }, app));
       return;
     }
-    services.push(withApp({ name: serviceName, url, port }, app));
+    const url = normalizeWebUrl(String(row.url ?? "").trim());
+    const port = isBlank(row, ["port"]) && url ? portOf(url) : parseInteger(row.port, 1, 65535);
+    if (!url) add("services", `${label}: enter an http or https address without query or fragment.`);
+    if (port === null) add("services", `${label}: port must be 1 to 65535.`);
+    if (!validName(serviceName) || !url || port === null || (command && !validCommand(command)) || (cwd && !validFolder(cwd))) return;
+    const move = moved.find(item => item.app === app && item.from === port)
+      ?? (app === null ? null : moved.find(item => item.app === null && item.from === port));
+    if (move && !move.to) { if (command) services.push(withApp({ name: serviceName, ...start }, app)); return; } // its address was unticked
+    if (move && move.to.port !== port) {
+      services.push(withApp({ name: serviceName, url: `${move.to.origin}/`, port: move.to.port, ...start }, app));
+      return;
+    }
+    services.push(withApp({ name: serviceName, url, port, ...start }, app));
   });
   for (const env of environments) {
     if (!isLoopback(env.base_url)) continue;
@@ -595,9 +622,13 @@ export function reviewToManifest(review) {
   });
   if (surfaces.length > 64) add("surfaces", "Use at most 64 surfaces.");
 
+  const icon = typeof review.icon?.path === "string" && review.icon.enabled !== false ? review.icon.path : null;
+  if (icon !== null && !validIcon(icon)) add("icon", "The icon must be an image file inside the project folder.");
   if (errors.length) return { manifest: null, errors };
   const v2 = [...environments, ...services].some(item => item.app) || surfaces.some(item => item.prominence);
-  return { errors, manifest: { version: v2 ? 2 : 1, name, kind: review.kind, environments, services, surfaces } };
+  const v3 = icon !== null || services.some(item => item.command || !item.url);
+  return { errors, manifest: { version: v3 ? 3 : v2 ? 2 : 1, name, kind: review.kind, ...(icon !== null ? { icon } : {}),
+    environments, services, surfaces } };
 }
 
 export const REFUSAL_TEXT = Object.freeze({

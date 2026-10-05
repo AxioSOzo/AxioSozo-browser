@@ -4,6 +4,9 @@ import { ContextsError } from './errors.mjs';
 import { ENV_ORDER } from './environments.mjs';
 import { MANIFEST_PATH, parseManifest } from './manifest.mjs';
 import {
+  ROOT_SCRIPTS, appIconFiles, chooseIcon, iconCandidates, makeTargets, packageManager, procfileProcesses, readmeFacts, runScript, startCommand,
+} from './setup.mjs';
+import {
   AGENT_DIRS, AGENT_FILES, PLATFORM_KINDS, REFUSAL_REASONS, SURFACE_KINDS, clip, deepFreeze, environmentKey, isPlainObject, own,
   surfaceProminence, trimTrailing, utf8Length, validateBaseUrl, validateDetectionDraft, validateHostPattern, validateWebUrl, stripQueryAndFragment,
 } from './schema.mjs';
@@ -21,6 +24,10 @@ export const DETECTION_FILES = Object.freeze([
   'pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json',
   // workstation-v1 §1.1: parsed only for its `functions` string.
   'convex.json',
+  // workstation-v1 §1.5: how the project is started and what it is (start
+  // commands and images in README.md, make/just targets, Procfile.dev
+  // processes, the Nx project type). Never executed.
+  'README.md', 'Makefile', 'justfile', 'Procfile.dev', 'project.json',
 ]);
 const ALLOWED = new Set(DETECTION_FILES);
 export const isAllowedPath = rel => typeof rel === 'string' && ALLOWED.has(rel);
@@ -704,6 +711,10 @@ const INV_LIST_SUFFIXES = Object.freeze(['', '/ios', '/macos']);
 const INV_CHECK_FIXED = Object.freeze([
   'AGENTS.md', 'CLAUDE.md', '.claude', '.codex', '.agent-worktrees', 'convex', 'convex/schema.ts', 'convex/http.ts',
   'android', 'build.gradle', 'build.gradle.kts', 'android/build.gradle', 'android/build.gradle.kts',
+  // workstation-v1 §1.5: start scripts and lockfiles (presence only), as in
+  // setup.mjs ROOT_SCRIPTS and LOCKFILES, spelled out for the reader parity check.
+  'dev', 'bin/dev', 'script/dev', 'scripts/dev', 'script/server', 'dev.sh', 'start.sh', 'run.sh', 'scripts/dev.sh',
+  'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock', 'package-lock.json',
 ]);
 const INV_CHECK_SUFFIXES = Object.freeze(['/convex', '/build.gradle', '/build.gradle.kts', '/android/build.gradle', '/android/build.gradle.kts']);
 const MAX_LISTING_NAMES = 512;
@@ -880,14 +891,16 @@ const slug = s => {
   return clip(trimTrailing(out, '-'), 40);
 };
 
-export function detectProject({ rootName, files = {}, refused = [], packages, inventory, docs } = {}) {
+export function detectProject({ rootName, files = {}, refused = [], packages, inventory, docs, icons } = {}) {
   if (!isPlainObject(files)) throw new ContextsError('INVALID_INPUT', '$.files: expected an object of relative path → text', '$.files');
   if (!Array.isArray(refused)) throw new ContextsError('INVALID_INPUT', '$.refused: expected an array', '$.refused');
   if (packages !== undefined && packages !== null && !isPlainObject(packages)) throw new ContextsError('INVALID_INPUT', '$.packages: expected an object of package dir → { files, refused }', '$.packages');
   if (docs !== undefined && docs !== null && !isPlainObject(docs)) throw new ContextsError('INVALID_INPUT', '$.docs: expected an object of docs path → text', '$.docs');
+  if (icons !== undefined && icons !== null && !isPlainObject(icons)) throw new ContextsError('INVALID_INPUT', '$.icons: expected { listing, sizes }', '$.icons');
   const st = {
     warnings: [], refused: [], envs: [], services: [], surfaces: [], frameworks: [], kinds: [], names: [], registry: [],
   };
+  const entries = []; // { command, source, guess } start commands not tied to a dev server
   const warn = msg => { if (st.warnings.length < MAX_WARNINGS) st.warnings.push(clip(msg, 256)); };
   const takeRefused = (list, prefix, at) => list.forEach((r, i) => {
     if (!isPlainObject(r) || typeof r.path !== 'string' || !REFUSAL_REASONS.includes(r.reason)) throw new ContextsError('INVALID_INPUT', `${at}[${i}]: expected { path, reason }`, `${at}[${i}]`);
@@ -943,8 +956,13 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
   const addEnv = (name, url, source, guess, unit = '', role = 'remote') => {
     try { st.envs.push({ name, base_url: validateBaseUrl(url), source: clip(source, 256), guess, unit, role }); } catch { warn(`${source}: ignored an invalid URL`); }
   };
-  const addService = (name, url, port, source, guess, unit = '', role = 'other') => {
-    try { st.services.push({ name: safeName(name) || 'service', url: validateWebUrl(stripQueryAndFragment(url)), port, source: clip(source, 256), guess, unit, role }); } catch { warn(`${source}: ignored an invalid service URL`); }
+  // `url` may be null for a service that only has a start command (manifest v3).
+  const addService = (name, url, port, source, guess, unit = '', role = 'other', { command = null, cwd = null } = {}) => {
+    if (url === null && !command) return;
+    try {
+      st.services.push({ name: safeName(name) || 'service', url: url === null ? null : validateWebUrl(stripQueryAndFragment(url)), port: url === null ? null : port,
+        source: clip(source, 256), guess, unit, role, command, cwd: command && cwd ? cwd : null });
+    } catch { warn(`${source}: ignored an invalid service URL`); }
   };
   const addSurface = (name, url, kind, source, guess, prominence) => {
     try {
@@ -982,7 +1000,8 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
       const m = parseManifest(root.text[MANIFEST_PATH]);
       const src = MANIFEST_PATH;
       return validateDetectionDraft({
-        version: 2, name: m.name, kind: m.kind, kind_source: { source: src, guess: false },
+        version: 3, name: m.name, kind: m.kind, kind_source: { source: src, guess: false },
+        icon: m.icon ? { path: m.icon, source: src, guess: false } : null,
         environments: m.environments.map(e => ({ ...e, source: src, guess: false })),
         services: m.services.map(s => ({ ...s, source: src, guess: false })),
         surfaces: m.surfaces.map(s => ({ ...s, prominence: surfaceProminence(s), source: src, guess: false })),
@@ -992,6 +1011,9 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
   }
 
   const rootPkgJson = json('package.json');
+  const pm = packageManager({ present: inv.present, pkg: rootPkgJson });
+  // The folder a unit's command runs in (null = the project folder).
+  const cwdOf = u => (u.dir ? u.dir : null);
   const workspaceRoot = own(rootPkgJson, 'workspaces') !== undefined || ['pnpm-workspace.yaml', 'lerna.json', 'turbo.json', 'nx.json'].some(has);
   let remoteFromPackage = null, rootPkg = null;
 
@@ -1024,12 +1046,14 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
       const found = [], budget = { calls: 0 };
       for (const name of order.slice(0, 200)) for (const f of analyzeScript(scripts, name, deps, budget)) found.push(f);
       for (const f of found) framework(f.id);
+      u.scripts = scripts; u.found = found;
       const pj = at('package.json');
+      const run = f => ({ command: runScript(pm, f.script), cwd: cwdOf(u) });
       const web = found.find(f => f.kind === 'web');
       if (web) {
         const source = web.explicit ? `${pj} scripts.${web.script} (${web.id} port ${web.port})` : `${web.label} default port (${pj} scripts.${web.script})`;
         addEnv('local', `http://localhost:${web.port}`, source, !web.explicit, u.dir, 'web');
-        addService(`${web.label} dev server`, `http://localhost:${web.port}`, web.port, source, !web.explicit, u.dir, 'web');
+        addService(`${web.label} dev server`, `http://localhost:${web.port}`, web.port, source, !web.explicit, u.dir, 'web', run(web));
         kind('web', `${pj} scripts.${web.script} (${web.id})`, false, 3);
       } else if (u.isRoot && !workspaceRoot) {
         // Dependency-only guesses are for single-app roots; in a workspace root
@@ -1045,10 +1069,12 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
         }
       }
       for (const f of found.filter(f => f.kind === 'service')) {
-        addService(f.label, `http://localhost:${f.port}`, f.port, `${pj} scripts.${f.script}`, !f.explicit, u.dir);
+        addService(f.label, `http://localhost:${f.port}`, f.port, `${pj} scripts.${f.script}`, !f.explicit, u.dir, 'other', run(f));
       }
       const desktop = found.find(f => f.kind === 'desktop');
       if (desktop) kind('desktop', `${pj} scripts.${desktop.script} (${desktop.id})`, false, 1);
+      // Electron's own start command; Tauri's is added with its config below.
+      if (desktop && desktop.id !== 'tauri') addService(`${desktop.label} app`, null, null, `${pj} scripts.${desktop.script}`, false, u.dir, 'desktop', run(desktop));
       else if (deps.has('electron')) { framework('electron'); kind('desktop', `${pj} dependency electron`, false, 1); }
       if (desktop?.port && !web) {
         const source = `${desktop.label} default port (${pj} scripts.${desktop.script})`;
@@ -1056,6 +1082,7 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
       }
       const mobile = found.find(f => f.kind === 'mobile') ?? (deps.has('expo') || deps.has('react-native') ? { id: deps.has('expo') ? 'expo' : 'react-native', script: null } : null);
       if (mobile) { framework(mobile.id); kind('mobile', mobile.script ? `${pj} scripts.${mobile.script} (${mobile.id})` : `${pj} dependency ${mobile.id}`, false, 2); }
+      if (mobile?.script) addService(`${mobile.label} app`, null, null, `${pj} scripts.${mobile.script}`, false, u.dir, 'other', run(mobile));
       if (u.isRoot) {
         rootPkg = pkg;
         st.names.push([2, safeName(own(pkg, 'name'))]);
@@ -1082,6 +1109,11 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
       if (!conf) continue;
       framework('tauri');
       kind('desktop', at(path), false, 1);
+      // `tauri dev` through the package's own script, else the Cargo subcommand.
+      const tauriScript = (u.found ?? []).find(f => f.id === 'tauri');
+      const tauriRun = tauriScript ? { command: runScript(pm, tauriScript.script), cwd: cwdOf(u) }
+        : isPlainObject(u.scripts) && Object.hasOwn(u.scripts, 'tauri') ? { command: runScript(pm, 'tauri', 'dev'), cwd: cwdOf(u) }
+          : { command: 'cargo tauri dev', cwd: cwdOf(u) };
       const build = own(conf, 'build');
       const dev = str(own(build, 'devUrl')) ?? str(own(build, 'devPath'));
       let devEnv = false;
@@ -1093,8 +1125,9 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
         const before = st.envs.length;
         addEnv('local', url, `${at(path)} ${field}`, false, u.dir, 'desktop');
         devEnv = st.envs.length > before;
-        if (port) addService('Tauri dev server', url, port, `${at(path)} ${field}`, false, u.dir, 'desktop');
+        if (port) addService('Tauri dev server', url, port, `${at(path)} ${field}`, false, u.dir, 'desktop', tauriRun);
       }
+      if (!devEnv) addService('Desktop app (Tauri)', null, null, at(path), false, u.dir, 'desktop', tauriRun);
       if (u.isRoot) st.names.push([0, safeName(str(own(conf, 'productName')) ?? str(own(own(conf, 'package'), 'productName')))]);
       const updater = own(own(conf, 'plugins'), 'updater') ?? own(own(conf, 'tauri'), 'updater');
       const endpoints = own(updater, 'endpoints');
@@ -1191,7 +1224,8 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
         list.push(r);
       }
       for (const r of list) {
-        addService(list.length > 1 ? `${svc} (${r.port})` : svc, `http://localhost:${r.port}`, r.port, `${composePath} services.${clip(svc, 60)}.ports`, r.guess);
+        const up = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(svc) ? { command: `docker compose up ${svc}` } : {};
+        addService(list.length > 1 ? `${svc} (${r.port})` : svc, `http://localhost:${r.port}`, r.port, `${composePath} services.${clip(svc, 60)}.ports`, r.guess, '', 'other', up);
         published++;
       }
     }
@@ -1207,7 +1241,10 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
     const bins = own(cargo, 'bin');
     if (Array.isArray(bins) && bins.length) kind('cli', 'Cargo.toml [[bin]]', false, 4);
     else if (isPlainObject(own(cargo, 'lib'))) kind('library', 'Cargo.toml [lib]', false, 5);
-    else kind('library', p ? 'Cargo.toml [package]' : 'Cargo.toml [workspace]', true, 5);
+    // A workspace root only groups crates; the product is decided elsewhere
+    // (an app bundle, a README start command). It stays the last fallback.
+    else kind('library', p ? 'Cargo.toml [package]' : 'Cargo.toml [workspace]', true, p ? 8 : 9);
+    if (Array.isArray(bins) && bins.length) entries.push({ command: 'cargo run', source: 'Cargo.toml [[bin]]', guess: true, late: true });
     for (const [field, label, k] of [['repository', 'Repository', 'repository'], ['documentation', 'Documentation', 'docs'], ['homepage', 'Homepage', 'other']]) {
       const v = str(own(p, field)); if (v) addSurface(label, v, k, `Cargo.toml package.${field}`, false);
     }
@@ -1241,10 +1278,37 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
     const m = mod && !/\s/.test(mod) ? [line, '', mod] : null;
     if (m && /^[A-Za-z0-9.\-_~/]{1,200}$/.test(m[2]) && !m[2].split('/').some(s => s === '..' || s === '.' || s === '')) {
       st.names.push([5, safeName(m[2].split('/').at(-1))]);
-      kind('library', 'go.mod', true, 5);
+      kind('library', 'go.mod', true, 8);
       if (m[2].split('/')[0].includes('.')) addSurface('pkg.go.dev', `https://pkg.go.dev/${m[2]}`, 'docs', 'go.mod module', true);
     } else warn('go.mod: no valid module line');
   }
+
+  // Nx project.json: an application is never a library, whatever else guessed.
+  const nx = json('project.json');
+  const nxType = str(own(nx, 'projectType'));
+  if (nx) st.names.push([6, safeName(own(nx, 'name'))]);
+  if (nxType === 'library') kind('library', 'project.json projectType', false, 5);
+  if (nxType === 'application') st.kinds = st.kinds.filter(k => !(k.kind === 'library' && k.guess));
+
+  // Start commands documented or kept in the folder (workstation-v1 §1.5),
+  // in order of trust: README code blocks, start scripts, make/just targets.
+  const readme = has('README.md') ? readmeFacts(root.text['README.md']) : { commands: [], images: [] };
+  const addEntry = (command, source, guess) => {
+    const c = startCommand(command);
+    if (c && !entries.some(e => e.command === c) && entries.length < 16) entries.push({ command: c, source: clip(source, 256), guess });
+  };
+  for (const c of readme.commands) addEntry(c, 'README.md', false);
+  for (const script of ROOT_SCRIPTS) if (inv.present.get(script) === 'file') addEntry(script.includes('/') ? script : `./${script}`, `${script} (start script in the folder)`, true);
+  if (has('Makefile')) for (const t of makeTargets(root.text.Makefile)) addEntry(`make ${t}`, `Makefile target ${t}`, false);
+  if (has('justfile')) for (const t of makeTargets(root.text.justfile, { just: true })) addEntry(`just ${t}`, `justfile recipe ${t}`, false);
+  if (has('Procfile.dev') && procfileProcesses(root.text['Procfile.dev']).length) addEntry('foreman start -f Procfile.dev', 'Procfile.dev', true);
+
+  // A macOS app icon in the folder means a desktop app unless a stronger
+  // signal (a framework, a web dev server) said otherwise.
+  const iconListing = isPlainObject(own(icons, 'listing')) ? icons.listing : {};
+  const appIcons = appIconFiles(iconListing);
+  if (appIcons.length) kind('desktop', `${appIcons[0]} (macOS app icon)`, true, 3.5);
+  if (inv.present.get('android') === 'dir') kind('mobile', 'android/ folder', true, 7);
 
   // git remote → repository / issues / CI / releases
   let remote = null;
@@ -1266,7 +1330,13 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
     if (r) { for (const [label, url, k, guess] of forgeSurfaces(r)) addSurface(label, url, k, 'package.json repository', guess); if (r.credentials) warn('package.json: removed credentials from repository URL'); }
   }
 
-  // Kind, name, registry surfaces.
+  // Kind, name, registry surfaces. Native app projects (Xcode, Gradle) count
+  // after web dev servers, so a suite with a web app stays a web project.
+  const extra = v2();
+  for (const p of extra.platforms) {
+    if (p.kind === 'macos') kind('desktop', p.source, false, 3.6);
+    else if (p.kind === 'ios' || p.kind === 'android') kind('mobile', p.source, false, 3.6);
+  }
   const chosenKind = st.kinds.sort((a, b) => a.rank - b.rank)[0] ?? { kind: 'web', source: 'default', guess: true };
   if (['library', 'cli'].includes(chosenKind.kind)) {
     const npmName = rootPkg && own(rootPkg, 'private') !== true && str(own(rootPkg, 'name'));
@@ -1275,7 +1345,21 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
   }
   const name = st.names.filter(([, n]) => n).sort((a, b) => a[0] - b[0])[0]?.[1] || safeName(rootName) || 'project';
 
+  // Without any service command, the best documented start command starts
+  // the project: it joins the one local dev server, or stands on its own.
+  const startEntry = [...entries.filter(e => !e.late), ...entries.filter(e => e.late)][0];
+  if (startEntry && !st.services.some(s => s.command)) {
+    const local = st.services.filter(s => s.url !== null);
+    if (local.length === 1) Object.assign(local[0], { command: startEntry.command, cwd: null });
+    else {
+      const label = { desktop: 'Desktop app', mobile: 'Mobile app', web: 'Dev server', cli: 'Command line', library: 'Dev command' }[chosenKind.kind];
+      addService(label, null, null, startEntry.source, startEntry.guess, '', 'entry', { command: startEntry.command });
+    }
+  }
 
+  // Icon: the manifest's, else the best readable image named by configuration,
+  // the README or an icon-like file name in an icon folder.
+  const icon = chooseIcon(iconCandidatesFor({ files: root.text, packages: units.slice(1), listing: iconListing, readme }), own(icons, 'sizes') ?? {});
 
   // Apps. Each package (and the root) with a local dev server is an app; a
   // Tauri config makes a desktop app whose dev URL replaces the guessed dev
@@ -1327,14 +1411,22 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
   const appOf = x => labels.get(keyOf(x));
   const envList = st.envs.map(e => { const app = appOf(e); return { name: e.name, ...(app ? { app } : {}), base_url: e.base_url, source: e.source, guess: e.guess }; });
   const serviceList = st.services.map(s => {
-    const app = (s.role !== 'other' || s.unit !== '') ? appOf(s) : undefined;
-    return { name: s.name, ...(app ? { app } : {}), url: s.url, port: s.port, source: s.source, guess: s.guess };
+    const app = (s.role !== 'other' && s.role !== 'entry' || s.unit !== '') ? appOf(s) : undefined;
+    return { name: s.name, ...(app ? { app } : {}), ...(s.url !== null ? { url: s.url, port: s.port } : {}),
+      ...(s.command ? { command: s.command } : {}), ...(s.command && s.cwd ? { cwd: s.cwd } : {}), source: s.source, guess: s.guess };
   });
 
-  // Dedupe and cap. Explicit values beat guesses; first wins otherwise.
+  // Dedupe and cap. Explicit values beat guesses; first wins otherwise. A
+  // service that loses keeps nothing, except that its start command moves to
+  // the winner when the winner has none.
   const pick = (list, keyOf2) => {
     const out = new Map();
-    for (const item of list) { const k = keyOf2(item), prev = out.get(k); if (!prev || (prev.guess && !item.guess)) out.set(k, item); }
+    for (const item of list) {
+      const k = keyOf2(item), prev = out.get(k);
+      if (!prev) out.set(k, item);
+      else if (prev.guess && !item.guess) out.set(k, item.command || !prev.command ? item : { ...item, command: prev.command, ...(prev.cwd ? { cwd: prev.cwd } : {}) });
+      else if (!prev.command && item.command) out.set(k, { ...prev, command: item.command, ...(item.cwd ? { cwd: item.cwd } : {}) });
+    }
     return [...out.values()];
   };
   const rank = e => { const i = ENV_ORDER.indexOf(e.name); return i < 0 ? ENV_ORDER.length : i; };
@@ -1345,16 +1437,60 @@ export function detectProject({ rootName, files = {}, refused = [], packages, in
   const superseded = new Set(envList.filter(e => !kept.has(e) && e.guess && !environments.some(x => x.base_url === e.base_url)).map(e => e.base_url));
   const locals = environments.filter(e => e.name === 'local');
   if (new Set(locals.map(e => e.base_url)).size < locals.length) warn('two apps use the same local URL; check the ports in review');
-  let services = pick(serviceList.filter(s => !(s.guess && superseded.has(s.url))), s => s.port);
+  let services = pick(serviceList.filter(s => !(s.guess && s.url && superseded.has(s.url))), s => s.port ?? `command:${s.command}`);
   let surfaces = pick(st.surfaces, s => s.url).map((s, i) => [s, i]).sort(([a, i], [b, j]) => SURFACE_KINDS.indexOf(a.kind) - SURFACE_KINDS.indexOf(b.kind) || i - j).map(([s]) => s);
   const cap = (list, max, label) => { if (list.length > max) warn(`${list.length - max} ${label} beyond the limit of ${max} were dropped`); return list.slice(0, max); };
   environments = cap(environments, 16, 'environments'); services = cap(services, 32, 'services'); surfaces = cap(surfaces, 64, 'surfaces');
 
-  const extra = v2();
   return validateDetectionDraft({
-    version: 2, name, kind: chosenKind.kind, kind_source: { source: chosenKind.source, guess: chosenKind.guess },
+    version: 3, name, kind: chosenKind.kind, kind_source: { source: chosenKind.source, guess: chosenKind.guess }, icon,
     environments, services, surfaces, frameworks: st.frameworks.map(f => clip(f, 64)), files_read, refused: st.refused, warnings: st.warnings, ...extra,
   });
+}
+
+// ------------------------------------------------------- icon search ----
+
+// Images named by project configuration: Tauri bundle.icon (relative to the
+// config), electron-builder and package.json build icons, README images
+// (strongest when called a logo or icon). Paths only; the reader checks them.
+function iconHints({ files = {}, packages = [], readme = null } = {}) {
+  const hints = [];
+  const add = (path, source, weight) => { if (typeof path === 'string' && hints.length < 32) hints.push({ path, source, weight }); };
+  const parse = text => { try { const v = JSON.parse(text); return isPlainObject(v) ? v : undefined; } catch { return undefined; } };
+  const units = [{ dir: '', text: isPlainObject(files) ? files : {} },
+    ...(Array.isArray(packages) ? packages : []).filter(u => isPlainObject(u?.text) && typeof u.dir === 'string')];
+  for (const u of units) {
+    const prefix = u.dir ? `${u.dir}/` : '';
+    for (const path of ['src-tauri/tauri.conf.json', 'tauri.conf.json']) {
+      const conf = typeof u.text[path] === 'string' ? parse(u.text[path]) : undefined;
+      const list = own(own(conf, 'bundle'), 'icon') ?? own(own(own(conf, 'tauri'), 'bundle'), 'icon');
+      const base = resolveRel(u.dir, path.includes('/') ? 'src-tauri' : '');
+      for (const icon of Array.isArray(list) ? list.slice(0, 8) : []) {
+        const rel = typeof icon === 'string' && base !== null ? resolveRel(base, icon) : null;
+        if (rel) add(rel, `${prefix}${path} bundle.icon`, 45);
+      }
+    }
+    const pkg = typeof u.text['package.json'] === 'string' ? parse(u.text['package.json']) : undefined;
+    for (const [value, source] of [[own(own(pkg, 'build'), 'icon'), 'package.json build.icon'], [own(own(own(pkg, 'build'), 'mac'), 'icon'), 'package.json build.mac.icon']]) {
+      const rel = typeof value === 'string' ? resolveRel(u.dir, value) : null;
+      if (rel) add(rel, `${prefix}${source}`, 45);
+    }
+  }
+  const eb = typeof files['electron-builder.json'] === 'string' ? parse(files['electron-builder.json']) : undefined;
+  for (const value of [own(eb, 'icon'), own(own(eb, 'mac'), 'icon')]) { const rel = typeof value === 'string' ? resolveRel('', value) : null; if (rel) add(rel, 'electron-builder.json icon', 45); }
+  const facts = readme ?? (typeof files['README.md'] === 'string' ? readmeFacts(files['README.md']) : null);
+  for (const image of facts?.images ?? []) add(image.path, 'README.md image', /logo|icon|brand/i.test(`${image.alt} ${image.path}`) ? 40 : 10);
+  return hints;
+}
+
+/** Icon candidates for a folder, best first (workstation-v1 §1.5): the reader
+ * asks for the metadata of exactly these paths, then detectProject chooses
+ * the same way. `packages` are { dir, text } units or the reader's
+ * `{ [dir]: { files } }` object. */
+export function iconCandidatesFor({ files = {}, packages = [], listing = {}, readme = null } = {}) {
+  const units = Array.isArray(packages) ? packages
+    : isPlainObject(packages) ? Object.keys(packages).filter(isPackageDir).map(dir => ({ dir, text: own(own(packages, dir), 'files') ?? {} })) : [];
+  return iconCandidates({ listing, hints: iconHints({ files, packages: units, readme }) });
 }
 
 // ------------------------------------------------- detection v2 fields ----

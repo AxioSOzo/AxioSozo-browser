@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "compose-fly",
   "kind": "web",
   "kind_source": {
@@ -19,6 +19,7 @@
       "name": "web",
       "url": "http://localhost:8080/",
       "port": 8080,
+      "command": "docker compose up web",
       "source": "docker-compose.yml services.web.ports",
       "guess": false
     },
@@ -26,6 +27,7 @@
       "name": "api",
       "url": "http://localhost:3000/",
       "port": 3000,
+      "command": "docker compose up api",
       "source": "docker-compose.yml services.api.ports",
       "guess": false
     },
@@ -33,6 +35,7 @@
       "name": "db",
       "url": "http://localhost:5432/",
       "port": 5432,
+      "command": "docker compose up db",
       "source": "docker-compose.yml services.db.ports",
       "guess": false
     },
@@ -40,6 +43,7 @@
       "name": "metrics",
       "url": "http://localhost:9090/",
       "port": 9090,
+      "command": "docker compose up metrics",
       "source": "docker-compose.yml services.metrics.ports",
       "guess": true
     }
@@ -64,6 +68,7 @@
     "docker-compose.yml: services.dns port udp, ignored",
     "docker-compose.yml: services.lan port bound to a non-loopback address, ignored"
   ],
+  "icon": null,
   "integrations": [
     {
       "id": "fly",

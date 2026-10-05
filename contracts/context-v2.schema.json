@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://axiosozo.invalid/contracts/context-v2.schema.json",
-  "title": "AxioSozo detection draft v2, project record v2 and context store v3",
-  "description": "workstation-v1 §1–§2 (Plan 4). Extends context-v1.schema.json, which still defines every unchanged record (context metadata, manifests, detection draft v1 fields, project record v1 fields). Every object rejects unknown properties. Checks delegated to code (packages/contexts/src/schema.mjs): uniqueness of integration ids, domain hosts, account keys and shared-site hosts; host label rules and the 253-byte limit; at most 16 path segments; worktrees > 0 only with .agent-worktrees present; strings are stored trimmed. Version 1 drafts, version 1 project records and store versions 1 and 2 keep validating unchanged.",
+  "title": "AxioSozo detection drafts v2 and v3, manifest v3, project record v2 and context store v3",
+  "description": "workstation-v1 §1–§2 (Plan 4) and §1.5 (project setup: manifest v3, detection draft v3, the Understand setup document). Extends context-v1.schema.json, which still defines every unchanged record (context metadata, manifests, detection draft v1 fields, project record v1 fields). Every object rejects unknown properties. Checks delegated to code (packages/contexts/src/schema.mjs): uniqueness of integration ids, domain hosts, account keys and shared-site hosts; host label rules and the 253-byte limit; at most 16 path segments; worktrees > 0 only with .agent-worktrees present; strings are stored trimmed. Version 1 drafts, version 1 project records and store versions 1 and 2 keep validating unchanged.",
   "$defs": {
     "integrationId": {
       "description": "workstation-v1 §1.4 INTEGRATIONS, in display order.",
@@ -308,6 +308,9 @@
         },
         {
           "$ref": "#/$defs/detectionDraftV2"
+        },
+        {
+          "$ref": "#/$defs/detectionDraftV3"
         }
       ]
     },
@@ -662,7 +665,7 @@
           "$ref": "context-v1.schema.json#/$defs/project/properties/root"
         },
         "manifest": {
-          "$ref": "context-v1.schema.json#/$defs/project/properties/manifest"
+          "$ref": "#/$defs/manifest"
         },
         "manifest_state": {
           "$ref": "context-v1.schema.json#/$defs/project/properties/manifest_state"
@@ -763,6 +766,398 @@
           "$ref": "#/$defs/contextStoreV3"
         }
       ]
+    },
+    "command": {
+      "description": "The command a developer types to start the service, one line (manifest v3).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "iconPath": {
+      "description": "Project icon (manifest v3): an image file inside the project folder; no hidden segments, \".\" or \"..\"; png, svg, ico, webp, jpg or jpeg.",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^(?![~])(?!.*(^|/)\\.)[^/\\\\?#\\u0000-\\u001f\\u007f-\\u009f]+(/[^/\\\\?#\\u0000-\\u001f\\u007f-\\u009f]+)*\\.([Pp][Nn][Gg]|[Ss][Vv][Gg]|[Ii][Cc][Oo]|[Ww][Ee][Bb][Pp]|[Jj][Pp][Ee]?[Gg])$"
+    },
+    "serviceV3": {
+      "description": "Manifest v3 service: a local address (url and port together), a start command, or both. cwd needs a command and is never \"\". url and port together is checked in code.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "context-v1.schema.json#/$defs/name"
+        },
+        "app": {
+          "$ref": "context-v1.schema.json#/$defs/appLabel"
+        },
+        "url": {
+          "$ref": "context-v1.schema.json#/$defs/manifestUrl"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "command": {
+          "$ref": "#/$defs/command"
+        },
+        "cwd": {
+          "$ref": "#/$defs/relativeDir"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "url",
+            "port"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        }
+      ]
+    },
+    "manifestV3": {
+      "description": "Manifest version 3: version 2 plus the optional project icon and service command/cwd. Writers emit the lowest version the fields need.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "environments",
+        "services",
+        "surfaces"
+      ],
+      "properties": {
+        "version": {
+          "const": 3
+        },
+        "name": {
+          "$ref": "context-v1.schema.json#/$defs/name"
+        },
+        "kind": {
+          "$ref": "context-v1.schema.json#/$defs/projectKind"
+        },
+        "icon": {
+          "$ref": "#/$defs/iconPath"
+        },
+        "environments": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "context-v1.schema.json#/$defs/environmentV2"
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/serviceV3"
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "context-v1.schema.json#/$defs/surfaceV2"
+          }
+        }
+      }
+    },
+    "manifest": {
+      "description": "Repository file .axiosozo/project.json, version 1, 2 or 3.",
+      "oneOf": [
+        {
+          "$ref": "context-v1.schema.json#/$defs/manifest"
+        },
+        {
+          "$ref": "#/$defs/manifestV3"
+        }
+      ]
+    },
+    "draftServiceV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source",
+        "guess"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "context-v1.schema.json#/$defs/name"
+        },
+        "app": {
+          "$ref": "context-v1.schema.json#/$defs/appLabel"
+        },
+        "url": {
+          "$ref": "context-v1.schema.json#/$defs/manifestUrl"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "command": {
+          "$ref": "#/$defs/command"
+        },
+        "cwd": {
+          "$ref": "#/$defs/relativeDir"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "guess": {
+          "type": "boolean"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "url",
+            "port"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        }
+      ]
+    },
+    "draftIcon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "source",
+        "guess"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/iconPath"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "guess": {
+          "type": "boolean"
+        }
+      }
+    },
+    "detectionDraftV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "kind_source",
+        "environments",
+        "services",
+        "surfaces",
+        "frameworks",
+        "files_read",
+        "refused",
+        "warnings",
+        "integrations",
+        "platforms",
+        "domains",
+        "agents",
+        "icon"
+      ],
+      "properties": {
+        "version": {
+          "const": 3
+        },
+        "name": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/name"
+        },
+        "kind": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/kind"
+        },
+        "kind_source": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/kind_source"
+        },
+        "environments": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/environments"
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/draftServiceV3"
+          }
+        },
+        "surfaces": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/surfaces"
+        },
+        "frameworks": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/frameworks"
+        },
+        "files_read": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/files_read"
+        },
+        "refused": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/refused"
+        },
+        "warnings": {
+          "$ref": "context-v1.schema.json#/$defs/detectionDraft/properties/warnings"
+        },
+        "integrations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/integration"
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/platform"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/draftDomain"
+          },
+          "description": "Hosts deduplicated, explicit configuration before docs."
+        },
+        "agents": {
+          "$ref": "#/$defs/agentPresence"
+        },
+        "icon": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/draftIcon"
+            }
+          ]
+        }
+      },
+      "description": "workstation-v1 §1.5: detection draft version 2 plus the project icon and service start commands (a service may have a command only)."
+    },
+    "setupDocument": {
+      "description": "understand-v1 §3.3 setup document: what an assistant found while a folder is added. Inert; only values the user keeps reach the manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "name",
+        "kind",
+        "kind_reason",
+        "icon",
+        "services"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "name": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "context-v1.schema.json#/$defs/projectKind"
+        },
+        "kind_reason": {
+          "type": "string",
+          "maxLength": 160,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "icon": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/iconPath"
+            }
+          ]
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind",
+              "command",
+              "cwd",
+              "url"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+              },
+              "kind": {
+                "enum": [
+                  "web",
+                  "desktop",
+                  "mobile",
+                  "api",
+                  "worker",
+                  "docs",
+                  "other"
+                ]
+              },
+              "command": {
+                "$ref": "#/$defs/command"
+              },
+              "cwd": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/relativeDir"
+                  }
+                ]
+              },
+              "url": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}(/[^\\s?#]*)?$"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "oneOf": [

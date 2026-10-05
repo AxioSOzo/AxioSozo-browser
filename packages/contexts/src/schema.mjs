@@ -23,7 +23,7 @@ export const SURFACE_PROMINENCE = Object.freeze(['primary', 'secondary']);
 // Surface kinds shown next to the project by default; every other kind goes
 // behind the "…" menu unless a surface says otherwise.
 export const PRIMARY_SURFACE_KINDS = Object.freeze(['repository', 'package', 'store']);
-export const MANIFEST_VERSIONS = Object.freeze([1, 2]);
+export const MANIFEST_VERSIONS = Object.freeze([1, 2, 3]);
 export const CONTEXT_STORE_VERSION = 3;
 export const CONTEXT_STORE_VERSIONS = Object.freeze([1, 2, 3]);
 export const PROJECT_RECORD_VERSIONS = Object.freeze([1, 2]);
@@ -39,6 +39,10 @@ export const DEFAULT_SHARED_SITES = Object.freeze([
   'github.com', '*.github.com', 'gitlab.com', 'bitbucket.org', 'npmjs.com', '*.npmjs.com', 'stackoverflow.com', 'developer.mozilla.org',
 ]);
 export const BRIEF_APP_KINDS = Object.freeze(['web', 'desktop', 'mobile', 'api', 'docs', 'cli', 'library', 'other']);
+// Understand `setup` document (understand-v1 §3.3): what a service is for.
+export const SETUP_SERVICE_KINDS = Object.freeze(['web', 'desktop', 'mobile', 'api', 'worker', 'docs', 'other']);
+// Project icons are image files inside the project folder (manifest v3 `icon`).
+export const ICON_EXTENSIONS = Object.freeze(['png', 'svg', 'ico', 'webp', 'jpg', 'jpeg']);
 export const UNDERSTAND_CLIS = Object.freeze(['claude-code', 'codex']);
 // Public Gecko userContextIds are 1..UINT32_MAX-1; UINT32_MAX is reserved
 // for extension storage. Routing also permits 0 for the default container.
@@ -197,9 +201,21 @@ function environment(v, code, path, allowApp = false) {
   keys(v, code, path, ['name', 'base_url'], ['app']);
   return withApp({ name: str(v.name, code, `${path}.name`, { pattern: ENV_NAME }), base_url: baseUrl(v.base_url, code, `${path}.base_url`) }, v, code, path, allowApp);
 }
-function service(v, code, path, extra = false, allowNew = extra) {
-  keys(v, code, path, ['name', 'url', 'port', ...(extra ? ['source', 'guess'] : [])], ['app']);
-  const out = withApp({ name: name(v.name, code, `${path}.name`), url: webUrl(v.url, code, `${path}.url`), port: int(v.port, code, `${path}.port`, 1, 65535) }, v, code, path, allowNew);
+// Manifest version 3 lets a service carry the command that starts it (and
+// the folder it runs in); a service without a local address (a desktop app,
+// a worker) then has a command only. url and port always come together.
+function service(v, code, path, extra = false, allowNew = extra, v3 = false) {
+  const prov = extra ? ['source', 'guess'] : [];
+  if (!v3) keys(v, code, path, ['name', 'url', 'port', ...prov], ['app']);
+  else keys(v, code, path, ['name', ...prov], ['app', 'url', 'port', 'command', 'cwd']);
+  const hasUrl = own(v, 'url') !== undefined, hasPort = own(v, 'port') !== undefined, hasCommand = own(v, 'command') !== undefined;
+  if (hasUrl !== hasPort) fail(code, path, 'url and port go together');
+  if (!hasUrl && !hasCommand) fail(code, path, 'a service needs a url and port, a command, or both');
+  if (own(v, 'cwd') !== undefined && !hasCommand) fail(code, `${path}.cwd`, 'cwd requires a command');
+  const local = hasUrl ? { url: webUrl(v.url, code, `${path}.url`), port: int(v.port, code, `${path}.port`, 1, 65535) } : {};
+  const out = withApp({ name: name(v.name, code, `${path}.name`), ...local }, v, code, path, allowNew);
+  if (hasCommand) out.command = command(v.command, code, `${path}.command`);
+  if (own(v, 'cwd') !== undefined) out.cwd = relDir(v.cwd, code, `${path}.cwd`, { allowEmpty: false });
   return extra ? { ...out, ...provenance(v, code, path) } : out;
 }
 function surface(v, code, path, extra = false, allowNew = extra) {
@@ -226,24 +242,31 @@ export function surfaceProminence(surface) {
 }
 
 // Manifest version 1 is the original shape; version 2 additionally allows
-// `app` on environments/services and `prominence` on surfaces. Writers emit
-// version 1 whenever no v2 field is used, so older builds keep reading them.
+// `app` on environments/services and `prominence` on surfaces; version 3
+// adds the project `icon` (an image file in the folder) and service
+// `command`/`cwd`. Writers emit the lowest version the fields need, so older
+// builds keep reading what they can.
 function manifest(v, code, path) {
-  keys(v, code, path, ['version', 'name', 'kind', 'environments', 'services', 'surfaces']);
-  if (!MANIFEST_VERSIONS.includes(v.version)) fail(code, `${path}.version`, 'expected 1 or 2');
-  const v2 = v.version === 2;
+  const v3 = isPlainObject(v) && v.version === 3;
+  keys(v, code, path, ['version', 'name', 'kind', 'environments', 'services', 'surfaces'], v3 ? ['icon'] : []);
+  if (!MANIFEST_VERSIONS.includes(v.version)) fail(code, `${path}.version`, 'expected 1, 2 or 3');
+  const v2 = v.version >= 2;
   return {
     version: v.version,
     name: name(v.name, code, `${path}.name`),
     kind: oneOf(v.kind, PROJECT_KINDS, code, `${path}.kind`),
+    ...(v3 && own(v, 'icon') !== undefined ? { icon: iconPath(v.icon, code, `${path}.icon`) } : {}),
     environments: uniqueEnvNames(arr(v.environments, code, `${path}.environments`, { max: 16 }).map((e, i) => environment(e, code, `${path}.environments[${i}]`, v2)), code, `${path}.environments`),
-    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, false, v2)),
+    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, false, v2, v3)),
     surfaces: arr(v.surfaces, code, `${path}.surfaces`, { max: 64 }).map((s, i) => surface(s, code, `${path}.surfaces[${i}]`, false, v2)),
   };
 }
 // True when a manifest-shaped value uses a field that needs version 2.
 export const needsManifestV2 = m => [...(m?.environments ?? []), ...(m?.services ?? [])].some(x => own(x, 'app') !== undefined) ||
   (m?.surfaces ?? []).some(s => own(s, 'prominence') !== undefined);
+// True when a manifest-shaped value uses a field that needs version 3.
+export const needsManifestV3 = m => own(m, 'icon') !== undefined ||
+  (m?.services ?? []).some(s => ['command', 'cwd'].some(k => own(s, k) !== undefined) || own(s, 'url') === undefined);
 // `firefox` is the deprecated version 1 spelling of `gecko`: read, then normalized.
 export const ENGINES = Object.freeze(['gecko', 'chromium']);
 export const DEPRECATED_ENGINE_ALIASES = Object.freeze({ firefox: 'gecko' });
@@ -296,6 +319,28 @@ function relDir(v, code, path, { allowEmpty = true, max = 200 } = {}) {
   const segs = v.split('/');
   if (segs.length > 16 || segs.some(s => !s || s === '.' || s === '..')) fail(code, path, 'expected a relative path without ".", ".." or empty segments');
   return v;
+}
+// A command typed in a terminal (manifest v3 service, setup document): one line.
+function command(v, code, path) { return line(v, code, path, 1, 200); }
+// A project icon: an image file inside the project folder, never hidden,
+// never a URL or an absolute or home-relative path.
+function iconPath(v, code, path) {
+  relDir(v, code, path, { allowEmpty: false });
+  const segs = v.split('/');
+  if (v.startsWith('~') || /[?#]/.test(v) || /^[a-z][a-z0-9+.-]*:/i.test(v)) fail(code, path, 'expected a relative file path');
+  if (segs.some(seg => seg.startsWith('.'))) fail(code, path, 'hidden files and folders are not allowed');
+  const ext = /\.([A-Za-z0-9]{1,8})$/.exec(segs.at(-1))?.[1].toLowerCase();
+  if (!ICON_EXTENSIONS.includes(ext)) fail(code, path, `expected an image file (${ICON_EXTENSIONS.join(', ')})`);
+  return v;
+}
+export const validateIconPath = v => iconPath(v, 'INVALID_INPUT', '$');
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+// A local development address: http(s) on a loopback host with an explicit port.
+function localUrl(v, code, path) {
+  if (typeof v !== 'string' || v.length > 200) fail(code, path, 'expected a URL of at most 200 characters');
+  const u = parseHttp(v, code, path, { query: false });
+  if (!LOOPBACK_HOSTS.includes(u.hostname) || !u.port) fail(code, path, 'expected a local address such as http://localhost:5173');
+  return u.pathname === '/' ? u.origin : u.href;
 }
 function plainHost(v, code, path) {
   const h = hostPattern(v, code, path);
@@ -402,6 +447,32 @@ function briefRecord(v, code, path) {
   };
 }
 export const validateBriefRecord = v => deepFreeze(briefRecord(v, 'INVALID_BRIEF', '$'));
+// understand-v1 §3.3 setup document: what an assistant found while a folder
+// is being added. Inert data; only values the user keeps in the review sheet
+// reach the manifest.
+function setupDocument(v, code, path) {
+  keys(v, code, path, ['version', 'name', 'kind', 'kind_reason', 'icon', 'services']);
+  if (v.version !== 1) fail(code, `${path}.version`, 'expected 1');
+  const trimmed = (x, p) => { if (typeof x !== 'string') fail(code, p, 'expected a string'); return x.trim(); };
+  return {
+    version: 1,
+    name: nullable(v.name, x => line(x, code, `${path}.name`, 1, 80)),
+    kind: oneOf(v.kind, PROJECT_KINDS, code, `${path}.kind`),
+    kind_reason: line(v.kind_reason, code, `${path}.kind_reason`, 0, 160),
+    icon: nullable(v.icon, x => iconPath(trimmed(x, `${path}.icon`), code, `${path}.icon`)),
+    services: arr(v.services, code, `${path}.services`, { max: 8 }).map((s, i) => {
+      const p = `${path}.services[${i}]`; keys(s, code, p, ['name', 'kind', 'command', 'cwd', 'url']);
+      return {
+        name: line(s.name, code, `${p}.name`, 1, 64),
+        kind: oneOf(s.kind, SETUP_SERVICE_KINDS, code, `${p}.kind`),
+        command: command(s.command, code, `${p}.command`),
+        cwd: nullable(s.cwd, x => relDir(trimmed(x, `${p}.cwd`), code, `${p}.cwd`, { allowEmpty: false })),
+        url: nullable(s.url, x => localUrl(trimmed(x, `${p}.url`), code, `${p}.url`)),
+      };
+    }),
+  };
+}
+export const validateSetupDocument = v => deepFreeze(setupDocument(v, 'INVALID_SETUP', '$'));
 
 const PROJECT_V1_KEYS = ['version', 'id', 'root', 'manifest', 'manifest_state', 'context_uuid', 'trusted', 'created_at', 'updated_at'];
 const PROJECT_V2_KEYS = ['detected', 'container', 'shared_sites', 'accounts', 'brief'];
@@ -471,18 +542,25 @@ function contextStore(v, code, path) {
   }
   return { version: v.version, contexts, projects };
 }
-// Detection draft version 1 (HANDOFF_3) and version 2 (workstation-v1 §1.4:
-// version 1 plus integrations, platforms, domains and agents).
+// Detection draft version 1 (HANDOFF_3), version 2 (workstation-v1 §1.4:
+// version 1 plus integrations, platforms, domains and agents) and version 3
+// (version 2 plus the project icon and service commands).
 const DRAFT_V1_KEYS = ['version', 'name', 'kind', 'kind_source', 'environments', 'services', 'surfaces', 'frameworks', 'files_read', 'refused', 'warnings'];
 function detectionDraft(v, code, path) {
-  const v2 = isPlainObject(v) && v.version === 2;
-  keys(v, code, path, v2 ? [...DRAFT_V1_KEYS, ...V2_DRAFT_KEYS] : DRAFT_V1_KEYS);
-  if (v.version !== 1 && v.version !== 2) fail(code, `${path}.version`, 'expected 1 or 2');
+  const version = isPlainObject(v) ? v.version : undefined;
+  const v2 = version === 2 || version === 3, v3 = version === 3;
+  keys(v, code, path, [...DRAFT_V1_KEYS, ...(v2 ? V2_DRAFT_KEYS : []), ...(v3 ? ['icon'] : [])]);
+  if (![1, 2, 3].includes(version)) fail(code, `${path}.version`, 'expected 1, 2 or 3');
   keys(v.kind_source, code, `${path}.kind_source`, ['source', 'guess']);
-  const out = draftV1(v, code, path);
-  return v2 ? { ...out, version: 2, ...v2Fields(v, code, path, true) } : out;
+  const out = draftV1(v, code, path, v3);
+  if (!v2) return out;
+  const extra = v3 ? { icon: nullable(v.icon, x => {
+    keys(x, code, `${path}.icon`, ['path', 'source', 'guess']);
+    return { path: iconPath(x.path, code, `${path}.icon.path`), ...provenance(x, code, `${path}.icon`) };
+  }) } : {};
+  return { ...out, version, ...extra, ...v2Fields(v, code, path, true) };
 }
-function draftV1(v, code, path) {
+function draftV1(v, code, path, v3 = false) {
   return {
     version: 1,
     name: name(v.name, code, `${path}.name`),
@@ -493,7 +571,7 @@ function draftV1(v, code, path) {
       const { source: _s, guess: _g, ...plain } = e;
       return { ...environment(plain, code, p, true), ...provenance(e, code, p) };
     }), code, `${path}.environments`),
-    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, true)),
+    services: arr(v.services, code, `${path}.services`, { max: 32 }).map((s, i) => service(s, code, `${path}.services[${i}]`, true, true, v3)),
     surfaces: arr(v.surfaces, code, `${path}.surfaces`, { max: 64 }).map((s, i) => surface(s, code, `${path}.surfaces[${i}]`, true)),
     frameworks: arr(v.frameworks, code, `${path}.frameworks`).map((f, i) => str(f, code, `${path}.frameworks[${i}]`, { max: 64 })),
     files_read: arr(v.files_read, code, `${path}.files_read`).map((f, i) => str(f, code, `${path}.files_read[${i}]`)),

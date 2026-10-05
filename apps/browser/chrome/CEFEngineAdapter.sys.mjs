@@ -120,8 +120,12 @@ export function fitCEFRenderSurface({ width, height, device_scale }, { maxBytes 
   throw new Error("UNSUPPORTED_SURFACE");
 }
 
+// The project volume, or one named build root directly inside it.
+const BUILD_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?$/u;
+const CEF_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+$/u;
+
 export function validCEFSessionRuntime(root, session, geckoProfile) {
-  if (typeof root !== "string" || !/^\/Volumes\/[A-Za-z0-9_-]+$/u.test(root)
+  if (typeof root !== "string" || !BUILD_ROOT.test(root)
       || typeof session !== "string" || typeof geckoProfile !== "string") return false;
   const prefix = `${root}/runtime/`;
   if (!session.startsWith(prefix)) return false;
@@ -129,6 +133,12 @@ export function validCEFSessionRuntime(root, session, geckoProfile) {
   return parts.length === 2 && /^[0-9a-f]{16}$/u.test(parts[0])
     && /^[A-Za-z0-9-]{1,64}$/u.test(parts[1])
     && geckoProfile === `${session}/gecko`;
+}
+
+/** The CEF root is the build root itself, or the volume that directly contains it. */
+export function validCEFRoot(root, cefRoot) {
+  return typeof root === "string" && typeof cefRoot === "string" && BUILD_ROOT.test(root) && CEF_ROOT.test(cefRoot)
+    && (root === cefRoot || root.slice(0, root.lastIndexOf("/")) === cefRoot);
 }
 
 // Trackpad phases as reported by the engine-view component's NSEvent monitor.
@@ -1137,7 +1147,10 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   const root = Services.env.get("AXIOSOZO_BUILD_ROOT");
   const session = Services.env.get("AXIOSOZO_SESSION_RUNTIME");
   const command = Services.env.get("AXIOSOZO_CEF_BINARY");
-  if (!/^\/Volumes\/[a-zA-Z0-9_-]+$/u.test(root) || command !== `${root}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`
+  // The CEF host is built once at the volume root; a named sub build root
+  // (e.g. /Volumes/AxioSozoBuild/workstation) shares it.
+  const cefRoot = Services.env.get("AXIOSOZO_CEF_ROOT") || root;
+  if (!validCEFRoot(root, cefRoot) || command !== `${cefRoot}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`
       || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path)
       || !(browsingMode === "web"
         ? Services.env.get("AXIOSOZO_ENGINE_SWITCHING") === "1" && origin === BLANK_IDENTITY
