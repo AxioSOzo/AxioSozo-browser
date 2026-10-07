@@ -85,6 +85,21 @@ The parity test detects future allowlist drift. Broad static path shapes are a
 helper ceiling; the service must restrict every operation to its current
 workspace/inventory/document plan.
 
+Project setup (workstation-v1 §1.5) adds, mirrored from `setup.mjs` and
+checked by the parity test:
+
+- **Read:** the root files `README.md`, `Makefile`, `justfile`, `Procfile.dev`
+  and `project.json`.
+- **Presence only:** start scripts and lockfiles.
+- **Icon folders:** listing of folders whose last segment is an icon-folder
+  name, or a logo/icon/brand/mark/symbol folder inside a brand folder.
+- **Icon files:** presence and metadata of image files, plus content reads of
+  readable images (`png`, `svg`, `ico`, `webp`, `jpg`, `jpeg`, at most the
+  usual 256 KiB). `icns` is presence only.
+
+Image paths have at most 8 unhidden safe segments and never `node_modules`.
+The browser validates image bytes before anything is shown.
+
 ## Containment and failure behavior
 
 Every root ancestor and every relative directory is opened from a retained

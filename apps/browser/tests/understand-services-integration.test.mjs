@@ -82,7 +82,7 @@ function fakeHostChild(host) {
   return child;
 }
 
-function fixture({ fixtureMode = true, projects = null, containers = false, manifestIO = null, roots = null, fs = undefined } = {}) {
+function fixture({ fixtureMode = true, projects = null, containers = false, manifestIO = null, roots = null, fs = undefined, pickFolder = undefined } = {}) {
   const clock = fakeClock();
   const seeded = projects ?? [record("p_harbor1", HARBOR, "Harbor"), record("p_inkline1", INKLINE, "Inkline")];
   const files = new Map([["contexts.json", JSON.stringify({ version: 3, contexts: [{ version: 1, workspace_uuid: ORPHAN_SPACE, type: "personal",
@@ -117,7 +117,7 @@ function fixture({ fixtureMode = true, projects = null, containers = false, mani
   const observed = {};
   const services = new AxioSozoServices({
     storageFor, clock: clock.now, timers: clock.timers, randomId: (() => { let n = 0; return prefix => `${prefix}fixture${++n}`; })(),
-    onShutdown: (fn, label) => shutdown.push({ fn, label }), ...(fs ? { fs } : {}),
+    onShutdown: (fn, label) => shutdown.push({ fn, label }), ...(fs ? { fs } : {}), ...(pickFolder ? { pickFolder } : {}),
     rootMetadata: path => { counts.rootMetadata++; return typeof metadata.get(path) === "function" ? metadata.get(path)() : metadata.get(path) ?? null; },
     ...(understandFixture ? { understandFixture } : {}),
     ...(manifestIO ? { createManifestAcceptIO: () => { counts.manifestIO++; return manifestIO; } } : {}),
@@ -228,6 +228,27 @@ test("fixture selection: only the native request picks the offline facade; OFFLI
     assert.equal(f.counts.opens, 1);
     assert.deepEqual(value(await p.request("getUnderstandState", { projectId: "p_harbor1" })).clis, [{ cli: "codex", version: "synthetic-1" }]);
     assert.equal(JSON.stringify(f.events).includes("/fixed"), false);
+  } finally { f.restore(); }
+});
+
+test("production setup check (understand-v1 §5.1): a picked folder on the Projects page is NOT_AUTHORIZED before any folder, root or runtime work", async () => {
+  const f = fixture({ fixtureMode: false, pickFolder: async () => HARBOR });
+  try {
+    const p = page(f, { route: null });
+    assert.equal(code(await p.request("suggestSetup", { root: HARBOR })), "ROOT_NOT_PICKED", "only a folder this page picked");
+    assert.equal(value(await p.request("pickFolder")), HARBOR);
+    const answer = value(await p.request("suggestSetup", { root: HARBOR }));
+    assert.deepEqual([answer.kind, answer.status, answer.reason, answer.cli, answer.model, answer.document, answer.data_sent],
+      ["setup", "unavailable", "NOT_AUTHORIZED", null, null, null, false]);
+    assert.deepEqual([f.counts.rootMetadata, f.counts.opens, f.counts.spawns, f.host.frames.length], [0, 0, 0, 0], "no root, factory, spawn or envelope");
+    assert.equal(f.events.includes("understand"), false);
+    for (const extra of [{ cli: "codex" }, { projectId: "p_harbor1" }, { binding: {} }]) {
+      assert.equal(code(await p.request("suggestSetup", { root: HARBOR, ...extra })), "INVALID_PARAMS", Object.keys(extra)[0]);
+    }
+    assert.equal(value(await p.request("cancelSetup", {})), null);
+    // Another tab in front: the check is not this page's to start.
+    f.zen.window.gBrowser.selectedBrowser = { localName: "browser", other: true };
+    assert.equal(code(await p.request("suggestSetup", { root: HARBOR })), "DOCUMENT_GONE");
   } finally { f.restore(); }
 });
 

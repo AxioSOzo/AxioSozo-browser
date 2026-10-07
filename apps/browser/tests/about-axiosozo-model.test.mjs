@@ -131,7 +131,7 @@ test("service and surface addresses with a query or fragment are refused in the 
   const { manifest, errors } = M.reviewToManifest(review);
   assert.equal(manifest, null);
   const messages = errors.map(error => error.message).join("\n");
-  assert.match(messages, /Service 2: enter an http or https address without query or fragment/u);
+  assert.match(messages, /api: enter an http or https address without query or fragment/u);
   assert.match(messages, /Surface 2: enter an http or https address without query or fragment/u);
 });
 
@@ -253,7 +253,8 @@ test("add-project review, Domo-like: environments grouped per app, production UR
   // Untouched, the review gives the same manifest as the core (apart from base URL trailing slashes).
   const untouched = M.reviewToManifest(review).manifest;
   const reference = core.draftToManifest(draft);
-  assert.equal(untouched.version, 2);
+  assert.equal(untouched.version, 3, "detected start commands need manifest v3");
+  assert.deepEqual(untouched.services.map(s => [s.name, s.command, s.cwd ?? null]), reference.services.map(s => [s.name, s.command, s.cwd ?? null]));
   assert.deepEqual(core.validateManifest(untouched).environments.map(env => [env.app, env.name, env.base_url.replace(/\/$/u, "")]),
     reference.environments.map(env => [env.app, env.name, env.base_url.replace(/\/$/u, "")]));
   assert.deepEqual(untouched.services.map(s => [s.app, s.name, s.port]), reference.services.map(s => [s.app, s.name, s.port]));
@@ -283,7 +284,9 @@ test("add-project review, RemoteRAL-like: + Add environment gets a dev server; g
   review.productionUrl = "https://remoteral.example";
   const { manifest, errors } = M.reviewToManifest(review);
   assert.deepEqual(errors, []);
-  assert.equal(manifest.version, 1, "single-app manifests stay version 1");
+  assert.equal(manifest.version, 3, "the detected start command needs manifest v3");
+  assert.equal(M.reviewToManifest({ ...review, services: review.services.map(row => ({ ...row, command: "" })) }).manifest.version, 1,
+    "single-app manifests without v2/v3 fields stay version 1");
   assert.deepEqual(manifest.environments.map(env => [env.name, env.base_url]),
     [["local", "http://localhost:5173"], ["api", "http://localhost:8787"], ["production", "https://remoteral.example"]]);
   assert.deepEqual(manifest.services.map(s => [s.name, s.port]), [["Vite dev server", 5173], ["Dev server", 8787]]);

@@ -587,7 +587,7 @@ export function reviewToManifest(review) {
     if (!validName(serviceName) || !url || port === null || (command && !validCommand(command)) || (cwd && !validFolder(cwd))) return;
     const move = moved.find(item => item.app === app && item.from === port)
       ?? (app === null ? null : moved.find(item => item.app === null && item.from === port));
-    if (move && !move.to) { if (command) services.push(withApp({ name: serviceName, ...start }, app)); return; } // its address was unticked
+    if (move && !move.to) return; // its address was unticked
     if (move && move.to.port !== port) {
       services.push(withApp({ name: serviceName, url: `${move.to.origin}/`, port: move.to.port, ...start }, app));
       return;
@@ -629,6 +629,95 @@ export function reviewToManifest(review) {
   const v3 = icon !== null || services.some(item => item.command || !item.url);
   return { errors, manifest: { version: v3 ? 3 : v2 ? 2 : 1, name, kind: review.kind, ...(icon !== null ? { icon } : {}),
     environments, services, surfaces } };
+}
+
+// ---------------------------------------------------------------- project setup (workstation-v1 §1.5, understand-v1 §3.3)
+
+/** The project types, as the setup sheet offers them. */
+export const KIND_CHOICES = Object.freeze([["web", "Web app"], ["desktop", "Desktop app"], ["mobile", "Mobile app"],
+  ["cli", "Command line"], ["library", "Library"]]);
+export const SETUP_CLI_LABELS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code" });
+// Service names detection gives when it knows nothing better; an assistant's names replace them.
+const GENERIC_SERVICE_NAMES = new Set(["Dev server", "Dev command", "Desktop app", "Mobile app", "Command line", "service"]);
+
+/** The folder's last segment (the name shown while it is being read). */
+export function folderName(root) {
+  const parts = String(root ?? "").split("/").filter(Boolean);
+  return parts.at(-1) ?? "";
+}
+
+/** A long path shortened in the middle for one line: the start and the last two folders. */
+export function shortPath(root, max = 56) {
+  const text = String(root ?? "");
+  if ([...text].length <= max) return text;
+  const parts = text.split("/");
+  const tail = parts.slice(-2).join("/");
+  return `${parts.slice(0, 3).join("/")}/…/${tail}`;
+}
+
+/** One line for the sheet's setup status, or null to show nothing. `check` is
+ * { phase: "reading" | "checking" | "done" | "failed" | "off", cli, changes }. */
+export function setupStatus(check) {
+  const who = SETUP_CLI_LABELS[check?.cli] ?? "The assistant";
+  switch (check?.phase) {
+    case "reading": return { tone: "busy", text: "Reading the folder…" };
+    case "checking": return { tone: "busy", text: check.cli ? `${who} is checking how this project starts…` : "Checking how this project starts…" };
+    case "done": return { tone: "good", text: check.changes > 0 ? `Checked by ${who}. ${check.changes} ${check.changes === 1 ? "suggestion" : "suggestions"} applied.` : `Checked by ${who}. Nothing to change.` };
+    case "failed": return { tone: "quiet", text: `${who} could not check this folder. What was found is below.` };
+    default: return null;
+  }
+}
+
+/**
+ * Applies an assistant's setup document to the review, leaving every field the
+ * user already changed (`touched`: "name", "kind", "icon", "service:<index>")
+ * alone. Returns what changed, for the status line. The document is inert data:
+ * commands are text the user may keep or edit, never run.
+ */
+export function applySetup(review, doc, { touched = new Set(), cli = null } = {}) {
+  const changes = [];
+  if (!doc || typeof doc !== "object") return changes;
+  const who = SETUP_CLI_LABELS[cli] ?? "assistant";
+  const source = `${who} setup check`;
+  if (!touched.has("kind") && PROJECT_KINDS.includes(doc.kind)) {
+    if (doc.kind !== review.kind) changes.push("kind");
+    review.kind = doc.kind;
+    review.kindSource = { source: doc.kind_reason ? `${who}: ${doc.kind_reason}` : source, guess: false };
+  }
+  if (!touched.has("name") && validName(doc.name ?? "") && doc.name !== review.name) { review.name = doc.name; changes.push("name"); }
+  if (!touched.has("icon") && typeof doc.icon === "string" && validIcon(doc.icon) && doc.icon !== review.icon?.path) {
+    review.icon = { path: doc.icon, source, guess: false, previous: review.icon ?? null };
+    changes.push("icon");
+  }
+  for (const item of Array.isArray(doc.services) ? doc.services : []) {
+    if (!validCommand(item?.command ?? "")) continue;
+    const port = item.url && isLoopback(item.url) ? portOf(item.url) : null;
+    const index = review.services.findIndex(row => (port !== null && Number(row.port) === port) || (row.command && row.command === item.command));
+    if (index >= 0) {
+      if (touched.has(`service:${index}`)) continue;
+      const row = review.services[index];
+      const before = JSON.stringify([row.name, row.command, row.cwd]);
+      if (GENERIC_SERVICE_NAMES.has(row.name) && validName(item.name)) row.name = item.name;
+      row.command = item.command;
+      row.cwd = item.cwd ?? "";
+      row.guess = false;
+      if (JSON.stringify([row.name, row.command, row.cwd]) !== before) changes.push("service");
+      continue;
+    }
+    if (review.services.length >= 32) break;
+    review.services.push({ name: validName(item.name) ? item.name : "Service", url: port !== null ? new URL(item.url).origin + "/" : "",
+      port: port !== null ? String(port) : "", command: item.command, cwd: item.cwd ?? "", app: null, source, guess: false, enabled: true, suggested: true });
+    changes.push("service");
+    // A local address the assistant found also links tabs on it to the project.
+    if (port !== null && !review.environments.some(row => isLoopback(row.base_url) && portOf(row.base_url) === port)) {
+      const taken = new Set(review.environments.filter(row => row.app === null).map(row => row.name));
+      const base = String(item.name).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^[^a-z]+|-+$/g, "").slice(0, 32) || "local";
+      const name = !taken.has("local") ? "local" : !taken.has(base) ? base : `local-${port}`;
+      if (ENV_NAME.test(name) && !taken.has(name)) review.environments.push({ app: null, name, base_url: new URL(item.url).origin,
+        source, guess: false, enabled: true, servicePort: port });
+    }
+  }
+  return changes;
 }
 
 export const REFUSAL_TEXT = Object.freeze({

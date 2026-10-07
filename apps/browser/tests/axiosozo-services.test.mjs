@@ -2318,3 +2318,91 @@ test("project home: console errors are the owner's RAM count and five newest of 
   await h.timers.runAll();
   assert.deepEqual(events, [{ name: "console" }, { name: "console" }], "one trailing event for the burst");
 });
+
+// ---- Project runs (docs/design/projects.md §3) ----------------------------------------
+const RUN_MANIFEST = { version: 3, name: "Shop", kind: "web",
+  environments: [{ name: "local", base_url: "http://localhost:5174" }],
+  services: [{ name: "Vite", url: "http://localhost:5174/", port: 5174, command: "bun run dev", cwd: "apps/web" },
+    { name: "iOS app", command: "make ios" }, { name: "Site", url: "https://shop.example/", port: 443 }],
+  surfaces: [] };
+
+function fakeRunner() {
+  const calls = [];
+  const runs = new Map();
+  const approved = new Set();
+  let onChange = null;
+  const create = ({ approvals, onChange: notify }) => {
+    onChange = notify;
+    return {
+      calls, approvals,
+      async start({ projectId, root, target, approve }) {
+        calls.push(["start", projectId, root, target.key, approve]);
+        if (!approved.has(target.key) && !approve) throw Object.assign(new Error("NEEDS_APPROVAL"), { code: "NEEDS_APPROVAL" });
+        approved.add(target.key);
+        const run = { project_id: projectId, key: target.key, status: "running", started_at: runs.size };
+        runs.set(`${projectId}|${target.key}`, run);
+        notify();
+        return run;
+      },
+      async stop(projectId, key) { calls.push(["stop", projectId, key]); const run = runs.get(`${projectId}|${key}`); if (run) run.status = "stopped"; return !!run; },
+      async stopAll(projectId) { calls.push(["stopAll", projectId]); },
+      get: (projectId, key) => runs.get(`${projectId}|${key}`) ?? null,
+      list: () => [...runs.values()],
+      log: () => ["ready"],
+      dismiss: () => true,
+      isApproved: ({ command }) => [...approved].some(key => RUN_MANIFEST.services.find(s => key.endsWith(s.name))?.command === command),
+      async close() { calls.push(["close"]); },
+    };
+  };
+  return { create, calls, notify: () => onChange?.() };
+}
+
+test("runs: targets come from declared services; a start needs a normal window and an approved command", { skip }, async () => {
+  const runner = fakeRunner();
+  const h = harness({ tree: { ...VITE_TREE, "/work/shop/apps": { dir: true }, "/work/shop/apps/web": { dir: true } }, deps: { createRunner: runner.create } });
+  const project = await h.services.confirmProject({ root: "/work/shop", manifest: RUN_MANIFEST, contextUuid: APP });
+  const listed = await h.services.projectRuns(project.id);
+  assert.equal(listed.available, true);
+  assert.deepEqual(listed.targets.map(t => [t.name, t.kind, t.startable, t.local, t.run]),
+    [["Vite", "web", true, true, null], ["iOS app", "mobile", true, false, null], ["Site", "web", false, false, null]]);
+  const events = [];
+  h.services.on("runs", () => events.push("runs"));
+  const key = listed.targets[0].key;
+  await assert.rejects(h.services.startRun({ window: h.zen.window, projectId: project.id, key }), error => error.code === "NEEDS_APPROVAL");
+  const run = await h.services.startRun({ window: h.zen.window, projectId: project.id, key, approve: true });
+  assert.equal(run.status, "running");
+  assert.deepEqual(runner.calls.at(-1), ["start", project.id, "/work/shop", key, true]);
+  assert.deepEqual(events, ["runs"], "state changes become one name-only event");
+  await assert.rejects(h.services.startRun({ window: h.zen.window, projectId: project.id, key: listed.targets[2].key }), error => error.code === "NO_COMMAND");
+  await assert.rejects(h.services.startRun({ window: h.zen.window, projectId: project.id, key: "nope" }), error => error.code === "UNKNOWN_TARGET");
+  await assert.rejects(h.services.startRun({ window: {}, projectId: project.id, key }), error => error.code === "NO_WINDOW");
+  const privateWindow = fakeZenWindow({ spaces: [{ uuid: GONE, name: "Incognito" }], isPrivate: true });
+  h.services.registerWindow(privateWindow.window, new ZenWorkspaceAdapter(privateWindow.window));
+  await assert.rejects(h.services.startRun({ window: privateWindow.window, projectId: project.id, key }), error => error.code === "PRIVATE_WINDOW");
+  const all = await h.services.listRuns();
+  assert.deepEqual(all.map(item => [item.project_name, item.target?.name, item.status]), [["Shop", "Vite", "running"]]);
+  assert.deepEqual(await h.services.stopRun({ projectId: project.id, key }), { stopped: true });
+  assert.deepEqual(h.services.runLog({ projectId: project.id, key }), ["ready"]);
+  // Forgetting the project stops its runs; the profile shutdown closes the runner.
+  await h.services.removeProject(project.id);
+  assert.deepEqual(runner.calls.at(-1), ["stopAll", project.id]);
+  for (const fn of h.shutdown) await fn();
+  assert.deepEqual(runner.calls.at(-1), ["close"]);
+});
+
+test("runs: a project folder that moved or lies under a denied root is never run in; no runner means unavailable", { skip }, async () => {
+  const runner = fakeRunner();
+  const tree = { ...VITE_TREE, "/work/shop/apps": { dir: true }, "/work/shop/apps/web": { dir: true } };
+  const h = harness({ tree, deps: { createRunner: runner.create } });
+  const project = await h.services.confirmProject({ root: "/work/shop", manifest: RUN_MANIFEST, contextUuid: APP });
+  const key = (await h.services.projectRuns(project.id)).targets[0].key;
+  h.fs.nodes.delete("/work/shop");
+  h.fs.nodes.set("/work/shop", { link: "/private" });
+  await assert.rejects(h.services.startRun({ window: h.zen.window, projectId: project.id, key, approve: true }), error => error.code === "ROOT_MOVED");
+  assert.equal(runner.calls.length, 0);
+  const bare = harness({ tree: VITE_TREE });
+  const other = await bare.services.confirmProject({ root: "/work/shop", manifest: RUN_MANIFEST, contextUuid: APP });
+  assert.equal((await bare.services.projectRuns(other.id)).available, false);
+  await assert.rejects(bare.services.startRun({ window: bare.zen.window, projectId: other.id, key, approve: true }), error => error.code === "RUNS_UNAVAILABLE");
+  assert.deepEqual(await bare.services.listRuns(), []);
+});

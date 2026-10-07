@@ -47,6 +47,8 @@ struct Tab {
   bool textInputScheduled=false;uint64_t textInputAt=0;
   // Trackpad pinch synthesized as a two-point touch sequence (input.inc).
   bool pinching=false;double pinchScale=1,pinchSpan=0,pinchX=0,pinchY=0;uint64_t pinchAt=0;
+  // Page icon: the chosen icon URL, its current download and the last data URL sent.
+  NSString *iconURL=nil,*iconData=nil;uint64_t iconRequest=0;
 };
 static std::map<std::string,Tab*> tabsByKey;
 static std::map<int,Tab*> tabsByBrowser;
@@ -799,6 +801,58 @@ static bool uiCommand(Tab* tab,NSString* method,NSDictionary* command,NSString* 
   releasePrompt(p);complete(requestId,@"success");
   return true;
 }
+// ---- Page icon --------------------------------------------------------------
+// Chromium downloads the page's declared icon (or its default /favicon.ico) with
+// its own network context; cookies are neither sent nor stored for favicons.
+// Zen receives only a small PNG data URL and never fetches the icon itself.
+constexpr uint32_t IconPixels=32;      // 16 pt tab icon at 2x
+constexpr size_t MaxIconBytes=5400;    // base64 + target stays within transport MaxMeta
+static uint64_t iconRequests=0;
+static void sendIcon(Tab* tab,NSString* data){
+  tab->iconData=data;
+  NSMutableDictionary* item=[@{@"event":@"favicon",@"version":@1,@"icon":data} mutableCopy];
+  if(!tab->target[@"native_target_id"])return;
+  item[@"target"]=tab->target;std::string encoded=json(item);
+  if(encoded.size()>axio::MaxMeta-64){tab->iconData=@"";item[@"icon"]=@"";encoded=json(item);}
+  transport.event(encoded);
+}
+static NSString* iconDataURL(cef_image_t* image){
+  if(!image||image->is_empty(image))return @"";
+  int w=0,h=0;cef_binary_value_t* png=image->get_as_png(image,1.0f,1,&w,&h);if(!png)return @"";
+  size_t size=png->get_size(png);NSString* result=@"";
+  if(size&&size<=MaxIconBytes&&w>0&&h>0){
+    NSMutableData* data=[NSMutableData dataWithLength:size];png->get_data(png,data.mutableBytes,size,0);
+    result=[@"data:image/png;base64," stringByAppendingString:[data base64EncodedStringWithOptions:0]];
+  }
+  png->base.release(&png->base);return result;
+}
+// One icon download. CEF owns the only reference; the last release frees it.
+struct IconDownload {
+  cef_download_image_callback_t api{};std::atomic<int> refs{1};NSString* key=nil;uint64_t request=0;
+  IconDownload(){
+    api.base.size=sizeof(api);
+    api.base.add_ref=[](cef_base_ref_counted_t* b){reinterpret_cast<IconDownload*>(b)->refs++;};
+    api.base.release=[](cef_base_ref_counted_t* b){auto* p=reinterpret_cast<IconDownload*>(b);if(--p->refs==0){delete p;return 1;}return 0;};
+    api.base.has_one_ref=[](cef_base_ref_counted_t* b){return int(reinterpret_cast<IconDownload*>(b)->refs==1);};
+    api.base.has_at_least_one_ref=[](cef_base_ref_counted_t* b){return int(reinterpret_cast<IconDownload*>(b)->refs>0);};
+    api.on_download_image_finished=[](cef_download_image_callback_t* self,const cef_string_t*,int,cef_image_t* image){
+      HOLD(image);auto* d=reinterpret_cast<IconDownload*>(self);
+      auto found=tabsByKey.find(keyOf(d->key));Tab* tab=found!=tabsByKey.end()?found->second:nullptr;
+      // A newer icon, document or target replaced this request.
+      if(!tab||tab->closing||tab->iconRequest!=d->request)return;
+      sendIcon(tab,iconDataURL(image));
+    };
+  }
+};
+static void requestIcon(Tab* tab,cef_browser_t* value,NSString* url){
+  if(!url){tab->iconURL=nil;tab->iconRequest=++iconRequests;sendIcon(tab,@"");return;}
+  // The same icon for the next document: resend what Zen already showed.
+  if([url isEqual:tab->iconURL]&&tab->iconData){sendIcon(tab,tab->iconData);return;}
+  tab->iconURL=url;tab->iconData=nil;tab->iconRequest=++iconRequests;
+  auto* download=new IconDownload();download->key=tab->key;download->request=tab->iconRequest;
+  auto text=utf16(url);auto address=view(text);
+  auto* host=value->get_host(value);host->download_image(host,&address,1,IconPixels,0,&download->api);host->base.release(&host->base);
+}
 static void configureDelegation(){
   client.api.get_find_handler=[](cef_client_t*){return finds.retain();};
   finds.api.on_find_result=[](cef_find_handler_t*,cef_browser_t* value,int identifier,int count,const cef_rect_t*,int active,int final_){
@@ -1080,6 +1134,13 @@ static void configureStream(){
   display.api.on_title_change=[](cef_display_handler_t*,cef_browser_t* value,const cef_string_t* title_){
     HOLD(value);Tab* tab=tabFor(value);if(!tab)return;NSString* title=ns(title_);
     tabEvent(tab,@"title",@{@"title":[title substringToIndex:MIN(title.length,1024)]});
+  };
+  display.api.on_favicon_urlchange=[](cef_display_handler_t*,cef_browser_t* value,cef_string_list_t icons){
+    HOLD(value);Tab* tab=tabFor(value);if(!tab||tab->closing)return;
+    // Chromium lists the declared icons in document order, else the default /favicon.ico.
+    NSString* chosen=nil;
+    for(NSString* url in listStrings(icons,32))if(url.length<=4096&&allowedURL(url,true)&&![url isEqual:@"about:blank"]){chosen=url;break;}
+    requestIcon(tab,value,chosen);
   };
   display.api.on_address_change=[](cef_display_handler_t*,cef_browser_t* value,cef_frame_t* frame,const cef_string_t* address){
     HOLD(value);HOLD(frame);Tab* tab=tabFor(value);if(!tab||!frame->is_main(frame))return;NSString* url=ns(address);

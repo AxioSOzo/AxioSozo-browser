@@ -49,6 +49,9 @@ test("kinds: declared kind wins; mobile, desktop, API, worker and web from names
 test("display state: our process, then the port answer, decides what the user sees", () => {
   const web = { local: true }, ios = { local: false };
   assert.equal(displayState(web, { status: "running" }, "down"), "starting");
+  const web5173 = { local: true, port: 5173 };
+  assert.equal(displayState(web5173, { status: "running", detected_url: "http://localhost:5173/" }, "unknown"), "running", "it printed its address");
+  assert.equal(displayState(web5173, { status: "running", detected_url: "http://localhost:5174/" }, "down"), "starting", "another port is not this one");
   assert.equal(displayState(web, { status: "running" }, "up"), "running");
   assert.equal(displayState(ios, { status: "running" }, null), "running");
   assert.equal(displayState(web, { status: "stopping" }, "up"), "stopping");
@@ -96,21 +99,20 @@ test("output: colours and controls are removed; the first printed local address 
 function fakeSpawn() {
   const spawned = [];
   const spawn = async options => {
-    let resolveWait, pushChunk;
+    let resolveWait;
     const chunks = [];
     let waiting = null;
     const proc = {
       pid: 4000 + spawned.length, options, stdinClosed: false, killed: null,
       stdin: { close() { proc.stdinClosed = true; return Promise.resolve(); } },
-      stdout: { readString() { return chunks.length ? Promise.resolve(chunks.shift()) : new Promise(r => { waiting = r; }); } },
+      stdout: { read() { return (chunks.length ? Promise.resolve(chunks.shift()) : new Promise(r => { waiting = r; })).then(bytes => bytes.slice().buffer); } },
       wait: () => new Promise(r => { resolveWait = r; }),
       kill(ms) { proc.killed = ms; return Promise.resolve(); },
-      emit(text) { if (waiting) { const w = waiting; waiting = null; w(text); } else chunks.push(text); },
-      exit(code) { proc.emit(""); resolveWait({ exitCode: code }); },
+      emit(text) { proc.emitBytes(new TextEncoder().encode(text)); },
+      emitBytes(bytes) { if (waiting) { const w = waiting; waiting = null; w(bytes); } else chunks.push(bytes); },
+      exit(code) { proc.emitBytes(new Uint8Array(0)); resolveWait({ exitCode: code }); },
     };
-    pushChunk = proc.emit;
     spawned.push(proc);
-    void pushChunk;
     return proc;
   };
   return { spawn, spawned };
@@ -162,8 +164,13 @@ test("output is kept clean and bounded; the printed address is remembered; exit 
   proc.emit(" line\r\n");
   await flush();
   assert.deepEqual(runner.log("p_1", web.key), ["VITE ready", "  ➜  Local:   http://localhost:5174/", "partial line"]);
+  // A chunk that ends inside a UTF-8 sequence is not the end of the output.
+  const bytes = new TextEncoder().encode("ready ✓\n");
+  proc.emitBytes(bytes.slice(0, 8)); await flush();
+  proc.emitBytes(bytes.slice(8)); await flush();
+  assert.equal(runner.log("p_1", web.key).at(-1), "ready ✓");
   assert.equal(runner.get("p_1", web.key).detected_url, "http://localhost:5174/");
-  assert.equal(runner.get("p_1", web.key).last_line, "partial line");
+  assert.equal(runner.get("p_1", web.key).last_line, "ready ✓");
   proc.emit(Array.from({ length: LOG_LINES + 50 }, (_, i) => `line ${i}`).join("\n") + "\n");
   await flush();
   assert.equal(runner.log("p_1", web.key).length, LOG_LINES);
@@ -233,14 +240,14 @@ function nodeSubprocess(options) {
   const child = nodeSpawn(options.command, options.arguments, { cwd: options.workdir, env: options.environment, stdio: ["pipe", "pipe", "pipe"] });
   const queue = []; let waiting = null; let ended = false;
   const deliver = value => { if (waiting) { const w = waiting; waiting = null; w(value); } else queue.push(value); };
-  child.stdout.setEncoding("utf8");
   child.stdout.on("data", chunk => deliver(chunk));
-  child.stdout.on("end", () => { ended = true; deliver(""); });
+  child.stdout.on("end", () => { ended = true; deliver(Buffer.alloc(0)); });
   const exited = new Promise(resolve => child.on("exit", (code, signal) => resolve({ exitCode: code ?? (signal ? 128 : -1) })));
   return Promise.resolve({
     pid: child.pid,
     stdin: { close() { child.stdin.end(); return Promise.resolve(); } },
-    stdout: { readString() { return queue.length ? Promise.resolve(queue.shift()) : ended ? Promise.resolve("") : new Promise(r => { waiting = r; }); } },
+    stdout: { read() { return (queue.length ? Promise.resolve(queue.shift()) : ended ? Promise.resolve(Buffer.alloc(0)) : new Promise(r => { waiting = r; }))
+      .then(chunk => new Uint8Array(chunk).slice().buffer); } },
     wait: () => exited,
     kill() { child.kill("SIGKILL"); return Promise.resolve(); },
   });

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
-/* F4/F5 runtime additions: environment pill, project block, rule indicator,
+/* F4/F5 runtime additions: environment pill, Projects section and panel, rule indicator,
  * outgoing-data indicator, rule panel, waiting overlay and pause interstitial.
  * Zen/Firefox tokens with system-colour fallbacks; no custom fonts, no motion
  * beyond what prefers-reduced-motion allows. */
@@ -132,71 +132,211 @@
 }
 :is(.axiosozo-waiting, .axiosozo-pause) button:disabled { opacity: 0.6; }
 
-/* ---- Project folders (under the space header of the active space) ---------------
- * Reads like part of Zen's tab list: same row height, radius and hover wash.
- * One quiet row per project; expanded, its environments and primary links sit
- * below like tabs. Everything else is behind "…" or in about:axiosozo. */
-.axiosozo-project-folders {
+/* ---- Projects (ProjectSidebar.sys.mjs; docs/design/projects.md §2) ------------------
+ * Under the space header: a quiet "Projects" heading and one row per project,
+ * the same height rhythm and hover wash as Zen's tabs, but never a tab: a row
+ * opens the project panel beside the sidebar. Colour appears only where it says
+ * something: the project's own icon or container colour, green for a running
+ * server, amber while one starts, red when one stopped with an error. */
+:root {
+  --axiosozo-run-green: light-dark(rgb(36 161 72), rgb(88 214 120));
+  --axiosozo-run-amber: light-dark(rgb(214 140 0), rgb(255 190 70));
+  --axiosozo-run-red: var(--text-color-error, light-dark(rgb(215 0 34), rgb(255 132 128)));
+  --axiosozo-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 3.6c0-.6.6-.9 1.1-.6l6.6 4.4c.4.3.4.9 0 1.2L6.1 13c-.5.3-1.1 0-1.1-.6z'/%3E%3C/svg%3E");
+  --axiosozo-icon-stop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='4' y='4' width='8' height='8' rx='1.6'/%3E%3C/svg%3E");
+  --axiosozo-icon-output: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M3 4.5h10M3 8h10M3 11.5h6'/%3E%3C/svg%3E");
+  --axiosozo-icon-more: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='3.5' cy='8' r='1.4'/%3E%3Ccircle cx='8' cy='8' r='1.4'/%3E%3Ccircle cx='12.5' cy='8' r='1.4'/%3E%3C/svg%3E");
+  --axiosozo-icon-plus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M8 3.5v9M3.5 8h9'/%3E%3C/svg%3E");
+  --axiosozo-icon-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
+  --axiosozo-icon-web: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.3'%3E%3Ccircle cx='8' cy='8' r='5.6'/%3E%3Cpath d='M2.6 8h10.8M8 2.4c1.6 1.6 2.3 3.5 2.3 5.6S9.6 12 8 13.6M8 2.4C6.4 4 5.7 5.9 5.7 8s.7 4 2.3 5.6'/%3E%3C/svg%3E");
+  --axiosozo-icon-api: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3.2c-1.3 0-1.8.6-1.8 1.8v1.4C4.2 7.4 3.7 8 2.8 8c.9 0 1.4.6 1.4 1.6V11c0 1.2.5 1.8 1.8 1.8M10 3.2c1.3 0 1.8.6 1.8 1.8v1.4c0 1 .5 1.6 1.4 1.6-.9 0-1.4.6-1.4 1.6V11c0 1.2-.5 1.8-1.8 1.8'/%3E%3C/svg%3E");
+  --axiosozo-icon-mobile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.3'%3E%3Crect x='4.4' y='1.9' width='7.2' height='12.2' rx='1.8'/%3E%3Cpath d='M7 12h2' stroke-linecap='round'/%3E%3C/svg%3E");
+  --axiosozo-icon-desktop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.3' stroke-linecap='round'%3E%3Crect x='2' y='3' width='12' height='8' rx='1.4'/%3E%3Cpath d='M6 13.6h4M8 11v2.6'/%3E%3C/svg%3E");
+  --axiosozo-icon-worker: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5'/%3E%3Cpath d='M11.8 2.4v2.3H9.5M4.2 13.6v-2.3h2.3'/%3E%3C/svg%3E");
+  --axiosozo-icon-other: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 5 3 3-3 3M8.5 11.5h4'/%3E%3C/svg%3E");
+}
+
+.axiosozo-projects {
   display: flex;
   flex-direction: column;
-  margin: 0 var(--zen-tab-margin, 6px) 4px;
+  margin: 2px var(--zen-tab-margin, 6px) 6px;
   font-size: 12px;
 }
-:root[zen-compact-mode="true"] .axiosozo-project-folders { display: none; }
-.axiosozo-project-toggle,
-.axiosozo-project-link > button,
-.axiosozo-project-overflow {
+/* A plain reset at the lowest specificity, so every rule below wins over it. */
+:where(.axiosozo-projects, .axiosozo-project-panel) button {
   appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 30px;
-  padding: 0 8px;
+  margin: 0;
   border: 0;
-  border-radius: var(--border-radius-medium, 8px);
   background: none;
   color: inherit;
   font: inherit;
   text-align: start;
-  transition: background-color 100ms ease;
+  cursor: default;
 }
-:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-overflow):hover {
-  background: color-mix(in srgb, currentColor 7%, transparent);
-}
-:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-overflow):hover:active {
-  background: color-mix(in srgb, currentColor 11%, transparent);
-}
-:is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-overflow):focus-visible {
+:where(.axiosozo-projects, .axiosozo-project-panel) :is(button, pre):focus-visible {
   outline: var(--focus-outline, 2px solid AccentColor);
   outline-offset: var(--focus-outline-offset, -2px);
 }
-.axiosozo-project-toggle { font-weight: 600; opacity: 0.85; }
-.axiosozo-project-block[data-active] > .axiosozo-project-toggle { opacity: 1; }
-.axiosozo-project-glyph,
-.axiosozo-project-chevron,
-.axiosozo-project-link-icon {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  -moz-context-properties: fill, fill-opacity;
-  fill: currentColor;
-  fill-opacity: 0.7;
+.axiosozo-projects [hidden],
+.axiosozo-project-panel [hidden] { display: none !important; }
+
+.axiosozo-projects-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding-inline: 8px 2px;
 }
-.axiosozo-project-glyph { background: url("chrome://global/skin/icons/folder.svg") center / 14px no-repeat; }
-/* The project's own container colour, as on its tabs (usercontext.css). */
-.axiosozo-project-glyph[class*="identity-color-"] { fill: var(--identity-icon-color); fill-opacity: 1; }
-.axiosozo-project-chevron {
+.axiosozo-projects-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.5;
+  transition: opacity 100ms ease;
+}
+.axiosozo-projects-title::after {
+  content: "";
   width: 12px;
-  background: url("chrome://global/skin/icons/arrow-down-12.svg") center / 10px no-repeat;
+  height: 12px;
+  background: currentColor;
+  mask: var(--axiosozo-icon-chevron) center / 11px no-repeat;
   opacity: 0;
-  transform: rotate(-90deg);
   transition: opacity 100ms ease, transform 150ms ease;
 }
-.axiosozo-project-toggle:is(:hover, :focus-visible) .axiosozo-project-chevron { opacity: 1; }
-.axiosozo-project-toggle[aria-expanded="true"] .axiosozo-project-chevron { opacity: 0.8; transform: none; }
-.axiosozo-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-project-summary { display: inline-flex; align-items: center; gap: 3px; }
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title { opacity: 0.8; }
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title::after { opacity: 0.8; }
+.axiosozo-projects-title[aria-expanded="false"]::after { opacity: 0.8; transform: rotate(-90deg); }
+.axiosozo-projects-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--axiosozo-run-green);
+  background: color-mix(in srgb, var(--axiosozo-run-green) 13%, transparent);
+}
+.axiosozo-projects-running::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.axiosozo-projects-running:hover { background: color-mix(in srgb, var(--axiosozo-run-green) 20%, transparent); }
+.axiosozo-projects-add {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.axiosozo-projects-add::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: var(--axiosozo-icon-plus) center / 14px no-repeat;
+}
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-add { opacity: 0.7; }
+.axiosozo-projects-add:hover { opacity: 1 !important; background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 8%, transparent)); }
+
+.axiosozo-projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.axiosozo-project,
+.axiosozo-projects-more { position: relative; display: flex; align-items: center; }
+.axiosozo-project-row,
+.axiosozo-projects-overflow {
+  display: flex;
+  align-items: center;
+  gap: var(--tab-icon-end-margin, 8.5px);
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding-inline: var(--tab-inline-padding, 8px);
+  border-radius: var(--tab-border-radius, 8px);
+  transition: background-color 100ms ease;
+}
+.axiosozo-project-row:hover,
+.axiosozo-project-row[aria-expanded="true"],
+.axiosozo-projects-overflow:hover {
+  background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 7%, transparent));
+}
+.axiosozo-project-row:hover:active { transform: scale(var(--zen-active-tab-scale, 0.985)); }
+.axiosozo-project[data-current] > .axiosozo-project-row .axiosozo-project-name { font-weight: 600; }
+.axiosozo-project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.axiosozo-projects-overflow { font-size: 11.5px; opacity: 0.6; padding-inline-start: calc(var(--tab-inline-padding, 8px) + 16px + var(--tab-icon-end-margin, 8.5px)); }
+.axiosozo-projects-overflow:hover { opacity: 1; }
+
+/* The project's mark: its own image, or a monogram tile in its container's
+ * colour (Firefox's identity colour, usercontext.css) or a stable hue. */
+.axiosozo-project-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 4.5px;
+  background: light-dark(hsl(var(--axiosozo-project-hue, 220) 52% 50%), hsl(var(--axiosozo-project-hue, 220) 42% 46%));
+  color: white;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
+}
+.axiosozo-project-icon[class*="identity-color-"] { background: var(--identity-icon-color); }
+.axiosozo-project-icon[data-image] { background: none; box-shadow: none; border-radius: 4px; }
+.axiosozo-project-icon > img { width: 100%; height: 100%; object-fit: contain; }
+.axiosozo-project-icon[data-size="large"] { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; }
+.axiosozo-project-icon[data-size="large"][data-image] { border-radius: 8px; }
+
+.axiosozo-project-badges { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.axiosozo-project-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--axiosozo-run-green);
+}
+.axiosozo-project-live::before,
+.axiosozo-project-failed {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.axiosozo-project-live[data-state="starting"] { color: var(--axiosozo-run-amber); }
+.axiosozo-project-live[data-state="starting"]::before { animation: axiosozo-pulse 1.1s ease-in-out infinite; }
+.axiosozo-project-failed { color: var(--axiosozo-run-red); }
+@keyframes axiosozo-pulse { 50% { opacity: 0.3; } }
 /* Retained console messages of the project's tabs (Plan 4 step 7): a quiet,
  * legible count; tinted with Firefox's critical colour when errors are among them. */
 .axiosozo-project-console {
@@ -215,39 +355,258 @@
 .axiosozo-project-console[data-level="error"] {
   background: color-mix(in srgb, var(--icon-color-critical, currentColor) 22%, transparent);
 }
-.axiosozo-project-body[hidden] { display: none; }
-.axiosozo-project-body { padding-block: 0 4px; }
-.axiosozo-project-links { margin: 0; padding: 0 0 0 10px; list-style: none; }
-.axiosozo-project-app {
-  padding: 4px 8px 0;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  opacity: 0.5;
-}
-.axiosozo-project-link > button { min-height: 28px; font-weight: 400; }
-.axiosozo-project-link > button[aria-current="true"] { background: color-mix(in srgb, currentColor 9%, transparent); }
-.axiosozo-project-link > button > .axiosozo-status-dot { margin-inline: 5px; }
-.axiosozo-project-link-icon { fill-opacity: 0.75; border-radius: 3px; object-fit: contain; }
-.axiosozo-project-link-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-project-link-detail {
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+/* The quick start appears where the badges are, on hover only. */
+.axiosozo-project-quick {
+  position: absolute;
+  inset-inline-end: 5px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   opacity: 0;
   transition: opacity 100ms ease;
 }
-.axiosozo-project-link > button:is(:hover, :focus-visible) .axiosozo-project-link-detail { opacity: 0.6; }
-.axiosozo-project-more { opacity: 0.7; }
-.axiosozo-project-more:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
-.axiosozo-project-more-glyph { flex: none; width: 16px; text-align: center; font-weight: 600; }
-.axiosozo-project-overflow { min-height: 26px; padding-inline-start: 32px; font-size: 11px; opacity: 0.65; }
-.axiosozo-project-overflow:is(:hover, :focus-visible) { opacity: 1; }
-/* Status dots: green = the local port answers, grey = it does not, a ring = not
- * checked (unknown, or production, which is never contacted). */
+.axiosozo-project-quick::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: var(--axiosozo-icon-play) center / 13px no-repeat;
+}
+.axiosozo-project:is(:hover, :focus-within) > .axiosozo-project-quick { opacity: 0.75; }
+.axiosozo-project-quick:hover { opacity: 1 !important; background: color-mix(in srgb, currentColor 10%, transparent); color: var(--axiosozo-run-green); }
+.axiosozo-project:is(:hover, :focus-within):has(> .axiosozo-project-quick:not([hidden])) .axiosozo-project-badges { visibility: hidden; }
+
+/* Zen's collapsed (icon) sidebar: projects stay, as their icons. Compact mode
+ * keeps the whole section; it slides out with the sidebar. */
+:root:not([zen-sidebar-expanded="true"]) .axiosozo-projects {
+  margin-inline: 0;
+  & .axiosozo-projects-head,
+  & .axiosozo-project-name,
+  & .axiosozo-project-badges,
+  & .axiosozo-project-quick,
+  & .axiosozo-projects-more { display: none !important; }
+  & .axiosozo-projects-list[hidden] { display: flex !important; }
+  & .axiosozo-project-row { justify-content: center; padding-inline: 0; }
+  & .axiosozo-project[data-state="running"] .axiosozo-project-icon { box-shadow: 0 0 0 1.5px var(--axiosozo-run-green); }
+  & .axiosozo-project[data-state="starting"] .axiosozo-project-icon { box-shadow: 0 0 0 1.5px var(--axiosozo-run-amber); }
+  & .axiosozo-project[data-state="failed"] .axiosozo-project-icon { box-shadow: 0 0 0 1.5px var(--axiosozo-run-red); }
+}
+
+/* ---- The project panel (beside the sidebar) ------------------------------------------- */
+#axiosozo-project-panel {
+  --panel-padding: 0;
+  --arrowpanel-padding: 0;
+}
+.axiosozo-pp {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+  width: 340px;
+  max-height: min(600px, 78vh);
+  overflow-y: auto;
+  padding: 14px 10px 10px;
+  font: message-box;
+  font-size: 12.5px;
+  color: var(--arrowpanel-color, inherit);
+}
+.axiosozo-pp-head { display: flex; align-items: center; gap: 11px; padding-inline: 4px; }
+.axiosozo-pp-titles { flex: 1; min-width: 0; }
+.axiosozo-pp-title { margin: 0; font-size: 14.5px; font-weight: 650; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-path { margin: 1px 0 0; font-size: 11px; opacity: 0.58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-more,
+.axiosozo-pp-icon-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  opacity: 0.72;
+}
+.axiosozo-pp-more::before,
+.axiosozo-pp-icon-button::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: var(--axiosozo-icon-more) center / 15px no-repeat;
+}
+.axiosozo-pp-icon-button[data-action="start"]::before { mask-image: var(--axiosozo-icon-play); mask-size: 13px; }
+.axiosozo-pp-icon-button[data-action="stop"]::before { mask-image: var(--axiosozo-icon-stop); mask-size: 13px; }
+.axiosozo-pp-icon-button[data-action="log"]::before { mask-image: var(--axiosozo-icon-output); mask-size: 15px; }
+.axiosozo-pp-icon-button[data-action="dismiss"]::before { mask-image: var(--axiosozo-icon-plus); mask-size: 14px; rotate: 45deg; }
+:is(.axiosozo-pp-more, .axiosozo-pp-icon-button):hover,
+.axiosozo-pp-icon-button[aria-expanded="true"],
+.axiosozo-pp-more[aria-expanded="true"] { opacity: 1; background: color-mix(in srgb, currentColor 9%, transparent); }
+.axiosozo-pp-icon-button[data-action="start"]:hover { color: var(--axiosozo-run-green); }
+.axiosozo-pp-icon-button:disabled { opacity: 0.35; }
+
+.axiosozo-pp-section { display: flex; flex-direction: column; gap: 2px; }
+.axiosozo-pp-section-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; padding-inline: 8px 4px; }
+.axiosozo-pp-section-title { margin: 0; font-size: 11px; font-weight: 600; opacity: 0.52; }
+.axiosozo-pp-targets,
+.axiosozo-pp-links { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.axiosozo-pp-target { display: flex; align-items: center; gap: 2px; padding-inline-end: 4px; border-radius: 9px; transition: background-color 100ms ease; }
+.axiosozo-pp-target:hover { background: color-mix(in srgb, currentColor 6%, transparent); }
+.axiosozo-pp-target-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 6px 8px; border-radius: 9px; }
+.axiosozo-pp-target-text { display: flex; flex-direction: column; min-width: 0; }
+.axiosozo-pp-target-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-target-detail { font-size: 11px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-target[data-state="running"] .axiosozo-pp-target-detail,
+.axiosozo-pp-target[data-state="external"] .axiosozo-pp-target-detail { opacity: 0.75; }
+.axiosozo-pp-target[data-state="failed"] .axiosozo-pp-target-detail { color: var(--axiosozo-run-red); opacity: 1; }
+.axiosozo-pp-target-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.axiosozo-pp-target-main .axiosozo-project-icon { width: 28px; height: 28px; border-radius: 7px; font-size: 13px; }
+/* What a target is, and a status mark on its corner. */
+.axiosozo-pp-kind {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.axiosozo-pp-kind::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  opacity: 0.8;
+  mask: var(--axiosozo-icon-other) center / 16px no-repeat;
+}
+.axiosozo-pp-kind[data-kind="web"]::before { mask-image: var(--axiosozo-icon-web); }
+.axiosozo-pp-kind[data-kind="api"]::before { mask-image: var(--axiosozo-icon-api); }
+.axiosozo-pp-kind[data-kind="mobile"]::before { mask-image: var(--axiosozo-icon-mobile); }
+.axiosozo-pp-kind[data-kind="desktop"]::before { mask-image: var(--axiosozo-icon-desktop); }
+.axiosozo-pp-kind[data-kind="worker"]::before { mask-image: var(--axiosozo-icon-worker); }
+.axiosozo-pp-kind::after {
+  content: "";
+  position: absolute;
+  inset-block-end: -1px;
+  inset-inline-end: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--arrowpanel-background, Canvas);
+  background: transparent;
+  display: none;
+}
+.axiosozo-pp-target:is([data-state="running"], [data-state="external"]) .axiosozo-pp-kind::after { display: block; background: var(--axiosozo-run-green); }
+.axiosozo-pp-target[data-state="starting"] .axiosozo-pp-kind::after,
+.axiosozo-pp-target[data-state="stopping"] .axiosozo-pp-kind::after { display: block; background: var(--axiosozo-run-amber); animation: axiosozo-pulse 1.1s ease-in-out infinite; }
+.axiosozo-pp-target[data-state="failed"] .axiosozo-pp-kind::after { display: block; background: var(--axiosozo-run-red); }
+.axiosozo-pp-target[data-state="running"] .axiosozo-pp-kind,
+.axiosozo-pp-target[data-state="external"] .axiosozo-pp-kind { background: color-mix(in srgb, var(--axiosozo-run-green) 14%, transparent); }
+
+/* The one-time question before a command first runs. */
+.axiosozo-pp-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 2px 4px 6px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+}
+.axiosozo-pp-confirm p { margin: 0; }
+.axiosozo-pp-confirm-title { font-weight: 600; }
+.axiosozo-pp-confirm-where { font-size: 11px; opacity: 0.7; line-height: 1.4; }
+.axiosozo-pp-command,
+.axiosozo-waiting-command {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.28));
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.axiosozo-pp-confirm-buttons { display: flex; justify-content: flex-end; gap: 6px; }
+.axiosozo-pp-primary,
+.axiosozo-waiting-start {
+  padding: 4px 14px;
+  border-radius: 7px;
+  background: var(--zen-primary-color, AccentColor) !important;
+  color: var(--button-text-color-primary, white) !important;
+  font-weight: 600;
+}
+.axiosozo-pp-primary:hover { filter: brightness(1.08); }
+.axiosozo-pp-text-button {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+.axiosozo-pp-text-button:hover { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
+.axiosozo-pp-error { margin: 0 8px 4px 46px; font-size: 11.5px; color: var(--axiosozo-run-red); }
+.axiosozo-pp-log { margin: 0 4px 6px; }
+.axiosozo-pp-output {
+  margin: 0;
+  max-height: 190px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: light-dark(rgb(0 0 0 / 0.05), rgb(0 0 0 / 0.32));
+  font: 10.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.axiosozo-pp-empty { margin: 0; padding: 2px 8px 4px; font-size: 12px; line-height: 1.45; opacity: 0.65; }
+.axiosozo-pp-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+.axiosozo-pp-add::before {
+  content: "";
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px dashed color-mix(in srgb, currentColor 35%, transparent);
+  box-sizing: border-box;
+  background: currentColor;
+  mask: var(--axiosozo-icon-plus) center / 14px no-repeat;
+}
+.axiosozo-pp-add:hover { opacity: 1; background: color-mix(in srgb, currentColor 6%, transparent); }
+.axiosozo-pp-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.axiosozo-pp-link:hover { background: color-mix(in srgb, currentColor 6%, transparent); }
+.axiosozo-pp-link-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+.axiosozo-pp-link-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-link-detail { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: 0.5; }
+.axiosozo-pp-foot {
+  display: flex;
+  gap: 4px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--panel-separator-color, color-mix(in srgb, currentColor 12%, transparent));
+}
+
+/* Status dots of the environment pill's menu and container mark: green = the
+ * local port answers, grey = it does not, a ring = not checked. */
 .axiosozo-status-dot {
   display: inline-block;
   flex: none;
@@ -261,8 +620,11 @@
 .axiosozo-status-dot[data-status="up"] { background: rgb(52 199 89); border-color: transparent; }
 .axiosozo-status-dot[data-status="down"] { background: color-mix(in srgb, currentColor 35%, transparent); border-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
-  :is(.axiosozo-project-toggle, .axiosozo-project-link > button, .axiosozo-project-overflow, .axiosozo-project-chevron,
-    .axiosozo-project-link-detail) { transition: none; }
+  :is(.axiosozo-project-row, .axiosozo-projects-title, .axiosozo-projects-title::after, .axiosozo-projects-add, .axiosozo-project-quick,
+    .axiosozo-pp-target) { transition: none; }
+  :is(.axiosozo-project-live, .axiosozo-pp-kind)::before,
+  .axiosozo-pp-kind::after { animation: none !important; }
+  .axiosozo-project-row:hover:active { transform: none; }
 }
 
 /* ---- Chrome-owned overlays in the tab's browser stack --------------------------------- */
@@ -296,6 +658,16 @@
 .axiosozo-waiting-status,
 .axiosozo-waiting-url { opacity: 0.75; }
 .axiosozo-waiting-url { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+.axiosozo-waiting-command { margin-top: 4px; max-width: 100%; text-align: start; }
+.axiosozo-waiting-output {
+  max-width: 100%;
+  font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.axiosozo-waiting[data-starting] .axiosozo-waiting-spinner { visibility: visible !important; }
 .axiosozo-waiting-actions,
 .axiosozo-pause-actions,
 .axiosozo-pause-confirm { display: flex; align-items: center; gap: 8px; margin-top: 6px; }

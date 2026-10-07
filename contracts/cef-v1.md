@@ -206,12 +206,20 @@ All generations are safe JSON integers (0..9007199254740991).
 
 Events include `ready` with actual CEF/Chromium/platform/capabilities, `created`,
 `accepted`, `completed`, `navigation`, `loading`, `title`, `url`, `closed`, `error`,
-`cursor` (a CSS cursor keyword), `open_url` and the host-level `heartbeat` (see
+`cursor` (a CSS cursor keyword), `open_url`, `favicon` and the host-level `heartbeat` (see
 "Heartbeat"); web sessions add `prompt`,
 `prompt_closed`, `download_updated`, `find_result` and `popup_blocked`. A shared host must report
 `multi_target`, `stop`, `cursor`, `persistent_profile` and `open_in_tab`. A malformed
 event about one target's document ends that target; framing, authentication,
 identity and response errors end the host and every target.
+`favicon {icon}` carries the page icon: Chromium downloads the first declared icon
+(else the default `/favicon.ico`) through its own network context, without cookies,
+at most 32 px, and the host sends it as `data:image/png;base64,…` of at most
+5400 PNG bytes, or `""` when the page has none or the download fails. Zen never
+fetches an icon URL itself; any other value ends that target
+(`INVALID_CEF_FAVICON`). Zen shows it with its own `setIcon`, keeps it when the
+hidden Firefox browser loads `about:blank`, and uses Firefox's error-page icons
+while a network or certificate error shows.
 Generation changes precede observable navigation events. Frames/events for a stale
 generation are discarded by the presenter and never applied to another target.
 CEF engine identity comes from the pinned native runtime, not a spoofed user agent.

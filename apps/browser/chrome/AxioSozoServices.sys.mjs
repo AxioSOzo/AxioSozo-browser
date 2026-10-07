@@ -22,6 +22,7 @@ import { isContextEngine, toContextEngine } from "./EngineRegistry.sys.mjs";
 import { createProjectDetection } from "./ProjectDetection.sys.mjs";
 import { createProjectRecords } from "./ProjectRecords.sys.mjs";
 import { readProjectIcon } from "./ProjectIcon.sys.mjs";
+import { approvalsOver, createProjectRunner, EMPTY_APPROVALS, runEnvironment, runTargets, validateApprovals } from "./ProjectRunner.sys.mjs";
 import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
 import { createProjectArrival } from "./ProjectArrival.sys.mjs";
 import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
@@ -44,7 +45,9 @@ import { createSafetyAtomicStorage } from "./SafetyAtomicStorage.sys.mjs";
 
 export { MAX_LISTING_ENTRIES } from "./ProjectDetection.sys.mjs";
 export const EVENT_NAMES = Object.freeze(["contexts", "projects", "rules", "ledger", "services", "attention", "agents", "understand", "console",
-  "watches", "safety"]);
+  "watches", "safety", "runs"]);
+// Run state and output changes reach the sidebar as one name-only event at most this often.
+export const RUNS_EVENT_MS = 200;
 // Console retention changes reach pages and the sidebar as one name-only
 // event at most this often (Plan 4 step 7); a burst ends with a trailing one.
 export const CONSOLE_EVENT_MS = 250;
@@ -62,7 +65,7 @@ const AGENT_NAMES = Object.freeze({ "claude-code": "Claude Code", codex: "Codex"
 const AGENT_SESSION = /^s_[0-9a-f]{16}$/u;
 const AGENT_CHANNEL_EVENTS = new Set(["endpoint", "enablement", "activity", "cleanup", "capabilities"]);
 export const STORE_FILES = Object.freeze({ contexts: "contexts.json", rules: "site-rules.json", ledger: "usage-ledger.json",
-  watches: "watches.json" });
+  watches: "watches.json", runApprovals: "run-approvals.json" });
 export const PROBE_MIN_INTERVAL_MS = 5000;
 export const PROBE_TIMEOUT_MS = 2000;
 export const LEDGER_FLUSH_MS = 30000;
@@ -345,6 +348,8 @@ export class AxioSozoServices {
   #records; #arrival;
   // Project icons as data: URLs, by canonical root and icon path (bounded, session only).
   #icons = new Map();
+  // Project runs (ProjectRunner): built on first use; null when unavailable.
+  #runner = undefined; #runsTimer = null; #runsPending = false;
   #setupSerial = 0;
   // Arrival acceptances between token consumption and the store append.
   #acceptances = new Set();
@@ -497,6 +502,9 @@ export class AxioSozoServices {
       // Read only by the one watch controller (Plan 4 §4).
       watches: new JsonStore({ storage: storageFor(STORE_FILES.watches),
         validate: core.validateWatchStore, empty: core.DEFAULT_WATCH_STORE }),
+      // The commands the user approved to run, per project folder (ProjectRunner).
+      runApprovals: new JsonStore({ storage: storageFor(STORE_FILES.runApprovals),
+        validate: validateApprovals, empty: EMPTY_APPROVALS }),
     };
     try { this.#deps.onShutdown?.(() => this.flushLedger()); }
     catch (error) { console.error("AxioSozo: ledger shutdown flush not registered", error); }
@@ -1005,6 +1013,8 @@ export class AxioSozoServices {
     }, ["projects", "contexts", "attention"]));
     this.#serviceStatus.delete(id);
     if (this.#containers && core.isProjectId(id)) await this.#containers.forget(id).catch(() => {});
+    // A forgotten project keeps no server running.
+    if (this.#runner) await this.#runner.stopAll(id).catch(() => {});
     return { removed: true };
   }
 
@@ -1672,6 +1682,107 @@ export class AxioSozoServices {
       if (status !== "down") result = "unknown";
     }
     return result;
+  }
+
+  // ── project runs (docs/design/projects.md §3) ──────────────────────────
+  // A project's declared services that carry a command run only from a
+  // normal window's explicit action, with the exact command approved once.
+  // Runs belong to this process: they stop with it (ProjectRunner).
+  #projectRunner() {
+    if (this.#runner !== undefined) return this.#runner;
+    const create = this.#deps.createRunner;
+    this.#runner = null;
+    if (typeof create !== "function") return null;
+    try { this.#runner = create({ approvals: approvalsOver(this.#stores.runApprovals), onChange: () => this.#emitRuns() }) ?? null; }
+    catch (error) { console.error("AxioSozo: project runs unavailable", error?.code ?? error); this.#runner = null; }
+    if (this.#runner) {
+      try { this.#deps.onShutdown?.(() => this.#runner.close(), "AxioSozo: stop project runs"); }
+      catch (error) { console.error("AxioSozo: project runs shutdown not registered", error); }
+    }
+    return this.#runner;
+  }
+
+  #emitRuns() {
+    if (this.#runsTimer !== null) { this.#runsPending = true; return; }
+    this.#emit("runs");
+    try {
+      this.#runsTimer = this.#deps.timers.setTimeout(() => {
+        this.#runsTimer = null;
+        if (this.#runsPending) { this.#runsPending = false; this.#emitRuns(); }
+      }, RUNS_EVENT_MS);
+    } catch { this.#runsTimer = null; }
+  }
+
+  /** The run targets of a project with this process's run of each:
+   * { available, targets: [{ key, name, app, kind, command, cwd, url, port,
+   * local, startable, approved, run: snapshot | null }] }. */
+  async projectRuns(projectId) {
+    const project = await this.getProject(projectId);
+    if (!project) fail("UNKNOWN_PROJECT");
+    const runner = this.#projectRunner();
+    return clone({ available: !!runner, targets: runTargets(project).map(target => ({ ...target,
+      approved: !!runner && target.startable && runner.isApproved({ projectId, root: project.root, cwd: target.cwd, command: target.command }),
+      run: runner?.get(projectId, target.key) ?? null })) });
+  }
+
+  /** Every run this process holds (running or ended, not dismissed), each
+   * with its project's name and target, newest first. */
+  async listRuns() {
+    const runner = this.#runner ?? null;
+    if (!runner) return [];
+    const { projects } = await this.#loadContexts();
+    return clone(runner.list().map(run => {
+      const project = projects.find(item => item.id === run.project_id) ?? null;
+      const target = project ? runTargets(project).find(item => item.key === run.key) ?? null : null;
+      return { ...run, project_name: project?.manifest.name ?? null, target };
+    }).sort((a, b) => b.started_at - a.started_at));
+  }
+
+  /** Starts one run target of a project from a normal window. NEEDS_APPROVAL
+   * until the user pressed a button that showed this exact command
+   * (`approve: true`). A project folder that now resolves elsewhere, or lies
+   * under a denied root, is never run in. */
+  async startRun({ window, projectId, key, approve = false } = {}) {
+    const adapter = window ? this.#windows.get(window) ?? null : null;
+    if (!adapter) fail("NO_WINDOW");
+    if (!this.#normalWindow(window, adapter)) fail("PRIVATE_WINDOW");
+    const runner = this.#projectRunner();
+    if (!runner) fail("RUNS_UNAVAILABLE");
+    const project = await this.getProject(projectId);
+    if (!project) fail("UNKNOWN_PROJECT");
+    const target = runTargets(project).find(item => item.key === key);
+    if (!target) fail("UNKNOWN_TARGET");
+    if (!target.startable) fail("NO_COMMAND");
+    const fs = this.#fs();
+    await this.#refuseDeniedRoot(fs, project.root);
+    let canonical;
+    try { canonical = await fs.realpath(project.root); } catch { fail("ROOT_NOT_FOUND"); }
+    if (canonical !== project.root) fail("ROOT_MOVED");
+    if (!this.#normalWindow(window, adapter)) fail("NO_WINDOW");
+    try { return clone(await runner.start({ projectId, root: project.root, target, approve: approve === true })); }
+    catch (error) { if (typeof error?.code === "string") fail(error.code); throw error; }
+  }
+
+  /** Stops one run; resolves when its processes have ended. */
+  async stopRun({ projectId, key } = {}) {
+    const runner = this.#runner ?? null;
+    return { stopped: runner ? await runner.stop(projectId, key) : false };
+  }
+
+  /** Stops every run of a project (or of every project). */
+  async stopRuns({ projectId = null } = {}) {
+    await this.#runner?.stopAll(projectId ?? null);
+    return { stopped: true };
+  }
+
+  /** The kept output of one run (RAM only), oldest line first. */
+  runLog({ projectId, key } = {}) {
+    return this.#runner ? this.#runner.log(projectId, key) : [];
+  }
+
+  /** Forgets an ended run and its output. */
+  dismissRun({ projectId, key } = {}) {
+    return this.#runner ? this.#runner.dismiss(projectId, key) : false;
   }
 
   // ── rules ─────────────────────────────────────────────────────────────
@@ -3525,6 +3636,13 @@ function chromeDependencies() {
     timers: { setTimeout, clearTimeout },
     pickFolder: pickFolderWithFilePicker,
     mostRecentWindow: () => Services.wm.getMostRecentWindow("navigator:browser"),
+    // Project runs: the fixed /bin/sh supervisor through Gecko's Subprocess,
+    // with a terminal's environment (ProjectRunner.runEnvironment).
+    createRunner: ({ approvals, onChange }) => {
+      const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
+      return createProjectRunner({ spawn: options => Subprocess.call(options), timers: { setTimeout, clearTimeout }, approvals, onChange,
+        environment: runEnvironment({ get: name => (Services.env.exists(name) ? Services.env.get(name) : null), home: directory("Home") }) });
+    },
     onShutdown(flush, label = "AxioSozo: flush usage ledger") {
       const { AsyncShutdown } = ChromeUtils.importESModule("resource://gre/modules/AsyncShutdown.sys.mjs");
       AsyncShutdown.profileBeforeChange.addBlocker(label, () => flush().catch(() => {}));

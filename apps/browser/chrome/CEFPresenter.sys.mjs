@@ -14,6 +14,19 @@ const XHTML = "http://www.w3.org/1999/xhtml";
 const ENGINE_ATTRIBUTE = "axiosozo-engine";
 const ENGINE_VALUE = "axiosozo-engine";
 const URL_VALUE = "axiosozo-chromium-url";
+const TITLE_VALUE = "axiosozo-chromium-title";
+// Firefox's own error-page favicons (toolkit/content/aboutNetError.mjs).
+const ERROR_ICONS = { certificate_error: "chrome://global/skin/icons/warning.svg", load_failed: "chrome://global/skin/icons/info.svg" };
+// Tab state Gecko's hidden about:blank browser would otherwise overwrite.
+const TAB_STATE = ["image", "busy", "progress"];
+
+/** Firefox's tab label for a page without a title: its address without the scheme. */
+export function addressLabel(url) {
+  if (!transferableURL(url)) return "";
+  let text = url;
+  try { text = decodeURI(url); } catch {}
+  return text.replace(/^https?:\/\//u, "");
+}
 
 /** A page address that one engine may hand to the other on an explicit switch. */
 export function transferableURL(value) {
@@ -151,7 +164,7 @@ export class CEFPresenter {
     this.onSwitchStart = onSwitchStart;
     this.browsingMode = browsingMode;
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = [];
-    this.restoreURLs = new WeakMap();
+    this.restoreURLs = new WeakMap(); this.restoreTitles = new WeakMap();
     this.onTabClose = event => {
       const record = this.records.get(event.target) || (event.target === this.pending?.tab ? this.pending : null);
       if (record) this.#remove(record, { keepEngine: true }).then(() => this.#indicator(this.active)).catch(onFailure);
@@ -160,7 +173,12 @@ export class CEFPresenter {
       const record = this.records.get(event.target);
       if (!record) return;
       try { this.#assertNoActiveMedia(record.tab); }
-      catch (error) { this.#revert(record, error); }
+      catch (error) { this.#revert(record, error); return; }
+      // The hidden Firefox browser's own load (about:blank) clears the icon and
+      // throbber; the tab keeps showing its Chromium page's state.
+      const changed = event.detail?.changed ?? TAB_STATE;
+      if (changed.includes("image")) this.#applyIcon(record);
+      if (changed.includes("busy") || changed.includes("progress")) this.#syncBusy(record);
     };
     this.onTabSelect = () => {
       for (const record of this.records.values()) this.#visibility(record);
@@ -171,10 +189,13 @@ export class CEFPresenter {
       } else this.#activateIfMarked(this.window.gBrowser.selectedTab);
     };
     this.onTabRestored = event => this.#adoptRestoredTab(event.target);
+    // Lazily restored tabs are set up (SSTabRestoring) long before they load (SSTabRestored).
+    this.onTabRestoring = event => this.#labelRestoredTab(event.target);
     win.gBrowser.tabContainer.addEventListener("TabClose", this.onTabClose);
     win.gBrowser.tabContainer.addEventListener("TabSelect", this.onTabSelect);
     win.gBrowser.tabContainer.addEventListener("TabAttrModified", this.onTabAttrModified);
     win.gBrowser.tabContainer.addEventListener("SSTabRestored", this.onTabRestored);
+    win.gBrowser.tabContainer.addEventListener("SSTabRestoring", this.onTabRestoring);
     this.onVisibilityChange = () => {
       // Gecko's own handler runs first, then reapply ownership after it may
       // reactivate the retained document when the window becomes visible.
@@ -209,6 +230,7 @@ export class CEFPresenter {
     container.removeEventListener("TabSelect", this.onTabSelect);
     container.removeEventListener("TabAttrModified", this.onTabAttrModified);
     container.removeEventListener("SSTabRestored", this.onTabRestored);
+    container.removeEventListener("SSTabRestoring", this.onTabRestoring);
     this.window.document.removeEventListener?.("visibilitychange", this.onVisibilityChange);
     for (const type of DISPLAY_EVENTS) this.window.removeEventListener?.(type, this.onDisplayChange);
   }
@@ -295,8 +317,8 @@ export class CEFPresenter {
       this.#rememberURL(tab, url);
     } else {
       tab.removeAttribute?.(ENGINE_ATTRIBUTE);
-      this.restoreURLs.delete(tab);
-      try { store?.deleteCustomTabValue(tab, ENGINE_VALUE); store?.deleteCustomTabValue(tab, URL_VALUE); } catch {}
+      this.restoreURLs.delete(tab); this.restoreTitles.delete(tab);
+      for (const key of [ENGINE_VALUE, URL_VALUE, TITLE_VALUE]) { try { store?.deleteCustomTabValue(tab, key); } catch {} }
     }
   }
   #rememberURL(tab, url) {
@@ -305,6 +327,20 @@ export class CEFPresenter {
     this.restoreURLs.set(tab, value);
     try { this.#session()?.setCustomTabValue(tab, URL_VALUE, value); } catch {}
   }
+  /** The page title, so a restored Chromium tab is labelled before its engine starts. */
+  #rememberTitle(tab, title) {
+    if (typeof title !== "string" || !title || this.restoreTitles.get(tab) === title) return;
+    this.restoreTitles.set(tab, title);
+    try { this.#session()?.setCustomTabValue(tab, TITLE_VALUE, title); } catch {}
+  }
+  #labelRestoredTab(tab) {
+    if (this.browsingMode !== "web" || !tab || this.records.has(tab)) return;
+    let engine = null, title = null;
+    try { engine = this.#session()?.getCustomTabValue(tab, ENGINE_VALUE); title = this.#session()?.getCustomTabValue(tab, TITLE_VALUE); } catch {}
+    if (engine !== "chromium" || typeof title !== "string" || !title) return;
+    this.restoreTitles.set(tab, title);
+    this.#setTabLabel(tab, title);
+  }
   #adoptRestoredTab(tab) {
     if (this.browsingMode !== "web" || !tab || this.records.has(tab)) return;
     let engine = null, url = null;
@@ -312,6 +348,7 @@ export class CEFPresenter {
     if (engine !== "chromium") return;
     tab.setAttribute?.(ENGINE_ATTRIBUTE, "chromium");
     if (transferableURL(url)) this.restoreURLs.set(tab, url);
+    this.#labelRestoredTab(tab);
     if (tab === this.window.gBrowser.selectedTab) this.#activateIfMarked(tab);
   }
   /** Chromium starts lazily, when its tab is first shown. */
@@ -554,7 +591,9 @@ export class CEFPresenter {
       latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
       firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 },
       surfaceMode:false, native:null, hostByteCap:false, keyVerdicts:new Map(), keyDowns:new Map(),
-      wheelRemainder:{ x:0, y:0 }, ime:null };
+      wheelRemainder:{ x:0, y:0 }, ime:null, title:this.browsingMode === "web" ? this.restoreTitles.get(tab) ?? "" : "",
+      // The page keeps the icon it had (in Firefox, or restored by Zen's session) until Chromium reports its own.
+      icon:this.browsingMode === "web" ? this.#currentIcon(tab) : null, errorIcon:null };
     let settle;
     record.settled = new Promise(resolve => { settle = resolve; });
     this.pending = record;
@@ -602,6 +641,7 @@ export class CEFPresenter {
         this.#loadInGecko(record, "about:blank");
         if (url) this.#action(record, current => record.adapter.navigate(current, url));
       }
+      this.#applyIcon(record); this.#syncBusy(record);
       this.#focusContent(record); this.#indicator(record); this.#syncChrome(record);
       return target;
     } catch (error) {
@@ -689,18 +729,25 @@ export class CEFPresenter {
     }
     // The certificate error page is drawn by ChromiumBrowserUI; the tab title follows it here.
     if (event.event === "error" && !event.request_id && event.code === "certificate_error" && this.browsingMode === "web") {
-      this.#errorTitle(record, "certificate_error");
+      this.#errorTitle(record, "certificate_error"); this.#errorIcon(record, "certificate_error");
     }
     if (this.ui?.handle(record, event)) return; // AxioSozo engine UI delegation
     if (event.event === "url") {
       record.latestURL = event.url;
       if (record.committed && this.browsingMode === "web") this.#rememberURL(record.tab, event.url);
+      // Firefox's throbber: "connecting" until the new document commits, then "loading".
+      if (record.loading?.loading) { record.progress = true; this.#syncBusy(record); }
     }
-    if (event.event === "title") { record.title = event.title; record.a11y?.setTitle(record.a11yTarget, event.title); }
+    if (event.event === "title") {
+      record.title = event.title; record.a11y?.setTitle(record.a11yTarget, event.title);
+      if (record.committed && this.browsingMode === "web") this.#rememberTitle(record.tab, event.title);
+    }
     if (event.event === "loading") {
+      if (event.loading && !record.loading?.loading) record.progress = false;
       record.loading = event;
-      record.tab.toggleAttribute?.("busy", !!event.loading);
+      this.#syncBusy(record);
     }
+    if (event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); }
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
     // The page closed itself (window.close()); the tab explains and can reload.
@@ -744,6 +791,7 @@ export class CEFPresenter {
     // Chromium reports a refused certificate, then the cancelled load; keep the specific reason.
     if (code === "load_failed" && record.panelCode === "certificate_error") return;
     this.#errorTitle(record, code);
+    this.#errorIcon(record, code);
     if (!record.panel) {
       if (!code) return;
       const panel = this.#element(record.overlay, "div", "axiosozo-cef-panel");
@@ -794,12 +842,39 @@ export class CEFPresenter {
     }
     this.#updateBadge(record);
   }
-  /** The tab label: Firefox's error-page title while an error page shows, else the page title. */
-  #labelTitle(record) { return record.errorTitle || record.title; }
-  #setLabel(record) {
-    const gBrowser = this.window.gBrowser, title = this.#labelTitle(record);
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(record.tab, title);
-    else record.tab.label = title;
+  /** The tab label: Firefox's error-page title while an error page shows, else the page title, else its address. */
+  #labelTitle(record) { return record.errorTitle || record.title || addressLabel(record.latestURL); }
+  #setLabel(record) { this.#setTabLabel(record.tab, this.#labelTitle(record)); }
+  #setTabLabel(tab, title) {
+    const gBrowser = this.window.gBrowser;
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title);
+    else tab.label = title;
+  }
+  // ---- Tab icon and throbber ---------------------------------------------------
+  #currentIcon(tab) {
+    try { return this.window.gBrowser.getIcon?.(tab) || null; } catch { return null; }
+  }
+  /** Shows the page's icon (or Firefox's error-page icon) through Zen's own setIcon. */
+  #applyIcon(record) {
+    const gBrowser = this.window.gBrowser;
+    if (!record.committed || record.applyingIcon || typeof gBrowser.setIcon !== "function" || !record.tab.isConnected) return;
+    const icon = record.errorIcon ?? record.icon ?? "";
+    if ((this.#currentIcon(record.tab) ?? "") === icon && record.tab.hasAttribute?.("image") === !!icon) return;
+    record.applyingIcon = true;
+    try { gBrowser.setIcon(record.tab, icon); record.iconApplied = true; } catch (error) { this.onFailure(error); }
+    finally { record.applyingIcon = false; }
+  }
+  /** Network and certificate errors show Firefox's error-page icon; a crashed page keeps its own. */
+  #errorIcon(record, code) {
+    record.errorIcon = ERROR_ICONS[code] ?? null;
+    this.#applyIcon(record);
+  }
+  /** Firefox's tab throbber: busy while Chromium loads, progress once the new document commits. */
+  #syncBusy(record) {
+    if (!record.committed) return;
+    const loading = !!record.loading?.loading;
+    record.tab.toggleAttribute?.("busy", loading);
+    record.tab.toggleAttribute?.("progress", loading && !!record.progress);
   }
   /** Sets (code) or clears (null) the error-page tab title; the next successful load restores the page title. */
   #errorTitle(record, code) {
@@ -1246,10 +1321,12 @@ export class CEFPresenter {
       return presenter.active ? false : original.apply(this, args);
     }, { optional: true });
     wrap(this.window.gBrowser, "setTabTitle", function(presenter, original, args) {
-      const record = presenter.records.get(args[0]);
-      if (!record || !presenter.#labelTitle(record)) return original.apply(this, args);
-      presenter.#setLabel(record);
-      return true;
+      const tab = args[0], record = presenter.records.get(tab);
+      if (record && presenter.#labelTitle(record)) { presenter.#setLabel(record); return true; }
+      // A Chromium tab that has not started yet (restored, or moved while in the background).
+      const saved = !record && tab?.getAttribute?.(ENGINE_ATTRIBUTE) === "chromium" ? presenter.restoreTitles.get(tab) : null;
+      if (saved) { presenter.#setTabLabel(tab, saved); return true; }
+      return original.apply(this, args);
     }, { optional: true });
     // Typed addresses, searches, address-bar results, bookmarks and history all
     // reach openTrustedLinkIn. "current" in a Chromium tab loads in Chromium.
@@ -1310,7 +1387,12 @@ export class CEFPresenter {
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
     record.canvas.width = 1; record.canvas.height = 1;
-    record.tab.toggleAttribute?.("busy", false);
+    record.tab.toggleAttribute?.("busy", false); record.tab.toggleAttribute?.("progress", false);
+    // Back in Firefox, Firefox's page sets its own icon. A kept engine keeps the
+    // icon so Zen's session (and a closing window) remembers it.
+    if (!keepEngine && record.iconApplied && record.tab.isConnected) {
+      try { this.window.gBrowser.setIcon?.(record.tab, ""); } catch {}
+    }
     if (!keepEngine) this.#markEngine(record.tab, "gecko");
     if (record.tab.isConnected) this.window.gBrowser.setTabTitle(record.tab);
     if (this.window.gBrowser.selectedTab === record.tab) {
