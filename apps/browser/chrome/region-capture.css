@@ -1,0 +1,260 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Capture an area for an agent (RegionCapture.sys.mjs). Chrome only: drawn
+ * over the tab's browser stack, never inside the page and never captured. */
+
+.axiosozo-region {
+  --axiosozo-region-accent: var(--zen-primary-color, AccentColor);
+  --axiosozo-region-dim: rgb(0 0 0 / 0.38);
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  border-radius: var(--zen-native-inner-radius, 0);
+  pointer-events: none;
+  font: menu;
+  font-family: inherit;
+  -moz-user-select: none;
+  user-select: none;
+
+  /* Select mode (from the context menu) and a finished capture take the mouse. */
+  &[data-mode="select"], &[data-captured] {
+    pointer-events: auto;
+  }
+  &[data-mode="select"] {
+    cursor: crosshair;
+  }
+}
+
+/* Select mode before the first drag: the whole page dims a little. */
+.axiosozo-region-shade {
+  position: absolute;
+  inset: 0;
+  background: var(--axiosozo-region-dim);
+  animation: axiosozo-region-fade 140ms ease-out;
+}
+
+.axiosozo-region-box {
+  position: absolute;
+  box-sizing: border-box;
+  /* Everything outside the selection dims; the root clips it to the tab. */
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.28), 0 0 0 100vmax var(--axiosozo-region-dim);
+  /* White like the macOS screenshot frame: readable on any page under the dim. */
+  outline: 1.5px solid white;
+  outline-offset: 0;
+  border-radius: 2px;
+  corner-shape: round;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* The captured pixels, shown in place so what you see is what you copy. */
+.axiosozo-region-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.axiosozo-region-size {
+  position: absolute;
+  top: -26px;
+  left: -1.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: rgb(20 20 20 / 0.78);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  white-space: nowrap;
+
+  /* Too close to the top edge: inside the box instead. */
+  &[data-inside] {
+    top: 6px;
+    left: 6px;
+  }
+  .axiosozo-region[data-captured] & {
+    display: none;
+  }
+}
+
+.axiosozo-region-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: rgb(20 20 20 / 0.8);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.4);
+  pointer-events: none;
+  animation: axiosozo-region-rise 180ms ease-out;
+}
+
+.axiosozo-region[data-busy] .axiosozo-region-box {
+  outline-style: dashed;
+}
+
+/* The action bar: a small floating card in Zen's urlbar language. */
+.axiosozo-region-bar {
+  position: absolute;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 16px));
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 10px;
+  border-radius: calc(12px * var(--zen-squircle-value, 1));
+  background: var(--zen-dialog-background, Canvas);
+  color: var(--toolbar-color, CanvasText);
+  outline: 0.5px solid light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.12));
+  box-shadow: 0 18px 60px -18px rgb(0 0 0 / 0.45), 0 2px 8px -2px rgb(0 0 0 / 0.18);
+  pointer-events: auto;
+  cursor: default;
+  -moz-user-select: text;
+  animation: axiosozo-region-rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.axiosozo-region-meta {
+  padding-inline: 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.axiosozo-region-note {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  margin: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--zen-colors-border, light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.12)));
+  border-radius: calc(7px * var(--zen-squircle-value, 1));
+  background: var(--zen-colors-input-bg, Field);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+
+  &::placeholder {
+    color: color-mix(in srgb, currentColor 50%, transparent);
+  }
+  &:focus-visible {
+    outline: var(--focus-outline, 2px solid var(--axiosozo-region-accent));
+    outline-offset: -1px;
+  }
+}
+
+.axiosozo-region-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.axiosozo-region-button {
+  appearance: none;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 12px;
+  border: none;
+  border-radius: calc(7px * var(--zen-squircle-value, 1));
+  background: var(--button-background-color, light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.1)));
+  color: var(--button-text-color, inherit);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: var(--button-font-weight, 500);
+  cursor: default;
+  transition: background-color 120ms ease;
+
+  &:hover {
+    background: var(--button-background-color-hover, light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.15)));
+  }
+  &:active {
+    background: var(--button-background-color-active, light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.2)));
+  }
+  &:focus-visible {
+    outline: var(--focus-outline, 2px solid var(--axiosozo-region-accent));
+    outline-offset: var(--focus-outline-offset, 2px);
+  }
+}
+
+.axiosozo-region-primary {
+  background: var(--button-background-color-primary, var(--axiosozo-region-accent));
+  color: var(--button-text-color-primary, white);
+
+  &:hover {
+    background: var(--button-background-color-primary-hover, var(--button-background-color-primary, var(--axiosozo-region-accent)));
+  }
+  &:active {
+    background: var(--button-background-color-primary-active, var(--button-background-color-primary, var(--axiosozo-region-accent)));
+  }
+}
+
+.axiosozo-region-close {
+  width: 28px;
+  padding: 0;
+  margin-inline-end: auto;
+  background: transparent;
+  /* A plain ×, drawn so no icon file is needed. */
+  &::before {
+    content: "";
+    display: block;
+    width: 10px;
+    height: 10px;
+    margin: auto;
+    background:
+      linear-gradient(45deg, transparent calc(50% - 0.75px), currentColor calc(50% - 0.75px), currentColor calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+      linear-gradient(-45deg, transparent calc(50% - 0.75px), currentColor calc(50% - 0.75px), currentColor calc(50% + 0.75px), transparent calc(50% + 0.75px));
+    opacity: 0.7;
+  }
+}
+
+@keyframes axiosozo-region-fade {
+  from { opacity: 0; }
+}
+@keyframes axiosozo-region-rise {
+  from { opacity: 0; translate: 0 4px; }
+}
+.axiosozo-region-hint {
+  /* The hint is centred with translate, so it only fades. */
+  animation-name: axiosozo-region-fade;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .axiosozo-region-shade,
+  .axiosozo-region-hint,
+  .axiosozo-region-bar {
+    animation: none;
+  }
+  .axiosozo-region-button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .axiosozo-region-box {
+    outline-color: Highlight;
+  }
+  .axiosozo-region-bar {
+    outline: 1px solid CanvasText;
+  }
+  .axiosozo-region-primary {
+    background: ButtonText;
+    color: ButtonFace;
+  }
+}
