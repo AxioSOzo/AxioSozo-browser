@@ -67,7 +67,10 @@
   background: var(--axiosozo-run-red);
 }
 @container urlbar-container (width < 350px) {
-  #axiosozo-env-pill { padding-inline: 6px; }
+  /* Only a mark here: without its capsule a lone dot reads as a status, not
+   * as a switch. The capsule comes back on hover, where it is a button. */
+  #axiosozo-env-pill:not(:hover, [aria-expanded="true"]) { background: transparent; }
+  #axiosozo-env-pill { padding-inline: 5px; }
   #axiosozo-env-pill .axiosozo-env-pill-label { display: none; }
   /* Nothing else marks it: a quiet dot keeps the pill findable. */
   #axiosozo-env-pill:not([data-container], [data-status="failed"])::before {
@@ -372,7 +375,10 @@
   min-width: 0;
   min-height: var(--tab-min-height, 36px);
   margin: var(--tab-margin-block, 2px);
-  padding-inline: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px));
+  /* Zen insets a tab's favicon by a further 3⅓px (.tab-icon-image margin);
+   * the same here puts the mark and the name on the tabs' columns. */
+  padding-inline: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px)
+    calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px));
   border-radius: var(--tab-border-radius, 8px);
   transition: background-color 100ms ease, transform 100ms ease;
 }
@@ -392,15 +398,16 @@
   white-space: nowrap;
 }
 .axiosozo-projects-overflow {
-  padding-inline-start: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 16px + var(--tab-icon-end-margin, 8.5px));
+  padding-inline-start: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px + 16px + var(--tab-icon-end-margin, 8.5px));
   font-size: small;
   color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
 }
 .axiosozo-projects-overflow:hover { color: inherit; }
 
-/* The project's mark: its own image, or a monogram tile in its container's
- * colour (Firefox's identity colour, usercontext.css) or a stable hue, dark
- * enough in every hue for its white letter. Favicon-sized, like a tab's. */
+/* The project's mark: its own image, or a monogram tile tinted with its
+ * container's colour (Firefox's identity colour, usercontext.css) or a stable
+ * hue, the letter in a deeper shade of the same colour. Quiet next to real
+ * favicons, like Zen's own space marks. Favicon-sized, like a tab's. */
 .axiosozo-project-icon {
   display: grid;
   place-items: center;
@@ -410,14 +417,15 @@
   height: 16px;
   overflow: hidden;
   border-radius: 4.5px;
-  background: light-dark(oklch(0.55 0.12 var(--axiosozo-project-hue, 250)), oklch(0.5 0.1 var(--axiosozo-project-hue, 250)));
-  color: white;
+  --axiosozo-mark: oklch(0.6 0.13 var(--axiosozo-project-hue, 250));
+  background: color-mix(in oklab, var(--axiosozo-mark) 22%, transparent);
+  color: light-dark(color-mix(in oklab, var(--axiosozo-mark) 72%, black), color-mix(in oklab, var(--axiosozo-mark) 72%, white));
   font-size: 9.5px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--axiosozo-mark) 40%, transparent);
 }
-.axiosozo-project-icon[class*="identity-color-"] { background: var(--identity-icon-color); }
+.axiosozo-project-icon[class*="identity-color-"] { --axiosozo-mark: var(--identity-icon-color); }
 .axiosozo-project-icon[data-image] { background: none; box-shadow: none; border-radius: 4px; }
 .axiosozo-project-icon > img { width: 100%; height: 100%; object-fit: contain; }
 .axiosozo-project-icon[data-size="large"] { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; }

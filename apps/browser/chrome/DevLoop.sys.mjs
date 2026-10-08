@@ -95,6 +95,20 @@ export function browserStackOf(window, tab) {
   return stack;
 }
 
+/** A folder path short enough for one panel line that still ends in the
+ * project's own folders: "/Volumes/…/products/remotedraw". The full path
+ * stays in the tooltip. */
+export function compactPath(path, max = 36) {
+  if (typeof path !== "string" || path.length <= max) return path;
+  const parts = path.split("/");
+  const head = parts[0] === "" ? `/${parts[1] ?? ""}` : parts[0];
+  for (const keep of [2, 1]) {
+    const tail = parts.slice(-keep).join("/");
+    if (parts.length > keep + 2 && head.length + tail.length + 3 <= max) return `${head}/…/${tail}`;
+  }
+  return `…/${parts.at(-1)}`;
+}
+
 function envName(environment) {
   return typeof environment === "string" ? environment : environment?.name ?? null;
 }
@@ -611,7 +625,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   const sidebar = installProjectSidebar(window, { services, adapter, core, privateWindow, timers, element, place,
     projects: () => projects, projectById, environmentsOf, currentProjectId: () => pillState?.project.id ?? null,
     cachedStatuses, statusesFor, consoleCounts, consolePhrase, paintContainer, projectColor, goTo, openSettings, openOverview,
-    displayPath: root => (homeDir && typeof root === "string" && root.startsWith(`${homeDir}/`) ? `~${root.slice(homeDir.length)}` : root) });
+    displayPath: root => compactPath(homeDir && typeof root === "string" && root.startsWith(`${homeDir}/`) ? `~${root.slice(homeDir.length)}` : root) });
   cleanups.push(() => sidebar.dispose());
   const sidebarDiagnostics = () => { const d = sidebar.diagnostics(); return { blockShown: d.shown, foldersShown: d.rows, sidebar: d }; };
   const scheduleFolders = () => sidebar.schedule();

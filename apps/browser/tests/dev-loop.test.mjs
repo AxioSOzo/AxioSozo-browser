@@ -529,7 +529,8 @@ test("P2 runtime stylesheet: Firefox's container colour paints the marks; a hidd
   // .axiosozo-status-dot sets display: inline-block, which would beat the UA [hidden] rule.
   assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[hidden\] \{ display: none; \}/u);
   assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[class\*="identity-color-"\] \{\s*background: var\(--identity-icon-color\);\s*border-color: transparent;\s*\}/u);
-  assert.match(css, /\.axiosozo-project-icon\[class\*="identity-color-"\] \{ background: var\(--identity-icon-color\); \}/u);
+  assert.match(css, /\.axiosozo-project-icon\[class\*="identity-color-"\] \{ --axiosozo-mark: var\(--identity-icon-color\); \}/u);
+  assert.match(css, /\.axiosozo-project-icon \{[^}]*background: color-mix\(in oklab, var\(--axiosozo-mark\) 22%, transparent\);/u);
   assert.doesNotMatch(css, /#[0-9a-f]{6}\b[^}]*identity/iu, "no copied container colours");
 });
 
@@ -1337,4 +1338,12 @@ test("runtime stylesheet: Zen and Firefox tokens, one status palette, round pill
     assert.doesNotMatch(block, /opacity: 0\.\d/u, selector);
   }
   assert.match(css, /:where\(\.axiosozo-projects, \.axiosozo-project-panel\) :is\(button, pre\):focus-visible \{\s*outline: var\(--focus-outline, [^)]*\);\s*outline-offset: var\(--focus-outline-inset, -2px\);/u);
+});
+
+test("compactPath keeps the project's own folders and a recognisable start", async () => {
+  const { compactPath } = await import("../chrome/DevLoop.sys.mjs");
+  assert.equal(compactPath("~/code/atlas"), "~/code/atlas");
+  assert.equal(compactPath("/Volumes/T9/axiosozo/products/remotedraw"), "/Volumes/…/products/remotedraw");
+  assert.equal(compactPath("~/Developer/clients/acme/website-2026"), "~/…/acme/website-2026");
+  assert.equal(compactPath("/Volumes/AxioSozoBuild/ux-overnight/shots/repos/a-very-long-project-folder-name"), "…/a-very-long-project-folder-name");
 });

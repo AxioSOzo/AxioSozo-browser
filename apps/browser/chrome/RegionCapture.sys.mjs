@@ -189,6 +189,8 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     return target?.localName === "browser" && target.documentGlobal === window && gBrowser.getTabForBrowser(target) ? target : null;
   };
   const point = event => ({ x: event.clientX, y: event.clientY });
+  // A chrome modal (Ask AI) owns the window until it closes.
+  const modalOpen = () => { try { return !!document.querySelector?.('[aria-modal="true"]:not([hidden])'); } catch { return false; } };
 
   // ---- overlay ----------------------------------------------------------------------
   const node = (tag, className, parent, attrs = {}) => {
@@ -278,7 +280,7 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     if (gesture?.phase === "select") return; // the select overlay handles its own mouse
     if (event.button !== 2 || !prefEnabled(window, REGION_PREFS.rightDrag, true)) return;
     const browser = browserUnder(event);
-    if (!browser || !sample(browser).ok) return;
+    if (!browser || modalOpen() || !sample(browser).ok) return;
     cancel("restart");
     gesture = { phase: "pending", browser, start: point(event), screenX: event.screenX, screenY: event.screenY,
       deferred: null, moved: false, last: point(event) };
@@ -390,7 +392,8 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
       let project = null;
       try {
         const match = await services.projectForUrl?.(facts.url, adapter.workspaceForTab?.(facts.tab) ?? undefined);
-        if (match?.project?.name) project = { name: match.project.name, environment: match.environment?.name ?? null };
+        const name = match?.project?.manifest?.name ?? match?.project?.name;
+        if (typeof name === "string" && name) project = { name, environment: match.environment?.name ?? null };
       } catch {}
       if (gesture?.token !== token) return;
       gesture = { phase: "captured", browser, token, selection, buffer, url: facts.url, title: facts.title,

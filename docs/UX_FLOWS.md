@@ -149,4 +149,26 @@ and `#settings` redirect):
 - **Copy for agent** copies it as text to paste into Claude Code, Codex or
   another agent. A copy that worked is said briefly (**Done**) and leaves by
   itself; anything that did not happen says so and stays until closed.
-  Screenshots and opening an agent directly are not in this build.
+  Opening an agent directly is not in this build; for a picture, capture an
+  area (below).
+
+## Capture an area for an agent
+
+Design: [capture an area](design/region-capture.md).
+
+- **Hold the right mouse button and drag** over a web page: the area is
+  selected (white frame, size in points, the rest of the tab dims). A plain
+  right-click still opens the normal menu at the same spot; a page that has
+  its own right-click menu keeps its own drag.
+- **Capture Area for Agent…** in the page menu does the same with the left
+  button or the trackpad: drag over an area, or click once for the visible
+  page. Esc cancels.
+- On release the area freezes and a small bar shows its size and project,
+  an optional note and **Copy for agent** (Return: the picture plus a plain
+  note with title, address, project and the note) or **Copy image**. A Zen
+  toast says what was copied. Clicking outside, Esc, switching tabs or a
+  navigation discards it.
+- Never in private windows, on sensitive sites, on non-web pages or (not yet)
+  on Chromium tabs; the toast says why. Nothing is saved or sent anywhere:
+  only your clipboard, after your click.
+  `axiosozo.regionCapture.rightDrag.enabled=false` keeps right-click stock.

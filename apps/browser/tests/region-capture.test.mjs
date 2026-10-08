@@ -160,7 +160,7 @@ function harness({ url = PAGE, engine = "gecko", sensitiveHost = false, privateW
   const clipboard = { writes: [], write(buffer, text) { this.writes.push({ buffer, text }); } };
   const toasts = [];
   const services = { isNormalWindow: () => true,
-    projectForUrl: async () => ({ project: { name: "Harbor" }, environment: { name: "web" } }) };
+    projectForUrl: async () => ({ project: { id: "p_harbor", manifest: { name: "Harbor" } }, environment: { name: "web" } }) };
   const adapter = { isPrivateWindow: () => privateWindow, workspaceForTab: () => null };
   const buffer = new ArrayBuffer(8);
   const runtime = installRegionCapture(window, {
@@ -305,6 +305,18 @@ test("the right-drag pref off leaves right-click alone; the menu entry still wor
   await flush();
   const [rect] = h.snapshots[0];
   assert.deepEqual([rect.x, rect.y, rect.width, rect.height], [0, 0, 1000, 800]);
+});
+
+test("a chrome modal (Ask AI) open over the window keeps right-click stock", () => {
+  const h = harness();
+  const modal = h.document.createElement("div");
+  modal.setAttribute("aria-modal", "true");
+  h.document.documentElement.append(modal);
+  down(h);
+  assert.equal(h.contentAsksForMenu().defaultPrevented, false);
+  modal.remove();
+  down(h);
+  assert.equal(h.contentAsksForMenu().defaultPrevented, true);
 });
 
 test("dispose removes the menu entry, the overlay and every listener", async () => {
