@@ -502,8 +502,9 @@ test("service status connects only to loopback on declared ports, on request, ra
   assert.ok(h.probes.every(p => p.timeoutMs > 0 && Object.keys(p).sort().join() === "address,port,timeoutMs"), "no URL or host name is handed to the prober");
   assert.equal(first.find(s => s.name === "Site").checked_at, null);
   assert.ok(events.length >= 1);
-  const attention = await h.services.needsAttention();
-  assert.deepEqual(attention.map(a => [a.kind, a.target.service]).sort(), [["service_down", "Api"], ["service_down", "V6"], ["service_down", "Vite"]]);
+  // A declared server that is not running is a project's normal state: listed as
+  // "Not running" where the project is shown, never raised as needing attention.
+  assert.deepEqual(await h.services.needsAttention(), []);
   down = false;
   await h.services.serviceStatus(project.id);
   assert.equal(h.probes.length, 4, "a second request inside the interval reuses the result");
@@ -2331,9 +2332,10 @@ function fakeRunner() {
   const runs = new Map();
   const approved = new Set();
   let onChange = null;
+  let created = null;
   const create = ({ approvals, onChange: notify }) => {
     onChange = notify;
-    return {
+    return created = {
       calls, approvals,
       async start({ projectId, root, target, approve }) {
         calls.push(["start", projectId, root, target.key, approve]);
@@ -2354,7 +2356,7 @@ function fakeRunner() {
       async close() { calls.push(["close"]); },
     };
   };
-  return { create, calls, notify: () => onChange?.() };
+  return { create, calls, notify: () => onChange?.(), get created() { return created; } };
 }
 
 test("runs: targets come from declared services; a start needs a normal window and an approved command", { skip }, async () => {
@@ -2389,6 +2391,43 @@ test("runs: targets come from declared services; a start needs a normal window a
   for (const fn of h.shutdown) await fn();
   assert.deepEqual(runner.calls.at(-1), ["close"]);
 });
+
+test("attention: only a run that crashed or could not start needs the user, announced once per change", { skip }, async () => {
+  const runner = fakeRunner();
+  const h = harness({ tree: { ...VITE_TREE, "/work/shop/apps": { dir: true }, "/work/shop/apps/web": { dir: true } }, deps: { createRunner: runner.create } });
+  const project = await h.services.confirmProject({ root: "/work/shop", manifest: RUN_MANIFEST, contextUuid: APP });
+  const [vite, ios] = (await h.services.projectRuns(project.id)).targets;
+  const events = [];
+  h.services.on("attention", () => events.push("attention"));
+  await h.services.startRun({ window: h.zen.window, projectId: project.id, key: vite.key, approve: true });
+  await h.timers.runAll(); // the runs event throttle
+  assert.deepEqual(await h.services.needsAttention(), [], "a running server needs nothing");
+  assert.deepEqual(events, [], "no failure, no attention event");
+  runnerRun(runner, project.id, vite.key, { status: "failed", name: "Vite", exit_code: 1, error: null });
+  runner.notify();
+  assert.deepEqual(events, ["attention"]);
+  runner.notify();
+  await h.timers.runAll();
+  assert.deepEqual(events, ["attention"], "the same failure is announced once");
+  let attention = await h.services.needsAttention();
+  assert.deepEqual(attention, [{ kind: "run_failed", title: "Vite stopped with an error", detail: "Shop · exit code 1",
+    target: { type: "project", id: project.id, run: vite.key } }]);
+  await h.services.startRun({ window: h.zen.window, projectId: project.id, key: ios.key, approve: true });
+  runnerRun(runner, project.id, ios.key, { status: "failed", name: "iOS app", exit_code: null, error: "SPAWN_FAILED" });
+  attention = await h.services.needsAttention();
+  assert.deepEqual(attention.map(item => [item.title, item.detail]),
+    [["Vite stopped with an error", "Shop · exit code 1"], ["iOS app could not start", "Shop"]]);
+  // Stopped and cleanly exited runs are not failures.
+  runnerRun(runner, project.id, vite.key, { status: "stopped" });
+  runnerRun(runner, project.id, ios.key, { status: "exited", exit_code: 0, error: null });
+  assert.deepEqual(await h.services.needsAttention(), []);
+});
+
+// Rewrites the fake runner's record of one run in place (its list() returns these objects).
+function runnerRun(runner, projectId, key, fields) {
+  const record = runner.created.list().find(run => run.project_id === projectId && run.key === key);
+  Object.assign(record, fields);
+}
 
 test("runs: a project folder that moved or lies under a denied root is never run in; no runner means unavailable", { skip }, async () => {
   const runner = fakeRunner();

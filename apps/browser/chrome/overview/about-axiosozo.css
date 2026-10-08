@@ -68,6 +68,8 @@
 }
 
 html { min-height: 100%; background-color: var(--page) !important; }
+/* Hidden means hidden, also for parts whose class sets a display. */
+[hidden] { display: none !important; }
 
 /* The font family is Zen's (its theme sets the system font on :root). */
 body {
@@ -114,8 +116,10 @@ a { color: inherit; }
 }
 .skip-link:focus { top: 12px; }
 
-/* Firefox's focus outline, in Zen's accent (--focus-outline-color). */
+/* Firefox's focus outline, in Zen's accent (--focus-outline-color). One ring
+ * only: fields draw it on their edge instead of a second ring inside. */
 :focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+:is(select, textarea, input:not([type="checkbox"], [type="radio"])):focus-visible { outline-offset: 0; }
 /* Headings and cards receive focus only so screen readers land there; no ring. */
 [tabindex="-1"]:focus, [tabindex="-1"]:focus-visible { outline: none; box-shadow: none; }
 input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--accent); }
@@ -160,15 +164,19 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
   color: var(--ink);
   box-shadow: var(--shadow), 0 0 0 1px var(--hairline);
 }
+/* What needs you, counted: neutral; red only when a server crashed. */
 .views a .count {
   margin-inline-start: var(--space-small);
-  padding: 0 5px;
+  padding: 0 6px;
   border-radius: var(--radius-round);
-  background: var(--bad);
-  color: var(--background-color-canvas);
+  corner-shape: round;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
   font-size: var(--font-micro);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
+.views a .count[data-tone="bad"] { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad-ink); }
 
 /* ---- Views and blocks ------------------------------------------------------------- */
 
@@ -230,16 +238,20 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
 .row-title { font-weight: 500; }
 .row-detail { color: var(--ink-soft); font-size: var(--font-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* A status dot echoes the words next to it. Green runs, amber waits, red
+ * failed; a server that is simply not running is an empty ring, never red. */
 .dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--ink-faint);
 }
 .dot[data-status="up"] { background: var(--good); }
 .dot[data-status="down"] { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
 .dot[data-status="warn"] { background: var(--warn); }
+.dot[data-status="off"] { background: none; box-shadow: inset 0 0 0 1.5px var(--ink-faint); }
 
 /* ---- First-run guide ---------------------------------------------------------------- */
 
@@ -274,6 +286,7 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
   width: 20px;
   height: 20px;
   border-radius: 50%;
+  corner-shape: round;
   box-shadow: inset 0 0 0 1.5px var(--hairline-strong);
   color: var(--ink-soft);
   font-size: var(--font-micro);
@@ -334,6 +347,7 @@ input[type="checkbox"]:not(.switch), input[type="radio"] { accent-color: var(--a
   align-items: center;
   padding: 1px 7px;
   border-radius: var(--radius-round);
+  corner-shape: round;
   background: var(--surface-hover);
   color: var(--ink-soft);
   font-size: var(--font-micro);
@@ -385,7 +399,7 @@ button.icon { width: 28px; padding: 0; background: none; color: var(--ink-soft);
 button.icon:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
 button.link-button { min-height: 0; padding: 0; background: none; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
-select, input[type="text"], input[type="url"], input[type="number"], input[type="time"], textarea {
+select, input[type="text"], input[type="url"], input[type="number"], input[type="time"], input[type="password"], textarea {
   box-sizing: border-box;
   min-height: 28px;
   margin: 0;
@@ -399,7 +413,6 @@ select, input[type="text"], input[type="url"], input[type="number"], input[type=
 }
 select { padding-inline-end: 30px; }
 textarea { width: 100%; padding: var(--space-small) var(--space-small); resize: vertical; }
-:is(select, input, textarea):focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* Switch */
 input.switch {
@@ -410,6 +423,7 @@ input.switch {
   height: 18px;
   margin: 0;
   border-radius: var(--radius-round);
+  corner-shape: round;
   background: var(--input-border-color);
   transition: background-color 150ms ease;
 }
@@ -421,6 +435,7 @@ input.switch::after {
   width: 14px;
   height: 14px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--color-white);
   box-shadow: var(--box-shadow-level-1);
   transition: translate 150ms var(--ease);
@@ -541,7 +556,7 @@ dialog[open] { animation: sheet-in 200ms var(--ease); }
 .bar-label { display: flex; flex-direction: column; min-width: 0; }
 .bar-label span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .bar-label span + span { color: var(--ink-soft); font-size: var(--font-micro); }
-.bar { height: 6px; border-radius: var(--radius-round); background: var(--surface-hover); overflow: hidden; }
+.bar { height: 6px; border-radius: var(--radius-round); corner-shape: round; background: var(--surface-hover); overflow: hidden; }
 .bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); opacity: 0.85; }
 .bar-value { text-align: end; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
 .quiet-actions { display: flex; justify-content: flex-end; gap: var(--space-xsmall); }
@@ -618,7 +633,6 @@ select.compact { min-height: 26px; font-size: var(--font-caption); }
 .project-facts { display: flex; flex-wrap: wrap; gap: var(--space-xsmall) var(--space-large); margin-top: var(--space-small); font-size: var(--font-caption); }
 .fact { display: inline-flex; align-items: center; gap: var(--space-small); min-width: 0; }
 .fact-label { color: var(--ink-soft); }
-.fact[data-tone="down"] { color: var(--bad-ink); }
 /* Controls above the card's link; the free space around them still opens the home. */
 .card-control, .project-actions { position: relative; z-index: 1; }
 .card-control { margin-top: var(--space-small); }
@@ -682,7 +696,6 @@ button.env-open:hover:not(:disabled) { background: var(--surface-hover); }
 .env-open:is(:hover, :focus-visible) > svg:last-child { opacity: 1; }
 .env-status { display: inline-flex; align-items: center; gap: var(--space-small); flex: none; min-width: 7.5rem; color: var(--ink-soft); font-size: var(--font-caption); }
 .env-status[data-status="up"] { color: var(--good-ink); }
-.env-status[data-status="down"] { color: var(--bad-ink); }
 
 .links { display: flex; flex-direction: column; gap: var(--space-small); margin-top: var(--space-small); }
 .link-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--space-small); }
@@ -845,6 +858,7 @@ button.small { min-height: var(--button-min-height-small); padding-inline: var(-
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  corner-shape: round;
   box-shadow: inset 0 0 0 1.5px var(--hairline-strong);
 }
 .container-mark[class*="identity-color-"] { background: var(--identity-icon-color); box-shadow: 0 0 0 2px var(--surface-strong); }
@@ -883,19 +897,8 @@ button.small { min-height: var(--button-min-height-small); padding-inline: var(-
 .key-panel .field { margin-top: var(--space-xsmall); }
 .key-panel button[aria-disabled="true"] { opacity: 0.45; }
 .key-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-small); min-width: 0; }
-.key-row input[type="password"] {
-  flex: 1 1 14rem;
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 var(--space-small);
-  border: 0;
-  border-radius: var(--radius-small);
-  background: var(--surface-strong);
-  color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--hairline-strong);
-  font: inherit;
-}
-.key-row input[type="password"]:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+/* The key field is an ordinary field (see the shared input rule above). */
+.key-row input[type="password"] { flex: 1 1 14rem; min-width: 0; }
 .key-row input:disabled { opacity: 0.5; }
 p.errors:empty { display: none; }
 
@@ -1004,7 +1007,7 @@ h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-w
 .start[aria-busy="true"]:empty { min-height: 6rem; }
 .start-section { display: flex; flex-direction: column; gap: var(--space-medium); }
 .start-section h3 { display: flex; align-items: center; gap: var(--space-small); }
-.start-section h3 .count { padding: 0 6px; border-radius: var(--radius-round); background: var(--surface-hover); color: var(--ink-soft);
+.start-section h3 .count { padding: 0 6px; border-radius: var(--radius-round); corner-shape: round; background: var(--surface-hover); color: var(--ink-soft);
   font-size: var(--font-micro); font-weight: var(--font-weight-bold); }
 .start-section > .activity-list { padding: var(--space-medium) var(--space-large); border-radius: var(--radius); background: var(--surface);
   box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline); }
@@ -1018,13 +1021,20 @@ h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-w
 
 /* ---- Toast ------------------------------------------------------------------------------ */
 
+/* One quiet line at the bottom, in Zen's inverse branding colours. A pointer
+ * over it keeps it; a click puts it away. An error says so with a red dot, not
+ * a red slab. */
 .toast {
   position: fixed;
   inset-inline: 0;
-  bottom: 22px;
+  bottom: 24px;
   z-index: 20;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-small);
   width: max-content;
   max-width: min(36rem, calc(100vw - 48px));
+  box-sizing: border-box;
   padding: 9px var(--space-large);
   border-radius: var(--radius);
   background: var(--zen-branding-bg-reverse);
@@ -1036,8 +1046,17 @@ h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-w
   pointer-events: none;
   transition: opacity 180ms ease, translate 220ms var(--ease);
 }
-.toast:not(:empty)[data-visible] { opacity: 1; translate: 0; }
-.toast[data-kind="error"] { background: var(--text-color-error); color: var(--background-color-canvas); }
+.toast:not(:empty)[data-visible] { opacity: 1; translate: 0; pointer-events: auto; }
+.toast[data-kind="error"]::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--bad);
+}
 
 @media (max-width: 640px) {
   body { padding-inline: var(--space-large); }
@@ -1070,6 +1089,7 @@ h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-w
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  corner-shape: round;
   border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
   border-top-color: currentColor;
   animation: spin 700ms linear infinite;
@@ -1107,7 +1127,7 @@ input.setup-name {
   font-weight: var(--font-weight-semibold);
 }
 input.setup-name:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--input-border-color); }
-input.setup-name:focus-visible { background-color: var(--zen-colors-input-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+input.setup-name:focus-visible { background-color: var(--zen-colors-input-bg); box-shadow: inset 0 0 0 1px var(--input-border-color); }
 input.setup-name:disabled { opacity: 1; color: var(--ink-soft); }
 .setup-path { margin: 0; color: var(--ink-soft); font-family: var(--mono); font-size: var(--font-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setup-status {
@@ -1169,7 +1189,7 @@ input.setup-name:disabled { opacity: 1; color: var(--ink-soft); }
 .service-line { display: flex; align-items: center; gap: var(--space-small); min-width: 0; }
 .service-line input { min-height: 24px; padding-block: 1px; background-color: transparent; box-shadow: none; }
 .service-line input:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--input-border-color); }
-.service-line input:focus-visible { background-color: var(--zen-colors-input-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+.service-line input:focus-visible { background-color: var(--zen-colors-input-bg); box-shadow: inset 0 0 0 1px var(--input-border-color); }
 input.service-name { flex: 1 1 8rem; min-width: 6rem; font-weight: var(--font-weight-semibold); }
 input.service-command { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: var(--font-caption); color: var(--ink); }
 input.service-command::placeholder { font-family: inherit; }
@@ -1205,6 +1225,30 @@ details.setup-more > summary { font-weight: 500; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The first-run safety offer: where else it can be changed, after the choice. */
+.safety-later { padding-inline: 0; }
+
+/* More contrast asked for: soft text and hairlines move one step closer to the ink. */
+@media (prefers-contrast: more) {
+  :root {
+    --ink-soft: var(--text-color);
+    --ink-faint: color-mix(in srgb, var(--text-color) 69%, transparent);
+    --hairline: var(--zen-colors-border);
+  }
+}
+
+/* Forced colours: shapes that carry state get a system-colour edge, so a dot,
+ * a count or a switch never disappears with its background. */
+@media (forced-colors: active) {
+  .dot, .container-mark, .toast[data-kind="error"]::before { forced-color-adjust: none; background: CanvasText; box-shadow: none; }
+  .dot[data-status="off"], .dot:not([data-status]), .dot[data-status="unknown"] { background: Canvas; box-shadow: inset 0 0 0 1.5px CanvasText; }
+  .views a .count, .tag, .start-section h3 .count, .toast { border: 1px solid CanvasText; }
+  .views a[aria-current="page"] { outline: 1px solid Highlight; }
+  input.switch { border: 1px solid ButtonText; }
+  input.switch:checked { forced-color-adjust: none; background: Highlight; }
+  .project-card, .card, .rows, .panel, .env-list, .home-facts, .brief, .watch-list { border: 1px solid CanvasText; }
 }
 
 @media (prefers-reduced-motion: reduce) {

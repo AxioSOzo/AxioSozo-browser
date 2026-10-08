@@ -2013,10 +2013,10 @@ export function watchStatusView(status, { error = null } = {}) {
 
 export const SAFETY_TITLE = "Block adult and malicious sites";
 // What the setting does, and no more: it only chooses the DNS resolver.
-export const SAFETY_TEXT = "When on, this profile looks up site addresses with DNS over HTTPS through Cloudflare's family resolver (family.cloudflare-dns.com), which declines sites on Cloudflare's adult and malware lists. It is not a complete filter, and AxioSozo does not look at pages to decide.";
+export const SAFETY_TEXT = "When on, sites are looked up with DNS over HTTPS through Cloudflare's family resolver (family.cloudflare-dns.com), which declines sites on its adult and malware lists. This is not a complete filter, and AxioSozo does not look at pages for it.";
 // The first-run offer: a proposal that changes nothing until it is saved.
-export const SAFETY_OFFER_HELP = "One choice for this profile. The box starts checked; nothing changes until you save your choice.";
-export const SAFETY_LATER = "You can change this later under AI & keys, or in Firefox Settings under Privacy & Security.";
+export const SAFETY_OFFER_HELP = "For this profile only, and nothing changes until you save your choice.";
+export const SAFETY_LATER = "You can change it later under AI & keys or in Firefox Settings → Privacy & Security.";
 export const SAFETY_OUTCOME_LABELS = Object.freeze({
   RESTORED: "My earlier settings are back", EXTERNAL_CHANGED: "I changed them myself", ACCEPTED: "Keep them as they are now" });
 export const SAFETY_OUTCOMES = Object.freeze(["RESTORED", "EXTERNAL_CHANGED", "ACCEPTED"]);

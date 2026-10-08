@@ -205,13 +205,24 @@ document.addEventListener("click", event => {
 });
 
 let toastTimer = null;
+const TOAST_MS = { info: 3200, error: 9000 };
+function hideStatusLater(node, ms) {
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.removeAttribute("data-visible"), ms);
+}
 function setStatus(message, kind = "info") {
   const node = $("status");
   node.dataset.kind = kind;
   node.textContent = message;
   node.toggleAttribute("data-visible", !!message);
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.removeAttribute("data-visible"), kind === "error" ? 6000 : 3200);
+  hideStatusLater(node, TOAST_MS[kind] ?? TOAST_MS.info);
+}
+/** A pointer over the toast keeps it; a click puts it away. */
+function setupStatus() {
+  const node = $("status");
+  node?.addEventListener("mouseenter", () => clearTimeout(toastTimer));
+  node?.addEventListener("mouseleave", () => { if (node.hasAttribute("data-visible")) hideStatusLater(node, 2000); });
+  node?.addEventListener("click", () => { clearTimeout(toastTimer); node.removeAttribute("data-visible"); });
 }
 
 function errorText(error) {
@@ -312,7 +323,9 @@ function setupSheet() {
 const contextName = uuid => state.contexts.find(context => context.uuid === uuid)?.name ?? null;
 const projectName = M.projectName;
 const hostOf = url => { try { return new URL(url).host; } catch { return url; } };
-const DOT_STATUS = { up: "up", down: "down", warn: "warn" };
+// A local server that is not running is a project's normal state: a neutral
+// ring, never the red of a failure. Some of several running reads as running.
+const DOT_STATUS = { up: "up", down: "off", warn: "up" };
 const dotStatus = tone => DOT_STATUS[tone] ?? "unknown";
 const dateText = ms => (Number.isSafeInteger(ms) && ms > 0
   ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null);
@@ -343,10 +356,18 @@ function showView(view) {
   if (view === "home" && previous !== "home" && state.connected && state.loaded) { renderStartPage(); loadStartPage(); }
 }
 
+/** A server that crashed is the only attention item that is a failure. */
+const attentionFailed = item => item?.kind === "run_failed";
+
 function renderViewCounts() {
   const link = document.querySelector('.views a[data-view="projects"]');
   link.querySelector(".count")?.remove();
-  if (state.attention.length) link.append(h("span", { class: "count", "aria-label": `${state.attention.length} need attention` }, String(state.attention.length)));
+  const count = state.attention.length;
+  if (!count) return;
+  // The link's name is "Projects, N need attention": the number is shown, the words are read.
+  link.append(h("span", { class: "count", "data-tone": state.attention.some(attentionFailed) ? "bad" : null },
+    h("span", { "aria-hidden": "true" }, String(count)),
+    h("span", { class: "visually-hidden" }, `, ${count} need${count === 1 ? "s" : ""} attention`)));
 }
 
 // ---------------------------------------------------------------- attention
@@ -375,7 +396,7 @@ function renderAttention() {
     if (action?.kind === "rule") button = h("button", { type: "button", onclick: () => { location.hash = `rule=${action.id}`; } }, "Edit rule");
     else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => { location.hash = M.homeHash(action.id); } }, "Show project");
     else if (action?.kind === "url") button = h("button", { type: "button", onclick: () => act("openUrl", { url: action.url }) }, "Open");
-    const status = item.kind === "service_down" ? "down" : "warn";
+    const status = attentionFailed(item) ? "down" : "warn";
     items.push(h("li", { class: "row" },
       h("span", { class: "dot", "data-status": status, "aria-hidden": "true" }),
       h("div", { class: "row-main" },
@@ -416,8 +437,11 @@ function spaceIcon(space) {
   return box;
 }
 
-const spaceLabel = context => `${context.name} (${TYPE_LABELS[context.type]?.toLowerCase() ?? context.type})`;
-const thisWindowTag = context => (context.uuid === state.activeSpace ? h("span", { class: "tag" }, "this window") : null);
+// A space is named by its own name. Its type in brackets ("Work (personal)")
+// read like a second name, so the type is said only where it is the subject.
+const spaceLabel = context => context.name;
+const thisWindowTag = context => (context.uuid === state.activeSpace
+  ? h("span", { class: "tag", title: "The space this window shows" }, "Current") : null);
 
 /** A space's actions behind "…": add a project straight into it, switch to
  * it, its type. The page has one "Add project" button, in its header. */
@@ -1043,6 +1067,14 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
 
   // ---- more options: addresses, production URL, links, findings, files
   const environmentsBox = h("div", { class: "form-rows" });
+  // The Production URL field shows only while no ticked address is named
+  // production (or while it holds a value of its own), so the two never disagree.
+  let productionField = null;
+  const syncProductionField = () => {
+    if (!productionField || !review) return;
+    const listed = review.environments.some(env => env.enabled !== false && String(env.name ?? "").trim() === "production");
+    productionField.hidden = listed && !String(review.productionUrl ?? "").trim();
+  };
   const addEnvironmentButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     const apps = M.reviewApps(review).filter(Boolean);
     review.environments.push({ app: apps.find(app => app !== "desktop") ?? apps[0] ?? null, name: "", base_url: "",
@@ -1060,7 +1092,7 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
         const use = h("input", { type: "checkbox", checked: row.enabled !== false, id: newId("env"), "aria-label": `Use ${label}`,
           onchange: event => { row.enabled = event.target.checked; renderEnvironments(); } });
         const nameField = h("input", { type: "text", value: row.name, placeholder: "local", "aria-label": `Name of ${label}`,
-          class: "env-name", disabled: row.enabled === false, oninput: event => { row.name = event.target.value; } });
+          class: "env-name", disabled: row.enabled === false, oninput: event => { row.name = event.target.value; syncProductionField(); } });
         const urlField = h("input", { type: "url", value: row.base_url, placeholder: "http://localhost:5173", "aria-label": `Address of ${label}`,
           class: "env-url", disabled: row.enabled === false, oninput: event => { row.base_url = event.target.value; } });
         const appSelect = row.added && apps.length > 1 ? h("select", { class: "compact", "aria-label": `App of ${label}`,
@@ -1071,21 +1103,23 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
           use, appSelect, nameField, urlField, remove, row.guess ? h("span", { class: "tag guess", title: row.source || null }, "guess") : null);
       }))));
     if (!review.environments.length) environmentsBox.append(h("p", { class: "help" }, "None yet."));
+    syncProductionField();
     if (focusIndex !== undefined && focusIndex >= 0) environmentsBox.querySelector(`[data-index="${focusIndex}"] input:not([type="checkbox"])`)?.focus();
     else if (focusIndex !== undefined) addEnvironmentButton.focus();
   };
 
   const surfacesShown = h("div", { class: "form-rows" });
   const surfacesMore = h("div", { class: "form-rows" });
-  const moreLinks = h("details", {}, h("summary", {}, "Behind … in the sidebar"), surfacesMore);
+  const moreLinks = h("details", {}, h("summary", {}, "Other links"), surfacesMore);
   const renderSurfaces = () => {
     const rowFor = (row, index) => {
       const label = row.name || `link ${index + 1}`;
       const keep = h("input", { type: "checkbox", checked: row.enabled !== false, "aria-label": `Keep ${label}`,
         onchange: event => { row.enabled = event.target.checked; renderSurfaces(); } });
       const move = h("button", { type: "button", class: "ghost small", disabled: row.enabled === false,
+        "aria-label": row.prominence === "primary" ? `Show ${label} later` : `Show ${label} first`,
         onclick: () => { row.prominence = row.prominence === "primary" ? "secondary" : "primary"; renderSurfaces(); } },
-      row.prominence === "primary" ? "Move behind …" : "Show in sidebar");
+      row.prominence === "primary" ? "Show later" : "Show first");
       const controls = row.added
         ? [h("input", { type: "text", value: row.name, placeholder: "Name", "aria-label": `Name of ${label}`, oninput: event => { row.name = event.target.value; } }),
           h("input", { type: "url", value: row.url, placeholder: "https://", "aria-label": `Address of ${label}`, class: "env-url", oninput: event => { row.url = event.target.value; } }),
@@ -1097,10 +1131,10 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
     const shown = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence === "primary");
     const more = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence !== "primary");
     surfacesShown.replaceChildren(...shown.map(([row, index]) => rowFor(row, index)));
-    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "None in the sidebar."));
+    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "None shown first."));
     surfacesMore.replaceChildren(...more.map(([row, index]) => rowFor(row, index)));
     moreLinks.hidden = !more.length;
-    moreLinks.querySelector("summary").textContent = `Behind … in the sidebar (${more.length})`;
+    moreLinks.querySelector("summary").textContent = `Other links (${more.length})`;
   };
   const addLinkButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     review.surfaces.push({ name: "", url: "", kind: "other", prominence: "primary", source: "", guess: false, enabled: true, added: true });
@@ -1116,17 +1150,21 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
     const spaceControl = h("select", { onchange: event => { review.contextUuid = event.target.value || null; } },
       option("", "No space (not in the sidebar)", review.contextUuid ?? ""),
       state.contexts.map(context => option(context.uuid,
-        `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · this window" : ""}`, review.contextUuid)));
+        `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · current space" : ""}`, review.contextUuid)));
     const productionInput = h("input", { type: "url", value: review.productionUrl, placeholder: "https://example.com",
       oninput: event => { review.productionUrl = event.target.value; } });
+    productionField = field({ label: "Production URL", control: productionInput, help: "The live site, for switching between local and live." });
+    syncProductionField();
     const findingRows = isNew ? findingFacts(review.findings) : [];
     const more = h("details", { class: "setup-more" }, h("summary", {}, "More options"),
       h("div", { class: "setup-more-body" },
         h("fieldset", {}, h("legend", {}, "Addresses"),
           h("p", { class: "help" }, "A tab on one of these belongs to this project."),
           environmentsBox, h("div", {}, addEnvironmentButton)),
-        field({ label: "Production URL", control: productionInput, help: "The live site, for switching between local and live." }),
-        h("fieldset", {}, h("legend", {}, "Links in the sidebar"), surfacesShown, moreLinks, h("div", {}, addLinkButton)),
+        productionField,
+        h("fieldset", {}, h("legend", {}, "Links"),
+          h("p", { class: "help" }, "The project's panel lists these, the ones shown first at the top."),
+          surfacesShown, moreLinks, h("div", {}, addLinkButton)),
         findingRows.length ? h("fieldset", { class: "findings" }, h("legend", {}, "Also found"),
           h("p", { class: "help" }, "Kept in this browser only. Agent files and app folders are noted by name, never opened."),
           h("dl", { class: "facts" }, findingRows.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))) : null,
@@ -1146,7 +1184,7 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
       h("section", { class: "setup-section", "aria-labelledby": `${kindLabel}-services` },
         h("div", { class: "setup-section-head" },
           h("h3", { id: `${kindLabel}-services`, class: "setup-label" }, "Services"),
-          h("span", { class: "help" }, "Commands are for you to copy; AxioSozo never runs them.")),
+          h("span", { class: "help" }, "Nothing runs until you start it, and the first start shows the exact command.")),
         servicesBox, h("div", {}, addServiceButton)),
       h("div", { class: "setup-section setup-space" }, field({ label: "Space", control: spaceControl })),
       more);
@@ -2393,7 +2431,7 @@ function safetyPanel(place) {
     const box = h("input", { type: "checkbox", id: ids.checked, checked: view.checked, "aria-describedby": `safety-${place}-help`, disabled: !!pending });
     parts.push(h("div", { class: "choice safety-choice" }, box,
       h("div", {}, h("label", { for: ids.checked }, M.SAFETY_TITLE),
-        h("span", { class: "help", id: `safety-${place}-help` }, offer ? `${M.SAFETY_TEXT} ${M.SAFETY_LATER}` : M.SAFETY_TEXT))));
+        h("span", { class: "help", id: `safety-${place}-help` }, M.SAFETY_TEXT))));
     parts.push(h("p", { class: "safety-now", "data-tone": view.tone }, h("span", { class: "dot", "data-status": toneDot(view.tone), "aria-hidden": "true" }),
       h("span", {}, view.text)));
     parts.push(h("div", { class: "button-row" },
@@ -2405,6 +2443,8 @@ function safetyPanel(place) {
           beginSafetyChoice("choose");
           renderSafety();
         } }, pending?.kind === "choose" ? "Saving…" : offer ? "Save my choice" : "Save")));
+    // Where else it can be changed: a quiet line after the choice, not more text in it.
+    if (offer) parts.push(h("p", { class: "footnote safety-later" }, M.SAFETY_LATER));
   } else {
     parts.push(h("p", { class: "quiet-text", "data-tone": view.tone }, view.text));
   }
@@ -2473,7 +2513,7 @@ function renderStartPage() {
     const action = item.action;
     const link = action?.kind === "project" ? h("a", { href: M.homeHash(action.id), class: "button-link small" }, "Show project")
       : action?.kind === "rule" ? h("a", { href: `#rule=${action.id}`, class: "button-link small" }, "Edit rule") : null;
-    return h("li", { class: "row" }, h("span", { class: "dot", "data-status": item.kind === "service_down" ? "down" : "warn", "aria-hidden": "true" }),
+    return h("li", { class: "row" }, h("span", { class: "dot", "data-status": attentionFailed(item) ? "down" : "warn", "aria-hidden": "true" }),
       h("div", { class: "row-main" }, h("span", { class: "row-title" }, item.title), item.detail ? h("span", { class: "row-detail" }, item.detail) : null),
       link);
   })) : h("p", { class: "quiet-text" }, "Nothing needs you right now.");
@@ -3486,6 +3526,7 @@ function setupSkipLink() {
 async function init() {
   setupDialog();
   setupSheet();
+  setupStatus();
   setupSkipLink();
   applyRoute();
   $("add-project").addEventListener("click", () => addProjectFlow({}));

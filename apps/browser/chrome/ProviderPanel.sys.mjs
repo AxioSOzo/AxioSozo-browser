@@ -13,9 +13,9 @@ function html(doc, tag, text = "", className = "") {
 export function providerErrorMessage(code) {
   const messages = {
     BLOCKED_AUTH: "Sign in with the selected provider’s official client, then try again.",
-    CODEX_LOGIN_REQUIRED: "Codex needs a one-time sign-in for this browser’s separate profile. Open Settings → Provider configurations for its official login command.",
+    CODEX_LOGIN_REQUIRED: "Codex needs a one-time sign-in for this browser’s separate profile. Open Settings → Provider configurations for the sign-in command.",
     ANTIGRAVITY_PROTOCOL_UNSUPPORTED: "Antigravity is unavailable in this build: startup and tool isolation have not been verified. Select Codex or Claude Code.",
-    BLOCKED_ENV: "This provider’s supported local client is unavailable. Check provider settings.",
+    BLOCKED_ENV: "This provider’s supported local client is unavailable. Check Settings.",
     BLOCKED_PROTOCOL: "This client does not expose a supported conversation connection yet.",
     UNSUPPORTED_PROVIDER: "This provider does not expose a supported conversation connection yet.",
     PROVIDER_HOST_UNAVAILABLE: "The local provider host is unavailable. Restart from the browser launcher.",
@@ -145,18 +145,19 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
   function build() {
     panel = html(doc, "section"); panel.id = "axiosozo-provider-panel"; panel.hidden = true;
     panel.setAttribute("role", "dialog"); panel.setAttribute("aria-modal", "true"); panel.setAttribute("aria-labelledby", "axiosozo-provider-title");
+    // Header: the title, then the provider, Settings and Close at the end.
     const header = html(doc, "div", "", "axiosozo-assistant-header");
     heading = html(doc, "h2", "Ask AI"); heading.id = "axiosozo-provider-title";
-    const closeButton = html(doc, "button", "Close"); closeButton.type = "button"; closeButton.addEventListener("click", close);
-    header.append(heading, closeButton);
-    const controls = html(doc, "div", "", "axiosozo-assistant-controls");
-    const label = html(doc, "label", "Provider"); label.htmlFor = "axiosozo-provider-choice";
+    const label = html(doc, "label", "Provider", "axiosozo-assistant-hidden"); label.htmlFor = "axiosozo-provider-choice";
     select = html(doc, "select"); select.id = "axiosozo-provider-choice";
     for (const [id, name] of Object.entries(PROVIDERS)) { const option = html(doc, "option", name); option.value = id; select.append(option); }
-    const settings = html(doc, "button", "Settings"); settings.type = "button";
+    const settings = html(doc, "button", "Settings", "axiosozo-assistant-quiet"); settings.type = "button";
     settings.addEventListener("click", () => openProviderSettings(win));
-    controls.append(label, select, settings);
-    const promptLabel = html(doc, "label", "Question"); promptLabel.htmlFor = "axiosozo-provider-question";
+    const closeButton = html(doc, "button", "", "axiosozo-assistant-close"); closeButton.type = "button";
+    closeButton.setAttribute("aria-label", "Close"); closeButton.title = "Close (Esc)";
+    closeButton.addEventListener("click", close);
+    header.append(heading, label, select, settings, closeButton);
+    const promptLabel = html(doc, "label", "Question", "axiosozo-assistant-hidden"); promptLabel.htmlFor = "axiosozo-provider-question";
     question = html(doc, "textarea"); question.id = "axiosozo-provider-question"; question.rows = 3; question.maxLength = 30000;
     question.placeholder = "Ask a question, or paste text to discuss…";
     const shareLabel = html(doc, "label", "", "axiosozo-assistant-share");
@@ -166,14 +167,18 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
     contextPreview.id = "axiosozo-assistant-context"; attach.setAttribute("aria-describedby", contextPreview.id);
     const actions = html(doc, "div", "", "axiosozo-assistant-controls");
     send = html(doc, "button", "Send", "primary"); send.type = "button";
+    send.title = "Send (⌘↩)"; send.setAttribute("aria-keyshortcuts", "Meta+Enter");
     stop = html(doc, "button", "Stop"); stop.type = "button"; stop.hidden = true;
-    const reset = html(doc, "button", "New conversation"); reset.type = "button";
+    const reset = html(doc, "button", "New conversation", "axiosozo-assistant-quiet"); reset.type = "button";
     reset.addEventListener("click", async () => { await disconnect(); setBusy(false); clearAnswer(); setStatus("New conversation. Nothing is sent until you press Send."); question.focus(); });
-    actions.append(send, stop, reset);
+    actions.append(reset, stop, send);
     answer = html(doc, "div", "", "axiosozo-assistant-answer"); answer.setAttribute("role", "region");
     answer.setAttribute("aria-label", "Assistant response"); answer.tabIndex = 0;
     status = html(doc, "p", "", "axiosozo-assistant-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-    panel.append(header, controls, promptLabel, question, shareLabel, contextPreview, actions, answer, status);
+    // Footer: what happens (status) on the left, the actions on the right.
+    const footer = html(doc, "div", "", "axiosozo-assistant-footer");
+    footer.append(status, actions);
+    panel.append(header, promptLabel, question, shareLabel, contextPreview, answer, footer);
     doc.documentElement.append(panel);
     select.addEventListener("change", async () => { await disconnect(); setBusy(false); clearAnswer(); setStatus("Provider selected. Nothing is sent until you press Send."); });
     attach.addEventListener("change", () => {
@@ -193,7 +198,9 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
       if (event.key === "Enter" && event.metaKey && !event.isComposing) { event.preventDefault(); submit(); }
       if (event.key === "Tab") {
-        const controls = [...panel.querySelectorAll("button, input, textarea, select, [tabindex='0']")].filter(item => !item.disabled && !item.hidden);
+        // Only what can take focus now: an empty answer region is not shown.
+        const controls = [...panel.querySelectorAll("button, input, textarea, select, [tabindex='0']")]
+          .filter(item => !item.disabled && !item.hidden && (typeof item.checkVisibility !== "function" || item.checkVisibility()));
         const first = controls[0], last = controls[controls.length - 1];
         if (event.shiftKey && doc.activeElement === first) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && doc.activeElement === last) { event.preventDefault(); first.focus(); }

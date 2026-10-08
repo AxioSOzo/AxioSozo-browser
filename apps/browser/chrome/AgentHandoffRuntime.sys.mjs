@@ -365,8 +365,11 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     clearResult();
     let notification = null;
     try {
+      // A copy that worked is said briefly and leaves by itself ("Done");
+      // anything that did not happen stays until it is closed.
       notification = popups()?.show(browser, HANDOFF_RESULT_NOTIFICATION, outcome.text, null,
-        { label: "OK", accessKey: "O", callback() {}, disableSecurityDelay: true }, null,
+        outcome.done ? { label: "Done", accessKey: "D", callback() {}, disableSecurityDelay: true }
+          : { label: "Close", accessKey: "C", callback() {}, disableSecurityDelay: true }, null,
         { persistence: 0, removeOnDismissal: true, hideClose: true,
           // Once this line is gone, a deferred uncertain launch may be said.
           eventCallback: state => { if (state === "removed") Promise.resolve().then(offerLateNotice); } });
@@ -421,7 +424,9 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     const hasSelection = session.precheck?.has_selection === true;
     const selection = node("checkbox", undefined, { id: "axiosozo-handoff-selection",
       label: hasSelection ? "Include the selected text" : "Include the selected text (nothing is selected)" });
-    selection.checked = hasSelection;
+    // An opt-in like every other one: unticked until the user ticks it, even
+    // when text is selected. The selection is read only when it is ticked.
+    selection.checked = false;
     if (!hasSelection) selection.disabled = true;
     // Console errors: offered when the console owner is present; ticked only
     // when this composer was opened from "Send errors to agent…". Only for a
@@ -434,16 +439,20 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
       consoleBox.checked = inProject && session.consoleChosen === true;
       if (!inProject) consoleBox.disabled = true;
     }
+    // What goes with it, then where it goes: plain facts, the project first.
     const project = session.authority?.project
-      ? node("description", `Project folder: ${session.authority.project.root} (${session.authority.name})`)
+      ? node("description", `Project: ${session.authority.name} (${session.authority.project.root})`)
       : node("description", session.authority ? "This page belongs to no AxioSozo project." : "The project is read again when you copy.");
     const included = node("description", consoleBox
-      ? "Also copied: the page title and its address, without query or fragment. Console errors only when ticked; nothing is sent until you copy."
-      : "Also copied: the page title and its address, without query or fragment.");
-    const route = node("description", consoleOffered
-      ? "Screenshots and opening Claude Code or Codex directly are not in this build yet. Paste the copy into your agent."
-      : "Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet. Paste the copy into your agent.");
+      ? "Always included: the page title and its address, without query or fragment. Selected text and console errors only when ticked."
+      : "Always included: the page title and its address, without query or fragment. Selected text only when ticked.");
+    // How it reaches the agent, said positively. What this build cannot do yet
+    // (screenshots, opening an agent directly) is the tooltip, not the body.
+    const route = node("description", "AxioSozo copies this as text. Paste it into Claude Code, Codex or another agent.",
+      { tooltiptext: consoleOffered ? "Screenshots and opening Claude Code or Codex directly are not in this build yet."
+        : "Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet." });
     for (const quiet of [project, included, route]) quiet.style.maxWidth = "28em";
+    route.style.marginTop = "4px";
     let fixture = null, fixtureNote = null;
     if (session.fixtureOffered) {
       // Owned synthetic test browsers only. Named as a test agent, never as a
@@ -486,7 +495,7 @@ export function installAgentHandoff(window, { services, adapter, engineOf = () =
     session.phase = "compose";
     diagnostics.composed++;
     try {
-      session.notification = manager.show(session.browser, HANDOFF_NOTIFICATION, "Copy <> for an agent", null,
+      session.notification = manager.show(session.browser, HANDOFF_NOTIFICATION, "Send <> to an agent", null,
         { label: "Copy for agent", accessKey: "C", callback: ({ event } = {}) => { onCopy(session, event); } },
         [{ label: "Cancel", accessKey: "N", disableSecurityDelay: true, callback: () => { restoreFocus(session); end(session, "cancelled"); } }],
         { name: handoffPlace(session.facts.url), persistence: 0, removeOnDismissal: true, autofocus: true,

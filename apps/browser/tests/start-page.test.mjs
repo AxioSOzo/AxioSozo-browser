@@ -97,7 +97,9 @@ test("flag on: the start page shows what needs you, agents, projects and watches
   assert.deepEqual(page.visible(), ["home"]);
   const links = page.document.querySelectorAll(".views a");
   assert.deepEqual(links.map(link => [link.getAttribute("href"), link.firstChild.textContent]), [["#home", "Start"], ["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"]]);
-  assert.equal(links[1].querySelector(".count").textContent, "1", "the Projects attention count stays where it was");
+  const count = links[1].querySelector(".count");
+  assert.equal(count.firstChild.textContent, "1", "the Projects attention count stays where it was");
+  assert.equal(count.textContent, "1, 1 needs attention", "the link reads as Projects, 1 needs attention");
   assert.equal(page.document.querySelector('.views a[aria-current="page"]').dataset.view, "home");
   const root = page.$("start-page");
   assert.equal(root.hasAttribute("aria-busy"), false);
