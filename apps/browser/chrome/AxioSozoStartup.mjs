@@ -188,6 +188,9 @@ async function installContexts({ engineProbe, aboutRegistered, alive }) {
     // It only ever writes the user's own clipboard, after their click.
     const toast = (win, message) => optionalModule("AxioSozoToast.sys.mjs")?.showAxioSozoToast?.(win, message);
     installers.push(["RegionCapture.sys.mjs", "installRegionCapture", { services, adapter: zen, engineOf, toast }]);
+    // AxioSozo Lab (lab/Lab.sys.mjs): experiments, each behind its own
+    // axiosozo.lab.<id>.enabled (off by default), installed and removed live.
+    installers.push(["lab/Lab.sys.mjs", "installLab", { services, adapter: zen, engineOf, toast, openOverview }]);
   }
   for (const [file, name, options] of installers) {
     const module = optionalModule(file);

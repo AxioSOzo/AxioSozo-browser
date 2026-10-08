@@ -1019,6 +1019,67 @@ h4.watch-question { color: var(--ink); font-size: var(--font-size-small); font-w
 .start-link:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
 .start-projects .row-detail { display: inline-flex; align-items: center; gap: var(--space-small); }
 
+/* ---- Lab ---------------------------------------------------------------------------------- */
+
+/* Experiments: one calm card each, grouped by what they are for; the variants
+ * of one idea sit side by side in a quiet tray. A card that is on carries a
+ * faint accent edge, so what is running reads at a glance without colour
+ * alone (the switch says it too). */
+.lab { display: flex; flex-direction: column; gap: var(--space-xxlarge); }
+.lab[aria-busy="true"]:empty { min-height: 6rem; }
+.lab-group { gap: var(--space-medium); }
+.lab-list, .lab-variants { display: flex; flex-direction: column; gap: var(--space-medium); margin: 0; padding: 0; list-style: none; }
+.lab-card { gap: var(--space-medium); height: 100%; box-sizing: border-box; }
+.lab-card .card-head { align-items: center; }
+.lab-card .card-title { color: var(--ink); font-size: var(--font-size-root); font-weight: var(--font-weight-heading); flex-wrap: wrap; }
+.lab-card[data-on] { box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--hairline)); }
+.lab-card .switch { align-self: center; }
+.lab-pitch { max-width: 40rem; color: var(--ink); }
+.lab-try { display: flex; flex-direction: column; gap: var(--space-xsmall); }
+.lab-try h5 { color: var(--ink-soft); font-weight: var(--font-weight-semibold); }
+.lab-steps { display: flex; flex-direction: column; gap: 2px; margin: 0; padding-inline-start: 1.4em; color: var(--ink-soft); }
+.lab-steps li { padding-inline-start: 2px; }
+.lab-steps li::marker { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.lab-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-small) var(--space-medium);
+  margin-top: auto;
+  padding-top: var(--space-medium);
+  border-top: 1px solid var(--hairline);
+}
+.lab-needs { flex: 1 1 14rem; color: var(--ink-soft); font-size: var(--font-caption); }
+.lab-clients { display: flex; flex-wrap: wrap; gap: var(--space-xsmall); margin: 0; padding: 0; list-style: none; }
+.lab-note { color: var(--ink-soft); font-size: var(--font-caption); }
+.lab-problem { color: var(--warn-ink); font-size: var(--font-caption); }
+.lab-family {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
+  padding: var(--space-small);
+  border-radius: calc(var(--radius) + var(--space-xsmall));
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.lab-family-head { padding: var(--space-xsmall) var(--space-small) 0; color: var(--ink-soft); font-size: var(--font-caption); font-weight: 500; }
+.lab-family .lab-variants { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: var(--space-small); }
+.lab-group[data-graduated] .lab-card { box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline); }
+.lab-empty { text-align: start; }
+/* Your assistants: one quiet line each (dot, name, what the Lab's check found). */
+.lab-client-list { display: flex; flex-direction: column; gap: var(--space-small); margin: 0; padding: 0; list-style: none; }
+.lab-client { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-xsmall) var(--space-small); }
+.lab-client > .dot { align-self: center; }
+.lab-client-name { color: var(--ink); font-weight: var(--font-weight-semibold); }
+.lab-client-text { color: var(--ink-soft); }
+.lab-client-note { flex-basis: 100%; padding-inline-start: var(--space-large); color: var(--ink-soft); font-size: var(--font-caption); }
+.lab-client-actions { display: flex; justify-content: flex-start; }
+
+@media (forced-colors: active) {
+  .lab-family { border: 1px solid CanvasText; }
+  .lab-card[data-on] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
 /* ---- Toast ------------------------------------------------------------------------------ */
 
 /* One quiet line at the bottom, in Zen's inverse branding colours. A pointer

@@ -149,18 +149,18 @@ test("wrong principal is rejected before any service call", async () => {
 
 // ---------------------------------------------------------------- dispatch
 
-test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, P4 plugin settings, decision keys, Understand and project setup", () => {
+test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, P4 plugin settings, decision keys, Understand, project setup and the Lab", () => {
   assert.deepEqual(Object.keys(METHODS).sort(), [
     "acceptProjectBrief", "activeContext", "cancelDecisionKeyOperations", "cancelProjectReadOperations", "cancelSetup", "cancelUnderstand",
     "checkWatch", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
-    "getAgentBridgeConfig", "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings",
+    "getAgentBridgeConfig", "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings", "getLabClients",
     "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getSafetyStatus", "getUnderstandAvailability", "getUnderstandState",
     "getWatchStatus", "linkOrganization", "linkProject",
-    "listAgentActivity", "listAgentSessions", "listContexts",
+    "listAgentActivity", "listAgentSessions", "listContexts", "listLab",
     "listOrphans", "listProjectContainers", "listProjects", "listRules", "listWatches", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
     "previewIcon", "previewProjectBriefAcceptance", "projectForUrl", "projectIcon", "readProject", "refreshProjectDetection", "reinspectProjectBriefAcceptance",
     "removeDecisionKey", "removeOrphans", "removeProject", "removeWatch", "retryWatchCleanup", "revokeAgentSession", "saveRule", "saveWatch", "serviceStatus",
-    "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setSharedSites", "storeDecisionKey", "suggestSetup", "updateProject",
+    "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setLabEnabled", "setSharedSites", "storeDecisionKey", "suggestSetup", "updateProject",
     "usageSummary", "writeManifest",
   ]);
   // Watch changes and safety choices are trusted clicks only (private child messages):

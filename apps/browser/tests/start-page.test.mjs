@@ -96,7 +96,7 @@ test("flag on: the start page shows what needs you, agents, projects and watches
   const page = await loadPage({ homes: { p_harbor1: { records: [record()], reporting: true, sessions: [] } } });
   assert.deepEqual(page.visible(), ["home"]);
   const links = page.document.querySelectorAll(".views a");
-  assert.deepEqual(links.map(link => [link.getAttribute("href"), link.firstChild.textContent]), [["#home", "Start"], ["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"]]);
+  assert.deepEqual(links.map(link => [link.getAttribute("href"), link.firstChild.textContent]), [["#home", "Start"], ["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"], ["#lab", "Lab"]]);
   const count = links[1].querySelector(".count");
   assert.equal(count.firstChild.textContent, "1", "the Projects attention count stays where it was");
   assert.equal(count.textContent, "1, 1 needs attention", "the link reads as Projects, 1 needs attention");

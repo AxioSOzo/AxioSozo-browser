@@ -66,6 +66,10 @@ const state = {
   start: { homes: new Map(), loading: false },
   // Project icons (workstation-v1 §1.5): id → data: URL, or null when it has none the browser could read.
   icons: new Map(),
+  // Lab: the actor's listLab answer (or the code it refused with), the
+  // experiments whose switch is on its way, and the assistants as the Lab's
+  // own check sees them (getLabClients; `checking` while a check runs).
+  lab: { list: null, error: null, busy: new Set(), clients: null, checking: false },
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -354,6 +358,8 @@ function showView(view) {
   if ((view === "ai" || (view === "projects" && !state.homeId)) && !state.safety.requested && state.connected && state.loaded) loadSafety();
   // The experimental start page reads its projects' activity when it shows.
   if (view === "home" && previous !== "home" && state.connected && state.loaded) { renderStartPage(); loadStartPage(); }
+  // The Lab reads its experiments and their switches whenever it is opened.
+  if (view === "lab" && previous !== "lab" && state.connected && state.loaded) loadLab();
 }
 
 /** A server that crashed is the only attention item that is a failure. */
@@ -2758,12 +2764,13 @@ function toggle(list, value, on) {
 
 // ---------------------------------------------------------------- AI & keys
 
-async function loadProviders() {
+/** The assistants as AI & keys shows them; refresh: true (Check again) runs the offline capability check again. */
+async function loadProviders({ refresh = false } = {}) {
   if (!state.admitted || !state.active) return;
   state.providersLoading = true;
   renderProviders();
   try {
-    state.providers = await call("getProviderStatus");
+    state.providers = await call("getProviderStatus", refresh ? { refresh: true } : {});
   } catch (error) {
     state.providers = { version: 1, discovery: "unavailable", providers: [] };
     setStatus("Could not check assistants. " + errorText(error), "error");
@@ -2779,7 +2786,7 @@ function providerCard(card) {
       h("div", { class: "card-titles" },
         h("h3", { class: "card-title" }, card.label,
           h("span", { class: "tag state", "data-tone": card.tone }, card.stateLabel)),
-        card.version ? h("span", { class: "card-sub" }, `Version ${card.version}${card.expectedVersion && card.expectedVersion !== card.version ? ` · this build expects ${card.expectedVersion}` : ""}`) : null)),
+        card.version ? h("span", { class: "card-sub" }, `Version ${card.version}`) : null)),
     h("p", { class: "help provider-detail" }, card.detail));
 }
 
@@ -3239,6 +3246,174 @@ async function clearLedgerFlow() {
   if (ok) await act("clearLedger", {}, "Screen time deleted.").then(loadLedger);
 }
 
+// ---------------------------------------------------------------- Lab (chrome/lab)
+
+// Experiments, each with its own switch. The list and every switch's state are
+// the actor's answer (listLab); a switch asks setLabEnabled with the
+// experiment's id and nothing else, and open windows install or remove the
+// experiment themselves. Which assistants the Lab can use is its own check
+// (getLabClients): opening the Lab only finds them; "Check again" starts each
+// one without a model call to read its version and check its options.
+
+let labTicket = 0;
+let labClientsTicket = 0;
+
+/** The experiments and their switches; only the latest answer publishes. */
+async function loadLab() {
+  if (!state.admitted || !state.active) return;
+  const ticket = labTicket = nextTicket();
+  try {
+    const list = await call("listLab");
+    if (ticket !== labTicket || !state.active) return;
+    state.lab.list = list;
+    state.lab.error = null;
+  } catch (error) {
+    if (ticket !== labTicket || !state.active) return;
+    state.lab.error = error;
+  }
+  await keepFocus(renderLab);
+  await loadLabClients({ check: false });
+}
+
+/** The assistants as the Lab sees them; check: true reads versions and checks options (no model call). */
+async function loadLabClients({ check = false } = {}) {
+  if (!state.admitted || !state.active || (check && state.lab.checking)) return;
+  const ticket = labClientsTicket = nextTicket();
+  if (check) { state.lab.checking = true; await keepFocus(renderLab); }
+  try {
+    const reply = await call("getLabClients", { check });
+    if (ticket !== labClientsTicket || !state.active) return;
+    state.lab.clients = reply;
+    if (check) setStatus("Assistants checked.");
+  } catch (error) {
+    if (ticket !== labClientsTicket || !state.active) return;
+    if (check) setStatus(error?.code === "PRIVATE_WINDOW" ? "Assistants are checked from a normal window." : labError(error), "error");
+  } finally {
+    if (ticket === labClientsTicket) state.lab.checking = false;
+  }
+  if (state.active) await keepFocus(renderLab);
+}
+
+const labError = error => M.labErrorText(error?.code) ?? errorText(error);
+
+function renderLab() {
+  const body = $("lab-body");
+  if (!body) return;
+  if (!state.connected || (state.lab.error && !state.lab.list)) {
+    body.removeAttribute("aria-busy");
+    fill(body, h("p", { class: "empty" }, state.connected ? `Could not open the Lab. ${labError(state.lab.error)}` : "This page is not connected to AxioSozo."));
+    return;
+  }
+  if (!state.lab.list) {
+    body.setAttribute("aria-busy", "true");
+    fill(body, h("p", { class: "loading" }, "Loading the Lab…"));
+    return;
+  }
+  body.removeAttribute("aria-busy");
+  fill(body,
+    labClientsBlock(),
+    M.labHasExperiments(state.lab.list) ? null : h("p", { class: "empty lab-empty" }, M.LAB_EMPTY),
+    M.labSections(state.lab.list).map(labSection));
+}
+
+/** "Your assistants": each client the Lab can run, as its own check found it, and "Check again". */
+function labClientsBlock() {
+  const headingId = newId("lab-clients");
+  const rows = M.labClientRows(state.lab.clients, { checking: state.lab.checking });
+  return h("section", { class: "block lab-group lab-clients", "aria-labelledby": headingId, "aria-busy": state.lab.checking ? "true" : null },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, M.LAB_CLIENTS_TITLE),
+      h("p", { class: "block-help" }, M.LAB_CLIENTS_HELP)),
+    h("ul", { class: "lab-client-list" }, rows.map(row => h("li", { class: "lab-client", "data-client": row.id, "data-state": row.state },
+      h("span", { class: "dot", "data-status": row.dot }),
+      h("span", { class: "lab-client-name" }, row.label),
+      h("span", { class: "lab-client-text" }, row.text),
+      row.note ? h("span", { class: "lab-client-note" }, row.note) : null))),
+    h("div", { class: "lab-client-actions" },
+      h("button", { type: "button", class: "ghost", "data-focus-key": "lab:check-clients", disabled: state.lab.checking || !state.admitted,
+        onclick: () => loadLabClients({ check: true }) }, state.lab.checking ? "Checking…" : "Check again")));
+}
+
+function labSection(section) {
+  const headingId = newId("lab-group");
+  return h("section", { class: "block lab-group", "aria-labelledby": headingId, "data-graduated": section.graduated },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, section.title),
+      section.help ? h("p", { class: "block-help" }, section.help) : null),
+    h("ul", { class: "lab-list" }, section.items.map(item => (item.kind === "family" ? labFamily(item)
+      : h("li", { class: "lab-item" }, labCard(item.experiment))))));
+}
+
+/** Variants of one idea, side by side; one of them can be on at a time. */
+function labFamily(family) {
+  const labelId = newId("lab-family");
+  return h("li", { class: "lab-family" },
+    h("div", { role: "group", "aria-labelledby": labelId },
+      h("p", { class: "lab-family-head", id: labelId }, family.label),
+      h("ul", { class: "lab-variants" }, family.members.map(member => h("li", { class: "lab-item" }, labCard(member))))));
+}
+
+/** One experiment: what it is, how to try it, what it uses, and its switch. */
+function labCard(experiment) {
+  const titleId = newId("lab-title");
+  const pitchId = newId("lab-pitch");
+  const busy = state.lab.busy.has(experiment.id);
+  const clients = M.labClientStates(experiment.needs, state.lab.clients, { checking: state.lab.checking });
+  const problem = M.labProblemText(experiment.problem);
+  const toggle = h("input", { type: "checkbox", class: "switch", role: "switch", checked: experiment.enabled,
+    disabled: busy || !state.admitted, "aria-labelledby": titleId, "aria-describedby": pitchId,
+    "data-focus-key": `lab:${experiment.id}`, title: experiment.enabled ? "On" : "Off",
+    onchange: event => setLabFlow(experiment, event.target.checked) });
+  if (busy) toggle.setAttribute("aria-busy", "true");
+  return h("article", { class: "card lab-card", "aria-labelledby": titleId, "data-experiment": experiment.id, "data-on": experiment.enabled },
+    h("div", { class: "card-head" },
+      h("div", { class: "card-titles" },
+        h("h4", { class: "card-title", id: titleId }, experiment.title,
+          experiment.graduated ? h("span", { class: "tag accent" }, "On by default") : null)),
+      toggle),
+    h("p", { class: "lab-pitch", id: pitchId }, experiment.pitch),
+    experiment.howToTry.length ? h("div", { class: "lab-try" },
+      h("h5", {}, "How to try"),
+      h("ol", { class: "lab-steps" }, experiment.howToTry.map(step => h("li", {}, step)))) : null,
+    h("div", { class: "lab-foot" },
+      h("p", { class: "lab-needs" }, M.labNeedsText(experiment)),
+      clients.length ? h("ul", { class: "lab-clients", "aria-label": "Assistants on this Mac" },
+        clients.map(client => h("li", { class: "tag", "data-state": client.state },
+          h("span", { class: "dot", "data-status": client.dot }), client.text))) : null),
+    experiment.graduated && !experiment.live ? h("p", { class: "lab-note" }, "Part of AxioSozo. Turning it off applies to new windows.") : null,
+    problem ? h("p", { class: "lab-problem" }, problem) : null);
+}
+
+/** The switch: the actor writes it and answers with the whole new state. */
+async function setLabFlow(experiment, enabled) {
+  if (state.lab.busy.has(experiment.id) || !state.active) return;
+  const before = state.lab.list;
+  state.lab.busy.add(experiment.id);
+  await keepFocus(renderLab);
+  // An older list answer still on its way is void: this one is newer.
+  const ticket = labTicket = nextTicket();
+  let refresh = false;
+  try {
+    const after = await call("setLabEnabled", { id: experiment.id, enabled });
+    if (!state.active) return;
+    if (ticket === labTicket) { state.lab.list = after; state.lab.error = null; }
+    setStatus(M.labToggleText(experiment, enabled, { before, after }));
+  } catch (error) {
+    if (!state.active) return;
+    setStatus(labError(error), "error");
+    refresh = error?.code === "UNKNOWN_EXPERIMENT";
+  } finally {
+    state.lab.busy.delete(experiment.id);
+  }
+  await keepFocus(renderLab);
+  if (refresh) loadLab();
+}
+
+/** Back on the Lab (another tab or about:config may have flipped a switch): read it again. */
+function setupLab() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.view === "lab" && state.admitted && state.active) loadLab();
+  });
+}
+
 // ---------------------------------------------------------------- wiring
 
 const onStart = run => async () => { await run(); if (state.view === "home") await keepFocus(renderStartPage); };
@@ -3338,6 +3513,7 @@ function renderDisconnected() {
   renderDecisionKeys();
   renderSafety();
   renderStartPage();
+  renderLab();
   for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
 }
 
@@ -3431,6 +3607,8 @@ async function boot() {
   else renderSafety();
   if (!state.active) return;
   if (state.view === "home") { renderStartPage(); await loadStartPage(); }
+  if (!state.active) return;
+  if (state.view === "lab") await loadLab();
   if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
@@ -3534,7 +3712,8 @@ async function init() {
   $("ledger-days").addEventListener("change", loadLedger);
   $("ledger-export").addEventListener("click", exportLedgerFlow);
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
-  $("providers-refresh").addEventListener("click", () => { loadProviders(); loadDecisionKeys(); });
+  $("providers-refresh").addEventListener("click", () => { loadProviders({ refresh: true }); loadDecisionKeys(); });
+  setupLab();
   window.addEventListener("hashchange", onHashChange);
   // Hidden (also into the back/forward cache): inactive until shown again from it.
   window.addEventListener("pagehide", deactivate);

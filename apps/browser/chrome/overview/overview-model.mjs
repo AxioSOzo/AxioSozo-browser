@@ -873,7 +873,7 @@ export function placementMessage(project, contexts) {
 
 // ---------------------------------------------------------------- deep links
 
-export const VIEWS = Object.freeze(["projects", "rules", "ai"]);
+export const VIEWS = Object.freeze(["projects", "rules", "ai", "lab"]);
 const LEGACY_VIEWS = Object.freeze({ home: "projects", time: "rules", settings: "ai" });
 const PROJECT_ID = /^p_[a-z0-9]{4,32}$/;
 const RULE_ID = /^r_[a-z0-9]{4,32}$/;
@@ -885,7 +885,7 @@ export function isHomeHash(hash) {
   return text === "home";
 }
 
-/** "#projects", "#rules", "#ai"; old "#home", "#time", "#settings" redirect;
+/** "#projects", "#rules", "#ai", "#lab"; old "#home", "#time", "#settings" redirect;
  * "#project=<id>" (the project's home, see homeIdFromRoute), "#edit-project=<id>",
  * "#add-project=<space uuid>", "#rule=<id>". With the experimental start page
  * on (home: true, P6) "#home" is that page instead of the old Projects link. */
@@ -1540,8 +1540,8 @@ export function admissionFailure(code) {
 
 // ---------------------------------------------------------------- AI & keys
 
-const PROVIDER_TONES = Object.freeze({ ready: "ok", "key-stored": "ok", unverified: "info", "not-installed": "off",
-  unavailable: "warn", "needs-key": "off", disabled: "off", unknown: "unknown" });
+const PROVIDER_TONES = Object.freeze({ ready: "ok", "key-stored": "ok", checked: "ok", unverified: "info", "not-installed": "off",
+  unavailable: "warn", "needs-sign-in": "warn", incompatible: "warn", "needs-key": "off", disabled: "off", unknown: "unknown" });
 
 /** Cards for the AI & keys view from getProviderStatus(); texts are shown as the
  * providers workstream wrote them (honest state_label and detail). */
@@ -1562,10 +1562,14 @@ export function providerCards(status) {
   }));
 }
 
+const NOT_VERIFIED = "Answers through this browser have not been verified yet.";
+/** One sentence on how the AI & keys cards were read (ProviderStatus: an offline capability check, or installation metadata). */
 export function providerSummary(status) {
   if (!status) return "Checking which assistants are installed…";
+  if (status.checks === "ok") return `Checked on this Mac without sending anything: each assistant ran offline in the browser sandbox. ${NOT_VERIFIED}`;
   if (status.discovery !== "ok") return "Could not read which assistants are installed. No client was started.";
-  return "Read from installation metadata only: no assistant was started and nothing was sent. Answers through this browser have not been verified yet.";
+  if (status.checks === "unavailable") return `Could not check the assistants; showing installation details only. Nothing was sent. ${NOT_VERIFIED}`;
+  return `Read from installation metadata only: no assistant was started and nothing was sent. ${NOT_VERIFIED}`;
 }
 
 /** Can the Jev key form be used, and why not. */
@@ -2122,4 +2126,145 @@ export function startPageView({ attention = [], projects = [], watches = [], wat
       local: localSummary(project, statuses.get(project.id) ?? []) })),
     watches: rows.slice(0, 12), moreWatches: Math.max(0, rows.length - 12), status,
   };
+}
+
+// ---------------------------------------------------------------- Lab (chrome/lab, docs/lab/README.md)
+
+// The experiments and their switches come from the actor's listLab answer
+// (Lab.sys.mjs listForPage); the assistants' state from getLabClients (the
+// Lab's own check, lab/clients.sys.mjs: any version whose options pass).
+
+export const LAB_CLIENT_LABELS = Object.freeze({ "claude-code": "Claude Code", codex: "Codex", antigravity: "Antigravity" });
+export const LAB_GRADUATED_TITLE = "Graduated";
+export const LAB_GRADUATED_HELP = "Started in the Lab and now part of AxioSozo. On by default; you can still turn them off.";
+export const LAB_EMPTY = "No experiments yet. New ones appear here, off until you turn them on.";
+const COUNT_WORDS = Object.freeze(["", "One", "Two", "Three", "Four", "Five"]);
+
+const labClients = needs => listOf(needs).filter(need => Object.hasOwn(LAB_CLIENT_LABELS, need));
+const orList = names => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`);
+
+/** Whether any listed experiment uses an assistant (then its install state is worth reading). */
+export function labNeedsClients(state) {
+  return listOf(state?.experiments).some(experiment => labClients(experiment?.needs).length > 0);
+}
+
+/** Which AI an experiment uses, and when, in one plain sentence. */
+export function labNeedsText(experiment) {
+  const names = labClients(experiment?.needs).map(need => LAB_CLIENT_LABELS[need]);
+  const prefix = experiment?.graduated ? "" : "Experimental. ";
+  return names.length ? `${prefix}Uses ${orList(names)} on this Mac when you click.` : `${prefix}Uses no AI.`;
+}
+
+export const LAB_CLIENTS_TITLE = "Your assistants";
+export const LAB_CLIENTS_HELP = "The Lab runs Claude Code, Codex and Antigravity as installed on this Mac, whatever their version, after checking the options it uses. Checking starts each one without sending anything.";
+
+/** One assistant's status as the Lab shows it: a dot, a short tag and its sentence. */
+function labClientView(id, status, { checking = false } = {}) {
+  const label = LAB_CLIENT_LABELS[id];
+  if (checking && (!status || status.state === "unchecked")) return { id, label, state: "checking", dot: "unknown", tag: `Checking ${label}…`, text: `Checking ${label}…`, note: null };
+  if (!status) return { id, label, state: "unknown", dot: "unknown", tag: `${label} status unknown`, text: "Not read yet.", note: null };
+  const version = typeof status.version === "string" ? status.version : null;
+  const text = typeof status.reason === "string" && status.reason ? status.reason : null;
+  const note = typeof status.note === "string" && status.note ? status.note : null;
+  switch (status.state) {
+    case "ready": return { id, label, state: "ready", dot: "up", tag: version ? `${label} ${version}` : `${label} ready`, text: text ?? `${label} · checked`, note };
+    case "partial": return { id, label, state: "partial", dot: "warn", tag: `${label} ${version ?? ""}`.trim(), text: text ?? `${label} works in part.`, note };
+    case "unchecked": return { id, label, state: "unchecked", dot: "unknown", tag: `${label} found`, text: text ?? `${label} found · not checked yet`, note };
+    case "missing": return { id, label, state: "missing", dot: "off", tag: `${label} not installed`, text: "Not installed", note: null };
+    case "changed": return { id, label, state: "changed", dot: "warn", tag: `${label} changed`, text: text ?? `${label} changed an option the Lab uses.`, note };
+    default: return { id, label, state: "broken", dot: "warn", tag: `${label} not usable`, text: text ?? `${label} could not be checked.`, note };
+  }
+}
+
+/** Every assistant for the Lab's "Your assistants" block, from getLabClients. */
+export function labClientRows(reply, { checking = false } = {}) {
+  const clients = listOf(reply?.clients);
+  return Object.keys(LAB_CLIENT_LABELS).map(id => labClientView(id, clients.find(item => item?.id === id), { checking }));
+}
+
+/** Per assistant an experiment uses: its state, from the Lab's own check (getLabClients). */
+export function labClientStates(needs, reply, { checking = false } = {}) {
+  const clients = listOf(reply?.clients);
+  return labClients(needs).map(id => {
+    const view = labClientView(id, clients.find(item => item?.id === id), { checking });
+    return { id, label: view.label, state: view.state, dot: view.dot, text: view.tag };
+  });
+}
+
+/**
+ * The Lab page's sections: one per group (in the actor's order) holding single
+ * experiments and families (an idea with its variants, side by side, the idea
+ * first), then graduated features last. Empty sections are left out.
+ */
+export function labSections(state) {
+  const experiments = listOf(state?.experiments).filter(item => typeof item?.id === "string");
+  const order = listOf(state?.groups).filter(group => typeof group === "string");
+  for (const item of experiments) if (!item.graduated && !order.includes(item.group)) order.push(item.group);
+  const byId = new Map(experiments.map(item => [item.id, item]));
+  // Variants of a graduated idea stay together (one of them on at a time), next to it rather than inside it.
+  const familyKey = item => {
+    if (item.graduated || !byId.has(item.family)) return item.id;
+    return byId.get(item.family).graduated ? `${item.family}\u0000variants` : item.family;
+  };
+  const members = new Map();
+  for (const item of experiments) {
+    const key = familyKey(item);
+    if (!members.has(key)) members.set(key, []);
+    members.get(key).push(item);
+  }
+  const sections = order.map(group => ({ group, title: group, help: null, graduated: false, items: [] }));
+  const graduated = { group: LAB_GRADUATED_TITLE, title: LAB_GRADUATED_TITLE, help: LAB_GRADUATED_HELP, graduated: true, items: [] };
+  const placed = new Set();
+  for (const item of experiments) {
+    if (placed.has(item.id)) continue;
+    const key = familyKey(item);
+    const family = members.get(key);
+    const root = byId.get(key) ?? family[0] ?? item;
+    const section = item.graduated ? graduated : sections.find(entry => entry.group === root.group);
+    if (family.length > 1) {
+      const ordered = [root, ...family.filter(member => member !== root)];
+      section.items.push({ kind: "family", id: root.family ?? key, members: ordered,
+        label: `${COUNT_WORDS[ordered.length] ?? ordered.length} takes on one idea. One can be on at a time.` });
+      for (const member of ordered) placed.add(member.id);
+    } else {
+      section.items.push({ kind: "single", id: item.id, experiment: item });
+      placed.add(item.id);
+    }
+  }
+  return [...sections, graduated].filter(section => section.items.length);
+}
+
+/** Whether the list holds any experiment that is not graduated. */
+export const labHasExperiments = state => listOf(state?.experiments).some(item => !item?.graduated);
+
+/** The confirmation after a switch: what is on now and, for variants, what went off. */
+export function labToggleText(experiment, enabled, { before = null, after = null } = {}) {
+  const title = String(experiment?.title ?? "The experiment");
+  if (experiment?.graduated && experiment.live === false) return `${title} is ${enabled ? "on" : "off"} in new windows.`;
+  if (!enabled) return `${title} is off and gone from your windows.`;
+  const wasOn = new Set(listOf(before?.experiments).filter(item => item?.enabled).map(item => item.id));
+  const offNow = listOf(after?.experiments).filter(item => item?.id !== experiment?.id && wasOn.has(item.id) && !item.enabled)
+    .map(item => item.title);
+  return offNow.length ? `${title} is on. ${orList(offNow)} is off now: one take at a time.` : `${title} is on in your windows.`;
+}
+
+/** A failed install or clean-up in some window, as the Lab page says it. */
+export function labProblemText(code) {
+  switch (code) {
+    case "LOAD_FAILED":
+    case "INSTALLER_MISSING":
+    case "INSTALL_FAILED": return "It could not start in a window. The Browser Console has the details.";
+    case "DISPOSE_FAILED": return "It did not clean up fully when it was turned off. Restart AxioSozo to be sure it is gone.";
+    default: return null;
+  }
+}
+
+/** Lab-specific failures of listLab and setLabEnabled; null for the page's common ones. */
+export function labErrorText(code) {
+  switch (code) {
+    case "LAB_UNAVAILABLE": return "The Lab is not available right now.";
+    case "UNKNOWN_EXPERIMENT": return "That experiment is no longer in the Lab. The list was read again.";
+    case "PRIVATE_WINDOW": return "Experiments are turned on and off from a normal window.";
+    default: return null;
+  }
 }

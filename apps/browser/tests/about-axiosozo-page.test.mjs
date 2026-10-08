@@ -90,11 +90,11 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
 const visibleView = document => document.querySelectorAll("section.view").filter(section => !section.hidden).map(section => section.dataset.view);
 const byText = (root, tag, text) => root.querySelectorAll(tag).find(node => node.textContent.trim() === text);
 
-test("three sections only; the first run guide is the Projects empty state; every space is listed", async () => {
+test("four sections only; the first run guide is the Projects empty state; every space is listed", async () => {
   const page = await loadPage();
   const { document } = page;
   assert.deepEqual(document.querySelectorAll(".views a").map(a => [a.getAttribute("href"), a.textContent]),
-    [["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"]]);
+    [["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"], ["#lab", "Lab"]]);
   assert.deepEqual(visibleView(document), ["projects"]);
   assert.ok(document.getElementById("guide-heading"), "first-run guidance folds into Projects");
   // Spaces without projects are one quiet row each, never an empty group box.
@@ -1081,4 +1081,14 @@ test("browser tools without the browser's capabilities say so; nothing is claime
   assert.equal(agentBody(page).querySelectorAll(".tool-row").length, 0);
   const hidden = await loadPage({ hash: "#ai", handlers: { getAgentEndpointState: () => { throw { code: "PRIVATE_WINDOW", message: "x" }; } } });
   assert.equal(agentBody(hidden).querySelectorAll(".agent-tools").length, 0, "no tools list where agent status cannot be read");
+});
+
+test("AI & keys: opening reads the status as it is; Check again asks the provider host to check the clients again", async () => {
+  const page = await loadPage({ hash: "#ai" });
+  const providerCalls = () => page.calls.filter(([name]) => name === "getProviderStatus").map(([, params]) => params);
+  assert.deepEqual(providerCalls(), [{}], "opening only reads");
+  page.document.getElementById("providers-refresh").click();
+  await flush();
+  assert.deepEqual(providerCalls(), [{}, { refresh: true }]);
+  assert.doesNotMatch(page.document.getElementById("provider-list").textContent, /this build expects/u, "no pinned version is shown");
 });
