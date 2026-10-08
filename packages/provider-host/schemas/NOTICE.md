@@ -26,3 +26,8 @@ All six schemas are structurally identical to the retained 0.157.1 schemas.
 The empty experimental environments/dynamicTools authority is independently
 confirmed in that exact tag's protocol/v2/thread.rs; no client was executed for
 schema acquisition. The original Apache-2.0 attribution applies.
+
+Historical since 9 October 2026: the live Codex route is `codex exec --json` and is
+admitted by the capability check in `src/checks.mjs`, not by these schemas. The
+0.157.1/0.160.0 request schemas are kept for provenance only; `codex-0.155.1.json`
+still describes the offline fixture peer (`fixtures/peer.mjs`).

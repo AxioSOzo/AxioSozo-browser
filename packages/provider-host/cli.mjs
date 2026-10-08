@@ -11,6 +11,7 @@ import { MacKeychain } from './src/keychain.mjs';
 import { providerBuildRoot } from './src/storage.mjs';
 import { SANDBOX_POLICY } from './src/sandbox.mjs';
 import { createLiveAdapter, LIVE_POLICY } from './src/live.mjs';
+import { checkClients, clearClientChecks, describeCheck } from './src/checks.mjs';
 import { serveStdio } from './src/host.mjs';
 import { UnderstandRunner } from './src/understand.mjs';
 
@@ -39,6 +40,15 @@ try {
     createKeyStore: provider => new MacKeychain(helperPath(), provider),
     createUnderstandRunner: () => new UnderstandRunner({ liveAuthorized: false }) });
   else if (command === 'discover') print({ version: 1, discovery: 'metadata-only; no client execution', providers: discover() });
+  else if (command === 'clients') {
+    // Capability check of each installed client (checks.mjs): runs the client offline in the
+    // browser sandbox against a loopback stand-in model. No model call, no credential read.
+    const options = [driver, ...flags].filter(Boolean);
+    if (options.some(flag => flag !== '--refresh')) throw Object.assign(new Error('Unknown clients option'), { code: 'INVALID_INPUT' });
+    if (options.includes('--refresh')) clearClientChecks();
+    const report = await checkClients({ officialHome: process.env.HOME });
+    print({ ...report, providers: report.providers.map(entry => ({ ...entry, summary: describeCheck(entry) })) });
+  }
   else if (command === 'check') {
     for (const source of sourceFiles(root)) if (!run(process.execPath, ['--check', source])) break;
     if (!process.exitCode && process.platform === 'darwin' && run('/Users/wout/.local/bin/mount-dev-storage', [])) {
@@ -130,10 +140,10 @@ try {
     const result = await new DecisionProvider({ liveAuthorized: true, keyStore: new MacKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
     print(result); if (result.reason !== 'validated') process.exitCode = 78;
   } else {
-    print({ status: 'UNSUPPORTED', command, usage: 'discover | serve | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;
+    print({ status: 'UNSUPPORTED', command, usage: 'discover | clients [--refresh] | serve | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;
   }
 } catch (error) {
-  const blocked = error.code?.startsWith('BLOCKED_') || ['CODEX_LOGIN_REQUIRED', 'ANTIGRAVITY_PROTOCOL_UNSUPPORTED', 'UNSUPPORTED'].includes(error.code);
+  const blocked = error.code?.startsWith('BLOCKED_') || ['CODEX_LOGIN_REQUIRED', 'ANTIGRAVITY_PROTOCOL_UNSUPPORTED', 'UNSUPPORTED', 'CLIENT_INCOMPATIBLE', 'CLIENT_CHECK_FAILED'].includes(error.code);
   print({ status: blocked ? error.code : 'FAIL', reason: error.code ?? 'COMMAND_ERROR', message: blocked ? error.message : 'Provider command failed; no credentials logged', diagnostic: error.diagnostic, version_status: error.version_status, client_version: error.client_version, fixture_version: error.fixture_version, protocol_status: error.protocol_status });
   process.exitCode = blocked ? 78 : 1;
 }

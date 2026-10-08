@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Settings from '../../../apps/browser/chrome/ProviderSettings.sys.mjs';
-const { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, openProviderSettings } = Settings;
+const { validateDiscovery, ProviderInstances, providerRoute, discoverForSettings, checkClientsForSettings, openProviderSettings, CLIENT_CHECK_TIMEOUT_MS } = Settings;
+import { checkClient } from '../src/checks.mjs';
 import { discover } from '../src/discovery.mjs';
 
 const discovery = () => ({ version: 1, providers: discover({ searchPath: '' }) });
@@ -90,6 +91,22 @@ test('Browser-owned discovery launches only fixed metadata command with no inher
   assert.deepEqual(fake.calls[0], { command: '/runtime/node', arguments: ['/project/packages/provider-host/cli.mjs', 'discover'], environmentAppend: false,
     environment: { PATH: '/metadata/path', LANG: 'C' }, stderr: 'pipe' });
   assert(fake.closed() >= 1); assert.equal(fake.killed(), 1);
+});
+
+test('The capability check runs the fixed clients command with build root and HOME only, and validates its report', async () => {
+  const report = { version: 1, checked_at: '2026-10-09T01:00:00.000Z', providers: [] };
+  for (const driver of ['codex', 'claude-code', 'antigravity']) report.providers.push(await checkClient(driver, { searchPath: '' }));
+  const fake = runtime(JSON.stringify(report));
+  const delays = []; fake.timers = { setTimeout: (callback, ms) => { delays.push(ms); return setTimeout(callback, ms); }, clearTimeout };
+  fake.env = key => ({ AXIOSOZO_PROVIDER_HOST: '/project/packages/provider-host/cli.mjs', AXIOSOZO_PROVIDER_NODE: '/runtime/node', AXIOSOZO_DISCOVERY_PATH: '/metadata/path',
+    AXIOSOZO_BUILD_ROOT: '/Volumes/AxioSozoBuild/workstation', AXIOSOZO_PROVIDER_HOME: '/Users/synthetic', OPENAI_API_KEY: 'never-forwarded' })[key] ?? '';
+  const result = await checkClientsForSettings(fake, undefined, { refresh: true });
+  assert.deepEqual(result.map(item => item.status), ['not-installed', 'not-installed', 'not-installed']);
+  assert.deepEqual(fake.calls[0], { command: '/runtime/node', arguments: ['/project/packages/provider-host/cli.mjs', 'clients', '--refresh'], environmentAppend: false,
+    environment: { PATH: '/metadata/path', LANG: 'C', AXIOSOZO_BUILD_ROOT: '/Volumes/AxioSozoBuild/workstation', HOME: '/Users/synthetic' }, stderr: 'pipe' });
+  assert.deepEqual(delays, [CLIENT_CHECK_TIMEOUT_MS]);
+  await checkClientsForSettings(fake); assert.deepEqual(fake.calls[1].arguments, ['/project/packages/provider-host/cli.mjs', 'clients']);
+  await assert.rejects(checkClientsForSettings(runtime(JSON.stringify({ version: 1, providers: [] }))), /INVALID_CLIENT_CHECKS/);
 });
 
 test('Discovery output limits, nonzero exit and cancellation all remain failures', async () => {

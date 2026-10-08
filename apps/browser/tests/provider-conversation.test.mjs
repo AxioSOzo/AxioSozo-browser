@@ -121,6 +121,21 @@ test('offline host and event labels are promoted to a fixed visible fixture sign
 });
 
 test('official setup and unsupported Antigravity route have actionable fixed messages', () => {
-  assert(providerErrorMessage('CODEX_LOGIN_REQUIRED').includes('separate profile'));
+  // Codex uses the user's own sign-in now: the message names the Terminal command, not a browser profile.
+  assert(providerErrorMessage('CODEX_LOGIN_REQUIRED').includes('codex login'));
+  assert(!providerErrorMessage('CODEX_LOGIN_REQUIRED').includes('separate profile'));
   assert(providerErrorMessage('ANTIGRAVITY_PROTOCOL_UNSUPPORTED').includes('Select Codex or Claude Code'));
+  assert(providerErrorMessage('ANTIGRAVITY_PROTOCOL_UNSUPPORTED').includes('tools'));
+  assert(providerErrorMessage('CLIENT_INCOMPATIBLE').includes('nothing was sent'));
+  assert(providerErrorMessage('RATE_LIMITED').includes('usage limit'));
+});
+
+test('a failed turn carries only a fixed reason code to the panel', async () => {
+  for (const [reason, expected] of [['RATE_LIMITED', { type: 'turn_finished', status: 'failed', reason: 'RATE_LIMITED' }],
+    ['provider said <b>secret</b>', { type: 'turn_finished', status: 'failed' }]]) {
+    const f = fixture(); await f.conversation.open(instance); await f.conversation.send('Question');
+    f.event({ type: 'turn_finished', turn_id: f.conversation.turnId, status: 'failed', reason }); await tick();
+    assert.deepEqual(f.events.find(event => event.type === 'turn_finished'), expected);
+    await f.conversation.close();
+  }
 });

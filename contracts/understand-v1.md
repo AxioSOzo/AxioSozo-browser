@@ -121,19 +121,18 @@ likely logo/icon file, and the services with their development start commands.
 
 #### Models and provider selection (`setup` only)
 
-`setup` uses the cheapest suitable model per CLI (`SETUP_MODELS`); `brief` and
-`explain_errors` keep the CLI's default model and their argument arrays are
-unchanged.
+`setup` asks for a cheaper model where the client offers a stable way to name one
+(`SETUP_MODELS`); `brief` and `explain_errors` keep the CLI's default model and their
+argument arrays are unchanged. No dated model ids are pinned: they break when a client
+updates its model catalogue.
 
-| CLI | Model | Arguments |
+| CLI | Model (display) | Arguments |
 | --- | --- | --- |
-| `codex` | `gpt-6-luna` | `exec -m gpt-6-luna -c model_reasoning_effort="low" --sandbox read-only …` |
-| `claude-code` | `claude-sonnet-5-5` | `--print --model claude-sonnet-5-5 --output-format json --json-schema <SETUP_SCHEMA> …` |
-| `antigravity` | `gemini-3.8-flash-low` | planned, not runnable: no Understand route in this build |
+| `codex` | `default` | `exec -c model_reasoning_effort="low" --sandbox read-only …` (Codex's own default model) |
+| `claude-code` | `sonnet` | `--print --model sonnet --output-format json --json-schema <SETUP_SCHEMA> …` (documented alias; the client resolves it) |
+| `antigravity` | `default` | planned, not runnable: no Understand route in this build |
 
-Source: the model ids were taken from the installed CLIs' own model lists, with
-no provider call (Codex 0.160.0 ships `gpt-6-luna`; Claude Code ships
-`claude-sonnet-5-5`; agy ships `gemini-3.8-flash-low/medium/high`).
+Until 9 October 2026 these were the dated ids `gpt-6-luna` and `claude-sonnet-5-5`.
 
 Automatic selection (`pickSetupCli(availableClis)`): the first of `codex`,
 `claude-code` present in the given CLI names (Codex preferred), else `null`.

@@ -12,9 +12,13 @@ function html(doc, tag, text = "", className = "") {
 }
 export function providerErrorMessage(code) {
   const messages = {
-    BLOCKED_AUTH: "Sign in with the selected provider’s official client, then try again.",
-    CODEX_LOGIN_REQUIRED: "Codex needs a one-time sign-in for this browser’s separate profile. Open Settings → Provider configurations for the sign-in command.",
-    ANTIGRAVITY_PROTOCOL_UNSUPPORTED: "Antigravity is unavailable in this build: startup and tool isolation have not been verified. Select Codex or Claude Code.",
+    BLOCKED_AUTH: "Sign in with the selected provider’s official client (for Claude Code: run claude in Terminal), then try again.",
+    CODEX_LOGIN_REQUIRED: "Codex is not signed in. Run codex login in Terminal, then try again. AxioSozo never opens a sign-in page.",
+    ANTIGRAVITY_PROTOCOL_UNSUPPORTED: "Antigravity cannot be used for Ask AI: it has no option that turns off its tools. Select Codex or Claude Code.",
+    CLIENT_INCOMPATIBLE: "This version of the client changed an option Ask AI uses, so nothing was sent. AI & keys shows which; select another provider until AxioSozo is updated.",
+    CLIENT_CHECK_FAILED: "The client could not be checked, so nothing was sent. Try again, or see AI & keys.",
+    RATE_LIMITED: "The provider says you have reached a usage limit. Try again later.",
+    PROVIDER_AUTH: "The provider refused the client’s sign-in. Sign in again in the official client (in Terminal), then try again.",
     BLOCKED_ENV: "This provider’s supported local client is unavailable. Check Settings.",
     BLOCKED_PROTOCOL: "This client does not expose a supported conversation connection yet.",
     UNSUPPORTED_PROVIDER: "This provider does not expose a supported conversation connection yet.",
@@ -125,7 +129,9 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
             if (renderFrame !== null) win.cancelAnimationFrame(renderFrame); flushAnswer();
             setBusy(false); question.focus();
             setStatus(event.status === "completed" ? "Done. Follow-up questions stay in this conversation until you close it."
-              : event.status === "cancelled" ? "Stopped." : `The provider ended the request (${event.status}).`);
+              : event.status === "cancelled" ? "Stopped."
+                : ["RATE_LIMITED", "PROVIDER_AUTH"].includes(event.reason) ? providerErrorMessage(event.reason)
+                  : `The provider ended the request (${event.status}).`);
           } else if (event.type === "error") { setBusy(false); setStatus(providerErrorMessage(event.code)); }
           else if (event.type === "idle") { setBusy(false); setStatus("Connection paused while idle. Send again to start a new conversation."); }
         } });

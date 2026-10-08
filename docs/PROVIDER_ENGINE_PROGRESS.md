@@ -5,6 +5,14 @@ small Zen-based browser with direct official-client AI conversations and explici
 Firefox/Chromium switching. It does not embed the T3 application or start an AI
 service with every browser window.
 
+**Update 9 October 2026 (provider engine):** version pins are gone. Codex and Claude
+Code are admitted by an offline capability check of the exact installed executable
+(docs/PROVIDERS.md, "Accepting client updates"), Codex runs as `codex exec --json` with
+the user's own sign-in (no separate browser `CODEX_HOME` or `codex login`), and live
+"Reply OK" turns passed through `cli.mjs serve` with Codex 0.162.0 and Claude Code
+2.1.295. Antigravity 1.3.2 stays refused (its tools cannot be turned off). The text
+below is the 26 September record.
+
 ## Implemented
 
 - **AI conversations:** Ask AI opens a compact privileged panel with provider

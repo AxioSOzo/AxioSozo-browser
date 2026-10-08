@@ -76,11 +76,12 @@ exits20 because it has no automated GUI assertions; no integrated screenshot fil
 was saved. The local CEF result binds the native source hashes, build stamp and
 process-cleanup evidence.
 
-Provider discovery reads metadata only. The current Codex 0.157.1 and Claude Code
-2.1.283 routes use reviewed official-client protocols with isolated customization
-and bounded streaming conversations. Live authentication and model responses have
-not been verified. Antigravity remains unavailable because its startup/tool isolation
-has not been established. No client, login UI, MCP server, hook,
+Provider discovery reads metadata only. Ask AI uses the user's own Codex
+(`codex exec --json`) and Claude Code (`claude -p` stream-json) with their own
+sign-in, admitted by an offline capability check of the exact installed executable
+instead of a version pin, so client updates are re-checked rather than refused
+(docs/PROVIDERS.md). Antigravity remains unavailable because it has no way to turn
+off its tools. No client, login UI, MCP server, hook,
 paid model or Jev network request is started by discovery, setup or deterministic
 tests. Provider fixtures are visibly `TEST_FIXTURE`; they do not certify live auth.
 Jev is optional, and a Keychain failure never falls back to plaintext storage.

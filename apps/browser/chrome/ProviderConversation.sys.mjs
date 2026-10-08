@@ -104,7 +104,8 @@ export class ProviderConversation {
     } else if (event.type === "turn_finished") {
       requireValue(["completed", "cancelled", "failed", "uncertain"].includes(event.status), "INVALID_PROVIDER_EVENT");
       this.turnId = null; this.runtime.timers.clearTimeout(this.turnTimer);
-      this.onEvent({ type: "turn_finished", status: event.status });
+      // A fixed reason code (e.g. RATE_LIMITED, PROVIDER_AUTH) may accompany a failed turn; never provider text.
+      this.onEvent({ type: "turn_finished", status: event.status, ...(CODE.test(event.reason ?? "") ? { reason: event.reason } : {}) });
       if (event.status === "uncertain" || event.status === "failed") this.close().catch(() => {});
     } else if (event.type === "approval") {
       this.onEvent({ type: "error", code: "PROVIDER_ACTION_UNSUPPORTED" });

@@ -5,13 +5,15 @@ import assert from 'node:assert/strict';
 import {
   buildProviderStatus, clientStatus, jevStatus, decisionKeyEntry, getProviderStatus, getDecisionKeyStatus,
   storeDecisionKeyAndReport, removeDecisionKeyAndReport, keychainErrorText, STATES, STATE_LABELS, SIGN_IN,
-  SIGN_IN_LABELS, LIVE_VERSIONS, DECISION_PROVIDERS, DECISION_CALLS,
+  SIGN_IN_LABELS, DECISION_PROVIDERS, DECISION_CALLS,
 } from '../chrome/ProviderStatus.sys.mjs';
-import { validateDiscovery } from '../chrome/ProviderSettings.sys.mjs';
+import * as ProviderStatus from '../chrome/ProviderStatus.sys.mjs';
+import { validateClientChecks, validateDiscovery, CHECK_REASONS, CHECK_STATUSES, CHECK_SIGN_IN } from '../chrome/ProviderSettings.sys.mjs';
 import { DECISION_KEY_CODES, DECISION_KEY_PREFS, decisionKeyStatus, storeDecisionKey, removeDecisionKey } from '../chrome/ProviderKeys.sys.mjs';
 import { createDecisionKeyFixtureRuntime, KEY_FIXTURE_SHA256 } from '../chrome/DecisionKeyFixtureRuntime.sys.mjs';
 import { discover } from '../../../packages/provider-host/src/discovery.mjs';
-import { LIVE_VERSIONS as HOST_LIVE_VERSIONS } from '../../../packages/provider-host/src/live.mjs';
+import * as HostLive from '../../../packages/provider-host/src/live.mjs';
+import { CHECK_REASONS as HOST_CHECK_REASONS, CHECK_STATUSES as HOST_CHECK_STATUSES, SIGN_IN_STATES as HOST_SIGN_IN, checkClient } from '../../../packages/provider-host/src/checks.mjs';
 
 const SECRET = 'synthetic-key-not-real-0123';
 
@@ -73,13 +75,26 @@ function keyOps({ key = 'missing', error = null, storeError = null, removeError 
   } };
 }
 
-test('chrome live-version table matches the provider host LIVE_VERSIONS exactly', () => {
-  assert.deepEqual(LIVE_VERSIONS, HOST_LIVE_VERSIONS);
+// A validated capability-check report like the provider host's `cli.mjs clients` prints.
+function checks(overrides = {}) {
+  const base = driver => ({ driver, installed: true, executable: `/synthetic/${driver}`, version: { codex: '0.162.0', 'claude-code': '2.1.295', antigravity: '1.3.2' }[driver],
+    status: driver === 'antigravity' ? 'unavailable' : 'compatible', reason_code: driver === 'antigravity' ? 'TOOLS_NOT_CONFINABLE' : null,
+    reason_detail: null, dropped_options: [], sign_in: driver === 'antigravity' ? 'not-applicable' : 'signed-in',
+    checked_at: '2026-10-09T01:00:00.000Z', cached: false, summary: 'host sentence' });
+  return validateClientChecks({ version: 1, checked_at: '2026-10-09T01:00:00.000Z',
+    providers: ['codex', 'claude-code', 'antigravity'].map(driver => ({ ...base(driver), ...(overrides[driver] ?? {}) })) });
+}
+const byId = (model, id) => model.providers.find(item => item.id === id);
+
+test('no version pin anywhere: chrome and host vocabularies of the capability check agree', () => {
+  assert.equal(ProviderStatus.LIVE_VERSIONS, undefined); assert.equal(HostLive.LIVE_VERSIONS, undefined);
+  assert.deepEqual(CHECK_STATUSES, HOST_CHECK_STATUSES); assert.deepEqual(CHECK_REASONS, HOST_CHECK_REASONS); assert.deepEqual(CHECK_SIGN_IN, HOST_SIGN_IN);
 });
 
 test('vocabulary is closed and every state and sign-in value has a user-facing string', () => {
-  assert.deepEqual(STATES, ['ready', 'unverified', 'not-installed', 'unavailable', 'needs-key', 'key-stored', 'disabled', 'unknown']);
+  assert.deepEqual(STATES, ['ready', 'checked', 'needs-sign-in', 'unverified', 'not-installed', 'incompatible', 'unavailable', 'needs-key', 'key-stored', 'disabled', 'unknown']);
   for (const state of STATES) assert.equal(typeof STATE_LABELS[state], 'string');
+  assert.deepEqual(SIGN_IN, ['client-sign-in', 'needs-client-sign-in', 'unsupported-account', 'api-key', 'not-applicable']);
   for (const value of SIGN_IN) assert.equal(typeof SIGN_IN_LABELS[value], 'string');
   assert.deepEqual(DECISION_PROVIDERS, ['jev', 'openai']);
   assert.equal(DECISION_CALLS, 'NOT_AUTHORIZED');
@@ -88,6 +103,7 @@ test('vocabulary is closed and every state and sign-in value has a user-facing s
 test('nothing installed: three clients not-installed; decision keys are not part of discovery', () => {
   const model = buildProviderStatus({ discovery: discovery() });
   assert.equal(model.version, 1); assert.equal(model.discovery, 'ok'); assert.equal(model.model_turns_verified, false);
+  assert.equal(model.checks, 'not-run');
   assert.deepEqual(model.providers.map(item => [item.id, item.state]), [
     ['codex', 'not-installed'], ['claude-code', 'not-installed'], ['antigravity', 'not-installed']]);
   for (const item of model.providers) {
@@ -101,37 +117,88 @@ test('nothing installed: three clients not-installed; decision keys are not part
   assert.deepEqual(buildProviderStatus({ discovery: discovery(), jev: { keyEntryEnabled: true, key: 'missing' } }).providers.at(-1).state, 'needs-key');
 });
 
-test('installed audited clients are unverified with sign-in handled by the official client', () => {
-  const found = discovery({ codex: { client_version: '0.160.0' }, 'claude-code': { client_version: '2.1.283' } });
-  const codex = clientStatus('codex', found[0]); const claude = clientStatus('claude-code', found[1]);
-  assert.deepEqual([codex.installed, codex.version, codex.state, codex.sign_in, codex.route], [true, '0.160.0', 'unverified', 'codex-login-once', 'official-client']);
-  assert.deepEqual([claude.installed, claude.version, claude.state, claude.sign_in], [true, '2.1.283', 'unverified', 'handled-by-client-on-first-question']);
-  assert.equal(claude.state_label, 'Installed · not yet verified');
-  assert.match(claude.detail, /first question/); assert.match(claude.detail, /not been verified/);
-  assert.match(codex.detail, /Sign in once with the official Codex client/);
-});
-
-test('version mismatch, unreadable version and Antigravity are unavailable, not unverified', () => {
-  const found = discovery({ codex: { client_version: '0.158.0' }, 'claude-code': { client_version: null }, antigravity: { client_version: null } });
+test('metadata alone (the check could not run) is "not checked yet", never compatible or incompatible', () => {
+  const found = discovery({ codex: { client_version: '0.162.0' }, 'claude-code': { client_version: '2.1.295' }, antigravity: { client_version: null } });
   const [codex, claude, agy] = found.map(item => clientStatus(item.driver, item));
-  assert.equal(codex.state, 'unavailable'); assert.equal(codex.version, '0.158.0'); assert.match(codex.detail, /0\.160\.0/);
-  assert.equal(claude.state, 'unavailable'); assert.equal(claude.version, null); assert.match(claude.detail, /could not be read/);
-  assert.equal(agy.state, 'unavailable'); assert.equal(agy.installed, true); assert.match(agy.detail, /not been verified/);
+  for (const item of [codex, claude, agy]) {
+    assert.equal(item.state, 'unverified'); assert.equal(item.state_label, 'Installed · not checked yet');
+    assert.equal(item.expected_version, null); assert.equal(item.check, null); assert.match(item.detail, /has not checked this/u);
+  }
+  assert.deepEqual([codex.version, claude.version, agy.version], ['0.162.0', '2.1.295', null]);
+  const model = buildProviderStatus({ discovery: found, checksError: 'HELPER_TIMEOUT' });
+  assert.deepEqual([model.checks, model.checks_error], ['unavailable', 'HELPER_TIMEOUT']);
 });
 
-test('Codex 0.160.0 alone is compatible and stays unverified; 0.157.1, future, prerelease and unreadable versions are unavailable', () => {
-  assert.deepEqual(LIVE_VERSIONS, { codex: '0.160.0', 'claude-code': '2.1.283' });
-  const model = buildProviderStatus({ discovery: discovery({ codex: { client_version: '0.160.0' } }) });
-  const codex = model.providers.find(item => item.id === 'codex');
-  assert.equal(model.model_turns_verified, false);
-  assert.deepEqual([codex.version, codex.expected_version, codex.state, codex.verified, codex.sign_in],
-    ['0.160.0', '0.160.0', 'unverified', false, 'codex-login-once']);
-  assert.match(codex.detail, /Sign in once with the official Codex client/); assert.match(codex.detail, /not been verified/);
-  for (const version of ['0.157.1', '0.161.0', '1.0.0', '0.160.0-alpha.1', null]) {
-    const refused = clientStatus('codex', discovery({ codex: { client_version: version } })[0]);
-    assert.deepEqual([refused.installed, refused.version, refused.state, refused.verified, refused.sign_in],
-      [true, version, 'unavailable', false, 'not-applicable'], String(version));
-    assert.match(refused.detail, /this build works only with Codex 0\.160\.0/, String(version));
+test('checked clients name the exact version that passed; any version may pass, nothing is ever ready', () => {
+  const model = buildProviderStatus({ checks: checks() });
+  assert.deepEqual([model.discovery, model.checks, model.model_turns_verified], ['ok', 'ok', false]);
+  const codex = byId(model, 'codex'), claude = byId(model, 'claude-code');
+  assert.deepEqual([codex.state, codex.state_label, codex.sign_in, codex.version, codex.expected_version, codex.verified],
+    ['checked', 'Codex 0.162.0 · checked', 'client-sign-in', '0.162.0', null, false]);
+  assert.equal(claude.state_label, 'Claude Code 2.1.295 · checked');
+  assert.match(codex.detail, /offers the model no tools/u); assert.match(codex.detail, /Nothing was sent/u); assert.match(codex.detail, /existing Codex sign-in/u);
+  for (const version of ['0.157.1', '0.161.0', '1.0.0', '0.170.0-alpha.1']) {
+    assert.equal(clientStatus('codex', checks({ codex: { version } })[0]).state_label, `Codex ${version} · checked`, version);
+  }
+  const unknownVersion = clientStatus('codex', checks({ codex: { version: null } })[0]);
+  assert.equal(unknownVersion.state_label, 'Codex · checked');
+  const dropped = clientStatus('codex', checks({ codex: { dropped_options: ['features.goals'] } })[0]);
+  assert.match(dropped.detail, /no longer has features\.goals; it passed without it/u);
+  const signInLater = clientStatus('claude-code', checks({ 'claude-code': { sign_in: 'unknown' } })[1]);
+  assert.equal(signInLater.state, 'checked'); assert.match(signInLater.detail, /checked when you send a question/u);
+  for (const item of model.providers) { assert.notEqual(item.state, 'ready'); assert(!JSON.stringify(item).includes('/synthetic/')); assert(Object.isFrozen(item)); }
+});
+
+test('needs sign-in, unsupported account, incompatible and unavailable states say exactly why', () => {
+  const [codexOut, claudeOut] = checks({ codex: { sign_in: 'needs-sign-in' }, 'claude-code': { sign_in: 'needs-sign-in' } }).map(item => clientStatus(item.driver, item));
+  assert.deepEqual([codexOut.state, codexOut.state_label, codexOut.sign_in], ['needs-sign-in', 'Needs sign-in in Codex', 'needs-client-sign-in']);
+  assert.match(codexOut.detail, /codex login/u); assert.match(claudeOut.detail, /run `claude` in Terminal/u);
+  assert.match(codexOut.detail, /never opens a sign-in page or reads your credentials/u);
+  const account = clientStatus('claude-code', checks({ 'claude-code': { sign_in: 'unsupported-account' } })[1]);
+  assert.deepEqual([account.state, account.state_label], ['unavailable', 'Claude Code 2.1.295 · account not supported']);
+  const option = clientStatus('claude-code', checks({ 'claude-code': { status: 'incompatible', reason_code: 'OPTION_REJECTED', reason_detail: '--permission-prompts', sign_in: 'not-applicable', version: '2.1.300' } })[1]);
+  assert.deepEqual([option.state, option.state_label], ['incompatible', 'Claude Code changed an option we use (--permission-prompts)']);
+  assert.match(option.detail, /Ask AI is off for Claude Code 2\.1\.300 until AxioSozo is updated for it/u); assert.match(option.detail, /Nothing was sent/u);
+  const tools = clientStatus('codex', checks({ codex: { status: 'incompatible', reason_code: 'TOOLS_NOT_DISABLED', reason_detail: 'exec_command', sign_in: 'not-applicable' } })[0]);
+  assert.equal(tools.state_label, 'Codex 0.162.0 offers tools we cannot turn off'); assert.match(tools.detail, /exec_command/u);
+  const leak = clientStatus('codex', checks({ codex: { status: 'incompatible', reason_code: 'INSTRUCTIONS_NOT_ISOLATED', reason_detail: 'skill', sign_in: 'not-applicable' } })[0]);
+  assert.equal(leak.state_label, 'Codex 0.162.0 would pass your own settings to Ask AI');
+  const format = clientStatus('codex', checks({ codex: { status: 'incompatible', reason_code: 'ANSWER_FORMAT_CHANGED', reason_detail: 'codex exec --json', sign_in: 'not-applicable' } })[0]);
+  assert.equal(format.state_label, 'Codex 0.162.0 changed its answer format');
+  const agy = byId(buildProviderStatus({ checks: checks() }), 'antigravity');
+  assert.deepEqual([agy.state, agy.state_label, agy.version], ['unavailable', 'Antigravity 1.3.2 · not usable for Ask AI', '1.3.2']);
+  assert.match(agy.detail, /no option that turns off its tools/u); assert.match(agy.detail, /Use Codex or Claude Code/u);
+  const failed = clientStatus('codex', checks({ codex: { status: 'error', reason_code: 'CHECK_FAILED', reason_detail: 'PROCESS_EXIT', sign_in: 'not-applicable' } })[0]);
+  assert.deepEqual([failed.state, failed.state_label], ['unknown', 'Could not check Codex 0.162.0']);
+  const managed = clientStatus('claude-code', checks({ 'claude-code': { status: 'unavailable', reason_code: 'MANAGED_POLICY', sign_in: 'not-applicable' } })[1]);
+  assert.match(managed.detail, /organisation policy/u);
+  const missing = clientStatus('codex', checks({ codex: { installed: false, executable: null, version: null, status: 'not-installed', sign_in: 'not-applicable', checked_at: null } })[0]);
+  assert.deepEqual([missing.state, missing.installed], ['not-installed', false]);
+  for (const item of [codexOut, claudeOut, account, option, tools, leak, format, agy, failed, managed, missing]) {
+    assert(STATES.includes(item.state)); assert.equal(item.verified, false); assert.match(item.detail, /^[A-Z].+\.$/u);
+  }
+});
+
+test('the check report is validated like any untrusted data', async () => {
+  // The host's real output shape (nothing installed: no client, broker or network is used).
+  const real = { version: 1, checked_at: '2026-10-09T01:00:00.000Z', providers: [] };
+  for (const driver of ['codex', 'claude-code', 'antigravity']) real.providers.push({ ...(await checkClient(driver, { searchPath: '' })), summary: 'x' });
+  assert.deepEqual(validateClientChecks(real).map(item => item.status), ['not-installed', 'not-installed', 'not-installed']);
+  const valid = () => JSON.parse(JSON.stringify({ version: 1, providers: checks() }));
+  for (const [name, mutate] of [
+    ['signed in while incompatible', value => { Object.assign(value.providers[0], { status: 'incompatible', sign_in: 'signed-in' }); }],
+    ['unknown status', value => { value.providers[0].status = 'ready'; }],
+    ['installed but not-installed', value => { value.providers[0].status = 'not-installed'; }],
+    ['unknown reason', value => { value.providers[0].reason_code = 'BECAUSE'; }],
+    ['invented version', value => { value.providers[0].version = 'latest'; }],
+    ['path with control characters', value => { value.providers[0].executable = '/bin/x\n<b>'; }],
+    ['bad dropped option', value => { value.providers[0].dropped_options = ['features.ok', 'rm -rf /']; }],
+    ['duplicate driver', value => { value.providers[1] = value.providers[0]; }],
+    ['four providers', value => { value.providers.push(value.providers[0]); }],
+    ['wrong version', value => { value.version = 2; }],
+  ]) {
+    const value = valid(); mutate(value);
+    assert.throws(() => validateClientChecks(value), /INVALID_CLIENT_CHECKS/u, name);
   }
 });
 
@@ -180,14 +247,21 @@ test('decision-key entries: stored, missing, turned off, helper unavailable and 
   assert.equal(jevStatus({ keyEntryEnabled: true, keyError: 'KEYCHAIN_HELPER_UNAVAILABLE' }).state, 'unavailable');
 });
 
-test('getProviderStatus reads installation metadata only and never rejects', async () => {
+test('getProviderStatus prefers the offline check, falls back to metadata, and never rejects', async () => {
   const calls = [];
-  const model = await getProviderStatus({ ops: { discover: async () => { calls.push('discover'); return discovery(); } } });
-  assert.deepEqual(calls, ['discover']); assert.equal(model.providers.length, 3);
+  const checked = await getProviderStatus({ refresh: true, ops: { checks: async (_runtime, _signal, options) => { calls.push(['checks', options]); return checks(); },
+    discover: async () => { calls.push(['discover']); return discovery(); } } });
+  assert.deepEqual(calls, [['checks', { refresh: true }]]); assert.equal(checked.checks, 'ok'); assert.equal(byId(checked, 'codex').state, 'checked');
+  calls.length = 0;
+  const fallback = await getProviderStatus({ ops: { checks: async () => { calls.push(['checks']); throw new Error('HELPER_TIMEOUT'); },
+    discover: async () => { calls.push(['discover']); return discovery(); } } });
+  assert.deepEqual(calls, [['checks'], ['discover']]); assert.deepEqual([fallback.checks, fallback.checks_error, fallback.discovery], ['unavailable', 'HELPER_TIMEOUT', 'ok']);
+  const metadataOnly = await getProviderStatus({ ops: { discover: async () => discovery() } });
+  assert.equal(metadataOnly.providers.length, 3); assert.equal(metadataOnly.checks, 'not-run');
   const degraded = await getProviderStatus({ ops: { discover: async () => { throw new Error('HELPER_TIMEOUT'); } } });
   assert.equal(degraded.discovery_error, 'HELPER_TIMEOUT');
-  const odd = await getProviderStatus({ ops: { discover: async () => { throw new Error('spawn /secret/path failed'); } } });
-  assert.equal(odd.discovery_error, 'DISCOVERY_FAILED'); assert(!JSON.stringify(odd).includes('/secret/path'));
+  const odd = await getProviderStatus({ ops: { checks: async () => { throw new Error('spawn /secret/path failed'); }, discover: async () => { throw new Error('spawn /secret/path failed'); } } });
+  assert.equal(odd.discovery_error, 'DISCOVERY_FAILED'); assert.equal(odd.checks_error, 'CHECKS_FAILED'); assert(!JSON.stringify(odd).includes('/secret/path'));
 });
 
 test('every key operation admits its own runtime under the caller signal; a refused admission never falls back', async () => {

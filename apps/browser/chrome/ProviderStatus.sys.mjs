@@ -4,60 +4,135 @@
 // Which AI providers are connected, in one honest status model shared by the
 // Settings window (providers-settings.xhtml) and about:axiosozo ("AI & keys").
 //
-// Inputs are installation metadata only (provider-host `discover`: no client is
-// executed, no sign-in is checked) and Keychain *presence* checks for the
-// decision-provider keys (ProviderKeys `exists`: an exit status, never the
-// secret). Nothing here starts a provider client, opens login UI or calls Jev or
-// OpenAI. Model turns through this browser have not been verified yet, so no
-// client is ever reported `ready`; product decision calls are NOT_AUTHORIZED, so
-// a stored key is never reported ready either.
+// Official clients (Codex, Claude Code, Antigravity) are described from the provider
+// host's capability check (`cli.mjs clients`, ProviderSettings.checkClientsForSettings):
+// the installed client is run offline in the browser sandbox against a loopback stand-in
+// model, so nothing is sent to a provider and no sign-in page opens. There is no version
+// pin: any version that passes is "checked"; one that changed an option we use is
+// "incompatible" and says which. When the check cannot run, installation metadata alone
+// is shown ("not checked yet"). Decision-provider keys are Keychain *presence* checks
+// (ProviderKeys `exists`: an exit status, never the secret). Nothing is reported `ready`:
+// a model answer through this browser is not claimed by a check.
 
-import { discoverForSettings } from "./ProviderSettings.sys.mjs";
+import { checkClientsForSettings, discoverForSettings } from "./ProviderSettings.sys.mjs";
 import { DECISION_KEY_CODES, DECISION_KEY_PREFS, DECISION_KEY_PROVIDERS, decisionKeyEntryEnabled, decisionKeyStatus,
   removeDecisionKey, storeDecisionKey, validateDecisionKey } from "./ProviderKeys.sys.mjs";
 import { createNativeDecisionKeyFixtureRuntime } from "./KeyFixtureNativeConfig.sys.mjs";
 
-/** Exact client versions the live routes accept (packages/provider-host/src/live.mjs LIVE_VERSIONS). */
-export const LIVE_VERSIONS = Object.freeze({ codex: "0.160.0", "claude-code": "2.1.283" });
 export const JEV_MODEL = "jev-1.13.0";
 export const DECISION_PROVIDERS = DECISION_KEY_PROVIDERS;
 /** Product decision calls in this build (decision-v1: the browser host disables live authorization). */
 export const DECISION_CALLS = "NOT_AUTHORIZED";
 export const OPENAI_SHAPE_STATUS = "UNVERIFIED_SHAPE";
 
-export const STATES = Object.freeze(["ready", "unverified", "not-installed", "unavailable", "needs-key",
-  "key-stored", "disabled", "unknown"]);
-/** Short user-facing label per state. */
+export const STATES = Object.freeze(["ready", "checked", "needs-sign-in", "unverified", "not-installed", "incompatible",
+  "unavailable", "needs-key", "key-stored", "disabled", "unknown"]);
+/** Generic label per state; official clients get a specific label (with name and version) instead. */
 export const STATE_LABELS = Object.freeze({
   ready: "Ready",
-  unverified: "Installed · not yet verified",
+  checked: "Checked",
+  "needs-sign-in": "Needs sign-in",
+  unverified: "Installed · not checked yet",
   "not-installed": "Not installed",
+  incompatible: "Changed an option we use",
   unavailable: "Unavailable in this build",
   "needs-key": "No key stored",
   "key-stored": "Key stored",
   disabled: "Turned off",
   unknown: "Status unknown",
 });
-export const SIGN_IN = Object.freeze(["handled-by-client-on-first-question", "codex-login-once", "api-key",
-  "not-applicable"]);
+export const SIGN_IN = Object.freeze(["client-sign-in", "needs-client-sign-in", "unsupported-account", "api-key", "not-applicable"]);
 export const SIGN_IN_LABELS = Object.freeze({
-  "handled-by-client-on-first-question": "Uses your existing Claude Code sign-in. It is checked by the official client when you send your first question.",
-  "codex-login-once": "Sign in once with the official Codex client for this browser (the command is shown in Provider settings). It is checked when you send your first question.",
+  "client-sign-in": "Uses your existing sign-in in the official client. AxioSozo never opens a sign-in page or reads your credentials.",
+  "needs-client-sign-in": "The official client is not signed in. Sign in there (in Terminal); AxioSozo never opens a sign-in page or reads your credentials.",
+  "unsupported-account": "The official client is signed in with an account type Ask AI does not support.",
   "api-key": "Uses an API key stored in the macOS Keychain.",
   "not-applicable": "No sign-in applies.",
 });
 const LABELS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code", antigravity: "Antigravity", jev: "Jev", openai: "OpenAI" });
 const CLIENTS = Object.freeze(["codex", "claude-code", "antigravity"]);
-const NOT_VERIFIED = "A real answer through this browser has not been verified yet.";
+const SIGN_IN_COMMANDS = Object.freeze({ codex: "run `codex login` in Terminal", "claude-code": "run `claude` in Terminal and sign in" });
+const NOTHING_SENT = "Nothing was sent to a provider for this check.";
 
 function entry(fields) {
-  return Object.freeze({ verified: false, ...fields, state_label: STATE_LABELS[fields.state] });
+  return Object.freeze({ verified: false, ...fields, state_label: fields.state_label ?? STATE_LABELS[fields.state] });
+}
+const named = (label, version) => (version ? `${label} ${version}` : label);
+const isCheck = provider => typeof provider?.status === "string" && "sign_in" in provider && "reason_code" in provider;
+
+function incompatibleLabel(label, version, check) {
+  switch (check.reason_code) {
+    case "OPTION_REJECTED": return `${label} changed an option we use (${check.reason_detail ?? "unknown option"})`;
+    case "TOOLS_NOT_DISABLED": return `${named(label, version)} offers tools we cannot turn off`;
+    case "INSTRUCTIONS_NOT_ISOLATED": return `${named(label, version)} would pass your own settings to Ask AI`;
+    case "ANSWER_FORMAT_CHANGED": return `${named(label, version)} changed its answer format`;
+    default: return `${named(label, version)} · not compatible`;
+  }
+}
+function incompatibleWhy(label, check) {
+  switch (check.reason_code) {
+    case "OPTION_REJECTED": return `It no longer accepts ${check.reason_detail ?? "an option"}, which Ask AI needs`;
+    case "TOOLS_NOT_DISABLED": return `With Ask AI's options it still offers the model tools (${check.reason_detail ?? "unknown"}), and Ask AI only uses ${label} without tools`;
+    case "INSTRUCTIONS_NOT_ISOLATED": return `With Ask AI's options it still passes your own ${label} customizations (${check.reason_detail ?? "unknown"}) to the model`;
+    case "ANSWER_FORMAT_CHANGED": return "AxioSozo could not read its answer";
+    default: return "It did not pass the check";
+  }
+}
+function unavailableDetail(driver, label, version, check) {
+  switch (check.reason_code) {
+    case "TOOLS_NOT_CONFINABLE": return `${named(label, version)} is installed, but Ask AI cannot use it: Antigravity has no option that turns off its tools (in a check it still offered the model 60 tools, including running commands and controlling a browser), and Ask AI only uses assistants without tools. Use Codex or Claude Code.`;
+    case "MANAGED_POLICY": return `${label} is managed by an organisation policy, which can add hooks to every session. Ask AI supports personal ${label} installs only.`;
+    case "UNSUPPORTED_PLATFORM": return "Ask AI currently needs macOS on Apple silicon.";
+    case "BROKER_UNAVAILABLE": return `The browser sandbox for AI clients is not built in this browser, so ${label} cannot be used or checked.`;
+    case "UNSUPPORTED_INSTALL": return `${label} is installed in a way AxioSozo cannot use: the program must be your own and not writable by other users.`;
+    default: return `${label} cannot be used in this build.`;
+  }
 }
 
-/** One official-client provider from validated discovery (ProviderSettings.validateDiscovery), or null. */
+/** One official client from a validated capability check (ProviderSettings.validateClientChecks). */
+function clientCheckStatus(driver, check) {
+  const label = LABELS[driver]; const version = check.version ?? null;
+  const base = { id: driver, label, route: "official-client", installed: check.installed, version, expected_version: null,
+    check: check.status, checked_at: check.checked_at ?? null, reason_code: check.reason_code ?? null };
+  switch (check.status) {
+    case "not-installed":
+      return entry({ ...base, installed: false, version: null, sign_in: "not-applicable", state: "not-installed",
+        detail: `The official ${label} client was not found. Install it to ask ${label} questions; browsing does not need it.` });
+    case "incompatible":
+      return entry({ ...base, sign_in: "not-applicable", state: "incompatible", state_label: incompatibleLabel(label, version, check),
+        detail: `${incompatibleWhy(label, check)}. Ask AI is off for ${named(label, version)} until AxioSozo is updated for it; ${label} itself keeps working outside the browser. ${NOTHING_SENT}` });
+    case "unavailable":
+      return entry({ ...base, sign_in: "not-applicable", state: "unavailable",
+        state_label: driver === "antigravity" ? `${named(label, version)} · not usable for Ask AI` : STATE_LABELS.unavailable,
+        detail: unavailableDetail(driver, label, version, check) });
+    case "compatible": {
+      const dropped = check.dropped_options?.length ? ` This version no longer has ${check.dropped_options.join(", ")}; it passed without ${check.dropped_options.length === 1 ? "it" : "them"}.` : "";
+      const passed = `AxioSozo checked this ${label} install: it accepts the options Ask AI uses, offers the model no tools, and keeps your own ${label} settings, instructions and MCP servers out.${dropped} ${NOTHING_SENT}`;
+      if (check.sign_in === "needs-sign-in") {
+        return entry({ ...base, sign_in: "needs-client-sign-in", state: "needs-sign-in", state_label: `Needs sign-in in ${label}`,
+          detail: `${named(label, version)} works with Ask AI but is not signed in: ${SIGN_IN_COMMANDS[driver]}, then check again. AxioSozo never opens a sign-in page or reads your credentials.` });
+      }
+      if (check.sign_in === "unsupported-account") {
+        return entry({ ...base, sign_in: "unsupported-account", state: "unavailable", state_label: `${named(label, version)} · account not supported`,
+          detail: `${named(label, version)} is signed in with an account type Ask AI does not support (it supports personal Pro and Max sign-in, not API keys, team or managed accounts).` });
+      }
+      return entry({ ...base, sign_in: "client-sign-in", state: "checked", state_label: `${named(label, version)} · checked`,
+        detail: `${passed} ${check.sign_in === "signed-in" ? `Uses your existing ${label} sign-in.` : `Your ${label} sign-in is checked when you send a question.`} An answer through this browser is only shown once you ask.` });
+    }
+    default:
+      return entry({ ...base, sign_in: "not-applicable", state: "unknown", state_label: `Could not check ${named(label, version)}`,
+        detail: `The check of ${named(label, version)} did not finish. ${NOTHING_SENT} Check again from AI & keys or Provider settings.` });
+  }
+}
+
+/**
+ * One official client, from a validated capability check (preferred) or, when the check
+ * could not run, from validated installation metadata (ProviderSettings.validateDiscovery).
+ */
 export function clientStatus(driver, provider) {
   const label = LABELS[driver];
-  const base = { id: driver, label, route: "official-client", expected_version: LIVE_VERSIONS[driver] ?? null };
+  if (isCheck(provider)) return clientCheckStatus(driver, provider);
+  const base = { id: driver, label, route: "official-client", expected_version: null, check: null, checked_at: null, reason_code: null };
   if (!provider) {
     return entry({ ...base, installed: null, version: null, sign_in: "not-applicable", state: "unknown",
       detail: `Could not read installation metadata for ${label}. No client was started.` });
@@ -67,19 +142,8 @@ export function clientStatus(driver, provider) {
     return entry({ ...base, installed: false, version: null, sign_in: "not-applicable", state: "not-installed",
       detail: `The official ${label} client was not found. Install it to ask ${label} questions; browsing does not need it.` });
   }
-  if (driver === "antigravity") {
-    return entry({ ...base, installed: true, version, sign_in: "not-applicable", state: "unavailable",
-      detail: "Installed, but unavailable in this build: Antigravity startup and tool isolation have not been verified. Use Codex or Claude Code." });
-  }
-  if (version !== LIVE_VERSIONS[driver]) {
-    return entry({ ...base, installed: true, version, sign_in: "not-applicable", state: "unavailable",
-      detail: version
-        ? `Installed version ${version}; this build works only with ${label} ${LIVE_VERSIONS[driver]}, so questions will be refused until the versions match.`
-        : `Installed, but its version could not be read from installation metadata; this build works only with ${label} ${LIVE_VERSIONS[driver]}.` });
-  }
-  const sign_in = driver === "codex" ? "codex-login-once" : "handled-by-client-on-first-question";
-  return entry({ ...base, installed: true, version, sign_in, state: "unverified",
-    detail: `Installed (${version}). ${SIGN_IN_LABELS[sign_in]} ${NOT_VERIFIED}` });
+  return entry({ ...base, installed: true, version, sign_in: "not-applicable", state: "unverified",
+    detail: `Installed${version ? ` (${version})` : ""}. AxioSozo has not checked this ${label} yet; it checks it offline when you open AI & keys or before you send a question.` });
 }
 
 // ---------------------------------------------------------------- decision keys
@@ -135,16 +199,19 @@ export function jevStatus({ keyEntryEnabled, key = null, keyError = null } = {})
 }
 
 /**
- * Pure: the clients from validated discovery (or null). Decision keys are separate
- * (getDecisionKeyStatus); `jev` is the legacy single-entry input, kept for callers
- * that still pass one.
+ * Pure: the clients from a validated capability check (`checks`) or, failing that, from
+ * validated discovery. Decision keys are separate (getDecisionKeyStatus); `jev` is the
+ * legacy single-entry input, kept for callers that still pass one.
  */
-export function buildProviderStatus({ discovery = null, discoveryError = null, jev = null } = {}) {
-  const providers = CLIENTS.map(driver => clientStatus(driver, discovery?.find(item => item.driver === driver) ?? null));
+export function buildProviderStatus({ checks = null, checksError = null, discovery = null, discoveryError = null, jev = null } = {}) {
+  const source = checks ?? discovery;
+  const providers = CLIENTS.map(driver => clientStatus(driver, source?.find(item => item.driver === driver) ?? null));
   return Object.freeze({
     version: 1,
-    discovery: discovery ? "ok" : "unavailable",
-    discovery_error: discovery ? null : discoveryError ?? "DISCOVERY_FAILED",
+    discovery: source ? "ok" : "unavailable",
+    discovery_error: source ? null : discoveryError ?? "DISCOVERY_FAILED",
+    checks: checks ? "ok" : checksError ? "unavailable" : "not-run",
+    checks_error: checks ? null : checksError,
     model_turns_verified: false,
     providers: Object.freeze(jev ? [...providers, jevStatus(jev)] : providers),
   });
@@ -158,15 +225,24 @@ const keyCode = error => DECISION_KEY_CODES.includes(error?.code) ? error.code
 // A surface that closed meanwhile is the cause, whatever step refused (the fixture
 // runtime reports its own refusal as an unavailable helper).
 const outcome = (error, signal, isActive) => (surfaceActive(signal, isActive) ? keyCode(error) : "SETTINGS_CLOSED");
-const defaultOps = Object.freeze({ discover: discoverForSettings });
+const defaultOps = Object.freeze({ checks: checkClientsForSettings, discover: discoverForSettings });
 // The privileged surface's choices only: never actor or page data.
 const defaultKeyOps = Object.freeze({ runtime: createNativeDecisionKeyFixtureRuntime, status: decisionKeyStatus,
   store: storeDecisionKey, remove: removeDecisionKey });
 
-/** Installation metadata only. Never rejects; never starts a client. */
-export async function getProviderStatus({ runtime, signal, ops = defaultOps } = {}) {
-  try { return buildProviderStatus({ discovery: await ops.discover(runtime, signal) }); }
-  catch (error) { return buildProviderStatus({ discovery: null, discoveryError: codeOf(error) ?? "DISCOVERY_FAILED" }); }
+/**
+ * The offline capability check of the installed clients (cached per executable by the
+ * provider host; `refresh` checks again), falling back to installation metadata when the
+ * check cannot run. Never rejects; never sends anything to a provider.
+ */
+export async function getProviderStatus({ runtime, signal, ops = defaultOps, refresh = false } = {}) {
+  let checksError = null;
+  if (typeof ops.checks === "function") {
+    try { return buildProviderStatus({ checks: await ops.checks(runtime, signal, { refresh: refresh === true }) }); }
+    catch (error) { checksError = codeOf(error) ?? "CHECKS_FAILED"; }
+  }
+  try { return buildProviderStatus({ discovery: await ops.discover(runtime, signal), checksError }); }
+  catch (error) { return buildProviderStatus({ discovery: null, discoveryError: codeOf(error) ?? "DISCOVERY_FAILED", checksError }); }
 }
 
 function requireProvider(provider) {

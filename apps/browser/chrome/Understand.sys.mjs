@@ -10,9 +10,9 @@ export const UNDERSTAND_LIMITS = Object.freeze({ queued: 4, minTimeoutMs: 10000,
   metadataBytes: 8192, requestBytes: 73728, briefBytes: 262144, cancelGraceMs: 1000 });
 const CLIS = Object.freeze(["claude-code", "codex"]);
 const KINDS = Object.freeze(["brief", "explain_errors", "setup"]);
-// understand-v1 §3.3: the cheapest suitable model per client for a setup check
-// (display only; the provider host passes the model to the client).
-export const SETUP_MODELS = Object.freeze({ codex: "gpt-6-luna", "claude-code": "claude-sonnet-5-5" });
+// understand-v1 §3.3: the model a setup check asks for, per client (display only; the
+// provider host passes it). No dated model ids: Claude Code's `sonnet` alias, Codex's default.
+export const SETUP_MODELS = Object.freeze({ codex: "default", "claude-code": "sonnet" });
 const SETUP_PREFERENCE = Object.freeze(["codex", "claude-code"]);
 /** Automatic client choice for a setup check: Codex, else Claude Code, else null. */
 export function pickSetupCli(clis) {
