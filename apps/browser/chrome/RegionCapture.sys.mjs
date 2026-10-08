@@ -4,12 +4,15 @@
 // Capture an area for an agent, in one normal browser window.
 //
 // Two ways in, both on the page area of a Gecko tab:
-//  - hold the right mouse button and drag: a plain right-click still opens the
-//    normal context menu, unchanged. On macOS Gecko asks for the menu on
-//    mousedown, so the menu's popupshowing is held back (its contentData kept)
-//    while the button is down; a release without a drag opens it again at the
-//    same spot. A page that handles right-click itself never asks for that
-//    menu, so its own right-drag is left alone.
+//  - hold the right mouse button (or Control and the primary button, as a
+//    trackpad without secondary click does) and drag: a plain right-click
+//    still opens the normal context menu, unchanged. On macOS Gecko asks for
+//    the menu on mousedown, so the menu's popupshowing is held back (its
+//    contentData kept) while the button is down; a release without a drag
+//    opens it again at the same spot. Every page's menu is held, so a drag
+//    over a page that cannot be captured says why in a toast instead of
+//    vanishing into the native menu. A page that handles right-click itself
+//    never asks for that menu, so its own right-drag is left alone.
 //  - "Capture Area for Agent…" in the page context menu: a select mode where a
 //    left drag selects and a click takes the visible page.
 //
@@ -244,7 +247,7 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
   const contextMenu = document.getElementById("contentAreaContextMenu");
   function onPopupShowing(event) {
     if (replaying || event.target !== contextMenu) return;
-    const holding = gesture && (gesture.phase === "pending" || gesture.phase === "selecting")
+    const holding = gesture && ["pending", "selecting", "refused"].includes(gesture.phase)
       && window.nsContextMenu?.contentData?.browser === gesture.browser;
     if (holding) {
       gesture.deferred = window.nsContextMenu.contentData;
@@ -278,17 +281,25 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     // originalTarget: a text field's inner editor is anonymous content.)
     if (view?.bar && gesture?.phase === "captured" && !view.bar.contains(event.target)) cancel("outside");
     if (gesture?.phase === "select") return; // the select overlay handles its own mouse
-    if (event.button !== 2 || !prefEnabled(window, REGION_PREFS.rightDrag, true)) return;
+    // The secondary button, or Control with the primary one: macOS (and a
+    // trackpad without secondary click) sends that as a left press that asks
+    // for the context menu.
+    const secondary = event.button === 2 || (event.button === 0 && event.ctrlKey && !event.metaKey && !event.altKey);
+    if (!secondary || !prefEnabled(window, REGION_PREFS.rightDrag, true)) return;
     const browser = browserUnder(event);
-    if (!browser || modalOpen() || !sample(browser).ok) return;
+    if (!browser || modalOpen()) return;
     cancel("restart");
-    gesture = { phase: "pending", browser, start: point(event), screenX: event.screenX, screenY: event.screenY,
-      deferred: null, moved: false, last: point(event) };
+    // Every page's menu is held while the button is down, so a drag over a
+    // page that cannot be captured says why instead of losing the drag to the
+    // native menu. A release without a drag still gets its menu.
+    const facts = sample(browser);
+    gesture = { phase: "pending", browser, button: event.button, start: point(event), screenX: event.screenX, screenY: event.screenY,
+      deferred: null, moved: false, last: point(event), refusal: facts.ok ? null : facts.reason };
   }
   function onMouseMove(event) {
     if (!gesture || !event.isTrusted) return;
     if (gesture.phase === "pending") {
-      if (!(event.buttons & 2)) { gesture = null; return; }
+      if (event.buttons === 0) { gesture = null; return; } // released outside this window
       gesture.last = point(event);
       if (Math.hypot(gesture.last.x - gesture.start.x, gesture.last.y - gesture.start.y) < DRAG_THRESHOLD) return;
       gesture.moved = true;
@@ -304,6 +315,14 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     }
   }
   function beginSelecting() {
+    if (gesture.refusal) {
+      const reason = gesture.refusal;
+      gesture.phase = "refused";
+      lastBrowser = gesture.browser;
+      swallowMenuUntil = now() + LATE_MENU_MS;
+      refuse(reason);
+      return;
+    }
     const browser = gesture.browser;
     if (!openView(browser, "drag")) { gesture = null; return; }
     gesture.phase = "selecting";
@@ -315,6 +334,7 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
   }
   function onMouseUp(event) {
     if (!gesture || !event.isTrusted) return;
+    if (gesture.phase === "refused") { gesture = null; return; }
     if (gesture.phase === "pending" && (event.button === 2 || event.button === 0)) {
       const saved = gesture;
       gesture = null;

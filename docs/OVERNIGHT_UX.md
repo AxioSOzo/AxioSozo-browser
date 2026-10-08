@@ -18,9 +18,13 @@ cd /Volumes/T9/axiosozo/.local/worktrees/browser-ux-overnight
 
 Then:
 
-1. Open any web page. **Hold the right mouse button and drag** over part of
-   it. Release, press Return, paste into Claude Code or Codex. A plain
-   right-click still opens the normal menu.
+1. Open a web page (http/https; not the AxioSozo start page or a new tab).
+   **Hold the right mouse button and drag** over part of it, or on a
+   trackpad hold **Control**, press and drag. Release, press Return, paste
+   into Claude Code or Codex. A plain right-click still opens the normal
+   menu. Quick check that you are in this build: the page's right-click menu
+   has **Capture Area for Agent…** (the other AxioSozo Dev app has the same
+   name and icon).
 2. Right-click → **Capture Area for Agent…** for the trackpad version
    (drag, or click once for the whole visible page).
 3. Add a project (about:axiosozo → Add project…) and look at the sidebar
@@ -72,9 +76,9 @@ branch, and remove `/Volumes/AxioSozoBuild/ux-overnight`.
 
 ## Not verified
 
-- Real hardware input: right-drag with a mouse, Ctrl-click and two-finger
-  trackpad drag, with native macOS context menus (tests used synthesized
-  events and the non-native menu).
+- Real hardware input: right-drag with a mouse, Control-drag and two-finger
+  trackpad drag. Synthesized right-drag, Control-drag, refusals and the
+  plain right-click menu were checked with native macOS context menus on.
 - VoiceOver.
 - Chromium tabs (capture is refused there for now).
 

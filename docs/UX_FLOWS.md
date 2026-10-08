@@ -156,10 +156,12 @@ and `#settings` redirect):
 
 Design: [capture an area](design/region-capture.md).
 
-- **Hold the right mouse button and drag** over a web page: the area is
-  selected (white frame, size in points, the rest of the tab dims). A plain
-  right-click still opens the normal menu at the same spot; a page that has
-  its own right-click menu keeps its own drag.
+- **Hold the right mouse button and drag** over a web page (on a trackpad:
+  hold Control, press and drag): the area is selected (white frame, size in
+  points, the rest of the tab dims). A plain right-click still opens the
+  normal menu at the same spot; a page that has its own right-click menu
+  keeps its own drag. A drag over a page that cannot be captured (start
+  page, settings, sensitive sites) says why in a toast.
 - **Capture Area for Agent…** in the page menu does the same with the left
   button or the trackpad: drag over an area, or click once for the visible
   page. Esc cancels.

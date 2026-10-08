@@ -269,15 +269,44 @@ test("Escape and switching tabs cancel without copying", async () => {
   assert.equal(h.clipboard.writes.length, 0);
 });
 
-test("sensitive sites, Chromium tabs and non-web pages are never captured", () => {
-  for (const options of [{ sensitiveHost: true }, { engine: "chromium" }, { url: "about:preferences" }]) {
+test("sensitive sites, Chromium tabs and non-web pages are never captured, and a drag says why", async () => {
+  const reasons = [[{ sensitiveHost: true }, /sensitive sites/], [{ engine: "chromium" }, /Chromium/], [{ url: "about:preferences" }, /Only web pages/]];
+  for (const [options, why] of reasons) {
     const h = harness(options);
     down(h);
-    assert.equal(h.contentAsksForMenu().defaultPrevented, false, "the normal menu is not even held");
+    assert.equal(h.contentAsksForMenu().defaultPrevented, true, "held, so the native menu cannot swallow the drag");
     move(h, 600, 400);
-    assert.equal(h.stack.querySelector(".axiosozo-region"), null);
-    assert.equal(h.menu.querySelector(`#${REGION_MENU_ITEM}`).hidden, true, "and the menu entry is hidden");
+    assert.equal(h.stack.querySelector(".axiosozo-region"), null, "nothing is selected");
+    assert.match(h.toasts.at(-1)?.description ?? "", why);
+    up(h, 600, 400);
+    await flush();
+    assert.equal(h.snapshots.length, 0);
+    assert.equal(h.opened.length, 0, "the drag does not open the menu either");
+    assert.equal(h.contentAsksForMenu().defaultPrevented, true, "nor does its late request");
+    // A plain right-click on the same page keeps its normal menu.
+    const fresh = harness(options);
+    down(fresh); fresh.contentAsksForMenu(); up(fresh, 401, 200);
+    assert.equal(fresh.opened.length, 1);
+    assert.equal(fresh.toasts.length, 0);
+    assert.equal(fresh.menu.querySelector(`#${REGION_MENU_ITEM}`).hidden, true, "and the menu entry is hidden");
   }
+});
+
+test("Control with the primary button (a trackpad's right-click) drags too", async () => {
+  const h = harness();
+  h.dispatchWindow("mousedown", { button: 0, buttons: 1, ctrlKey: true, clientX: 400, clientY: 200, screenX: 450, screenY: 260 });
+  h.contentAsksForMenu();
+  h.dispatchWindow("mousemove", { button: 0, buttons: 1, ctrlKey: true, clientX: 650, clientY: 380 });
+  assert.ok(h.stack.querySelector(".axiosozo-region"));
+  h.dispatchWindow("mouseup", { button: 0, buttons: 0, ctrlKey: true, clientX: 650, clientY: 380 });
+  await flush();
+  assert.equal(h.snapshots.length, 1);
+  assert.ok(h.stack.querySelector(".axiosozo-region-bar"));
+  // Without Control a left drag is the page's own.
+  const plain = harness();
+  plain.dispatchWindow("mousedown", { button: 0, buttons: 1, clientX: 400, clientY: 200 });
+  plain.dispatchWindow("mousemove", { button: 0, buttons: 1, clientX: 650, clientY: 380 });
+  assert.equal(plain.stack.querySelector(".axiosozo-region"), null);
 });
 
 test("private windows and the off pref install nothing", () => {
