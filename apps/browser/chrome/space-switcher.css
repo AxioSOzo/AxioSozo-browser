@@ -54,10 +54,13 @@
   }
 }
 
+/* The name stays put at the start, like Zen's space header, whatever the
+ * length of the space's name (XUL toolbarbuttons centre by default). */
 .axiosozo-space-switcher-name {
   appearance: none;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   flex: 1 1 auto;
   min-width: 0;
   gap: 6px;
@@ -122,15 +125,16 @@
   }
 }
 
+/* A small mark in a target wide enough to hit (20 by 24 px). */
 .axiosozo-space-dot {
   appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
+  min-width: 20px;
   height: 24px;
   margin: 0;
-  padding: 0 4px;
+  padding: 0 3px;
   border-radius: var(--toolbarbutton-border-radius);
   background-color: transparent;
   color: inherit;
@@ -154,7 +158,7 @@
   background-color: color-mix(in srgb, currentColor 32%, transparent);
   transition: width 200ms ease, background-color 150ms ease, scale 150ms ease;
 
-  .axiosozo-space-dot:hover > & {
+  .axiosozo-space-dot:is(:hover, [dragover]) > & {
     background-color: color-mix(in srgb, currentColor 60%, transparent);
   }
 
@@ -172,5 +176,22 @@
   .axiosozo-space-switcher-name,
   .axiosozo-space-dot-mark {
     transition: none;
+  }
+}
+
+/* Forced colours repaint backgrounds: the marks keep system colours, and the
+ * current space stays the highlighted one. */
+@media (forced-colors: active) {
+  .axiosozo-space-dot-mark {
+    forced-color-adjust: none;
+    background-color: GrayText;
+  }
+
+  .axiosozo-space-dot:is(:hover, [dragover]) > .axiosozo-space-dot-mark {
+    background-color: ButtonText;
+  }
+
+  .axiosozo-space-dot[aria-selected="true"] > .axiosozo-space-dot-mark {
+    background-color: SelectedItem;
   }
 }

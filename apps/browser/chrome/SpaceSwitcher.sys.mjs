@@ -23,6 +23,10 @@ export const SWITCHER_ID = "axiosozo-space-switcher";
 export const MAX_DOTS = 7;
 export const WHEEL_THRESHOLD = 30; // px of horizontal travel for one step
 export const WHEEL_IDLE_MS = 220; // a scroll gesture ends after this much quiet
+// A dragged tab switches spaces only after resting on a dot this long (Zen's
+// own drag-to-switch delay, zen.tabs.dnd-switch-space-delay), so a drag that
+// passes over the foot never flicks through spaces.
+export const DRAG_DWELL_MS = 500;
 const TAB_DROP_TYPE = "application/x-moz-tabbrowser-tab";
 const XHTML = "http://www.w3.org/1999/xhtml";
 const UUID_ATTRIBUTE = "space-uuid";
@@ -72,6 +76,7 @@ export function installSpaceSwitcher(window, { adapter = null, timers = null } =
   let switching = null;
   let focusAfterSwitch = false;
   let wheel = { travel: 0, locked: false, idle: null };
+  let dwell = null; // { dot, timer } while a dragged tab rests on a dot
 
   const xul = tag => document.createXULElement(tag);
   const html = (tag, className) => {
@@ -228,12 +233,32 @@ export function installSpaceSwitcher(window, { adapter = null, timers = null } =
     go(zen.neighbourWorkspace(Math.sign(wheel.travel), { scroll: true }));
   };
 
-  // Like Zen's space icons: dragging a tab over a dot switches to that space.
+  // Like Zen's space icons: a tab dragged onto a dot, and held there for a
+  // moment, switches to that space.
+  function endDwell() {
+    if (!dwell) return;
+    clock.clearTimeout(dwell.timer);
+    dwell.dot.removeAttribute("dragover");
+    dwell = null;
+  }
   const onDragOver = event => {
     const dot = dotOf(event);
     const types = event.dataTransfer?.types;
     if (!dot || !types || !Array.from(types).includes(TAB_DROP_TYPE)) return;
-    go(dot.getAttribute(UUID_ATTRIBUTE));
+    if (dwell?.dot === dot) return;
+    endDwell();
+    dot.setAttribute("dragover", "true");
+    dwell = { dot, timer: clock.setTimeout(() => {
+      const uuid = dot.getAttribute(UUID_ATTRIBUTE);
+      endDwell();
+      go(uuid);
+    }, DRAG_DWELL_MS) };
+  };
+  const onDragLeave = event => {
+    // Moving onto the dot's own mark is still on the dot.
+    if (!dwell || (event.target !== dwell.dot && !dwell.dot.contains?.(event.target))) return;
+    if (event.relatedTarget && dwell.dot.contains?.(event.relatedTarget)) return;
+    endDwell();
   };
 
   function activate() {
@@ -266,6 +291,9 @@ export function installSpaceSwitcher(window, { adapter = null, timers = null } =
     container.addEventListener("wheel", onWheel);
     tablist.addEventListener("keydown", onKeyDown);
     tablist.addEventListener("dragover", onDragOver);
+    tablist.addEventListener("dragleave", onDragLeave);
+    tablist.addEventListener("drop", endDwell);
+    tablist.addEventListener("dragend", endDwell);
 
     view = { container, name, icon, label, tablist, dots: new Map(), sheet, unsubscribe: zen.onUpdate(() => render()) };
     document.documentElement.setAttribute(ROOT_ATTRIBUTE, "true");
@@ -282,6 +310,10 @@ export function installSpaceSwitcher(window, { adapter = null, timers = null } =
     container.removeEventListener("wheel", onWheel);
     tablist.removeEventListener("keydown", onKeyDown);
     tablist.removeEventListener("dragover", onDragOver);
+    tablist.removeEventListener("dragleave", onDragLeave);
+    tablist.removeEventListener("drop", endDwell);
+    tablist.removeEventListener("dragend", endDwell);
+    endDwell();
     container.remove();
     sheet?.remove();
     document.documentElement.removeAttribute(ROOT_ATTRIBUTE);

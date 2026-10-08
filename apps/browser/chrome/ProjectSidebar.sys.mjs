@@ -20,6 +20,7 @@
 // web content. Runs start only from a button that names the target, and a
 // command is shown before its first run (ProjectRunner approvals).
 import { displayState, localAddress, targetUrl } from "./ProjectRunner.sys.mjs";
+import { showAxioSozoToast } from "./AxioSozoToast.sys.mjs";
 
 // Projects shown before the rest fold into "N more"; current and running
 // projects are always among them.
@@ -93,6 +94,22 @@ export function primaryTarget(views) {
 const hostOf = spec => { const url = typeof spec === "string" ? URL.parse(spec) : null; return url ? url.host : ""; };
 const sameOrigin = (a, b) => { const x = URL.parse(a ?? ""), y = URL.parse(b ?? ""); return !!x && !!y && x.origin === y.origin; };
 const errorText = code => ERROR_TEXT[code] ?? `Could not start (${typeof code === "string" ? code : "error"}).`;
+// Firefox's own globe for a link whose site has no stored favicon.
+const DEFAULT_FAVICON = "chrome://global/skin/icons/defaultFavicon.svg";
+// How long a toast with an Undo stays, so there is time to read and decide.
+export const UNDO_TOAST_MS = 6000;
+const APP_KINDS = new Set(["mobile", "desktop"]);
+
+/** "1 server", "3 servers", "2 apps", "3 servers and apps": what a Stop all
+ * stopped, named by the kinds of its targets. */
+export function runsPhrase(kinds) {
+  const list = Array.isArray(kinds) ? kinds : [];
+  const n = list.length;
+  const apps = list.filter(kind => APP_KINDS.has(kind)).length;
+  if (apps && apps < n) return `${n} servers and apps`;
+  const noun = apps ? "app" : "server";
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
 
 /**
  * ctx (from DevLoop): services, adapter, core, privateWindow, element(document,
@@ -376,23 +393,33 @@ export function installProjectSidebar(window, ctx) {
       views.map(view => [view.target, view.state, view.url, view.run?.status ?? null, view.run?.exit_code ?? null, view.run?.run ?? null]),
       confirming, logOpen, [...errors], [...busy], ctx.environmentsOf(project)]);
   }
-  /** The open output only: new lines, kept at the bottom unless the user scrolled up. */
-  function refreshLog() {
+  const isPinned = pre => pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+  /** The open output only: new lines, kept at the bottom unless the user
+   * scrolled up. `kept`: where the same output was before a redraw. */
+  function refreshLog(kept = null) {
     const pre = panelBody.querySelector?.(".axiosozo-pp-output");
     if (!pre || !logOpen) return;
-    const pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+    const same = kept && kept.key === pre.getAttribute?.("data-focus-key");
+    const pinned = same ? kept.pinned : isPinned(pre);
     const lines = logLines(logOpen.projectId, logOpen.key);
     const next = lines.length ? lines.join("\n") : "No output yet.";
     if (pre.textContent !== next) pre.textContent = next;
     if (pinned) pre.scrollTop = pre.scrollHeight ?? 0;
+    else if (same && Number.isFinite(kept.scrollTop)) pre.scrollTop = kept.scrollTop;
   }
 
+  /** Draws the open panel again when what it shows changed. Focus, the
+   * panel's scroll position and the output's (pinned or scrolled up) survive,
+   * so a server changing state never moves what the user is looking at. */
   function renderPanel() {
     if (!open) return;
     const signature = signatureOfPanel();
     if (signature !== null && signature === panelSignature) { refreshLog(); return; }
     panelSignature = signature;
     const focusKey = panel.contains?.(document.activeElement) ? document.activeElement?.getAttribute?.("data-focus-key") : null;
+    const scrollTop = panelBody.scrollTop;
+    const oldLog = panelBody.querySelector?.(".axiosozo-pp-output");
+    const kept = oldLog ? { key: oldLog.getAttribute?.("data-focus-key"), pinned: isPinned(oldLog), scrollTop: oldLog.scrollTop } : null;
     while (panelBody.firstChild) panelBody.firstChild.remove();
     if (open.mode === "runs") renderRunsPanel();
     else {
@@ -400,8 +427,9 @@ export function installProjectSidebar(window, ctx) {
       if (!project) { panel.hidePopup?.(); open = null; return; }
       renderProjectPanel(project, open.uuid);
     }
-    refreshLog();
-    if (focusKey) panelBody.querySelector?.(`[data-focus-key="${focusKey.replace(/["\\]/gu, "\\$&")}"]`)?.focus?.();
+    refreshLog(kept);
+    if (focusKey) panelBody.querySelector?.(`[data-focus-key="${focusKey.replace(/["\\]/gu, "\\$&")}"]`)?.focus?.({ preventScroll: true });
+    if (Number.isFinite(scrollTop)) panelBody.scrollTop = scrollTop;
     diagnostics.panel = open.mode === "runs" ? "runs" : open.projectId;
   }
 
@@ -429,7 +457,7 @@ export function installProjectSidebar(window, ctx) {
     const run = el("section", { className: "axiosozo-pp-section", attrs: { "aria-label": "Servers and apps" } }, panelBody);
     const ours = views.filter(view => OURS.has(view.run?.status ?? ""));
     sectionHead(run, "Run", ours.length > 1 ? { className: "axiosozo-pp-text-button", text: "Stop all", focusKey: `${id}:stop-all`,
-      onClick: () => { diagnostics.stops++; services.stopRuns({ projectId: id }).catch(() => {}); } } : null);
+      onClick: () => stopAll(project) } : null);
     if (!views.length) {
       el("p", { className: "axiosozo-pp-empty", text: data?.available === false
         ? "Starting servers is not available in this build." : "No servers or apps yet. Add how to start them, and AxioSozo starts and stops them for you." }, run);
@@ -451,7 +479,10 @@ export function installProjectSidebar(window, ctx) {
         const item = el("li", {}, list);
         const row = button(item, { className: "axiosozo-pp-link", focusKey: `${id}:link:${link.url}`, label: `${link.label}, ${hostOf(link.url)}`,
           onClick: () => { panel.hidePopup?.(); ctx.goTo(project, link.url, uuid, link.environment); } });
-        el("img", { className: "axiosozo-pp-link-icon", attrs: { alt: "", role: "presentation", src: `page-icon:${link.url}`, "data-kind": link.kind } }, row);
+        const icon = el("img", { className: "axiosozo-pp-link-icon", attrs: { alt: "", role: "presentation", src: `page-icon:${link.url}`, "data-kind": link.kind } }, row);
+        icon.addEventListener("error", () => {
+          if (icon.getAttribute("src") !== DEFAULT_FAVICON) icon.setAttribute("src", DEFAULT_FAVICON);
+        }, { once: true });
         el("span", { className: "axiosozo-pp-link-label", text: link.label }, row);
         el("span", { className: "axiosozo-pp-link-detail", text: hostOf(link.url) }, row);
       }
@@ -550,7 +581,7 @@ export function installProjectSidebar(window, ctx) {
     const live = allRuns.filter(run => OURS.has(run.status) || run.status === "failed");
     const section = el("section", { className: "axiosozo-pp-section" }, panelBody);
     sectionHead(section, "Servers and apps", allRuns.some(run => OURS.has(run.status)) ? { className: "axiosozo-pp-text-button", text: "Stop all",
-      focusKey: "runs:stop-all", onClick: () => { diagnostics.stops++; services.stopRuns({}).catch(() => {}); } } : null);
+      focusKey: "runs:stop-all", onClick: () => stopAll(null) } : null);
     if (!live.length) { el("p", { className: "axiosozo-pp-empty", text: "Nothing started here is running." }, section); return; }
     const list = el("ul", { className: "axiosozo-pp-targets" }, section);
     for (const run of live) {
@@ -615,6 +646,10 @@ export function installProjectSidebar(window, ctx) {
         return;
       }
       errors.set(key, errorText(error?.code));
+      // Started from the row with no panel showing it: say why, once.
+      if (!(open?.mode === "project" && open.projectId === project.id && panelOpen())) {
+        showAxioSozoToast(window, { title: `Could not start ${view.target.name}`, description: errorText(error?.code), key: `start:${key}` });
+      }
     } finally {
       busy.delete(key);
     }
@@ -636,6 +671,43 @@ export function installProjectSidebar(window, ctx) {
   function toggleLog(projectId, key) {
     logOpen = logOpen?.projectId === projectId && logOpen.key === key ? null : { projectId, key };
     renderPanel();
+  }
+
+  /** Stops every run of a project (null: of every project), then says what stopped. */
+  function stopAll(project) {
+    const projectId = project?.id ?? null;
+    const kinds = projectId
+      ? (runs.get(projectId)?.targets ?? []).filter(target => OURS.has(target.run?.status ?? "") && target.run.status !== "stopping").map(target => target.kind)
+      : allRuns.filter(run => OURS.has(run.status) && run.status !== "stopping").map(run => run.target?.kind ?? "other");
+    diagnostics.stops++;
+    Promise.resolve(services.stopRuns({ projectId })).then(() => {
+      if (disposed || !kinds.length) return;
+      showAxioSozoToast(window, { title: `Stopped ${runsPhrase(kinds)}`, description: project?.manifest?.name ?? null, key: `stop-all:${projectId ?? ""}` });
+    }, () => {
+      if (!disposed) showAxioSozoToast(window, { title: "Some servers did not stop", description: "Their state is in the Running panel.", key: "stop-all-failed" });
+    });
+  }
+
+  /** Takes a project out of this space (its folder, repository and tabs stay),
+   * with an Undo that puts it back where it was. */
+  function removeFromSpace(project) {
+    panel.hidePopup?.();
+    const name = project.manifest?.name ?? "Project";
+    const from = project.context_uuid ?? null;
+    Promise.resolve(services.updateProject(project.id, { context_uuid: null })).then(() => {
+      if (disposed) return;
+      showAxioSozoToast(window, { title: `Removed ${name} from this space`, description: "It stays on the Projects page.",
+        key: `remove:${project.id}`, timeoutMs: UNDO_TOAST_MS,
+        button: from ? { label: "Undo", onCommand: () => {
+          Promise.resolve(services.updateProject(project.id, { context_uuid: from })).catch(error => {
+            console.error("AxioSozo: undo remove from space failed", error);
+            showAxioSozoToast(window, { title: `Could not put ${name} back`, key: `remove:${project.id}` });
+          });
+        } } : null });
+    }, error => {
+      console.error("AxioSozo: remove from space failed", error);
+      if (!disposed) showAxioSozoToast(window, { title: `Could not remove ${name} from this space`, key: `remove:${project.id}` });
+    });
   }
 
   // ---- ⋯ menu ------------------------------------------------------------------------------------------
@@ -665,12 +737,8 @@ export function installProjectSidebar(window, ctx) {
     if (!project) return;
     if (action === "home") { panel.hidePopup?.(); ctx.openSettings?.(project.id); }
     else if (action === "edit") { panel.hidePopup?.(); ctx.openSettings?.(project.id, { edit: true }); }
-    else if (action === "stop-all") services.stopRuns({ projectId: project.id }).catch(() => {});
-    else if (action === "remove") {
-      panel.hidePopup?.();
-      // Reversible from about:axiosozo (Projects); the folder and repository are untouched.
-      Promise.resolve(services.updateProject(project.id, { context_uuid: null })).catch(error => console.error("AxioSozo: remove from space failed", error));
-    }
+    else if (action === "stop-all") stopAll(project);
+    else if (action === "remove") removeFromSpace(project);
   };
   const onMenuShowing = event => { if (event.target === menu) menuTarget?.anchor?.setAttribute?.("aria-expanded", "true"); };
   const onMenuHidden = event => { if (event.target === menu) menuTarget?.anchor?.setAttribute?.("aria-expanded", "false"); };
@@ -680,7 +748,9 @@ export function installProjectSidebar(window, ctx) {
   const onPanelShown = event => {
     if (event.target !== panel || !focusOnShow) return;
     focusOnShow = false;
-    panelBody.querySelector?.("button")?.focus?.();
+    // The first thing to run or open, not the ⋯ menu in the header.
+    (panelBody.querySelector?.(".axiosozo-pp-target-main") ?? panelBody.querySelector?.(".axiosozo-pp-add")
+      ?? panelBody.querySelector?.("button"))?.focus?.();
   };
   const onPanelHidden = event => {
     if (event.target !== panel) return;

@@ -247,17 +247,25 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   }
 
   const isLoopbackUrl = spec => ["localhost", "127.0.0.1", "[::1]"].includes(webURL(spec)?.hostname);
-  /** "up" | "down" | "unknown" for a local environment (its declared service on
-   * the same port and app); "remote" for anything that is never contacted. */
-  function environmentStatus(project, environment, statuses) {
-    const base = webURL(environment.base_url);
-    if (!base || !isLoopbackUrl(base.href)) return "remote";
+  /** The declared service behind a local environment (same port, same app
+   * first), with its port; null for a remote or undeclared one. */
+  function environmentService(project, environment) {
+    const base = webURL(environment?.base_url);
+    if (!base || !isLoopbackUrl(base.href)) return null;
     const port = Number(base.port) || (base.protocol === "https:" ? 443 : 80);
     const services = project.manifest?.services ?? [];
     const declared = services.find(s => s.port === port && (appOf(s) ?? null) === appOf(environment))
       ?? services.find(s => s.port === port);
+    return declared ? { name: declared.name, port } : null;
+  }
+  /** "up" | "down" | "unknown" for a local environment (its declared service on
+   * the same port and app); "remote" for anything that is never contacted. */
+  function environmentStatus(project, environment, statuses) {
+    if (!isLoopbackUrl(environment?.base_url)) return "remote";
+    const declared = environmentService(project, environment);
     if (!declared) return "unknown";
-    const status = statuses.find(s => s.port === port && s.name === declared.name)?.status ?? statuses.find(s => s.port === port)?.status;
+    const status = statuses.find(s => s.port === declared.port && s.name === declared.name)?.status
+      ?? statuses.find(s => s.port === declared.port)?.status;
     return STATUS_TEXT[status] ? status : "unknown";
   }
 
@@ -302,7 +310,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
 
   function hidePill() {
     pillState = null; pill.hidden = true; diagnostics.pillShown = false; diagnostics.pillContainer = null;
-    pill.removeAttribute("data-environment"); pill.removeAttribute("data-services"); pill.removeAttribute("data-container");
+    pill.removeAttribute("data-environment"); pill.removeAttribute("data-status"); pill.removeAttribute("data-container");
   }
 
   /** The selected tab's container against where this project would open the URL. */
@@ -312,23 +320,42 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
       tabUserContextId: id, tabIdentity: id ? identityOf(id) : null });
   }
 
+  /** Whether this window's run of the environment's own server stopped with
+   * an error (the sidebar's view of the project's run targets). */
+  function environmentFailed(project, environment) {
+    const own = environmentService(project, environment);
+    if (!own) return false;
+    try {
+      return sidebar.targetsOf(project).some(view => view.state === "failed" && view.target.local && view.target.port === own.port);
+    } catch { return false; }
+  }
+
+  /** The pill speaks for its own environment only: "not running" or "stopped
+   * with an error" for its declared local server. Other servers of the
+   * project that are down are mentioned in the tooltip, never as its colour. */
   function renderPill() {
     if (!pillState) return hidePill();
     const { project, environment, statuses, container } = pillState;
     const name = project.manifest?.name ?? "Project";
     const label = envLabel(project, environment);
-    const down = statuses.filter(s => s.status === "down").length;
+    const own = environmentService(project, environment);
+    const status = environmentFailed(project, environment) ? "failed" : environmentStatus(project, environment, statuses);
+    // Only on a local page do the project's other local servers matter.
+    const others = own ? statuses.filter(s => s.status === "down" && !(s.port === own.port && s.name === own.name)).length : 0;
     pillLabel.textContent = label;
     pill.setAttribute("data-environment", environment.name);
-    if (down) pill.setAttribute("data-services", "down"); else pill.removeAttribute("data-services");
+    if (status === "up" || status === "down" || status === "failed") pill.setAttribute("data-status", status);
+    else pill.removeAttribute("data-status");
     const marked = !!(container.info || container.action);
     pillContainer.hidden = !marked;
     paintContainer(pillContainer, PILL_CONTAINER, container.color);
     if (marked) pill.setAttribute("data-container", container.action ? "elsewhere" : "fits"); else pill.removeAttribute("data-container");
     diagnostics.pillContainer = marked ? pill.getAttribute("data-container") : null;
-    const serviceText = down ? `, ${down} of ${statuses.length} services not running` : "";
-    pill.setAttribute("aria-label", `${name}: ${label} environment${container.phrase}${serviceText}. Switch environment`);
-    pill.setAttribute("title", `${name} · ${label}${container.phrase}${serviceText}`); // HTML elements in chrome use title for tooltips
+    const statusText = status === "failed" ? ", stopped with an error" : status === "down" ? ", not running" : "";
+    const othersText = others ? `, ${others} other ${others === 1 ? "server" : "servers"} not running` : "";
+    pill.setAttribute("aria-label", `${name}: ${label} environment${container.phrase}${statusText}. Switch environment`);
+    // HTML elements in chrome use title for tooltips; it is also the button's accessible description.
+    pill.setAttribute("title", `${name} · ${label}${container.phrase}${statusText}${othersText}`);
     pill.hidden = false; diagnostics.pillShown = true;
   }
 
@@ -626,7 +653,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     state.command = element(document, "code", { className: "axiosozo-waiting-command" }, card);
     state.output = element(document, "p", { className: "axiosozo-waiting-output" }, card);
     const actions = element(document, "div", { className: "axiosozo-waiting-actions" }, card);
-    state.start = element(document, "button", { className: "axiosozo-waiting-start", text: `Start ${state.serviceName}` }, actions);
+    state.start = element(document, "button", { className: "axiosozo-waiting-start primary", text: `Start ${state.serviceName}` }, actions);
     state.onStart = () => { startFromWait(state).catch(() => {}); };
     state.start.addEventListener("click", state.onStart);
     state.retry = element(document, "button", { className: "axiosozo-waiting-retry", text: "Try again" }, actions);
@@ -875,6 +902,9 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
           if (!state.view) continue;
           refreshWaitView(state).then(() => { if (!state.ended) setWaitMode(state, state.mode); }, () => {});
         }
+        // The pill marks its own server stopping with an error.
+        const shown = pillState;
+        if (shown) sidebar.loadTargets(shown.project).then(() => { if (!disposed && pillState === shown) renderPill(); }, () => {});
       });
       if (typeof off === "function") cleanups.push(off);
     } catch { /* An older services build has no runs event. */ }

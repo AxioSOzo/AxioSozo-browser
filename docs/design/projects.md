@@ -69,6 +69,10 @@ process with whether its port answers:
   running or failed project always stay visible.
 - The row of the project whose tab is in front is the **current** project
   (semibold name, `aria-current`), as a chat's project is in ChatGPT.
+- Rows use Zen's tab geometry tokens (`--tab-min-height`,
+  `--tab-margin-block`, `--tab-inline-padding`, `--zen-toolbox-padding`), so
+  a row's pill, icon and name line up with the tabs below it, and names use
+  the tab list's font.
 - When anything AxioSozo started is running, the heading shows **N running**.
   It opens the **Running** panel: every run in every space, with Stop, Stop
   all and failed runs to dismiss. This is the central place for servers across
@@ -85,7 +89,11 @@ A row opens a panel beside the sidebar, the way Arc or Linear show detail
 without navigating:
 
 - Header: icon, name, folder (`~/…`), and ⋯ (Project home, Edit project…,
-  Stop all servers, Remove from space).
+  Stop all servers, Remove from space). Remove from space confirms in a Zen
+  toast with **Undo**, which puts the project back in the space it left;
+  Stop all says what stopped ("Stopped 3 servers").
+- A row opened with the keyboard moves focus to the first run target (or
+  **Add a server or app…**), not to ⋯.
 - **Run**: every run target with its kind icon, address or kind, and state.
   - Clicking a web target opens its page. If it is stopped and startable,
     clicking starts it first and opens the page at once; the waiting page then
@@ -100,7 +108,11 @@ without navigating:
   dashboards). There is no separate "More" menu any more.
 - The panel and the sidebar redraw only what changed: rows are keyed and
   updated in place, and an open panel keeps its anchor, focus and log scroll
-  while a server prints.
+  while a server prints. When a server changes state the panel is drawn
+  again, keeping focus, its scroll position and an output the user scrolled
+  up in.
+- A quick start (▶ on the row) that fails with no panel showing says why in
+  a Zen toast.
 
 ## 5. Starting, stopping and safety
 
@@ -164,7 +176,12 @@ What changed now:
   behaviour existed but is kept and tested through the panel.
 - The project of the front tab is marked current in the sidebar, and its panel
   shows which of its servers run.
-- The address-bar pill still names the environment and container.
+- The address-bar pill still names the environment and container. It speaks
+  for its own environment only: its dot turns red only when that
+  environment's own server stopped with an error; "not running" is said in
+  words, and other servers of the project that are down are only in its
+  tooltip. In Zen's narrow sidebar address bar (under 350 px, Zen's own
+  container query) only its dot stays, so the address keeps its room.
 
 **Recommended next step: project folders backed by Zen folders.** The pinned
 Zen has real folders (`gZenFolders.createFolder`, custom icons, persisted ids
