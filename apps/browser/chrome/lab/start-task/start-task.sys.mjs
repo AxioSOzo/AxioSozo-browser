@@ -84,6 +84,11 @@ function presence() {
   } catch { presenceModules = null; }
   return presenceModules;
 }
+/** Whether the proof-tab experiment is on: it then owns the moment a run that changed files ends. */
+function proofTabOn() {
+  try { return globalThis.Services?.prefs?.getBoolPref("axiosozo.lab.proof-tab.enabled", false) === true; } catch { return false; }
+}
+
 /** For tests: { openResultCard, hub, watchPresence }, or null for "not there"; undefined loads again. */
 export const setPresenceForTesting = modules => { presenceModules = modules; };
 
@@ -387,6 +392,9 @@ export function followTask(window, ctx, session, { anchor, task = "" } = {}) {
         onClick: () => { ctx.agents.stop(current.id).catch(() => {}); } }]);
       return;
     }
+    // One card per moment: a run that changed files of this page's project is
+    // the proof tab's to show ("To verify"), when that experiment is on.
+    if (current.state === "done" && current.files?.byRun?.length && proofTabOn()) { card.close("handed-over"); return; }
     if (handOff(current)) return;
     const extra = [costLine(current), current.rateLimit].filter(Boolean).join(" · ");
     if (current.state === "done") {
