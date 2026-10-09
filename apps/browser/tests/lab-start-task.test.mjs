@@ -56,8 +56,10 @@ test("here: on a project's page the bar offers Start in Claude Code, names the f
   await h.capture();
   await flush();
   const text = section().textContent;
-  assert.match(text, /^Claude Code may edit files in \/synthetic\/repos\/harbor\. The image, the page address and your note go with the task\.$/);
-  assert.equal(section().querySelector(".axiosozo-region-caption-path").textContent, HARBOR.root);
+  assert.match(text, /^Claude Code may edit files in harbor\. It gets the image, the page address and your note\.$/);
+  const path = section().querySelector(".axiosozo-region-caption-path");
+  assert.equal(path.textContent, "harbor", "the folder by name");
+  assert.equal(path.getAttribute("title"), HARBOR.root, "and in full on hover");
   const start = h.button("Start in Claude Code");
   assert.ok(start);
   assert.ok(start.classList.contains("axiosozo-region-primary"), "Start is the main action");

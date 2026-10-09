@@ -216,6 +216,8 @@ export function reduceSession(session, event, { now = Date.now() } = {}) {
         patch.summary = summarySentence(session.lastText ?? "") || `${name} finished.`;
       } else {
         // No final event (Codex has none on a signal, and may still exit 0): not done.
+        // The raw tail stays local, for a Details line and for debugging.
+        patch.detail = Object.freeze({ exitCode: event.exitCode ?? null, stderr: String(event.stderr ?? "").slice(-600) });
         patch.state = "failed";
         patch.reason = session.limitRejected && session.rateLimit ? session.rateLimit
           : failureText(session.client, { stderr: event.stderr ?? "", notice: session.notice ?? "", exitCode: event.exitCode }).text;
@@ -330,7 +332,7 @@ export function createAgentsService({ runtime, discovery, scratch, environment, 
     projectId: record.projectId, projectRoot: record.projectRoot, projectName: record.projectName, title: record.title, state: record.state,
     step: record.step, summary: record.summary, reason: record.reason, stopping: record.stopping === true, mayEdit: record.mayEdit ?? null,
     startedAt: record.startedAt, updatedAt: record.updatedAt, endedAt: record.endedAt ?? null, costUsd: record.costUsd ?? null,
-    durationMs: record.durationMs ?? null, rateLimit: record.rateLimit ?? null, files: record.files ?? null,
+    durationMs: record.durationMs ?? null, rateLimit: record.rateLimit ?? null, files: record.files ?? null, detail: record.detail ?? null,
     canStop: record.origin === "browser" && !finished(record.state),
     canResume: typeof record.sessionId === "string" && (record.client === "claude-code" || record.client === "codex" || record.client === "antigravity"),
   });

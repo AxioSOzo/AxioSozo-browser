@@ -548,7 +548,7 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
       placeholder: "Add a note for the agent (optional)", "aria-label": "Note for the agent (optional)", spellcheck: "true" });
     const actions = node("div", "axiosozo-region-actions", bar);
     const close = node("button", "axiosozo-region-button axiosozo-region-close", actions, { type: "button", "aria-label": "Discard capture", title: "Discard (Esc)" });
-    const copyImage = node("button", "axiosozo-region-button", actions, { type: "button" });
+    const copyImage = node("button", "axiosozo-region-button axiosozo-region-copy-image", actions, { type: "button" });
     copyImage.textContent = "Copy image";
     const copyForAgent = node("button", "axiosozo-region-button axiosozo-region-primary", actions, { type: "button", title: "Copy for agent (Return)" });
     copyForAgent.textContent = "Copy for agent";
@@ -645,7 +645,9 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
             try { onClick(event); } catch (error) { console.error(`AxioSozo: capture extension ${record.id} failed`, error); }
           });
         }
-        insertOwn(current.actions, element, null);
+        // Secondary actions sit quietly before Copy for agent; primary ones at the end.
+        if (!primary) element.classList.add("axiosozo-region-quiet");
+        insertOwn(current.actions, element, primary ? null : current.copyForAgent);
         if (primary && typeof onClick === "function") bar.setDefault(onClick, { button: element });
         return element;
       },

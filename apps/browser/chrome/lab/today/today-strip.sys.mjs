@@ -117,6 +117,10 @@ export function createTodayStrip(window, ctx, { data, errands, prefs = globalThi
   function draw() {
     if (disposed || !digest) return;
     const counts = digest.counts;
+    // Status where the eye already goes, only when there is something: a quiet
+    // day shows no line at all (finished work waits in the sheet, the rows).
+    const something = !!(counts.waiting || counts.failed || counts.due);
+    node.hidden = !something && !open;
     const sentence = stripText(counts);
     node.setAttribute("data-tone", stripTone(counts));
     text.textContent = sentence;

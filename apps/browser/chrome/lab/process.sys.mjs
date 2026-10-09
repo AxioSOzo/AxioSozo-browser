@@ -33,21 +33,22 @@ import { createSubprocessUtf8Reader } from "../SubprocessUtf8.sys.mjs";
 
 export const SUPERVISOR_NAME = "axiosozo-lab";
 export const SUPERVISOR = [
-  "exec 3>&2 2>/dev/null",
+  // No extra descriptors (no exec 3>&2): a Gecko child can inherit a guarded
+  // descriptor at a low number, and macOS kills a process that dup2()s over it
+  // (EXC_GUARD, SIGKILL). The shell's own job notices go to /dev/null at wait.
   "set -m",
   "mode=$1; first=$2; shift 2",
-  "if [ \"$mode\" = lease ]; then \"$@\" </dev/null 2>&3 3>&- & else \"$@\" 2>&3 3>&- & fi",
+  "if [ \"$mode\" = lease ]; then \"$@\" </dev/null & else \"$@\" & fi",
   "child=$!",
-  "exec 3>&-",
   "watcher=",
   "if [ \"$mode\" = lease ]; then ( while read -r _; do :; done; kill -TERM $$ ) & watcher=$!; fi",
-  "reap() { i=0; while kill -0 -\"$child\" && [ \"$i\" -lt \"$1\" ]; do sleep 0.1; i=$((i+1)); done; }",
-  "stop() { kill -\"$first\" -\"$child\"; reap 10; kill -TERM -\"$child\"; reap 20; kill -KILL -\"$child\"; }",
-  "trap 'stop; [ -n \"$watcher\" ] && kill -KILL -\"$watcher\"; exit 143' TERM INT HUP",
-  "wait \"$child\"",
+  "reap() { i=0; while kill -0 -\"$child\" 2>/dev/null && [ \"$i\" -lt \"$1\" ]; do sleep 0.1; i=$((i+1)); done; }",
+  "stop() { kill -\"$first\" -\"$child\" 2>/dev/null; reap 10; kill -TERM -\"$child\" 2>/dev/null; reap 20; kill -KILL -\"$child\" 2>/dev/null; }",
+  "trap 'stop; [ -n \"$watcher\" ] && kill -KILL -\"$watcher\" 2>/dev/null; exit 143' TERM INT HUP",
+  "wait \"$child\" 2>/dev/null",
   "code=$?",
-  "[ -n \"$watcher\" ] && kill -KILL -\"$watcher\"",
-  "kill -TERM -\"$child\"",
+  "[ -n \"$watcher\" ] && kill -KILL -\"$watcher\" 2>/dev/null",
+  "kill -TERM -\"$child\" 2>/dev/null",
   "exit \"$code\"",
 ].join("\n");
 export const SUPERVISOR_MODES = Object.freeze(["pipe", "lease"]);

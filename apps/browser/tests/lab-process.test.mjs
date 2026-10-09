@@ -17,15 +17,17 @@ const runtime = (spawner, timers = fakeTimers(), fs = memoryFs()) => ({ spawn: s
 
 test("the supervisor runs the client in its own process group and escalates interrupt → TERM → KILL", () => {
   const text = P.SUPERVISOR;
-  assert.match(text, /^exec 3>&2 2>\/dev\/null$/mu, "the supervisor's own noise goes nowhere; the client's stderr is kept");
+  assert.ok(!/^exec \d>/mu.test(text) && !/\d>&\d/u.test(text.replace(/2>\/dev\/null/gu, "")),
+    "no extra descriptors: dup2 over an inherited guarded fd gets the shell SIGKILLed on macOS");
   assert.match(text, /^set -m$/mu, "job control: the client gets its own process group");
-  assert.match(text, /"\$@" <\/dev\/null 2>&3 3>&- &/u, "lease mode: the client reads nothing");
-  assert.match(text, /else "\$@" 2>&3 3>&- &/u, "pipe mode: the client reads the supervisor's stdin");
+  assert.match(text, /"\$@" <\/dev\/null &/u, "lease mode: the client reads nothing");
+  assert.match(text, /else "\$@" & fi/u, "pipe mode: the client reads the supervisor's stdin");
   assert.match(text, /while read -r _; do :; done; kill -TERM \$\$/u, "the lease: end of stdin stops the run");
-  assert.match(text, /stop\(\) \{ kill -"\$first" -"\$child"; reap 10; kill -TERM -"\$child"; reap 20; kill -KILL -"\$child"; \}/u,
+  assert.match(text, /stop\(\) \{ kill -"\$first" -"\$child" 2>\/dev\/null; reap 10; kill -TERM -"\$child" 2>\/dev\/null; reap 20; kill -KILL -"\$child" 2>\/dev\/null; \}/u,
     "first the client's interrupt, SIGTERM after 1 s (Codex may ignore SIGINT), SIGKILL 2 s later, always to the group");
   assert.match(text, /trap 'stop; .*exit 143' TERM INT HUP/u);
-  assert.match(text, /kill -TERM -"\$child"\nexit "\$code"$/u, "a finished client's leftovers in its group are ended");
+  assert.match(text, /^wait "\$child" 2>\/dev\/null$/mu, "the shell's job notices stay out of the stderr tail");
+  assert.match(text, /kill -TERM -"\$child" 2>\/dev\/null\nexit "\$code"$/u, "a finished client's leftovers in its group are ended");
   assert.ok(!/\$\{|eval|`/u.test(text), "nothing is interpolated into the script");
 });
 

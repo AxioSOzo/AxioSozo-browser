@@ -230,7 +230,18 @@
  * menu. Same material and tokens as the bar itself. */
 
 .axiosozo-region-bar[data-extended] {
-  width: min(468px, calc(100% - 16px));
+  width: min(520px, calc(100% - 16px));
+}
+/* With more on the bar, secondary actions turn into quiet text buttons so the
+ * main pair (Copy for agent, Start) keeps the weight. */
+.axiosozo-region-bar[data-extended] :is(.axiosozo-region-copy-image, .axiosozo-region-quiet) {
+  padding-inline: 7px;
+  background: transparent;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  &:hover {
+    background: var(--button-background-color-hover, light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.12)));
+    color: inherit;
+  }
 }
 .axiosozo-region-actions {
   flex-wrap: wrap;

@@ -52,8 +52,9 @@ test("an extension gets the capture's facts and adds a section and an action in 
   const children = bar.children.map(node => node.className);
   assert.deepEqual(children, ["axiosozo-region-meta", "axiosozo-region-note", "axiosozo-region-section", "axiosozo-region-actions"]);
   assert.equal(sectionOf(h, "probe").getAttribute("aria-label"), "Probe");
-  assert.deepEqual(bar.querySelectorAll("button").map(node => node.textContent), ["", "Copy image", "Copy for agent", "Probe action"],
-    "an extension's buttons come after Copy for agent, where the main action sits");
+  assert.deepEqual(bar.querySelectorAll("button").map(node => node.textContent), ["", "Copy image", "Probe action", "Copy for agent"],
+    "a secondary action sits quietly before Copy for agent; primary ones come after it, where the main action sits");
+  assert.ok(bar.querySelectorAll("button").find(node => node.textContent === "Probe action").classList.contains("axiosozo-region-quiet"));
   assert.equal(bar.getAttribute("data-extended"), "true");
   h.click(h.button("Probe action"));
   assert.equal(seen.at(-1), "clicked");

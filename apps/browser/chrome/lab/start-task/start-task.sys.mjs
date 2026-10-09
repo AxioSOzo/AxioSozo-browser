@@ -233,8 +233,9 @@ function installHere(window, ctx) {
     const usable = status => status?.available === true && Array.isArray(status.capabilities) && status.capabilities.includes("task");
 
     function describe() {
-      consent.replaceChildren(`${name()} may edit files in `, el(document, "span", { class: "axiosozo-region-caption-path", text: root }),
-        ". The image, the page address and your note go with the task.",
+      consent.replaceChildren(`${name()} may edit files in `,
+        el(document, "span", { class: "axiosozo-region-caption-path", text: root.split("/").filter(Boolean).pop() ?? root, title: root }),
+        ". It gets the image, the page address and your note.",
         CLIENT_CAUTIONS[client] ? ` ${CLIENT_CAUTIONS[client]}` : "");
       picker?.setLabel(`Start in ${name()}`);
       bar.reposition();
