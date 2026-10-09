@@ -140,3 +140,64 @@ Not by how impressive they look, but by:
 
 The research suggests one real logged day and five short interviews before any
 of this graduates.
+
+## 6. What the real browser showed (9 October)
+
+Driven in the rebuilt custom build on a private synthetic profile, with the
+user's own Claude Code 2.1.295 on a synthetic "Harbor" project whose billing
+page has a dead Retry payment button. Screenshots in
+[screenshots/](screenshots/).
+
+The whole return path works end to end:
+
+1. Right-drag over the "Payment failed" banner. Within about 3 s Claude Code
+   (haiku, no tools, about $0.001) proposes "Retry button does nothing" and
+   "Card declined error has no next step"
+   ([02](screenshots/02-capture-proposals.png)).
+2. Clicking a proposal fills the task; Return starts Claude Code in the
+   project folder. The bar shows its live step: searching, reading
+   index.html, editing index.html ([03](screenshots/03-agent-working.png)).
+3. 13 s and $0.05 later the project's tab reads "To verify": what the agent
+   said, the file it changed (read from git by the browser), Reload, Not
+   right…, Looks right ([04](screenshots/04-to-verify.png)).
+4. Reload, click Retry payment: it works ([05](screenshots/05-verified.png)).
+   The diff is the 2-line fix a developer would make.
+
+Problems the real browser found, all fixed on the branch:
+- **Agents died in milliseconds after the first run.** The Lab's process
+  supervisor reassigned file descriptor 3; a Gecko child can inherit a
+  guarded descriptor there, and macOS kills a process that overwrites it.
+  Unit tests could not see this.
+- **AI-written tasks made agents over-build** (a made-up retry endpoint, 16
+  lines). Agents are now told to fix only what the task names; the same
+  proposal then gave the 2-line fix.
+- **Two cards for one moment** (result card and To verify). One card now.
+- **A needs-you toast pushed its button off screen; Find the date was
+  invisible on dark cards; a capture image from the window was rejected; the
+  bar was crowded.** Fixed.
+
+## 7. Recommendations
+
+| Family | Keep | Why |
+|---|---|---|
+| What's wrong here | **auto**, on project pages only | It is what Wout described: no composer, the browser thinks first. 3 s, a tenth of a cent, and "Nothing obvious" when nothing is. On other pages the button stays. |
+| Start the task | **here**, with "Open in the app" in its menu | It keeps the return path in the browser (live step, To verify, Reload). The deep link is the safe fallback for people who want to press Enter themselves. |
+| Agent presence | **on the project rows**, folder as an option | Rows put status where the eye already is and add no tabs. The folder is the most Zen-native, but every run becomes a tab to tidy. Worth a week of real use each. |
+| Proof tab | **yes**, graduate first | The most distinctive piece: the verdict on the real, signed-in page before reading code. No agent app can do this. |
+| Today | **strip** (hidden on quiet days), sheet on demand | No new place; it appears only when something needs you. |
+| Errands | **yes**, small | The first step into the non-code day without pretending to automate admin. |
+
+## 8. Decisions for Wout
+
+1. **Keychain access for Ask AI.** To use the existing Claude sign-in, Ask
+   AI's sandbox lets Claude Code read the login keychain file (the browser
+   never reads it). A narrower version was declined in September.
+2. **Agent tasks ignore the user's own Claude/Codex settings.** They run with
+   MCP servers off and Claude in restricted mode, so "edit files" stays edit
+   files. The other option is to run the user's agent exactly as configured.
+3. **Images for Codex and Antigravity** need a short-lived private file on
+   disk; the contracts say images are never written. Claude needs no file.
+4. **Capture AI automatically sends the area to Claude Code** on project
+   pages. On by default, or only after a click?
+5. **Antigravity** works for agent tasks (slow, about 4 minutes) but not for
+   quick answers: it always exposes its tools.
