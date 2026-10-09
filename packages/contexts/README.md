@@ -33,6 +33,7 @@ and [workstation-v1](../../contracts/workstation-v1.md) §1–§5; data shapes b
 | `ledger.mjs` | foreground-time ledger: record, query, prune, summarize, export |
 | `checkpoints.mjs` | Jev checkpoint pacing, rolling-hour budget, `site_rule_v1` request builder |
 | `containers.mjs` | per-project container style, shared sites, URL → container routing, integration hosts, account keys and labels |
+| `setup.mjs` | project setup (workstation-v1 §1.5): start commands from scripts, README, make/just and start scripts; the icon search plan, ranking and choice |
 | `arrival.mjs` | loopback ports, fixed `lsof` argument arrays and output parsers, root candidates, arrival offers, GitHub/Vercel surface matching |
 | `agent-status.mjs` | Claude Code / Codex / manual hook payloads → status records, the status board, copyable hook snippets |
 | `index.mjs` | public re-exports |

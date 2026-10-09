@@ -111,6 +111,76 @@ The detection draft becomes **version 2**: version 1 fields unchanged, plus
   docs, unconfirmed". `confirmed` is never true in a draft.
 - `agents.dirs`/`files` list only the fixed names that are present.
 
+### 1.5 Project setup: start commands, icon, manifest v3 (`setup.mjs`)
+
+Detection draft **version 3** = version 2 plus `icon: { path, source, guess } | null`.
+Its services may carry `command` and `cwd`, and may have a command without
+`url`/`port`. Manifest **version 3** = version 2 plus an optional top-level
+`icon` (an image file inside the folder) and service `command`/`cwd`. `url` and
+`port` go together. A service needs an address, a command or both, and `cwd`
+needs a command. Writers emit the lowest version the fields need.
+
+Reads, all through the existing containment reader and pinned helper
+(`project_reader.py`, digest in `ProjectReaderConfig.sys.mjs`):
+
+- **Root allowlist additions:** `README.md`, `Makefile`, `justfile`,
+  `Procfile.dev`, `project.json` (Nx). These are read for start commands,
+  images and the project type only, never executed.
+- **Presence-only checks:** the start scripts `dev`, `bin/dev`, `script/dev`,
+  `scripts/dev`, `script/server`, `dev.sh`, `start.sh`, `run.sh` and
+  `scripts/dev.sh`, and the lockfiles `pnpm-lock.yaml`, `yarn.lock`,
+  `bun.lockb`, `bun.lock` and `package-lock.json`. A complete small listing of
+  the parent answers absence without a helper call.
+- **Icon phase:** `iconListPlan({ units, listing })` names the folders whose file
+  and folder names may be listed, round by round (at most 48):
+  - the root and each workspace package;
+  - folders named `public`, `static`, `assets`, `branding`, `brand`, `icons`,
+    `images`, `img`, `logo`, `logos`, `resources`, `media`, `app`, `src` or
+    `src-tauri`, directly under those units or under such a folder;
+  - logo, icon, brand, mark or symbol folders inside a brand folder.
+
+  `iconCandidatesFor({ files, packages, listing })` then ranks at most 12 image
+  paths:
+  - Tauri `bundle.icon`, electron-builder and `package.json` `build.icon`;
+  - README images, strongest when called a logo or icon;
+  - files named like an icon, logo or default size.
+
+  Only their metadata is taken. `chooseIcon` keeps the best regular file of at
+  most 256 KiB. Hidden segments, `node_modules`, `..` and links out of the
+  root are refused.
+- **Icon bytes** are read only to show them (`previewIcon`, `projectIcon`):
+  - `iconRefusal`, then exact identities;
+  - only PNG, JPEG, WebP, ICO or plain SVG whose bytes match the type;
+  - SVG without entities, scripts or external references;
+  - the result goes to the page as a `data:` URL.
+
+Rules:
+
+- **Kind:**
+  - A bare Cargo `[workspace]` is the last fallback (library, guess).
+  - An Nx `projectType: application` removes guessed library kinds.
+  - A `.icns` app icon in a listed folder means desktop (guess), after web dev
+    servers.
+  - An Xcode project in `macos` means desktop; in `ios`, or a Gradle
+    `android` app, it means mobile.
+  - An `android/` folder alone is a weak mobile guess.
+- **Commands:**
+  - Package scripts get their package manager's command: `npm run x`,
+    `pnpm x`, `yarn x` or `bun run x`, in the package folder. The package
+    manager comes from the lockfile, else `packageManager`.
+  - Tauri: its script, else `<pm> tauri dev`, else `cargo tauri dev`.
+  - Electron and Expo/React Native: their script.
+  - Compose: `docker compose up <service>`.
+  - Without any service command, the first documented start command joins the
+    one local dev server or becomes its own service. Sources, in order:
+    1. README shell blocks;
+    2. start scripts;
+    3. make/just targets named dev, start, serve, run, up or watch;
+    4. `Procfile.dev`.
+  - `startCommand` accepts known runners only. It refuses chores (install,
+    build, test, setup, doctor, …), positional subcommands of start scripts,
+    and shell operators.
+
 ## 2. Project record v2 and context store v3 (P1/P2, `schema.mjs`)
 
 Project records gain **version 2** (profile-local only; never written to the
@@ -509,3 +579,6 @@ separate gate, and AI admission never infers permission from configuration alone
 ## 11. Changelog
 
 - 2 October 2026 — created for Plan 4.
+- 5 October 2026 — §1.5 project setup: detection draft v3 and manifest v3
+  (icon, service commands), README/make/just/Procfile/Nx reads, start-script
+  and lockfile presence, the icon phase and icon display.

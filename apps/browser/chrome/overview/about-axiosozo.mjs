@@ -64,6 +64,8 @@ const state = {
   safety: { reply: null, error: null, pending: null, unconfirmed: null, dismissed: false, notice: null, requested: false },
   // P6 (experimental): the start page's project home answers (agent activity) by id.
   start: { homes: new Map(), loading: false },
+  // Project icons (workstation-v1 §1.5): id → data: URL, or null when it has none the browser could read.
+  icons: new Map(),
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -120,6 +122,7 @@ const ICONS = {
   globe: ["M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11", "M2.5 8h11", "M8 2.5c1.6 1.6 2.3 3.5 2.3 5.5S9.6 11.9 8 13.5C6.4 11.9 5.7 10 5.7 8S6.4 4.1 8 2.5"],
   laptop: ["M3.5 4h9v6h-9z", "M2 12.5h12"],
   plus: ["M8 3v10", "M3 8h10"],
+  copy: ["M5.5 5.5h7v7h-7z", "M3.5 10.5v-7h7"],
 };
 function icon(name, size = 16) {
   const svg = document.createElementNS(SVG, "svg");
@@ -416,13 +419,13 @@ function spaceIcon(space) {
 const spaceLabel = context => `${context.name} (${TYPE_LABELS[context.type]?.toLowerCase() ?? context.type})`;
 const thisWindowTag = context => (context.uuid === state.activeSpace ? h("span", { class: "tag" }, "this window") : null);
 
-/** Add a project to a space, or switch to it; its type lives behind "…". */
+/** A space's actions behind "…": add a project straight into it, switch to
+ * it, its type. The page has one "Add project" button, in its header. */
 function spaceActions(context) {
   const key = suffix => `space:${context.uuid}:${suffix}`;
   return h("div", { class: "group-actions" },
-    h("button", { type: "button", class: "ghost small", "data-focus-key": key("add"), "aria-label": `Add a project to ${context.name}`,
-      onclick: () => addProjectFlow({ contextUuid: context.uuid }) }, icon("plus", 14), "Add project"),
     overflowMenu(`More for space ${context.name}`, [
+      { label: "Add a project here…", focusKey: key("add"), run: () => addProjectFlow({ contextUuid: context.uuid }) },
       { label: `Switch to ${context.name}`, focusKey: key("open"), run: () => act("openContext", { uuid: context.uuid }) },
       { label: "Space type…", focusKey: key("type"), run: () => openSpaceSettings(context) },
     ], { focusKey: key("menu") }));
@@ -603,30 +606,55 @@ async function refreshDetectionFlow(project) {
   if (result.ok) await loadProjects();
 }
 
-/** First run: what adding a project does, as the empty state of this view. */
+/** First run: what adding a project does, as the empty state of this view.
+ * Its action is the page's one "Add project" button, in the header. */
 function firstRunGuide() {
   const steps = [
-    ["Choose the folder", "AxioSozo reads a few config files (never .env files) and runs nothing."],
-    ["Check what was found", "Local servers per app, an optional production address and web links. Guesses are marked."],
-    ["Find it in the sidebar", "The project appears in the space you pick, under the space name. Opening one of its local addresses links the tab to it."],
+    ["Choose the folder", "AxioSozo reads its config files and README. It never opens .env files and runs nothing."],
+    ["Check the setup", "Type, icon and how each service starts. Change anything that is off."],
+    ["Find it in the sidebar", "Tabs on its local addresses belong to it."],
   ];
   return h("section", { class: "guide", "aria-labelledby": "guide-heading" },
     h("div", { class: "guide-head" },
       h("h3", { id: "guide-heading" }, "Add your first project"),
-      h("p", {}, "Any space can hold projects, personal ones included. Everything stays on this Mac."),
-      h("p", {}, "Opening your app on localhost also works: AxioSozo offers to keep its folder as a project.")),
+      h("p", {}, "Use Add project above. Everything stays on this Mac.")),
     h("ol", { class: "steps" }, steps.map(([title, text], index) => h("li", { class: "step" },
       h("span", { class: "step-mark", "aria-hidden": "true" }, String(index + 1)),
       h("span", { class: "step-title" }, title),
-      h("p", {}, text)))),
-    h("div", {}, h("button", { type: "button", class: "primary", onclick: () => addProjectFlow({}) }, "Add project…")));
+      h("p", {}, text)))));
 }
 
-/** The project's tile: its first letter, tinted with its own container's
- * Firefox colour (the same colour its tabs carry), neutral without one. */
-function projectTile(card, extra = "") {
+/** The project's tile: its icon when it has one the browser could read, else
+ * its first letter tinted with its own container's Firefox colour (the same
+ * colour its tabs carry), neutral without one. Icons load after the list. */
+function projectTile(card, extra = "", projectId = null) {
+  const url = projectId ? state.icons.get(projectId) : null;
   return h("span", { class: `project-tile${extra}${card.color ? ` identity-color-${card.color}` : ""}`,
-    "data-colored": card.color ? "" : null, "aria-hidden": "true" }, card.monogram);
+    "data-colored": card.color && !url ? "" : null, "data-image": url ? "" : null, "data-icon-for": projectId,
+    "aria-hidden": "true" }, url ? h("img", { src: url, alt: "" }) : card.monogram);
+}
+
+/** Reads the icons of listed projects that name one, one at a time, and puts
+ * each into its tiles in place. Session cache: state.icons (id → data URL or null). */
+let iconsLoading = false;
+async function loadProjectIcons() {
+  if (iconsLoading) return;
+  iconsLoading = true;
+  try {
+    for (const project of state.projects) {
+      if (!state.active) return;
+      if (typeof project.manifest?.icon !== "string" || state.icons.has(project.id)) continue;
+      let url = null;
+      try { url = await call("projectIcon", { id: project.id }); } catch { url = null; }
+      state.icons.set(project.id, typeof url === "string" && url.startsWith("data:image/") ? url : null);
+      if (!state.icons.get(project.id)) continue;
+      for (const tile of document.querySelectorAll(`[data-icon-for="${CSS.escape(project.id)}"]`)) {
+        tile.removeAttribute("data-colored");
+        tile.setAttribute("data-image", "");
+        fill(tile, h("img", { src: state.icons.get(project.id), alt: "" }));
+      }
+    }
+  } finally { iconsLoading = false; }
 }
 
 /** Edit, accounts, shared sites, folder and removal: secondary, behind "…". */
@@ -653,7 +681,7 @@ function projectCard(project, { loose = false } = {}) {
   const local = card.local && state.checking.has(project.id) && card.local.tone === "unknown"
     ? { tone: "unknown", text: "Checking local servers…" } : card.local;
   return h("li", { class: "project-card", id: `project-${project.id}`, "aria-labelledby": titleId },
-    projectTile(card),
+    projectTile(card, "", project.id),
     h("div", { class: "project-main" },
       h("h4", { class: "project-title", id: titleId },
         h("a", { href: card.href, class: "project-link", "data-focus-key": key("open") }, card.name)),
@@ -814,6 +842,7 @@ function renderProjects() {
   if (empty.length) parts.push(otherSpaces(empty, { only: !filled.length }));
   body.replaceChildren(...parts);
   renderPlacement();
+  loadProjectIcons();
 }
 
 /** Whichever pane of Projects is showing: the list or one project's home. */
@@ -868,71 +897,187 @@ async function removeProjectFlow(project) {
   await loadProjects();
 }
 
-/** Folder picker → static detection → review sheet. The space defaults to the
- * one this window shows (any type); contextUuid overrides it. */
-async function addProjectFlow({ contextUuid } = {}) {
-  const picked = await act("pickFolder");
-  if (!picked.ok || !picked.result) return;
-  const root = picked.result;
-  const detected = await act("detect", { root });
-  if (!detected.ok) return;
-  if (!contextUuid) await loadActiveSpace();
-  const space = contextUuid ?? state.activeSpace ?? state.contexts[0]?.uuid ?? null;
-  openProjectReview({ mode: "new", root, draft: detected.result, contextUuid: space });
+/** Shows a button as working (spinner and label, disabled) or restores it. */
+const buttonContent = new WeakMap();
+function setButtonBusy(button, label) {
+  if (!button) return;
+  if (label) {
+    if (!buttonContent.has(button)) buttonContent.set(button, [...button.childNodes]);
+    button.disabled = true;
+    button.setAttribute("data-busy", "");
+    button.setAttribute("aria-busy", "true");
+    fill(button, h("span", { class: "spinner", "aria-hidden": "true" }), label);
+    return;
+  }
+  const original = buttonContent.get(button);
+  buttonContent.delete(button);
+  if (original) button.replaceChildren(...original);
+  button.disabled = false;
+  button.removeAttribute("data-busy");
+  button.removeAttribute("aria-busy");
 }
 
-// Add-project review / project edit, in the sheet.
-function openProjectReview({ mode, root, draft, project, contextUuid = null }) {
-  const review = mode === "new" ? M.draftToReview(draft, { contextUuid }) : M.projectToReview(project);
-  const errorsList = h("ul", { class: "errors", role: "alert" });
-  let writeManifest = false;
+/** The one way to add a project: the folder picker, then the setup sheet at
+ * once, which shows each step while it happens. The space defaults to the one
+ * this window shows; contextUuid (a space's "…" menu) overrides it. */
+async function addProjectFlow({ contextUuid } = {}) {
+  const button = $("add-project");
+  if (button?.hasAttribute("data-busy")) return;
+  setButtonBusy(button, "Choose a folder…");
+  let picked;
+  try { picked = await act("pickFolder"); } finally { setButtonBusy(button, null); }
+  if (!picked.ok || !picked.result) return;
+  if (!contextUuid) await loadActiveSpace();
+  const space = contextUuid ?? state.activeSpace ?? state.contexts[0]?.uuid ?? null;
+  openProjectReview({ mode: "new", root: picked.result, contextUuid: space });
+}
+
+/** The first letter of a name, for a tile without an image. */
+const monogramOf = name => ([...String(name ?? "").trim()][0] ?? "?").toLocaleUpperCase();
+
+// The setup sheet: adding a folder ("new": read it, let an assistant check it
+// when that is available, review, add) or editing a project ("edit"). What
+// matters is up front (name and icon, type, services with their start
+// commands, space); addresses, links and what was read sit under More options.
+function openProjectReview({ mode, root = null, project = null, contextUuid = null }) {
+  const isNew = mode === "new";
+  let review = isNew ? null : M.projectToReview(project);
+  const folder = isNew ? root : project.root;
+  // Fields the user changed: an assistant's later answer never overrides them.
+  const touched = new Set();
+  const check = { phase: isNew ? "reading" : "off", cli: null, changes: 0 };
+  let writeManifest = false, closed = false, saving = false, iconUrl = null;
   let close = () => {};
 
-  const provenance = row => (row.source && row.source !== "confirmed"
-    ? h("span", { class: "provenance" }, row.guess ? h("span", { class: "tag guess" }, "guessed") : null, `from ${row.source}`)
-    : row.guess ? h("span", { class: "provenance" }, h("span", { class: "tag guess" }, "guessed")) : null);
+  const tile = h("span", { class: "setup-icon", "aria-hidden": "true" });
+  const nameInput = h("input", { type: "text", class: "setup-name", maxlength: "80", required: true, "aria-label": "Project name",
+    value: isNew ? M.folderName(root) : review.name, disabled: isNew,
+    oninput: event => { review.name = event.target.value; touched.add("name"); renderTile(); } });
+  const status = h("p", { class: "setup-status", role: "status", "aria-live": "polite", hidden: true });
+  const errorsList = h("ul", { class: "errors", role: "alert" });
+  const content = h("div", { class: "setup-content" });
+  const submitButton = h("button", { type: "button", class: "primary", disabled: isNew, onclick: () => submit() }, isNew ? "Add project" : "Save");
 
-  // Environments, grouped per app; each has a checkbox and an editable address.
+  const renderTile = () => {
+    tile.toggleAttribute("data-image", !!iconUrl);
+    if (iconUrl) fill(tile, h("img", { src: iconUrl, alt: "" }));
+    else fill(tile, monogramOf(review?.name ?? nameInput.value));
+  };
+  let statusTimer = null;
+  const renderStatus = () => {
+    clearTimeout(statusTimer);
+    const line = M.setupStatus(check);
+    if (!line) { status.hidden = true; status.replaceChildren(); return; }
+    status.hidden = false;
+    status.dataset.tone = line.tone;
+    fill(status, line.tone === "busy" ? h("span", { class: "spinner", "aria-hidden": "true" }) : line.tone === "good" ? icon("check", 14) : null,
+      h("span", {}, line.text),
+      check.phase === "checking" ? h("button", { type: "button", class: "link-button", onclick: () => stopCheck() }, "Skip") : null);
+  };
+
+  // ---- type
+  const kindName = newId("kind");
+  const kindHint = h("p", { class: "help kind-hint" });
+  const kindBox = h("div", { class: "kind-choices" });
+  const renderKind = () => {
+    fill(kindBox, M.KIND_CHOICES.map(([kind, label]) => h("label", { class: "kind-choice" },
+      h("input", { type: "radio", name: kindName, value: kind, checked: review.kind === kind,
+        onchange: () => { review.kind = kind; touched.add("kind"); renderKindHint(); } }),
+      h("span", {}, label))));
+    renderKindHint();
+  };
+  const renderKindHint = () => {
+    const source = review.kindSource?.source ?? "";
+    const text = touched.has("kind") || source === "confirmed" ? null
+      : source === "default" ? "The folder does not say. Pick the closest."
+        : review.kindSource?.guess ? "Best guess. Change it if it is wrong." : null;
+    kindHint.hidden = !text;
+    kindHint.textContent = text ?? "";
+    kindBox.title = source && source !== "confirmed" && source !== "default" ? `From ${source}` : "";
+  };
+
+  // ---- services: what a developer starts, with the command and its address
+  const servicesBox = h("div", { class: "service-list" });
+  const syncEnvironment = (row, enabled) => {
+    const port = Number(row.port);
+    if (!port) return;
+    for (const env of review.environments) if (env.servicePort === port && (env.app ?? null) === (row.app ?? null)) env.enabled = enabled;
+    renderEnvironments();
+  };
+  const serviceView = (row, index) => {
+    const key = `service:${index}`;
+    const label = row.name || `service ${index + 1}`;
+    const changed = () => touched.add(key);
+    const keep = h("input", { type: "checkbox", checked: row.enabled !== false, "aria-label": `Keep ${label}`,
+      onchange: event => { row.enabled = event.target.checked; changed(); syncEnvironment(row, row.enabled); renderServices(); } });
+    const off = row.enabled === false;
+    const address = row.added
+      ? h("input", { type: "url", class: "service-address", value: row.url, placeholder: "http://localhost:3000 (optional)", disabled: off,
+        "aria-label": `Address of ${label}`, oninput: event => { row.url = event.target.value; row.port = ""; changed(); } })
+      : row.url ? h("span", { class: "service-url", title: row.url }, hostOf(row.url)) : null;
+    return h("div", { class: "service-row", "data-enabled": off ? null : "", "data-index": index },
+      keep,
+      h("div", { class: "service-main" },
+        h("div", { class: "service-line" },
+          h("input", { type: "text", class: "service-name", value: row.name, placeholder: "Name", disabled: off, "aria-label": `Name of ${label}`,
+            oninput: event => { row.name = event.target.value; changed(); } }),
+          row.guess ? h("span", { class: "tag guess", title: row.source ? `Guessed from ${row.source}` : null }, "guess") : null,
+          address),
+        h("div", { class: "service-line" },
+          h("input", { type: "text", class: "service-command", value: row.command, spellcheck: "false", disabled: off,
+            placeholder: "Start command, e.g. npm run dev", "aria-label": `Start command of ${label}`,
+            oninput: event => { row.command = event.target.value; changed(); } }),
+          row.cwd ? h("span", { class: "service-cwd", title: `Runs in ${row.cwd}` }, `in ${row.cwd}`) : null)),
+      row.added ? iconButton("close", `Remove ${label}`, () => { review.services.splice(index, 1); renderServices(-1); }) : null);
+  };
+  const addServiceButton = h("button", { type: "button", class: "ghost small", onclick: () => {
+    review.services.push({ name: "", url: "", port: "", command: "", cwd: "", app: null, source: "", guess: false, enabled: true, added: true });
+    renderServices(review.services.length - 1);
+  } }, icon("plus", 14), "Add service");
+  const renderServices = focusIndex => {
+    fill(servicesBox, review.services.length ? review.services.map(serviceView)
+      : h("p", { class: "help" }, "Nothing to start was found. Add the command you use."));
+    if (focusIndex !== undefined && focusIndex >= 0) servicesBox.querySelector(`[data-index="${focusIndex}"] .service-name`)?.focus();
+    else if (focusIndex !== undefined) addServiceButton.focus();
+  };
+
+  // ---- more options: addresses, production URL, links, findings, files
   const environmentsBox = h("div", { class: "form-rows" });
-  const addEnvironmentButton = h("button", { type: "button", class: "ghost", onclick: () => {
+  const addEnvironmentButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     const apps = M.reviewApps(review).filter(Boolean);
     review.environments.push({ app: apps.find(app => app !== "desktop") ?? apps[0] ?? null, name: "", base_url: "",
       source: "", guess: false, enabled: true, servicePort: null, added: true });
     renderEnvironments(review.environments.length - 1);
-  } }, icon("plus", 14), "Add environment");
+  } }, icon("plus", 14), "Add address");
   const renderEnvironments = focusIndex => {
+    if (!review) return;
     const groups = M.environmentGroups(review);
     const apps = M.reviewApps(review).filter(Boolean);
     environmentsBox.replaceChildren(...groups.map(group => h("div", { class: "env-group", role: group.label ? "group" : null, "aria-label": group.label },
       group.label ? h("h4", {}, group.label) : null,
       group.rows.map(({ row, index }) => {
-        const label = `${row.app && group.label ? `${row.app} · ` : ""}${row.name || "new environment"}`;
+        const label = `${row.app && group.label ? `${row.app} · ` : ""}${row.name || "new address"}`;
         const use = h("input", { type: "checkbox", checked: row.enabled !== false, id: newId("env"), "aria-label": `Use ${label}`,
           onchange: event => { row.enabled = event.target.checked; renderEnvironments(); } });
-        const nameInput = h("input", { type: "text", value: row.name, placeholder: "local", "aria-label": `Name of ${label}`,
+        const nameField = h("input", { type: "text", value: row.name, placeholder: "local", "aria-label": `Name of ${label}`,
           class: "env-name", disabled: row.enabled === false, oninput: event => { row.name = event.target.value; } });
-        const urlInput = h("input", { type: "url", value: row.base_url, placeholder: "http://localhost:5173", "aria-label": `Address of ${label}`,
+        const urlField = h("input", { type: "url", value: row.base_url, placeholder: "http://localhost:5173", "aria-label": `Address of ${label}`,
           class: "env-url", disabled: row.enabled === false, oninput: event => { row.base_url = event.target.value; } });
         const appSelect = row.added && apps.length > 1 ? h("select", { class: "compact", "aria-label": `App of ${label}`,
           onchange: event => { row.app = event.target.value || null; renderEnvironments(index); } },
         option("", "Whole project", row.app ?? ""), apps.map(app => option(app, app, row.app))) : null;
         const remove = row.added ? iconButton("close", `Remove ${label}`, () => { review.environments.splice(index, 1); renderEnvironments(-1); }) : null;
         return h("div", { class: "review-row", "data-enabled": row.enabled !== false, "data-index": index },
-          use, appSelect, nameInput, urlInput, remove, provenance(row));
+          use, appSelect, nameField, urlField, remove, row.guess ? h("span", { class: "tag guess", title: row.source || null }, "guess") : null);
       }))));
-    if (!review.environments.length) environmentsBox.append(h("p", { class: "help" }, "Nothing was detected. Add the address you open during development."));
+    if (!review.environments.length) environmentsBox.append(h("p", { class: "help" }, "None yet."));
     if (focusIndex !== undefined && focusIndex >= 0) environmentsBox.querySelector(`[data-index="${focusIndex}"] input:not([type="checkbox"])`)?.focus();
     else if (focusIndex !== undefined) addEnvironmentButton.focus();
   };
-  renderEnvironments();
 
-  const productionInput = h("input", { type: "url", value: review.productionUrl, placeholder: "https://example.com",
-    oninput: event => { review.productionUrl = event.target.value; } });
-
-  // Links: "Shown" in the sidebar and "More" behind "…".
   const surfacesShown = h("div", { class: "form-rows" });
   const surfacesMore = h("div", { class: "form-rows" });
-  const moreDetails = h("details", {}, h("summary", {}, "More (behind … in the sidebar)"), surfacesMore);
+  const moreLinks = h("details", {}, h("summary", {}, "Behind … in the sidebar"), surfacesMore);
   const renderSurfaces = () => {
     const rowFor = (row, index) => {
       const label = row.name || `link ${index + 1}`;
@@ -940,103 +1085,189 @@ function openProjectReview({ mode, root, draft, project, contextUuid = null }) {
         onchange: event => { row.enabled = event.target.checked; renderSurfaces(); } });
       const move = h("button", { type: "button", class: "ghost small", disabled: row.enabled === false,
         onclick: () => { row.prominence = row.prominence === "primary" ? "secondary" : "primary"; renderSurfaces(); } },
-      row.prominence === "primary" ? "Move to More" : "Show in sidebar");
+      row.prominence === "primary" ? "Move behind …" : "Show in sidebar");
       const controls = row.added
         ? [h("input", { type: "text", value: row.name, placeholder: "Name", "aria-label": `Name of ${label}`, oninput: event => { row.name = event.target.value; } }),
           h("input", { type: "url", value: row.url, placeholder: "https://", "aria-label": `Address of ${label}`, class: "env-url", oninput: event => { row.url = event.target.value; } }),
           h("select", { class: "compact", "aria-label": `Kind of ${label}`, onchange: event => { row.kind = event.target.value; } },
             M.SURFACE_KINDS.map(kind => option(kind, kind.replaceAll("_", " "), row.kind)))]
         : [h("span", { class: "surface-name" }, row.name), h("span", { class: "surface-host", title: row.url }, hostOf(row.url))];
-      return h("div", { class: "review-row", "data-enabled": row.enabled !== false }, keep, controls, move, provenance(row));
+      return h("div", { class: "review-row", "data-enabled": row.enabled !== false }, keep, controls, move);
     };
     const shown = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence === "primary");
     const more = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence !== "primary");
     surfacesShown.replaceChildren(...shown.map(([row, index]) => rowFor(row, index)));
-    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "No links shown in the sidebar."));
+    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "None in the sidebar."));
     surfacesMore.replaceChildren(...more.map(([row, index]) => rowFor(row, index)));
-    if (!more.length) surfacesMore.append(h("p", { class: "help" }, "Nothing here."));
-    moreDetails.querySelector("summary").textContent = `More (behind … in the sidebar): ${more.length}`;
+    moreLinks.hidden = !more.length;
+    moreLinks.querySelector("summary").textContent = `Behind … in the sidebar (${more.length})`;
   };
-  renderSurfaces();
-  const addLinkButton = h("button", { type: "button", class: "ghost", onclick: () => {
+  const addLinkButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     review.surfaces.push({ name: "", url: "", kind: "other", prominence: "primary", source: "", guess: false, enabled: true, added: true });
     renderSurfaces();
     surfacesShown.querySelector("input[type=text]:last-of-type")?.focus();
   } }, icon("plus", 14), "Add link");
 
-  const nameInput = h("input", { type: "text", value: review.name, maxlength: "80", required: true,
-    oninput: event => { review.name = event.target.value; } });
-  const kindSelect = h("select", { onchange: event => { review.kind = event.target.value; } },
-    M.PROJECT_KINDS.map(kind => option(kind, kind, review.kind)));
-  const spaceSelect = h("select", { onchange: event => { review.contextUuid = event.target.value || null; } },
-    option("", "No space (not in the sidebar)", review.contextUuid ?? ""),
-    state.contexts.map(context => option(context.uuid,
-      `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · this window" : ""}`, review.contextUuid)));
+  // ---- the sheet, built once the folder was read
+  function build() {
+    const kindLabel = newId("kind-label");
+    kindBox.setAttribute("role", "radiogroup");
+    kindBox.setAttribute("aria-labelledby", kindLabel);
+    const spaceControl = h("select", { onchange: event => { review.contextUuid = event.target.value || null; } },
+      option("", "No space (not in the sidebar)", review.contextUuid ?? ""),
+      state.contexts.map(context => option(context.uuid,
+        `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · this window" : ""}`, review.contextUuid)));
+    const productionInput = h("input", { type: "url", value: review.productionUrl, placeholder: "https://example.com",
+      oninput: event => { review.productionUrl = event.target.value; } });
+    const findingRows = isNew ? findingFacts(review.findings) : [];
+    const more = h("details", { class: "setup-more" }, h("summary", {}, "More options"),
+      h("div", { class: "setup-more-body" },
+        h("fieldset", {}, h("legend", {}, "Addresses"),
+          h("p", { class: "help" }, "A tab on one of these belongs to this project."),
+          environmentsBox, h("div", {}, addEnvironmentButton)),
+        field({ label: "Production URL", control: productionInput, help: "The live site, for switching between local and live." }),
+        h("fieldset", {}, h("legend", {}, "Links in the sidebar"), surfacesShown, moreLinks, h("div", {}, addLinkButton)),
+        findingRows.length ? h("fieldset", { class: "findings" }, h("legend", {}, "Also found"),
+          h("p", { class: "help" }, "Kept in this browser only. Agent files and app folders are noted by name, never opened."),
+          h("dl", { class: "facts" }, findingRows.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))) : null,
+        isNew ? h("details", { class: "setup-read" },
+          h("summary", {}, `Files read: ${review.filesRead.length}${review.refused.length ? `, ${review.refused.length} skipped` : ""}`),
+          review.filesRead.length ? h("ul", { class: "file-list" }, review.filesRead.map(path => h("li", { class: "path" }, path))) : null,
+          review.refused.length ? h("ul", { class: "file-list" }, review.refused.map(item =>
+            h("li", {}, h("span", { class: "path" }, item.path), ` — ${M.REFUSAL_TEXT[item.reason] ?? item.reason}`))) : null,
+          review.warnings.length ? h("ul", { class: "file-list" }, review.warnings.map(text => h("li", {}, text))) : null,
+          h("p", { class: "help" }, "Only config files, the README and image names are read; never .env files or keys. Nothing is run.")) : null,
+        isNew ? choice({ type: "checkbox", name: "write-manifest", label: "Also save .axiosozo/project.json in the folder",
+          help: "So the team gets the same setup. Names, commands, addresses and links only.",
+          onchange: event => { writeManifest = event.target.checked; } }) : null));
+    fill(content,
+      h("section", { class: "setup-section", "aria-labelledby": kindLabel },
+        h("h3", { id: kindLabel, class: "setup-label" }, "Type"), kindBox, kindHint),
+      h("section", { class: "setup-section", "aria-labelledby": `${kindLabel}-services` },
+        h("div", { class: "setup-section-head" },
+          h("h3", { id: `${kindLabel}-services`, class: "setup-label" }, "Services"),
+          h("span", { class: "help" }, "Commands are for you to copy; AxioSozo never runs them.")),
+        servicesBox, h("div", {}, addServiceButton)),
+      h("div", { class: "setup-section setup-space" }, field({ label: "Space", control: spaceControl })),
+      more);
+    renderKind(); renderServices(); renderEnvironments(); renderSurfaces(); renderTile();
+  }
 
-  const findingRows = mode === "new" ? findingFacts(review.findings) : [];
-  const findings = findingRows.length ? h("fieldset", { class: "findings" }, h("legend", {}, "Also found in the folder"),
-    h("p", { class: "help" }, `Kept with the project in this browser, never written to the folder. ${M.PRESENCE_NOTE}`),
-    h("dl", { class: "facts" }, findingRows.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))) : null;
+  // ---- icon: shown from the folder through the browser's reader, never a URL
+  async function loadIcon() {
+    const path = review?.icon?.path ?? null;
+    let url = null;
+    if (path) {
+      try {
+        url = isNew ? await call("previewIcon", { root, path })
+          : path === project.manifest.icon ? await call("projectIcon", { id: project.id }) : null;
+      } catch { url = null; }
+    }
+    if (closed || (review?.icon?.path ?? null) !== path) return;
+    if (path && !url && review.icon.previous !== undefined) { review.icon = review.icon.previous; await loadIcon(); return; }
+    if (path && !url && isNew) review.icon = null; // an image the browser cannot show is not kept
+    iconUrl = url;
+    renderTile();
+  }
 
-  const detectionDetails = mode === "new" ? h("details", {},
-    h("summary", {}, `What was read: ${review.filesRead.length} file${review.filesRead.length === 1 ? "" : "s"}, ${review.refused.length} refused`),
-    review.frameworks.length ? h("p", {}, "Frameworks: " + review.frameworks.join(", ")) : null,
-    h("h4", {}, "Files read"),
-    review.filesRead.length ? h("ul", { class: "file-list" }, review.filesRead.map(path => h("li", { class: "path" }, path)))
-      : h("p", { class: "help" }, "None."),
-    h("h4", {}, "Files refused"),
-    review.refused.length ? h("ul", { class: "file-list" }, review.refused.map(item =>
-      h("li", {}, h("span", { class: "path" }, item.path), ` — ${M.REFUSAL_TEXT[item.reason] ?? item.reason}`)))
-      : h("p", { class: "help" }, "None."),
-    review.warnings.length ? [h("h4", {}, "Warnings"), h("ul", { class: "file-list" }, review.warnings.map(text => h("li", {}, text)))] : null,
-    h("p", { class: "help" }, ".env files, key files and anything outside the folder are never read. In a monorepo only the app folders' own config files are read. Nothing is executed.")) : null;
+  // ---- the setup check by the user's own assistant (when this build allows it)
+  async function startCheck() {
+    check.phase = "checking";
+    // Shown only when the check takes a moment; a build without it answers at once.
+    statusTimer = setTimeout(() => { if (check.phase === "checking") renderStatus(); }, 400);
+    let answer = null;
+    try { answer = await call("suggestSetup", { root }); } catch { answer = null; }
+    if (closed || check.phase !== "checking") return;
+    if (!answer || (answer.status === "unavailable" && ["NOT_AUTHORIZED", "CLI_NOT_INSTALLED"].includes(answer.reason))
+        || answer.status === "cancelled") {
+      check.phase = "off"; renderStatus(); return;
+    }
+    check.cli = answer.cli;
+    if (answer.status !== "ok" || !answer.document) { check.phase = "failed"; renderStatus(); return; }
+    const changes = M.applySetup(review, answer.document, { touched, cli: answer.cli });
+    check.phase = "done"; check.changes = changes.length;
+    renderStatus();
+    if (changes.includes("name") && document.activeElement !== nameInput) nameInput.value = review.name;
+    renderKind(); renderServices(); renderEnvironments(); renderTile();
+    if (changes.includes("icon")) loadIcon();
+  }
+  function stopCheck() {
+    if (check.phase !== "checking") return;
+    check.phase = "off";
+    renderStatus();
+    call("cancelSetup").catch(() => {});
+  }
 
-  const writeChoice = mode === "new" ? choice({ type: "checkbox", name: "write-manifest", label: "Also save .axiosozo/project.json in the folder",
-    help: "Asks first. The file holds names, addresses, ports and links only, never secrets.",
-    onchange: event => { writeManifest = event.target.checked; } }) : null;
-
-  const submit = async () => {
+  async function submit() {
+    if (saving || !review) return;
     const { manifest, errors } = M.reviewToManifest(review);
-    errorsList.replaceChildren(...errors.map(error => h("li", {}, error.message)));
-    if (!manifest) { setStatus("Fix the problems listed above Save.", "error"); return; }
-    if (mode === "edit") {
-      const saved = await act("updateProject", { id: project.id, patch: { manifest, context_uuid: review.contextUuid } },
-        `${manifest.name} saved. Open tabs follow the new addresses.`);
-      if (saved.ok) { close(); await Promise.all([loadProjects(), loadContexts()]); }
-      return;
+    fill(errorsList, errors.map(error => h("li", {}, error.message)));
+    if (!manifest) { errorsList.scrollIntoView?.({ block: "nearest" }); return; }
+    saving = true;
+    setButtonBusy(submitButton, isNew ? "Adding…" : "Saving…");
+    try {
+      if (!isNew) {
+        const saved = await act("updateProject", { id: project.id, patch: { manifest, context_uuid: review.contextUuid } },
+          `${manifest.name} saved. Open tabs follow the new addresses.`);
+        if (!saved.ok) { fill(errorsList, h("li", {}, errorText(saved.error))); return; }
+        state.icons.delete(project.id);
+        close();
+        await Promise.all([loadProjects(), loadContexts()]);
+        return;
+      }
+      stopCheck();
+      const confirmed = await act("confirmProject", { root, manifest, contextUuid: review.contextUuid });
+      if (!confirmed.ok) { fill(errorsList, h("li", {}, errorText(confirmed.error))); return; }
+      close();
+      await Promise.all([loadProjects(), loadContexts()]);
+      if (confirmed.result?.id) {
+        state.placement = confirmed.result.id;
+        renderPlacement();
+        setStatus(M.placementMessage(confirmed.result, state.contexts));
+        focusProject(confirmed.result.id);
+      }
+      if (writeManifest && confirmed.result?.id) await writeManifestFlow(confirmed.result);
+    } finally {
+      saving = false;
+      if (!closed) setButtonBusy(submitButton, null);
     }
-    const confirmed = await act("confirmProject", { root, manifest, contextUuid: review.contextUuid });
-    if (!confirmed.ok) return;
-    close();
-    await Promise.all([loadProjects(), loadContexts()]);
-    if (confirmed.result?.id) {
-      state.placement = confirmed.result.id;
-      renderPlacement();
-      setStatus(M.placementMessage(confirmed.result, state.contexts));
-      focusProject(confirmed.result.id);
-    }
-    if (writeManifest && confirmed.result?.id) await writeManifestFlow(confirmed.result);
-  };
+  }
 
   close = openSheet({
-    title: mode === "new" ? "Review project" : `Edit ${projectName(project)}`,
-    body: [
-      mode === "new" ? [h("p", { class: "path" }, root),
-        h("p", { class: "notice" }, "Found by reading config files. Items marked guessed are framework defaults. Untick what you do not use; nothing is saved until you add the project.")] : null,
-      h("div", { class: "form-row" }, field({ label: "Name", control: nameInput }),
-        field({ label: "Kind", control: kindSelect, help: review.kindSource.source && review.kindSource.source !== "confirmed"
-          ? `${review.kindSource.guess ? "Guessed" : "Detected"} from ${review.kindSource.source}` : null })),
-      field({ label: "Space", control: spaceSelect, help: "Where the project shows in the sidebar. Any space works, personal ones too." }),
-      h("fieldset", {}, h("legend", {}, "Environments"),
-        h("p", { class: "help" }, "Addresses you open. A tab on one of them is linked to this project, also when you type it yourself."),
-        environmentsBox, h("div", {}, addEnvironmentButton)),
-      field({ label: "Production URL (optional)", control: productionInput,
-        help: "The live site, for the environment switch. Hosting links such as Vercel only point to the dashboard, so add it here." }),
-      h("fieldset", {}, h("legend", {}, "Links"),
-        h("h4", {}, "Shown in the sidebar"), surfacesShown, moreDetails, h("div", {}, addLinkButton)),
-      findings, detectionDetails, writeChoice, errorsList],
-    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"),
-      h("button", { type: "button", class: "primary", onclick: submit }, mode === "new" ? "Add project" : "Save")],
+    title: isNew ? "Add project" : `Edit ${projectName(project)}`,
+    attrs: { "data-variant": "setup" },
+    body: [h("div", { class: "setup-head" }, tile,
+      h("div", { class: "setup-titles" }, nameInput, h("p", { class: "setup-path", title: folder }, M.shortPath(folder)))),
+    status, errorsList, content],
+    footer: [h("button", { type: "button", onclick: () => close() }, "Cancel"), submitButton],
+    onClose: () => { closed = true; clearTimeout(statusTimer); if (check.phase === "checking") call("cancelSetup").catch(() => {}); },
+  });
+
+  if (!isNew) { build(); loadIcon(); return; }
+  renderTile();
+  renderStatus();
+  content.setAttribute("aria-busy", "true");
+  fill(content, h("div", { class: "setup-skeleton", "aria-hidden": "true" }, [1, 2, 3].map(() => h("span", { class: "skeleton-line" }))));
+  call("detect", { root }).then(draft => {
+    if (closed) return;
+    content.removeAttribute("aria-busy");
+    review = M.draftToReview(draft, { contextUuid });
+    nameInput.disabled = false;
+    nameInput.value = review.name;
+    submitButton.disabled = false;
+    check.phase = "off";
+    renderStatus();
+    build();
+    loadIcon();
+    startCheck();
+  }, error => {
+    if (closed) return;
+    content.removeAttribute("aria-busy");
+    check.phase = "off";
+    renderStatus();
+    fill(content, h("div", { class: "setup-failed" },
+      h("p", {}, errorText(error)),
+      h("div", {}, h("button", { type: "button", onclick: () => { close(); addProjectFlow({ contextUuid }); } }, "Choose another folder"))));
   });
 }
 
@@ -1142,6 +1373,20 @@ function homeOpen(project) {
     body.push(h("p", { class: "quiet-text" }, "No addresses yet. Add the address you open during development with Edit."));
   }
   return homeSection("open", "Environments and links", body, { action: check });
+}
+
+/** How each service starts (manifest v3 commands): shown to copy, never run.
+ * A command with a folder copies as `cd <folder> && <command>`. */
+function homeStart(project) {
+  const services = project.manifest.services.filter(service => typeof service.command === "string" && service.command);
+  if (!services.length) return null;
+  const line = service => (service.cwd ? `cd ${/^[A-Za-z0-9._/-]+$/u.test(service.cwd) ? service.cwd : `'${service.cwd.replaceAll("'", "'\\''")}'`} && ${service.command}` : service.command);
+  return homeSection("start", "Start", h("ul", { class: "start-list" }, services.map(service => h("li", { class: "start-row" },
+    h("span", { class: "start-name" }, service.name),
+    h("code", { class: "start-command", title: service.cwd ? `Runs in ${service.cwd}` : "Runs in the project folder" }, line(service)),
+    iconButton("copy", `Copy the command for ${service.name}`, () => copySnippet(line(service),
+      `Copied. Paste it in a terminal in the ${projectName(project)} folder.`))))),
+  { quiet: true });
 }
 
 /** The project's own container, the accounts the user noted and shared sites. */
@@ -1342,6 +1587,7 @@ function renderHome() {
   const errors = M.homeConsoleErrors(state.home.data.console_errors);
   const sections = {
     open: () => homeOpen(project),
+    start: () => homeStart(project),
     accounts: () => homeAccounts(project, container, space),
     activity: () => homeActivity(project, agents, errors),
     watches: () => homeWatches(project),
@@ -1349,7 +1595,7 @@ function renderHome() {
   };
   fill(root, crumbs,
     h("header", { class: "home-head" },
-      projectTile(card, " large"),
+      projectTile(card, " large", project.id),
       h("div", { class: "home-titles" },
         h("h2", { id: "home-title", tabindex: "-1", "data-focus-key": "home:title" }, name),
         h("p", { class: "home-sub" }, h("span", {}, card.kind),
@@ -1361,7 +1607,7 @@ function renderHome() {
           onclick: () => openProjectReview({ mode: "edit", project }) }, "Edit"),
         projectMenu(project, { home: true, space }))),
     brief ? h("p", { class: "home-lede" }, brief.product) : null,
-    ...M.homeSections({ agents, errors }).map(section => sections[section]()));
+    ...M.homeSections({ agents, errors }).flatMap(section => (section === "open" ? ["open", "start"] : [section])).map(section => sections[section]()));
   focusHomeTitle();
 }
 

@@ -2,10 +2,10 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // F4 dev loop (HANDOFF_3 §5, §6.4; contexts-api-v1 §3.5). Three small, chrome-owned
-// additions: an environment pill in the address bar on project URLs, a project
-// block at the top of the active project workspace's tab list, and a waiting
-// overlay over the browser stack when a *declared* local origin refuses the
-// connection. Nothing is injected into web content, no shortcut is taken, no
+// additions: an environment pill in the address bar on project URLs, the
+// Projects section under the active space's header (ProjectSidebar), and a
+// waiting overlay over the browser stack when a *declared* local origin refuses
+// the connection (with Start when the project declares how to start it). Nothing is injected into web content, no shortcut is taken, no
 // port is scanned: status comes from services.serviceStatus (declared loopback
 // services only) or one injected probe for exactly the refused origin's port.
 // Private windows never probe: no status refresh, no polling (manual retry only).
@@ -16,6 +16,7 @@
 // a visible "Reopen in …" (a new tab) when the tab is elsewhere.
 import * as defaultCore from "./contexts/index.mjs";
 import { containerIndicator, expectedContainer, identityColorClass, tabFits } from "./ProjectAccountRuntime.sys.mjs";
+import { installProjectSidebar } from "./ProjectSidebar.sys.mjs";
 
 export const XHTML = "http://www.w3.org/1999/xhtml";
 export const RUNTIME_STYLESHEET = "chrome://browser/content/axiosozo/axiosozo-runtime.css";
@@ -31,8 +32,6 @@ export const WAIT_MAX_RELOAD_FAILURES = 3; // probe said up but the page still r
 export const SERVICE_REFRESH_MS = 30000;
 export const SERVICE_EVENT_THROTTLE_MS = 5000;
 export const CONTAINERS_PREF = "privacy.userContext.enabled";
-// Projects shown per space before the rest fold into "N more projects".
-export const FOLDER_LIMIT = 3;
 const STATUS_TEXT = Object.freeze({ up: "running", down: "not running", unknown: "status unknown" });
 const INERT = Object.freeze({ dispose() {} });
 
@@ -116,7 +115,7 @@ function hostLabel(baseUrl) {
  * count beside a project's summary; refreshed on the name-only console event).
  */
 export function installDevLoop(window, { services, adapter, core = defaultCore, timers = defaultTimers(window),
-  clock = () => Date.now(), probe = null, openUrl = null, openSettings = null, consoleErrors = null } = {}) {
+  clock = () => Date.now(), probe = null, openUrl = null, openSettings = null, openOverview = null, consoleErrors = null } = {}) {
   if (!services || !adapter || !window?.gBrowser || !prefEnabled(window, "axiosozo.contexts.enabled", true)) return INERT;
   const document = window.document;
   const gBrowser = window.gBrowser;
@@ -125,7 +124,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   let disposed = false;
   const releaseSheet = ensureRuntimeStylesheet(document);
   cleanups.push(releaseSheet);
-  const diagnostics = { pillShown: false, blockShown: false, foldersShown: 0, waits: 0, probes: 0, reloads: 0, switches: 0,
+  const diagnostics = { pillShown: false, waits: 0, probes: 0, reloads: 0, switches: 0,
     projectOpens: 0, pillContainer: null };
   // The target URL is built from a repository manifest: load it like an
   // untrusted web link (null principal in the tab's container), never with the
@@ -170,7 +169,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   let bindings = 0;
   function invalidateMenus() {
     bindings++;
-    for (const popup of [menu, moreMenu]) {
+    for (const popup of [menu]) {
       if (popup?.state === "open" || popup?.state === "showing") { try { popup.hidePopup?.(); } catch {} }
     }
   }
@@ -293,7 +292,6 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   menu.id = "axiosozo-env-menu";
   let pillState = null; // { tab, url, project, environment, app, current, environments, statuses, container }
   let pillToken = 0;
-  const lastActive = new Map(); // projectId → clock() when one of its tabs was last in front
 
   const pageActions = document.getElementById("page-action-buttons");
   if (pageActions) {
@@ -344,7 +342,6 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     const url = webURL(tab?.linkedBrowser?.currentURI?.spec);
     const match = url ? matchTab(tab) : null;
     if (!match) { hidePill(); scheduleFolders(); return; }
-    lastActive.set(match.project.id, clock());
     pillState = { tab, url: url.href, project: match.project, environment: match.environment, app: match.app,
       current: match.environment.name, environments: environmentsOf(match.project), statuses: cachedStatuses(match.project),
       container: containerOf(tab, match.project, url.href) };
@@ -482,28 +479,10 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     menu.removeEventListener("popuphidden", onMenuHidden);
   });
 
-  // ---- Project folders (sidebar) ------------------------------------------------------
-  // Under the space header: one compact, collapsible row per project that lives
-  // in this space (any space type), with a status dot per local environment and
-  // production. A project with an open tab in this space is "active" and starts
-  // expanded; others are collapsed and sort below. More than FOLDER_LIMIT
-  // projects collapse into an "N more projects" row. Expanded: environments
-  // (grouped by app) and primary surfaces; "…" holds secondary surfaces,
-  // "Edit project…" and "Remove from space".
-  const folders = element(document, "div", { className: "axiosozo-project-folders",
-    attrs: { id: "axiosozo-project-folders", role: "group", "aria-label": "Projects in this space" } });
-  const moreMenu = document.createXULElement("menupopup");
-  moreMenu.id = "axiosozo-project-more-menu";
-  (document.getElementById("mainPopupSet") ?? document.documentElement).appendChild(moreMenu);
-  const expandedChoice = new Map(); // projectId → boolean chosen by the user in this window
-  const showAll = new Set(); // space uuids whose full project list is open
-  let foldersState = null; // { uuid, entries: [{ project, active, running }] }
-  let folderSerial = 0;
-  let foldersScheduled = false;
-  let moreTarget = null; // { project, uuid, anchor, bindings } for the open "…" menu
-
-  function removeFolders() { foldersState = null; folders.remove(); diagnostics.foldersShown = 0; diagnostics.blockShown = false; }
-
+  // ---- Projects in the sidebar (ProjectSidebar) -------------------------------------
+  // Under the space header: the Projects section, one row per project of this
+  // space and its project panel (servers, apps, links). DevLoop keeps the model,
+  // tab linking, the container route (goTo) and port checks; ProjectSidebar draws.
   function workspaceOf(uuid) {
     let workspace = null;
     // Only the Zen workspace adapter knows Zen's markup (handoff §2.6).
@@ -512,17 +491,17 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return workspace;
   }
 
-  function place(uuid) {
+  function place(node, uuid) {
     let header = null;
     try { header = adapter.workspaceHeader?.(uuid) ?? null; } catch {}
     if (header?.parentNode) {
       // Zen's space header stays in the DOM when SpaceSwitcher hides it.
-      if (folders.previousElementSibling !== header) header.after(folders);
+      if (node.previousElementSibling !== header) header.after(node);
       return true;
     }
     const workspace = workspaceOf(uuid);
     if (!workspace) return false;
-    if (workspace.firstChild !== folders) workspace.prepend(folders);
+    if (workspace.firstChild !== node) workspace.prepend(node);
     return true;
   }
 
@@ -571,38 +550,6 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return openInProject(project, target.href, uuid);
   }
 
-  /** Projects of the space with their activity, most relevant first. */
-  function folderEntries(uuid) {
-    const inSpace = projects.filter(project => project.context_uuid === uuid);
-    const openTabs = new Map();
-    for (const tab of gBrowser.tabs ?? []) {
-      if (tab.closing || adapter.workspaceForTab(tab) !== uuid) continue;
-      const match = matchUrl(tab.linkedBrowser?.currentURI?.spec, uuid);
-      if (match) openTabs.set(match.project.id, (openTabs.get(match.project.id) ?? 0) + 1);
-    }
-    return inSpace.map((project, order) => ({
-      project, order, active: openTabs.has(project.id),
-      running: cachedStatuses(project).some(s => s.status === "up"),
-      last: lastActive.get(project.id) ?? 0,
-    })).sort((a, b) => (Number(b.active) - Number(a.active)) || (Number(b.running) - Number(a.running))
-      || (b.last - a.last) || (a.order - b.order));
-  }
-
-  function dot(status, parent) {
-    return element(document, "span", { className: "axiosozo-status-dot",
-      attrs: { "data-status": ["up", "down", "remote"].includes(status) ? status : "unknown", "aria-hidden": "true" } }, parent);
-  }
-
-  function statusSentence(project, statuses) {
-    const envs = project.manifest?.environments ?? [];
-    const local = envs.filter(e => environmentStatus(project, e, statuses) !== "remote");
-    const up = local.filter(e => environmentStatus(project, e, statuses) === "up").length;
-    const parts = [];
-    if (local.length) parts.push(`${up} of ${local.length} local ${local.length === 1 ? "server" : "servers"} running`);
-    if (envs.some(e => e.name === "production")) parts.push("production not checked");
-    return parts.length ? `, ${parts.join(", ")}` : "";
-  }
-
   // ---- Console errors (P5, Plan 4 step 7): counts only, from RAM ---------------------
   // Every change of what is retained (or of whether it can be read) raises the
   // console event, so the counts are read again only after one.
@@ -633,192 +580,25 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     return warnings ? `${part(errors, "console error")} and ${part(warnings, "warning")}` : part(errors, "console error");
   }
 
-  function row(list, { kind, label, detail, url, status = null, onActivate, current = false, focusKey }) {
-    const item = element(document, "li", { className: "axiosozo-project-link" }, list);
-    const button = element(document, "button", { attrs: { "data-kind": kind, "data-focus-key": focusKey,
-      "aria-label": `${label}, ${detail}${status && status !== "remote" ? `, ${STATUS_TEXT[status] ?? STATUS_TEXT.unknown}` : ""}` } }, item);
-    if (status) dot(status, button);
-    else {
-      const icon = element(document, "img", { className: "axiosozo-project-link-icon", attrs: { alt: "", role: "presentation" } }, button);
-      // Surfaces show the site's own favicon when Places has one.
-      if (kind === "surface" && url) icon.setAttribute("src", `page-icon:${url}`);
-    }
-    element(document, "span", { className: "axiosozo-project-link-label", text: label }, button);
-    element(document, "span", { className: "axiosozo-project-link-detail", text: detail }, button);
-    if (current) button.setAttribute("aria-current", "true");
-    button.addEventListener("click", event => { event.stopPropagation?.(); onActivate(); });
-    return button;
-  }
-
-  function projectFolder(entry, uuid, counts = null) {
-    const { project } = entry;
-    const id = project.id;
-    const statuses = cachedStatuses(project);
-    const expanded = expandedChoice.has(id) ? expandedChoice.get(id) : entry.active;
-    const name = project.manifest?.name ?? "Project";
-    const bodyId = `axiosozo-project-body-${++folderSerial}`;
-    const logged = counts?.get(id) ?? null;
-    const block = element(document, "div", { className: "axiosozo-project-block",
-      attrs: { "data-project-id": id, role: "group", "aria-label": `Project ${name}` } }, folders);
-    block.toggleAttribute?.("data-expanded", expanded);
-    block.toggleAttribute?.("data-active", entry.active);
-    const toggle = element(document, "button", { className: "axiosozo-project-toggle",
-      attrs: { "aria-expanded": String(expanded), "aria-controls": bodyId, "data-focus-key": `${id}:toggle`,
-        "aria-label": `${name}${logged ? `, ${consolePhrase(logged)}` : ""}${statusSentence(project, statuses)}. ${expanded ? "Collapse" : "Expand"} project` } }, block);
-    // The folder takes the colour of the project's own container, as its tabs do.
-    const glyph = element(document, "span", { className: "axiosozo-project-glyph", attrs: { "aria-hidden": "true" } }, toggle);
-    paintContainer(glyph, "axiosozo-project-glyph", projectColor(project));
-    element(document, "span", { className: "axiosozo-project-name", text: name }, toggle);
-    const summary = element(document, "span", { className: "axiosozo-project-summary", attrs: { "aria-hidden": "true" } }, toggle);
-    const environments = environmentsOf(project);
-    for (const environment of environments) {
-      const status = environmentStatus(project, environment, statuses);
-      if (status !== "remote" || environment.name === "production") dot(status, summary).setAttribute("title", envLabel(project, environment));
-    }
-    // Retained console messages of this project's tabs here: a small count
-    // beside the dots; the button's name says it in words.
-    if (logged) {
-      element(document, "span", { className: "axiosozo-project-console", text: logged.count > 99 ? "99+" : String(logged.count),
-        attrs: { "aria-hidden": "true", "data-level": logged.errors ? "error" : "warning", title: consolePhrase(logged) } }, toggle);
-    }
-    element(document, "span", { className: "axiosozo-project-chevron", attrs: { "aria-hidden": "true" } }, toggle);
-    toggle.addEventListener("click", event => {
-      event.stopPropagation?.();
-      expandedChoice.set(id, !expanded);
-      // Opening a folder is the moment to look: refresh its dots now.
-      if (!expanded) statusesFor(project, { fresh: true }).then(() => scheduleFolders()).catch(() => {});
-      renderFolders();
-    });
-    const body = element(document, "div", { className: "axiosozo-project-body", attrs: { id: bodyId } }, block);
-    body.hidden = !expanded;
-    if (!expanded) return block;
-    const list = element(document, "ul", { className: "axiosozo-project-links", attrs: { "aria-label": `${name} links` } }, body);
-    const apps = appsOf(project);
-    const grouped = apps.filter(Boolean).length > 1;
-    const selectedMatch = pillState?.project.id === id ? pillState.environment : null;
-    for (const app of grouped ? apps : [undefined]) {
-      const envs = environments.filter(e => app === undefined || appOf(e) === app);
-      if (!envs.length) continue;
-      if (grouped) element(document, "li", { className: "axiosozo-project-app", text: app ?? "all apps", attrs: { "aria-hidden": "true" } }, list);
-      for (const environment of envs) {
-        const status = environmentStatus(project, environment, statuses);
-        row(list, { kind: "environment", label: envLabel(project, environment), detail: hostLabel(environment.base_url),
-          status: status === "remote" ? "remote" : status, focusKey: `${id}:env:${envKey(environment)}`,
-          current: !!selectedMatch && envKey(selectedMatch) === envKey(environment),
-          onActivate: () => goTo(project, environment.base_url, uuid, environment) });
-      }
-    }
-    const surfaces = project.manifest?.surfaces ?? [];
-    for (const surface of surfaces.filter(s => core.surfaceProminence(s) === "primary")) {
-      row(list, { kind: "surface", label: surface.name, detail: hostLabel(surface.url), url: surface.url, focusKey: `${id}:surface:${surface.url}`,
-        onActivate: () => goTo(project, surface.url, uuid) });
-    }
-    const moreItem = element(document, "li", { className: "axiosozo-project-link" }, list);
-    const more = element(document, "button", { className: "axiosozo-project-more", attrs: { "data-kind": "more",
-      "aria-haspopup": "menu", "aria-expanded": "false", "data-focus-key": `${id}:more`, "aria-label": `More for ${name}` } }, moreItem);
-    element(document, "span", { className: "axiosozo-project-more-glyph", attrs: { "aria-hidden": "true" }, text: "…" }, more);
-    element(document, "span", { className: "axiosozo-project-link-label", text: "More" }, more);
-    more.addEventListener("click", event => {
-      event.stopPropagation?.();
-      buildMoreMenu(project, uuid, more);
-      if (typeof moreMenu.openPopup === "function") moreMenu.openPopup(more, "after_start");
-    });
-    return block;
-  }
-
-  function buildMoreMenu(project, uuid, anchor) {
-    while (moreMenu.firstChild) moreMenu.firstChild.remove();
-    moreTarget = { project, uuid, anchor, bindings };
-    const secondary = (project.manifest?.surfaces ?? []).filter(s => core.surfaceProminence(s) !== "primary");
-    for (const surface of secondary) menuItem(moreMenu, { label: `${surface.name} · ${hostLabel(surface.url)}`, "data-url": surface.url });
-    if (secondary.length) moreMenu.appendChild(document.createXULElement("menuseparator"));
-    if (typeof openSettings === "function") menuItem(moreMenu, { label: "Edit project…", "data-action": "edit" });
-    menuItem(moreMenu, { label: "Remove from space", "data-action": "remove" });
-  }
-
-  const onMoreCommand = event => {
-    const item = event.target;
-    // A menu shown before a tab, space or model change is stale and does nothing.
-    if (!moreTarget || moreTarget.bindings !== bindings) return;
-    const project = projectById(moreTarget.project.id);
-    if (!project) return;
-    const { uuid } = moreTarget;
-    const url = item?.getAttribute?.("data-url");
-    const action = item?.getAttribute?.("data-action");
-    if (url) goTo(project, url, uuid);
-    else if (action === "edit") openSettings?.(project.id, { edit: true });
-    else if (action === "remove") {
-      // Reversible from about:axiosozo (Projects); the folder and repository are untouched.
-      Promise.resolve(services.updateProject(project.id, { context_uuid: null })).catch(error => console.error("AxioSozo: remove from space failed", error));
-    }
-  };
-  const onMoreShowing = event => { if (event.target === moreMenu) moreTarget?.anchor?.setAttribute("aria-expanded", "true"); };
-  const onMoreHidden = event => { if (event.target === moreMenu) moreTarget?.anchor?.setAttribute("aria-expanded", "false"); };
-  moreMenu.addEventListener("command", onMoreCommand);
-  moreMenu.addEventListener("popupshowing", onMoreShowing);
-  moreMenu.addEventListener("popuphidden", onMoreHidden);
-  cleanups.push(() => {
-    moreMenu.removeEventListener("command", onMoreCommand);
-    moreMenu.removeEventListener("popupshowing", onMoreShowing);
-    moreMenu.removeEventListener("popuphidden", onMoreHidden);
-    moreMenu.remove(); folders.remove();
-  });
-
-  function renderFolders() {
-    foldersScheduled = false;
-    if (disposed) return;
-    const uuid = privateWindow ? null : adapter.activeWorkspaceUuid();
-    const entries = uuid ? folderEntries(uuid) : [];
-    if (!entries.length || !place(uuid)) { removeFolders(); return; }
-    const focusKey = folders.contains?.(document.activeElement) ? document.activeElement?.getAttribute?.("data-focus-key") : null;
-    foldersState = { uuid, entries };
-    while (folders.firstChild) folders.firstChild.remove();
-    const all = showAll.has(uuid);
-    const visible = entries.length > FOLDER_LIMIT && !all ? entries.slice(0, FOLDER_LIMIT) : entries;
-    const counts = consoleCounts();
-    for (const entry of visible) projectFolder(entry, uuid, counts);
-    if (entries.length > FOLDER_LIMIT) {
-      const hidden = entries.length - FOLDER_LIMIT;
-      const toggleAll = element(document, "button", { className: "axiosozo-project-overflow",
-        attrs: { "aria-expanded": String(all), "data-focus-key": "overflow" },
-        text: all ? "Show fewer projects" : `${hidden} more ${hidden === 1 ? "project" : "projects"}` }, folders);
-      toggleAll.addEventListener("click", event => {
-        event.stopPropagation?.();
-        if (all) showAll.delete(uuid); else showAll.add(uuid);
-        renderFolders();
-      });
-    }
-    if (focusKey) folders.querySelector?.(`[data-focus-key="${focusKey.replace(/["\\]/gu, "\\$&")}"]`)?.focus?.();
-    diagnostics.foldersShown = visible.length; diagnostics.blockShown = true;
-  }
-
-  /** Coalesces renders from bursts of tab events into one microtask. */
-  function scheduleFolders() {
-    if (foldersScheduled || disposed) return;
-    foldersScheduled = true;
-    Promise.resolve().then(renderFolders).catch(() => {});
-  }
-
-  async function refreshFolders({ fresh = false } = {}) {
-    await ensureProjects();
-    if (disposed) return;
-    renderFolders();
-    if (!foldersState) return;
-    const { entries } = foldersState;
-    if (!privateWindow) lastStatusRefresh = clock();
-    await Promise.all(entries.map(entry => statusesFor(entry.project, { fresh }).catch(() => [])));
-    if (!disposed) renderFolders();
-  }
+  const homeDir = (() => { try { return window.Services?.dirsvc?.get?.("Home", window.Ci?.nsIFile)?.path ?? null; } catch { return null; } })();
+  const sidebar = installProjectSidebar(window, { services, adapter, core, privateWindow, timers, element, place,
+    projects: () => projects, projectById, environmentsOf, currentProjectId: () => pillState?.project.id ?? null,
+    cachedStatuses, statusesFor, consoleCounts, consolePhrase, paintContainer, projectColor, goTo, openSettings, openOverview,
+    displayPath: root => (homeDir && typeof root === "string" && root.startsWith(`${homeDir}/`) ? `~${root.slice(homeDir.length)}` : root) });
+  cleanups.push(() => sidebar.dispose());
+  const sidebarDiagnostics = () => { const d = sidebar.diagnostics(); return { blockShown: d.shown, foldersShown: d.rows, sidebar: d }; };
+  const scheduleFolders = () => sidebar.schedule();
+  const refreshFolders = options => (disposed ? Promise.resolve() : ensureProjects().then(() => sidebar.refresh(options)));
 
   async function refreshStatuses() {
     if (privateWindow) return;
     lastStatusRefresh = clock();
-    const due = new Map((foldersState?.entries ?? []).map(entry => [entry.project.id, entry.project]));
+    const due = new Map(sidebar.shownProjects().map(project => [project.id, project]));
     if (pillState) due.set(pillState.project.id, pillState.project);
     for (const project of due.values()) await statusesFor(project, { fresh: true });
     if (disposed) return;
     if (pillState) { pillState.statuses = cachedStatuses(pillState.project); renderPill(); }
-    renderFolders();
+    sidebar.render();
   }
 
   // ---- Waiting overlay --------------------------------------------------------------
@@ -841,7 +621,14 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
       attrs: { id: titleId }, text: `Waiting for ${state.serviceName} on port ${state.port}…` }, card);
     state.status = element(document, "p", { className: "axiosozo-waiting-status", attrs: { "aria-live": "polite" } }, card);
     element(document, "p", { className: "axiosozo-waiting-url", text: state.display }, card);
+    // The project's start command, shown on the button that runs it (that
+    // press is the approval), and the newest line of its output while it starts.
+    state.command = element(document, "code", { className: "axiosozo-waiting-command" }, card);
+    state.output = element(document, "p", { className: "axiosozo-waiting-output" }, card);
     const actions = element(document, "div", { className: "axiosozo-waiting-actions" }, card);
+    state.start = element(document, "button", { className: "axiosozo-waiting-start", text: `Start ${state.serviceName}` }, actions);
+    state.onStart = () => { startFromWait(state).catch(() => {}); };
+    state.start.addEventListener("click", state.onStart);
     state.retry = element(document, "button", { className: "axiosozo-waiting-retry", text: "Try again" }, actions);
     state.cancel = element(document, "button", { className: "axiosozo-waiting-cancel", text: "Cancel" }, actions);
     state.onRetry = () => retryWait(state);
@@ -854,12 +641,53 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   function setWaitMode(state, mode) {
     state.mode = mode;
     state.overlay.setAttribute("data-mode", mode);
-    state.retry.hidden = mode === "polling" || mode === "reloading";
-    state.status.textContent = mode === "manual"
-      ? `Start ${state.serviceName} for ${state.projectName}, then choose Try again.`
-      : mode === "stopped" ? `${state.serviceName} has not answered yet. Start it, then choose Try again.`
+    const view = state.view;
+    const run = view?.run ?? null;
+    const ours = run?.status === "running" || run?.status === "stopping";
+    const startable = !privateWindow && !!view?.target.startable && !ours && mode !== "reloading";
+    state.overlay.toggleAttribute?.("data-starting", ours);
+    state.start.hidden = !startable;
+    state.start.disabled = !!state.starting;
+    state.command.hidden = !startable;
+    state.command.textContent = startable ? `${view.target.command}${view.target.cwd ? `  ·  in ${view.target.cwd}` : ""}` : "";
+    state.output.hidden = !(ours || run?.status === "failed") || !run?.last_line;
+    state.output.textContent = state.output.hidden ? "" : run.last_line;
+    state.retry.hidden = mode === "polling" || mode === "reloading" || startable;
+    state.title.textContent = ours && mode !== "reloading" ? `Starting ${state.serviceName}…` : `Waiting for ${state.serviceName} on port ${state.port}…`;
+    state.status.textContent = state.startError ? state.startError
       : mode === "reloading" ? `${state.serviceName} answered. Loading…`
+      : ours ? `${state.serviceName} is starting for ${state.projectName}. This page loads when it answers.`
+      : run?.status === "failed" ? `${state.serviceName} stopped${Number.isInteger(run.exit_code) ? ` (exit ${run.exit_code})` : ""}. Its output is in the project panel; start it again when ready.`
+      : startable ? `${state.serviceName} is not running. Start it here; this page loads when it answers.`
+      : mode === "manual" ? `Start ${state.serviceName} for ${state.projectName}, then choose Try again.`
+      : mode === "stopped" ? `${state.serviceName} has not answered yet. Start it, then choose Try again.`
       : `Start ${state.serviceName} for ${state.projectName}. This page loads when it answers.`;
+  }
+
+  /** The waiting page's Start: the button showed the exact command, so
+   * pressing it approves that command; then the page waits for the port. */
+  async function startFromWait(state) {
+    if (state.ended || state.starting || !state.view?.target.startable) return;
+    state.starting = true; state.startError = null;
+    setWaitMode(state, state.mode);
+    try {
+      await services.startRun({ window, projectId: state.project.id, key: state.view.target.key, approve: true });
+      await refreshWaitView(state);
+      state.attempts = 0; state.reloadFailures = 0;
+    } catch (error) {
+      state.startError = `${state.serviceName} did not start (${error?.code ?? "error"}). Open the project panel for details.`;
+    } finally {
+      state.starting = false;
+    }
+    if (state.ended) return;
+    if (state.startError) setWaitMode(state, state.mode); else startPolling(state);
+  }
+
+  /** The target behind a wait, with this process's run of it, read again. */
+  async function refreshWaitView(state) {
+    if (!state.view) return;
+    const views = await sidebar.loadTargets(state.project);
+    state.view = views.find(view => view.target.key === state.view.target.key) ?? state.view;
   }
 
   function endWait(state) {
@@ -869,6 +697,7 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     state.timer = null;
     state.retry.removeEventListener("click", state.onRetry);
     state.cancel.removeEventListener("click", state.onCancel);
+    state.start.removeEventListener("click", state.onStart);
     state.overlay.remove();
     if (state.restorePosition !== null) state.stack.style.position = state.restorePosition;
     if (waits.get(state.tab) === state) waits.delete(state.tab);
@@ -938,17 +767,27 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
     const declaredLocal = core.isDeclaredLocalOrigin(environments, url.href)
       || (isLoopbackUrl(url.href) && isLoopbackUrl(match.environment?.base_url));
     if (!declaredLocal) return; // neterror stays unchanged
+    const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+    const declared = (match.project.manifest?.services ?? []).find(s => s.port === port);
+    // The run target on this port (its start command and this process's run).
+    let view = null;
+    if (!privateWindow) {
+      try {
+        const views = (await sidebar.loadTargets(match.project)).filter(item => item.target.local && item.target.port === port);
+        view = views.find(item => item.target.name === declared?.name) ?? views[0] ?? null;
+      } catch { view = null; }
+      if (disposed || !tab.linkedBrowser || tab.closing) return;
+    }
     if (refused.get(tab) !== url.href) return; // another load started or committed meanwhile
     const stack = browserStackOf(window, tab);
     if (!stack) return;
     waits.get(tab) && endWait(waits.get(tab));
-    const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
-    const declared = (match.project.manifest?.services ?? []).find(s => s.port === port);
     const projectName = match.project.manifest?.name ?? "this project";
     const state = { tab, url: url.href, origin: url.origin, port, project: match.project, projectName,
       serviceName: declared?.name ?? `${projectName} ${envName(match.environment) ?? "local"} server`,
       display: `${url.host}${url.pathname}`, canPoll: !privateWindow && (typeof probe === "function" || !!declared),
-      attempts: 0, reloadFailures: 0, timer: null, ended: false, mode: null, stack, restorePosition: null };
+      attempts: 0, reloadFailures: 0, timer: null, ended: false, mode: null, stack, restorePosition: null,
+      view, starting: false, startError: null };
     state.overlay = overlayFor(state);
     if (window.getComputedStyle?.(stack)?.position === "static") {
       state.restorePosition = stack.style.position ?? "";
@@ -1019,23 +858,33 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   for (const name of ["projects", "contexts"]) {
     cleanups.push(services.on(name, () => {
       statusCache.clear();
-      loadProjects().then(() => Promise.all([refreshFolders(), refreshPill()])).catch(() => {});
+      loadProjects().then(() => { sidebar.projectsChanged(); return refreshPill(); }).catch(() => {});
     }));
   }
   if (!privateWindow && consoleErrors) {
-    // Retained console messages changed (name only): the folders draw again,
+    // Retained console messages changed (name only): the sidebar draws again,
     // coalesced, keeping expansion and keyboard focus.
     try { const off = services.on("console", () => { consoleStale = true; scheduleFolders(); }); if (typeof off === "function") cleanups.push(off); }
     catch { /* an older services build has no console event */ }
   }
   if (!privateWindow) {
+    // A run started, printed or ended: the waiting pages of its project follow.
+    try {
+      const off = services.on("runs", () => {
+        for (const state of [...waits.values()]) {
+          if (!state.view) continue;
+          refreshWaitView(state).then(() => { if (!state.ended) setWaitMode(state, state.mode); }, () => {});
+        }
+      });
+      if (typeof off === "function") cleanups.push(off);
+    } catch { /* An older services build has no runs event. */ }
     cleanups.push(services.on("services", () => {
       // serviceStatus may itself emit "services"; the throttle prevents a loop.
       if (clock() - lastStatusRefresh < SERVICE_EVENT_THROTTLE_MS) return;
       refreshStatuses().catch(() => {});
     }));
     const refreshTimer = timers.setInterval(() => {
-      if (disposed || document.hidden || (!pillState && !foldersState)) return;
+      if (disposed || document.hidden || (!pillState && !sidebar.shownProjects().length)) return;
       refreshStatuses().catch(() => {});
     }, SERVICE_REFRESH_MS);
     cleanups.push(() => timers.clearInterval(refreshTimer));
@@ -1048,16 +897,15 @@ export function installDevLoop(window, { services, adapter, core = defaultCore, 
   return Object.freeze({
     refresh: () => loadProjects().then(() => Promise.all([refreshPill(), refreshFolders()])),
     switchEnvironment: switchTo,
-    diagnostics: () => ({ ...diagnostics, waiting: [...waits.values()].map(s => ({ url: s.url, port: s.port, mode: s.mode, attempts: s.attempts })) }),
+    diagnostics: () => ({ ...diagnostics, ...sidebarDiagnostics(), waiting: [...waits.values()].map(s => ({ url: s.url, port: s.port, mode: s.mode, attempts: s.attempts })) }),
     dispose() {
       if (disposed) return;
       invalidateMenus();
       disposed = true;
-      menuBinding = null; moreTarget = null;
+      menuBinding = null;
       for (const state of [...waits.values()]) endWait(state);
       for (const cleanup of cleanups.reverse()) { try { cleanup?.(); } catch {} }
       clearMenu();
-      while (moreMenu.firstChild) moreMenu.firstChild.remove();
     },
   });
 }

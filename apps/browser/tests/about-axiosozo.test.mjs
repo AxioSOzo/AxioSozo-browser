@@ -306,6 +306,16 @@ test("folder picking uses the requesting tab's window and only picked roots can 
     assert.deepEqual(calls.at(-1), ["confirmProject", { root: "/Users/test/fixture-app", manifest, contextUuid: UUID_A }]);
     // The pick is consumed by confirmation.
     assert.equal((await request(actor, "detect", { root: "/Users/test/fixture-app" })).error.code, "ROOT_NOT_PICKED");
+    // Icons: a folder being added only when picked; a project by id; paths are shape-checked first.
+    assert.equal((await request(actor, "previewIcon", { root: "/Users/test/fixture-app", path: "icon.png" })).error.code, "ROOT_NOT_PICKED");
+    await request(actor, "pickFolder");
+    assert.equal((await request(actor, "previewIcon", { root: "/Users/test/fixture-app", path: "public/icon.png" })).ok, true);
+    assert.deepEqual(calls.at(-1), ["previewIcon", { root: "/Users/test/fixture-app", path: "public/icon.png" }]);
+    for (const path of ["", "a\nb.png", "x".repeat(201), 7]) {
+      assert.equal((await request(actor, "previewIcon", { root: "/Users/test/fixture-app", path })).error.code, "INVALID_PARAMS", String(path));
+    }
+    assert.equal((await request(actor, "projectIcon", { id: "p_abcd" })).ok, true);
+    assert.equal((await request(actor, "projectIcon", { id: "/Users/test" })).error.code, "INVALID_PARAMS");
     actor.didDestroy();
   } finally { restore(); }
 });

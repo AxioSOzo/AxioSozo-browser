@@ -125,14 +125,20 @@ export function runTargets(project) {
 /**
  * What the user sees for one target, from its run (this browser's process, or
  * null) and its port check ("up" | "down" | "unknown" | null):
- * - "starting": our process runs, its address does not answer yet;
+ * - "starting": our process runs, its address does not answer yet (and it
+ *   has not printed that address either);
  * - "running": our process runs (and answers, when it has an address);
  * - "external": not started here, but its address answers;
  * - "stopping", "failed" (exited non-zero or would not spawn), "stopped".
  */
 export function displayState(target, run, portStatus) {
   const status = run?.status ?? null;
-  if (status === "running") return target?.local && portStatus !== "up" ? "starting" : "running";
+  if (status === "running") {
+    if (!target?.local || portStatus === "up") return "running";
+    // A dev server prints its address once it listens: ready before the next port check.
+    const printed = localAddress(run.detected_url);
+    return printed && Number(printed.port || 80) === target.port ? "running" : "starting";
+  }
   if (status === "stopping") return "stopping";
   if (target?.local && portStatus === "up") return "external";
   if (status === "failed") return "failed";
@@ -220,7 +226,7 @@ export function printedUrl(line) {
 /**
  * createProjectRunner({ spawn, timers, clock, environment, approvals, onChange })
  * - spawn(options) → the Gecko Subprocess.call result ({ pid, stdin.close(),
- *   stdout.readString(), wait() → { exitCode }, kill(ms) });
+ *   stdout.read() → ArrayBuffer (empty at the end), wait() → { exitCode }, kill(ms) });
  * - environment: runEnvironment(...) (its SHELL is the login shell);
  * - approvals: { has(key), add(key) } (profile-backed in chrome), absent:
  *   nothing is ever approved and every start needs `approve`;
@@ -254,16 +260,21 @@ export function createProjectRunner({ spawn, timers = globalThis, clock = Date.n
     if (run.lines.length > LOG_LINES) run.lines.splice(0, run.lines.length - LOG_LINES);
   }
 
+  // Gecko's InputPipe: only an empty raw buffer is the end; a chunk that ends
+  // inside a UTF-8 sequence decodes to less (streaming, never fatal: a dev
+  // server's output is shown, not trusted).
   async function pump(run) {
+    const decoder = new TextDecoder("utf-8");
     try {
       for (;;) {
-        const chunk = await run.process.stdout.readString();
-        if (!chunk) break;
-        append(run, chunk);
+        const bytes = new Uint8Array(await run.process.stdout.read());
+        if (!bytes.byteLength) break;
+        append(run, decoder.decode(bytes, { stream: true }));
         notify();
       }
     } catch { /* The pipe closed. */ }
-    if (run.partial) { append(run, "\n"); notify(); }
+    append(run, `${decoder.decode()}\n`);
+    notify();
   }
 
   function settle(run, exitCode) {

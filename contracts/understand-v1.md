@@ -184,6 +184,34 @@ until explicit inspection. Inspection does not itself retry a write. Page events
 contain only the fixed `understand` name; documents, aliases, tokens and paths
 never become global event payloads.
 
+### 5.1 Setup check of a folder being added
+
+`setup` runs while the user adds a folder, before any project record exists:
+
+- The page calls `suggestSetup({ root })` for a root it picked with the native
+  folder picker in this document (`ROOT_NOT_PICKED` otherwise), and
+  `cancelSetup({})` when its sheet closes. It never names a CLI, model,
+  binding, revision or flag.
+- The actor mints a separate setup owner for that root on this exact document
+  (same manager, browsing context, selected embedder browser, normal window and
+  native document URI object). Any navigation, tab change, unsubscription,
+  sender refusal or destruction ends it, as for the project-home owner.
+- **Production answers `unavailable`/`NOT_AUTHORIZED` (`cli: null`,
+  `data_sent: false`) before Services looks at the folder**, a root is
+  admitted, a binding is made or a runtime is opened.
+- Off production (the pinned offline fixture only), Services binds the check to
+  the still-cached detection preview of that root
+  (`{ id: "s_setup<n>", revision: detectedAt, canonicalRoot }`) and a
+  synchronous predicate that holds only while that exact preview stays cached.
+  The facade admits only fixture roots, picks the CLI with `pickSetupCli` from
+  discovered metadata (`CLI_NOT_INSTALLED` when none), runs `setup` and returns
+  `{ …result, kind: "setup", cli, model }` with the document validated by the
+  contexts core (`validateSetupDocument`). A preview replaced meanwhile yields
+  `cancelled`/`STALE_PROJECT`. Nothing is persisted and no state event is sent.
+- The page applies the document only to fields the user did not change. Its
+  values reach the manifest only when the user adds the project. Commands are
+  text to copy; nothing runs them.
+
 ## 6. Changelog
 
 - 2 October 2026 — created for Plan 4.
@@ -191,4 +219,5 @@ never become global event payloads.
   accurate direct-child cleanup limits; retain live authorization closed.
 - 5 October 2026 — add the `setup` kind (§3.3) with its strict document,
   cheapest-model table and Codex-first automatic CLI selection; live runs
-  remain NOT_AUTHORIZED.
+  remain NOT_AUTHORIZED. §5.1: the browser's setup check of a picked folder
+  (`suggestSetup`/`cancelSetup`), closed in production.

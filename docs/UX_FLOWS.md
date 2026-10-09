@@ -6,7 +6,7 @@ run on a real build is pending. Nothing here is READY (see
 [setup status](SETUP_STATUS.md)).
 
 Zen stays the frontend. AxioSozo adds a few native-looking pieces: a space
-switcher at the bottom of the sidebar, project folders under the space name,
+switcher at the bottom of the sidebar, the Projects section under the space name,
 an environment pill in the address bar, entries in the space menu and one
 page, `about:axiosozo`. It takes no keyboard shortcut. The command palette,
 `Cmd+T` panel and saved-pages UI of the first experience were retired at the
@@ -52,18 +52,26 @@ Zen reset (HANDOFF_3 §3).
 
 ## In the sidebar
 
-- Under the space name, each project of that space is one quiet row: a folder
-  glyph, the name and status dots, one per local server (green: the port
-  answers, grey: it does not, ring: not checked) and one ring for production
-  (remote addresses are never contacted).
-- A project with an open tab in this space counts as **active**: it sorts
-  first and starts expanded. Others stay collapsed. With more than three
-  projects the rest fold into **N more projects**.
-- Expanded: one row per environment (grouped per app) and the shown links.
-  A row selects an open tab of that environment in this space, or opens one.
-  **More** (`…`) lists the other links, **Edit project…** (opens the editor in
-  `about:axiosozo`) and **Remove from space**.
-- Hidden in Zen's compact mode; the address-bar pill carries the essentials.
+Design and rationale: [projects, servers and connections](design/projects.md).
+
+- Under the space name, a quiet **Projects** heading (click to fold; `+` adds
+  a project to this space) and **one row per project**: its own icon or a
+  monogram in its container's colour, the name, and only meaningful badges
+  (a green count of running servers, amber while one starts, red when one
+  failed, the console-error count). Order is alphabetical and stable; past six
+  projects the rest fold into **N more**, never hiding the current or a
+  running project. The project of the front tab is marked current.
+- Hovering a project shows ▶: start its main server and open it.
+- A row opens the **project panel** beside the sidebar: **Run** (web and API
+  servers, mobile and desktop apps, workers: open, start, stop, output; the
+  first run of a command shows it and asks), **Links** (environments,
+  repository, dashboards), **Project home**, and ⋯ (Edit project…, Stop all
+  servers, Remove from space).
+- **N running** in the heading opens every run AxioSozo started, in every
+  space, with Stop and Stop all. Runs stop when you stop them, when the
+  project is removed, and when AxioSozo quits or crashes.
+- Kept in Zen's compact mode; the collapsed icon sidebar shows the project
+  icons. Zen's Clear button is hidden.
 
 ## Tabs and environments
 
@@ -75,7 +83,9 @@ Zen reset (HANDOFF_3 §3).
   the same app on the same path, query and fragment; other apps open at
   their own address.
 - A refused connection to a declared local address shows the **waiting page**
-  over the tab; it loads once the port answers. Other connection errors keep
+  over the tab; it loads once the port answers. When the project declares how
+  to start that server, the page offers **Start** with the exact command and
+  then shows it starting. Other connection errors keep
   Firefox's error page.
 - Editing a project's environments in `about:axiosozo` re-links open tabs at
   once.

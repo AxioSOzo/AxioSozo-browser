@@ -9,6 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
+import { runTargets } from "../chrome/ProjectRunner.sys.mjs";
 
 export const WORKSPACE_A = "{11111111-1111-4111-8111-111111111111}";
 export const WORKSPACE_B = "{22222222-2222-4222-8222-222222222222}";
@@ -304,7 +305,8 @@ export function createFakeAdapter({ privateWindow = false, active = WORKSPACE_A,
 // ---- Fake services ------------------------------------------------------------------------
 export function createFakeServices(core, { projects = [], contexts = [], rules = [], jev = null, statuses = {} } = {}) {
   const listeners = new Map();
-  const calls = { projectForUrl: 0, listProjects: 0, serviceStatus: 0, updateProject: [], recordForeground: [], usageSummary: 0, listRules: 0 };
+  const calls = { projectForUrl: 0, listProjects: 0, serviceStatus: 0, updateProject: [], recordForeground: [], usageSummary: 0, listRules: 0,
+    startRun: [], stopRun: [], stopRuns: [], projectIcon: [] };
   let ledger = core.DEFAULT_LEDGER;
   const services = {
     projects, contexts, rules, statuses, calls,
@@ -342,6 +344,49 @@ export function createFakeServices(core, { projects = [], contexts = [], rules =
       return core.summarize(ledger, { today: services.today, days });
     },
     today: "2026-09-27",
+    // Project runs (ProjectRunner through the services): approvals and runs in memory.
+    runs: new Map(), approved: new Set(), logs: {}, icons: {},
+    async projectRuns(projectId) {
+      const p = services.projects.find(item => item.id === projectId);
+      if (!p) throw Object.assign(new Error("UNKNOWN_PROJECT"), { code: "UNKNOWN_PROJECT" });
+      return { available: true, targets: runTargets(p).map(target => ({ ...target, approved: services.approved.has(`${projectId}\u0000${target.key}`),
+        run: services.runs.get(`${projectId}\u0000${target.key}`) ?? null })) };
+    },
+    async listRuns() {
+      return [...services.runs.values()].map(run => {
+        const p = services.projects.find(item => item.id === run.project_id);
+        return { ...run, project_name: p?.manifest.name ?? null, target: p ? runTargets(p).find(t => t.key === run.key) ?? null : null };
+      });
+    },
+    async startRun({ window, projectId, key, approve = false }) {
+      calls.startRun.push({ window, projectId, key, approve });
+      const p = services.projects.find(item => item.id === projectId);
+      const target = p && runTargets(p).find(t => t.key === key);
+      if (!target) throw Object.assign(new Error("UNKNOWN_TARGET"), { code: "UNKNOWN_TARGET" });
+      const id = `${projectId}\u0000${key}`;
+      if (!services.approved.has(id) && approve !== true) throw Object.assign(new Error("NEEDS_APPROVAL"), { code: "NEEDS_APPROVAL" });
+      services.approved.add(id);
+      const run = { project_id: projectId, key, name: target.name, status: "running", command: target.command, cwd: target.cwd,
+        started_at: calls.startRun.length, ended_at: null, exit_code: null, detected_url: null, last_line: "starting…" };
+      services.runs.set(id, run);
+      services.emit("runs");
+      return run;
+    },
+    async stopRun({ projectId, key }) {
+      calls.stopRun.push({ projectId, key });
+      const run = services.runs.get(`${projectId}\u0000${key}`);
+      if (run) { run.status = "stopped"; services.emit("runs"); }
+      return { stopped: !!run };
+    },
+    async stopRuns({ projectId = null } = {}) {
+      calls.stopRuns.push({ projectId });
+      for (const run of services.runs.values()) if (projectId === null || run.project_id === projectId) run.status = "stopped";
+      services.emit("runs");
+      return { stopped: true };
+    },
+    runLog({ projectId, key }) { return services.logs[`${projectId}\u0000${key}`] ?? []; },
+    dismissRun({ projectId, key }) { return services.runs.delete(`${projectId}\u0000${key}`); },
+    async projectIcon(id) { calls.projectIcon.push(id); return services.icons[id] ?? null; },
     on(name, callback) {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name).add(callback);

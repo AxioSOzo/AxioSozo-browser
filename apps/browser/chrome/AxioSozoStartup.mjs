@@ -168,7 +168,7 @@ async function installContexts({ engineProbe, aboutRegistered, alive }) {
     runtime.agentTools = () => bridge.getState();
   }
   const installers = [
-    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings,
+    ["DevLoop.sys.mjs", "installDevLoop", { services, adapter: zen, openSettings: openProjectSettings, openOverview,
       consoleErrors: consoleOwner?.service ?? null }],
     ["SiteRuleRuntime.sys.mjs", "installSiteRuleRuntime", { services, adapter: zen, decisions }],
     ["EnginePreference.sys.mjs", "installEnginePreference", { services, adapter: zen, engineProbe }],

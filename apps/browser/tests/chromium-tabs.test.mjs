@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, BLANK_IDENTITY } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, keyboardRoute } from '../chrome/CEFPresenter.sys.mjs';
+import { CEFPresenter, keyboardRoute, addressLabel } from '../chrome/CEFPresenter.sys.mjs';
+import { validFavicon, MAX_FAVICON_LENGTH } from '../chrome/CEFEngineAdapter.sys.mjs';
 import { installEngineProbeControls } from '../chrome/EngineProbeControls.sys.mjs';
 
 // Visibly controlled protocol fixtures for one shared web host. They never count
@@ -213,6 +214,9 @@ function zenWindow() {
     gBrowser: { selectedTab: first, get selectedBrowser() { return this.selectedTab.linkedBrowser; }, tabs,
       tabContainer: { addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) },
       updateTitlebar() {}, setTabTitle(tab) { tab.label = tab.id; },
+      // As Tabbrowser.setIcon/getIcon: browser.mIconURL plus the tab's image attribute.
+      setIcon(tab, url = '') { tab.linkedBrowser.mIconURL = url; if (url) tab.setAttribute('image', url); else tab.removeAttribute('image'); },
+      getIcon(tab) { return tab.linkedBrowser.mIconURL; },
       addTrustedTab(url, options) { const tab = makeTab(`tab-${tabs.length + 1}`, url); tabs.push(tab);
         if (!options.inBackground) win.gBrowser.selectedTab = tab; return tab; } },
     SessionStore: { getCustomTabValue: (tab, key) => custom.get(`${tab.id}:${key}`) ?? '',
@@ -539,4 +543,96 @@ test('an engine preference that cannot start Chromium keeps the Firefox tab; the
   assert.deepEqual(await disabled.applyEnginePreference(off.first, 'chromium'), { applied: false, engine: 'chromium', error: 'DISABLED' });
   assert.equal(off.launched.length, 0); assert.equal(off.custom.size, 0);
   await disabled.dispose();
+});
+
+const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+const OTHER_PNG = 'data:image/png;base64,AAAAAAAA';
+
+test('the host may send only a small PNG data URL it encoded as the page icon', async () => {
+  assert.equal(validFavicon(''), true); assert.equal(validFavicon(PNG), true);
+  for (const value of ['https://example.com/favicon.ico', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,', 'data:image/png;base64,a b=',
+    'data:image/png;base64,' + 'A'.repeat(MAX_FAVICON_LENGTH), 'chrome://global/skin/icons/info.svg', null, 7]) {
+    assert.equal(validFavicon(value), false, String(value).slice(0, 40));
+  }
+  const f = sharedHost(); await f.host.connect();
+  const first = attach(f.host, 'tab-a'), second = attach(f.host, 'tab-b');
+  await first.adapter.create('about:blank', { width: 2, height: 2, device_scale: 1 });
+  await second.adapter.create('about:blank', { width: 2, height: 2, device_scale: 1 });
+  f.event({ event: 'favicon', icon: PNG, target: f.targets.get('tab-a') }); await settle();
+  assert.equal(first.seen.events.at(-1).icon, PNG); assert.equal(first.adapter.status, 'active');
+  // A remote icon would make Zen fetch it with Firefox's network and cookies.
+  f.event({ event: 'favicon', icon: 'https://tracker.example/favicon.ico', target: f.targets.get('tab-b') }); await settle();
+  assert.equal(second.adapter.status, 'failed'); assert.deepEqual(second.seen.failures, ['INVALID_CEF_FAVICON']);
+  assert.equal(first.adapter.status, 'active');
+  await f.host.shutdown();
+});
+
+test("a Chromium tab shows its page's icon and Firefox's throbber, which the hidden Firefox browser cannot clear", async () => {
+  const z = zenWindow(), modified = (tab, changed) => z.listeners.get('TabAttrModified')({ target: tab, detail: { changed } });
+  z.win.gBrowser.setIcon(z.first, PNG);
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  assert.equal(z.first.getAttribute('image'), PNG, 'the page keeps its icon across the switch');
+  // Firefox's about:blank load finishes without an icon and clears it.
+  z.first.linkedBrowser.mIconURL = null; z.first.removeAttribute('image'); modified(z.first, ['image']);
+  assert.equal(z.first.getAttribute('image'), PNG); assert.equal(z.win.gBrowser.getIcon(z.first), PNG);
+  callbacks.onEvent({ event: 'favicon', icon: OTHER_PNG });
+  assert.equal(z.first.getAttribute('image'), OTHER_PNG);
+  callbacks.onEvent({ event: 'favicon', icon: '' });
+  assert.equal(z.first.hasAttribute('image'), false, 'a page without an icon shows Zen\'s default');
+  callbacks.onEvent({ event: 'favicon', icon: PNG });
+
+  // Throbber: connecting, then loading once the document commits.
+  callbacks.onEvent({ event: 'loading', loading: true, can_go_back: false, can_go_forward: false });
+  assert.equal(z.first.hasAttribute('busy'), true); assert.equal(z.first.hasAttribute('progress'), false);
+  callbacks.onEvent({ event: 'url', url: 'https://example.com/next' });
+  assert.equal(z.first.hasAttribute('progress'), true);
+  z.first.removeAttribute('busy'); modified(z.first, ['busy']);
+  assert.equal(z.first.hasAttribute('busy'), true, 'Firefox\'s load end does not stop Chromium\'s throbber');
+  callbacks.onEvent({ event: 'loading', loading: false, can_go_back: true, can_go_forward: false });
+  assert.equal(z.first.hasAttribute('busy'), false); assert.equal(z.first.hasAttribute('progress'), false);
+  z.first.toggleAttribute('busy', true); modified(z.first, ['busy']);
+  assert.equal(z.first.hasAttribute('busy'), false, 'nor does Firefox\'s load start begin one');
+
+  // Error pages use Firefox's error-page icons; the page icon returns with the next good load.
+  callbacks.onEvent({ event: 'error', code: 'load_failed', native_code: -105 });
+  assert.equal(z.first.getAttribute('image'), 'chrome://global/skin/icons/info.svg');
+  callbacks.onEvent({ event: 'load', http_status: 200, restored_from_history: false });
+  assert.equal(z.first.getAttribute('image'), PNG);
+
+  // Back in Firefox, Firefox's page sets its own icon.
+  await presenter.switchToGecko();
+  assert.equal(z.first.hasAttribute('image'), false);
+  await presenter.dispose();
+});
+
+test('a Chromium tab without a title is labelled with its address, as Firefox does', async () => {
+  assert.equal(addressLabel('https://example.com/a%20b?x=1'), 'example.com/a b?x=1');
+  assert.equal(addressLabel('about:blank'), '');
+  const z = zenWindow();
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });
+  await presenter.switchToChromium(z.first); await settle();
+  assert.equal(z.first.label, 'example.com/start');
+  z.launched[0].callbacks.onEvent({ event: 'title', title: 'Start' });
+  assert.equal(z.first.label, 'Start'); assert.equal(z.custom.get('first:axiosozo-chromium-title'), 'Start');
+  await presenter.switchToGecko();
+  assert.equal(z.custom.has('first:axiosozo-chromium-title'), false);
+  await presenter.dispose();
+});
+
+test('a restored Chromium tab is labelled with its page title before its engine starts', async () => {
+  const z = zenWindow();
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });
+  const background = z.makeTab('background', 'about:blank'); z.tabs.push(background);
+  z.custom.set('background:axiosozo-engine', 'chromium'); z.custom.set('background:axiosozo-chromium-url', 'https://example.com/later');
+  z.custom.set('background:axiosozo-chromium-title', 'Later page');
+  z.listeners.get('SSTabRestoring')({ target: background });
+  assert.equal(background.label, 'Later page'); assert.equal(z.launched.length, 0, 'not started in the background');
+  z.listeners.get('SSTabRestored')({ target: background });
+  z.win.gBrowser.setTabTitle(background);
+  assert.equal(background.label, 'Later page', 'Firefox\'s about:blank title does not replace it');
+  z.select(background); await settle();
+  assert.equal(z.launched.length, 1); assert.equal(background.label, 'Later page');
+  await presenter.dispose();
 });

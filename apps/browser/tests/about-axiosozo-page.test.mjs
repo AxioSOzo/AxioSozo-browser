@@ -102,10 +102,13 @@ test("three sections only; the first run guide is the Projects empty state; ever
   assert.equal(spaces.querySelector("h3").textContent, "Your spaces");
   assert.deepEqual(spaces.querySelectorAll(".row-title").map(node => node.textContent), ["Homethis window", "Acme BV"]);
   assert.equal(document.querySelectorAll(".space-group").length, 0);
-  assert.deepEqual(spaces.querySelectorAll("button.ghost").map(button => button.getAttribute("aria-label")),
-    ["Add a project to Home", "Add a project to Acme BV"]);
+  // One "Add project" button on the page, in the header; adding into a given space sits behind its "…".
+  assert.deepEqual(document.querySelectorAll("button:not([role=menuitem])").filter(button => /^Add (a )?project/u.test(button.textContent.trim()))
+    .map(button => button.id), ["add-project"]);
+  assert.equal(spaces.querySelectorAll("button.ghost").length, 0);
   assert.deepEqual(spaces.querySelectorAll(".menu-items button").map(button => button.textContent),
-    ["Switch to Home", "Space type…", "Switch to Acme BV", "Space type…"], "switching and the space type stay reachable, behind …");
+    ["Add a project here…", "Switch to Home", "Space type…", "Add a project here…", "Switch to Acme BV", "Space type…"],
+    "adding into a space, switching and the space type stay reachable, behind …");
   assert.equal(document.getElementById("projects-body").hasAttribute("aria-busy"), false);
   assert.equal(page.calls.some(([name]) => name === "getProviderStatus"), false, "no provider discovery until AI & keys is opened");
   assert.equal(page.calls.some(([name]) => /DecisionKey|JevKey/u.test(name)), false, "no Keychain check until AI & keys is opened");
@@ -486,47 +489,66 @@ test("rule editor: a screenshot cannot be newly chosen; a saved screen rule keep
   assert.equal(JSON.stringify(kept).includes("data_base64"), false, "a rule never carries an image");
 });
 
-test("add project: review sheet with the current space, environments per app, production URL, then where it lives", async () => {
+test("add project: one sheet with name, type, services and space up front; addresses and links under More options; then where it lives", async () => {
   const page = await loadPage();
   const { document } = page;
   document.getElementById("add-project").click();
   await flush();
   assert.equal(document.getElementById("sheet").open, true);
   const sheet = document.getElementById("sheet-body");
-  assert.equal(sheet.querySelector("h2").textContent, "Review project");
+  assert.equal(sheet.querySelector("h2").textContent, "Add project");
+  assert.equal(sheet.querySelector("input.setup-name").value, "Tauri Plus Web");
+  assert.equal(sheet.querySelector(".setup-path").textContent, "/synthetic/domo-cortex");
+  assert.equal(sheet.querySelector(".setup-status").hidden, true, "no assistant status where none checked the folder");
+  // Type: five choices, the detected one selected, no provenance sentence when it was certain.
+  assert.deepEqual(sheet.querySelectorAll(".kind-choice").map(choice => choice.textContent), ["Web app", "Desktop app", "Mobile app", "Command line", "Library"]);
+  assert.equal(sheet.querySelector(".kind-choice input:checked").value, "desktop");
+  assert.equal(sheet.querySelector(".kind-hint").hidden, true);
+  // Services with their start commands; the guessed Vite port is marked.
+  assert.deepEqual(sheet.querySelectorAll(".service-row").map(row => [row.querySelector(".service-name").value,
+    row.querySelector(".service-command").value, row.querySelector(".service-url")?.textContent ?? null]),
+  [["Tauri dev server", "npm run tauri -- dev", "localhost:1420"], ["Vite dev server", "npm run dev", "localhost:5173"]]);
+  assert.equal(sheet.querySelectorAll(".service-row")[1].querySelector(".service-cwd").textContent, "in apps/web");
+  assert.ok(sheet.querySelectorAll(".service-row .tag.guess").length >= 1, "the Vite default port is a guess");
   const space = sheet.querySelectorAll("select").find(select => select.querySelector("option")?.textContent.startsWith("No space"));
   assert.equal(space.value, HOME, "defaults to the space this window shows");
   assert.deepEqual(space.querySelectorAll("option").map(o => o.textContent),
     ["No space (not in the sidebar)", "Home (personal) · this window", "Acme BV (organization)"]);
-  assert.deepEqual(sheet.querySelectorAll(".env-group h4").map(h4 => h4.textContent), ["Desktop app (desktop)", "App web"]);
-  assert.deepEqual(sheet.querySelectorAll(".review-row .env-url").slice(0, 2).map(input => input.value), ["http://localhost:1420", "http://localhost:5173"]);
-  assert.ok(sheet.querySelectorAll(".tag.guess").some(tag => tag.textContent === "guessed"), "the Vite default port is marked guessed");
-  assert.match(sheet.textContent, /Shown in the sidebarRepositorygithub\.comMove to More/u, "only the repository is shown");
-  assert.match(sheet.textContent, /More \(behind … in the sidebar\): 4Issues.*Vercel \(synthetic-web\)vercel\.com/u, "issues, CI, releases and the Vercel dashboard go behind …");
-  // Detection v2 preview: services and apps as plain text, no links before the project exists.
-  const findings = sheet.querySelector("fieldset.findings");
-  assert.equal(findings.querySelector("legend").textContent, "Also found in the folder");
-  assert.deepEqual(findings.querySelectorAll("dt").map(dt => dt.textContent), ["Services", "Apps"]);
+  // Everything else waits under More options.
+  const more = sheet.querySelector("details.setup-more");
+  assert.equal(more.open, false);
+  assert.deepEqual(more.querySelectorAll(".env-group h4").map(h4 => h4.textContent), ["Desktop app (desktop)", "App web"]);
+  assert.match(more.textContent, /Links in the sidebarRepositorygithub\.comMove behind …/u, "only the repository is shown");
+  assert.match(more.textContent, /Behind … in the sidebar \(4\)Issues.*Vercel \(synthetic-web\)vercel\.com/u, "issues, CI, releases and the Vercel dashboard go behind …");
+  const findings = more.querySelector("fieldset.findings");
+  assert.equal(findings.querySelector("legend").textContent, "Also found");
   assert.deepEqual(findings.querySelectorAll("dd .tag").map(tag => tag.textContent), ["Vercel", "Desktop (Tauri) · Tauri Plus Web"]);
   assert.equal(findings.querySelectorAll("button").length, 0);
   const production = sheet.querySelectorAll("input").find(input => input.getAttribute("placeholder") === "https://example.com");
   production.value = "https://domo.example";
   production.dispatchEvent(makeEvent("input"));
-  byText(sheet, "button", "Add environment").click();
+  byText(sheet, "button", "Add address").click();
   const added = sheet.querySelectorAll(".env-group .review-row").at(-1);
   const [name, url] = added.querySelectorAll("input").filter(input => input.type !== "checkbox");
   name.value = "staging"; name.dispatchEvent(makeEvent("input"));
   url.value = "http://localhost:5180"; url.dispatchEvent(makeEvent("input"));
+  // A service of one's own: a command only.
+  byText(sheet, "button", "Add service").click();
+  const own = sheet.querySelectorAll(".service-row").at(-1);
+  own.querySelector(".service-name").value = "Docs"; own.querySelector(".service-name").dispatchEvent(makeEvent("input"));
+  own.querySelector(".service-command").value = "pnpm docs:dev"; own.querySelector(".service-command").dispatchEvent(makeEvent("input"));
   byText(document.getElementById("sheet"), "button", "Add project").click();
   await flush();
   const [, params] = page.calls.find(([method]) => method === "confirmProject");
   assert.equal(params.root, "/synthetic/domo-cortex");
   assert.equal(params.contextUuid, HOME);
-  assert.equal(params.manifest.version, 2);
+  assert.equal(params.manifest.version, 3, "start commands need manifest v3");
   assert.deepEqual(params.manifest.environments.map(env => [env.app ?? null, env.name, env.base_url]), [
     ["desktop", "local", "http://localhost:1420"], ["web", "local", "http://localhost:5173"],
     ["web", "staging", "http://localhost:5180"], ["web", "production", "https://domo.example"]]);
-  assert.ok(params.manifest.services.some(service => service.port === 5180), "a new local environment gets a dev server for its dot");
+  assert.deepEqual(params.manifest.services.filter(service => service.command).map(service => [service.name, service.command, service.cwd ?? null]),
+    [["Tauri dev server", "npm run tauri -- dev", null], ["Vite dev server", "npm run dev", "apps/web"], ["Docs", "pnpm docs:dev", null]]);
+  assert.ok(params.manifest.services.some(service => service.port === 5180), "a new local address gets a dev server for its dot");
   assert.equal(document.getElementById("sheet").open, false);
   const placement = document.getElementById("placement");
   assert.equal(placement.hidden, false);
@@ -536,6 +558,106 @@ test("add project: review sheet with the current space, environments per app, pr
   assert.deepEqual(page.calls.at(-1), ["openContext", { uuid: HOME }]);
   assert.ok(document.getElementById("project-p_domo1"), "the new project card is listed under its space");
 });
+
+test("add project: the sheet opens at once, shows reading, applies the assistant's setup check, shows the icon and saves once", async () => {
+  let finishDetect, finishConfirm;
+  const setupDoc = { version: 1, name: "Domo Cortex", kind: "web", kind_reason: "A web app with a Tauri shell", icon: "apps/web/public/icon.svg",
+    services: [{ name: "Web", kind: "web", command: "pnpm --filter web dev", cwd: null, url: "http://localhost:5173" },
+      { name: "Worker", kind: "worker", command: "pnpm worker", cwd: "apps/worker", url: null }] };
+  const page = await loadPage({ handlers: {
+    detect: () => new Promise(resolve => { finishDetect = () => resolve(DRAFT); }),
+    suggestSetup: () => ({ version: 1, request_id: "r:1", kind: "setup", cli: "codex", model: "gpt-6-luna", status: "ok", reason: null,
+      document: setupDoc, data_sent: true, duration_ms: 1200 }),
+    previewIcon: ({ path }) => (path === "apps/web/public/icon.svg" ? "data:image/svg+xml;base64,PHN2Zy8+" : null),
+    confirmProject: params => new Promise(resolve => { finishConfirm = () => resolve({ version: 1, id: "p_domo1", root: params.root, manifest: params.manifest,
+      manifest_state: "none", context_uuid: params.contextUuid, trusted: false, created_at: 1, updated_at: 1 }); }),
+  } });
+  const { document } = page;
+  document.getElementById("add-project").click();
+  await flush();
+  const sheet = document.getElementById("sheet-body");
+  // Immediately: the folder's name, a status line and placeholders; Add waits for the folder.
+  assert.equal(document.getElementById("sheet").open, true);
+  assert.equal(sheet.querySelector("input.setup-name").value, "domo-cortex");
+  assert.equal(sheet.querySelector(".setup-status").textContent, "Reading the folder…");
+  assert.ok(sheet.querySelector(".setup-skeleton"));
+  const add = byText(document.getElementById("sheet"), "button", "Add project");
+  assert.equal(add.disabled, true);
+  finishDetect();
+  await flush(12);
+  // The check's suggestions fill what the user did not touch; the status says by whom.
+  assert.equal(sheet.querySelector(".setup-status").textContent, "Checked by Codex. 5 suggestions applied.");
+  assert.equal(sheet.querySelector("input.setup-name").value, "Domo Cortex");
+  assert.equal(sheet.querySelector(".kind-choice input:checked").value, "web");
+  assert.deepEqual(sheet.querySelectorAll(".service-row").map(row => [row.querySelector(".service-name").value, row.querySelector(".service-command").value]),
+    [["Tauri dev server", "npm run tauri -- dev"], ["Vite dev server", "pnpm --filter web dev"], ["Worker", "pnpm worker"]]);
+  assert.equal(sheet.querySelector(".setup-icon img").getAttribute("src"), "data:image/svg+xml;base64,PHN2Zy8+");
+  assert.deepEqual(page.calls.filter(([name]) => name === "previewIcon").map(([, params]) => params),
+    [{ root: "/synthetic/domo-cortex", path: "apps/web/public/icon.svg" }]);
+  // Saving shows at once and a second click does nothing.
+  add.click();
+  add.click();
+  await flush();
+  assert.equal(add.disabled, true);
+  assert.equal(add.textContent, "Adding…");
+  assert.equal(page.calls.filter(([name]) => name === "confirmProject").length, 1);
+  finishConfirm();
+  await flush(12);
+  const [, params] = page.calls.find(([name]) => name === "confirmProject");
+  assert.equal(params.manifest.icon, "apps/web/public/icon.svg");
+  assert.equal(params.manifest.kind, "web");
+  assert.equal(document.getElementById("sheet").open, false);
+});
+
+test("add project: closing the sheet while the assistant checks ends that check; a refused folder offers another", async () => {
+  const page = await loadPage({ handlers: {
+    suggestSetup: () => new Promise(() => {}),
+    cancelSetup: () => null,
+  } });
+  const { document } = page;
+  document.getElementById("add-project").click();
+  await new Promise(resolve => setTimeout(resolve, 450));
+  await flush();
+  const sheet = document.getElementById("sheet-body");
+  assert.equal(sheet.querySelector(".setup-status").textContent, "Checking how this project starts…Skip");
+  byText(document.getElementById("sheet"), "button", "Cancel").click();
+  await flush();
+  assert.ok(page.calls.some(([name]) => name === "cancelSetup"));
+  const refused = await loadPage({ handlers: { detect: () => { throw { code: "ROOT_DENIED", message: "ROOT_DENIED" }; } } });
+  refused.document.getElementById("add-project").click();
+  await flush();
+  const body = refused.document.getElementById("sheet-body");
+  assert.match(body.textContent, /AxioSozo does not read this folder/u);
+  assert.ok(byText(body, "button", "Choose another folder"));
+  assert.equal(byText(refused.document.getElementById("sheet"), "button", "Add project").disabled, true);
+});
+
+test("a project's icon shows in the list and on its home; its Start section copies each command, with its folder", async () => {
+  const copied = [];
+  const browserProject = { ...structuredClone(HARBOR_BASE()), id: "p_browser1", root: "/synthetic/browser",
+    manifest: { version: 3, name: "AxioSozo Browser", kind: "desktop", icon: "assets/brand/icon.svg", environments: [],
+      services: [{ name: "Desktop app", command: "./dev" }, { name: "Docs", command: "pnpm dev", cwd: "apps/docs" }], surfaces: [] } };
+  const page = await loadPage({ projects: [browserProject], navigator: { clipboard: { writeText: async text => { copied.push(text); } } },
+    handlers: { projectIcon: ({ id }) => (id === "p_browser1" ? "data:image/svg+xml;base64,PHN2Zy8+" : null) } });
+  const { document } = page;
+  await flush();
+  const tile = document.querySelector('[data-icon-for="p_browser1"]');
+  assert.equal(tile.querySelector("img").getAttribute("src"), "data:image/svg+xml;base64,PHN2Zy8+");
+  assert.equal(page.calls.filter(([name]) => name === "projectIcon").length, 1);
+  await page.navigate("#project=p_browser1");
+  const start = document.querySelector('[data-section="start"]');
+  assert.ok(start, "a Start section for a project with commands");
+  assert.deepEqual(start.querySelectorAll(".start-row").map(row => [row.querySelector(".start-name").textContent, row.querySelector(".start-command").textContent]),
+    [["Desktop app", "./dev"], ["Docs", "cd apps/docs && pnpm dev"]]);
+  start.querySelectorAll("button")[1].click();
+  await flush();
+  assert.deepEqual(copied, ["cd apps/docs && pnpm dev"]);
+  assert.match(document.getElementById("status").textContent, /^Copied\./u);
+  assert.equal(document.querySelector(".home-head [data-icon-for] img")?.getAttribute("src"), "data:image/svg+xml;base64,PHN2Zy8+");
+  assert.equal(page.calls.filter(([name]) => name === "projectIcon").length, 1, "icons are read once per session");
+});
+
+const HARBOR_BASE = () => HARBOR;
 
 // P2: one synthetic v2 project with its own container, a detected service and
 // an account label the user typed earlier.

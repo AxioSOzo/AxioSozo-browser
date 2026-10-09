@@ -375,7 +375,9 @@ test("stylesheet only hides Zen UI while the switcher is active, and respects re
   assert.ok(hidingBlocks.length >= 3);
   // Every !important hide sits under the switcher's root attribute.
   const hideSelectors = [...css.matchAll(/^:root\[axiosozo-space-switcher\][^{]*\{/gmu)];
-  assert.equal(hideSelectors.length, 2);
+  assert.equal(hideSelectors.length, 3);
+  assert.match(css, new RegExp(`:root\\[axiosozo-space-switcher\\] \\${ZEN_SIDEBAR.clearButton} \\{\\s*display: none !important;`, "u"),
+    "Zen's Clear button is removed while the switcher is active");
   assert.doesNotMatch(css, /library-button/u, "Library is removed through CustomizableUI, not CSS");
   assert.match(css, /prefers-reduced-motion: reduce/u);
   assert.match(css, /:has\(\.tab-label-container-editing, \[zen-emoji-open="true"\]\)/u, "header returns while renaming or picking an icon");

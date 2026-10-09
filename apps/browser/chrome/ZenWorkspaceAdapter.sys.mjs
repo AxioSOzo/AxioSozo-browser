@@ -48,6 +48,7 @@ export const ZEN_ADAPTER_CONTRACT = Object.freeze([
   { name: "Library widget #zen-library-button", source: "src/zen/library/ZenLibraryWidget.sys.mjs", needle: "id: \"zen-library-button\"," },
   { name: "space header .zen-current-workspace-indicator", source: SPACE, needle: "<vbox class=\"zen-workspace-tabs-section zen-current-workspace-indicator " },
   { name: "space attribute collapsedpinnedtabs", source: SPACE, needle: "setAttribute(\"collapsedpinnedtabs\", \"true\")" },
+  { name: "Clear button .zen-workspace-close-unpinned-tabs-button", source: SPACE, needle: "class=\"zen-workspace-close-unpinned-tabs-button\" />" },
   { name: "rename state .tab-label-container-editing", source: UI, needle: "label.classList.add(\"tab-label-container-editing\");" },
   { name: "emoji picker anchor [zen-emoji-open]", source: "src/zen/common/emojis/ZenEmojiPicker.mjs", needle: "this.#anchor.setAttribute(\"zen-emoji-open\", \"true\");" },
   { name: "root attribute zen-sidebar-expanded", source: UI, needle: "document.documentElement.setAttribute(\"zen-sidebar-expanded\", \"true\");" },
@@ -76,6 +77,7 @@ export const ZEN_SIDEBAR = Object.freeze({
   libraryWidget: "zen-library-button",
   downloadsWidget: "downloads-button",
   spaceHeader: ".zen-current-workspace-indicator",
+  clearButton: ".zen-workspace-close-unpinned-tabs-button",
 });
 
 const UUID = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/u;

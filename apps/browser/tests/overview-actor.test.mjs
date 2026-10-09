@@ -447,9 +447,9 @@ test("add-project preview shows services, apps, domains, docs domains as unconfi
   const sheet = page.document.getElementById("sheet-body");
   const findings = sheet.querySelector("fieldset.findings");
   assert.ok(findings, "the preview has an Also found section");
-  assert.equal(findings.querySelector("legend").textContent, "Also found in the folder");
-  assert.match(findings.textContent, /never written to the folder/u);
-  assert.match(findings.textContent, /noted by name only; they are not opened/u);
+  assert.equal(findings.querySelector("legend").textContent, "Also found");
+  assert.match(findings.textContent, /Kept in this browser only/u);
+  assert.match(findings.textContent, /noted by name, never opened/u);
   const facts = factsOf(findings);
   assert.deepEqual(Object.keys(facts), ["Services", "Apps", "Domains", "Agents"]);
   assert.match(facts.Services.textContent, /^VercelConvexClerk/u);
@@ -537,10 +537,14 @@ test("detection and refresh failures show fixed sentences, not raw codes", async
   const page = await loadPage({ handlers: { detect: () => { throw { code: "READ_CONTAINMENT_UNAVAILABLE", message: "READ_CONTAINMENT_UNAVAILABLE" }; } } });
   page.document.getElementById("add-project").click();
   await flush();
-  assert.equal(page.document.getElementById("sheet").open ?? false, false, "no review without a detection");
-  assert.equal(page.document.getElementById("status").textContent, "This build cannot read project folders safely, so nothing was read.");
+  // The sheet stays open on the failure, in a fixed sentence, with nothing to add.
+  const sheet = page.document.getElementById("sheet-body");
+  assert.equal(page.document.getElementById("sheet").open, true);
+  assert.equal(sheet.querySelector(".setup-failed p").textContent, "This build cannot read project folders safely, so nothing was read.");
+  assert.equal(sheet.querySelectorAll(".service-row").length, 0, "no review without a detection");
+  assert.doesNotMatch(sheet.textContent, /READ_CONTAINMENT/u);
   const denied = await loadPage({ handlers: { detect: () => { throw { code: "ROOT_DENIED", message: "ROOT_DENIED" }; } } });
   denied.document.getElementById("add-project").click();
   await flush();
-  assert.match(denied.document.getElementById("status").textContent, /does not read this folder/u);
+  assert.match(denied.document.getElementById("sheet-body").textContent, /does not read this folder/u);
 });

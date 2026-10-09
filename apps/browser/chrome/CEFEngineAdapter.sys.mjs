@@ -245,6 +245,8 @@ const EVENT_FIELDS = {
   navigation: [], loading: ["loading", "can_go_back", "can_go_forward"],
   title: ["title"], url: ["url"], closed: [], error: ["request_id", "code", "native_code"], load: ["http_status", "restored_from_history", "same_document"],
   cursor: ["cursor"], open_url: ["url", "background"],
+  // The page icon as a small PNG data URL Chromium downloaded, or "" for none.
+  favicon: ["icon"],
   // Proposed with `ime`: the focused editable's kind and caret, in logical points.
   text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
   // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
@@ -256,6 +258,11 @@ const EVENT_FIELDS = {
   ax_tree_update: ["seq", "batch", "reset", "final", "root", "focus", "px", "events", "truncated", "nodes"],
   ax_location: ["seq", "nodes"],
 };
+// Only a PNG the host encoded itself: never a remote URL Zen would fetch, never SVG.
+export const MAX_FAVICON_LENGTH = 7400;
+const FAVICON = /^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+export const validFavicon = value => value === "" || (typeof value === "string" && value.length <= MAX_FAVICON_LENGTH
+  && value.length > 22 && FAVICON.test(value));
 const AX_EVENTS = new Set(["ax_tree_update", "ax_location"]);
 const DELEGATION_EVENTS = new Set(["prompt", "prompt_closed", "download_updated", "find_result", "popup_blocked"]);
 
@@ -272,7 +279,7 @@ const READ_FAILURE_CODES = new Set([
   "INVALID_CEF_CURSOR", "INVALID_CEF_OPEN_URL", "INVALID_CEF_PROMPT", "INVALID_CEF_TEXT_INPUT",
   "CEF_FRAME_PRESENTATION_FAILED", "CEF_EVENT_CALLBACK_FAILED",
   "CEF_SURFACE_BIND_FAILED", "CEF_SURFACE_CLOSED", "INVALID_CEF_HEARTBEAT", "CEF_HOST_UNRESPONSIVE",
-  "INVALID_CEF_ACCESSIBILITY",
+  "INVALID_CEF_ACCESSIBILITY", "INVALID_CEF_FAVICON",
 ]);
 // A violation that concerns one target's own document. On a shared host it ends
 // only that tab; framing, identity and response errors end the whole host.
@@ -573,7 +580,7 @@ export class CEFHostConnection {
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
-      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input"].includes(value.event)
+      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
           || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
@@ -768,7 +775,7 @@ export class CEFEngineAdapter {
   surfaceStats() { return this.#surfaceId === null ? null : this.#host.surfaceStats(this.#surfaceId); }
   capabilities() {
     return Object.freeze({ version: 1, engine: "chromium", navigation: true,
-      observation: ["url", "title", "loading"], content_capture: false, developer_tools: false,
+      observation: ["url", "title", "loading", "favicon"], content_capture: false, developer_tools: false,
       fixture_only: this.browsingMode === "fixture", private_mode: false, ime: this.inputFeatures.ime,
       render_path: this.renderPath, experimental: true });
   }
@@ -882,6 +889,7 @@ export class CEFEngineAdapter {
     if (value.event === "title" && (typeof value.title !== "string" || value.title.length > 1024)) throw targetError("INVALID_CEF_TITLE");
     if (value.event === "loading" && ![value.loading, value.can_go_back, value.can_go_forward].every(item => typeof item === "boolean")) throw targetError("INVALID_CEF_LOADING");
     if (value.event === "cursor" && !CURSORS.has(value.cursor)) throw targetError("INVALID_CEF_CURSOR");
+    if (value.event === "favicon" && !validFavicon(value.icon)) throw targetError("INVALID_CEF_FAVICON");
     if (value.event === "open_url" && (this.browsingMode !== "web" || !allowedWebURL(value.url)
         || value.url === "about:blank" || typeof value.background !== "boolean")) throw targetError("INVALID_CEF_OPEN_URL");
     if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
