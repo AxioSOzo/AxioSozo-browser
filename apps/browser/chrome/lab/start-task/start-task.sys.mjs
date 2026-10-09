@@ -350,6 +350,8 @@ export function followTask(window, ctx, session, { anchor, task = "" } = {}) {
   const caption = (text, extra = {}) => el(document, "p", { class: "axiosozo-start-task-caption", text, ...extra });
   const taskLine = task ? caption(`“${task.length > 140 ? `${task.slice(0, 139)}…` : task}”`, { class: "axiosozo-start-task-caption axiosozo-start-task-quote" }) : null;
   let shown = null;
+  // True once the run is fully over: the browser has read what it changed.
+  let settled = false;
 
   /** A finished run goes to agent presence's card when presence is on in some window; true when it did. */
   function handOff(current) {
@@ -393,7 +395,14 @@ export function followTask(window, ctx, session, { anchor, task = "" } = {}) {
       return;
     }
     // One card per moment: a run that changed files of this page's project is
-    // the proof tab's to show ("To verify"), when that experiment is on.
+    // the proof tab's to show ("To verify"), when that experiment is on. The
+    // files are read from git just after the run ends: wait for them.
+    if (current.state === "done" && current.mayEdit && !current.files && !settled) {
+      card.setTitle(`${current.clientLabel ?? "The agent"} is done`);
+      card.setBody([thinking(document, "Checking what changed…"), taskLine]);
+      card.setActions([]);
+      return;
+    }
     if (current.state === "done" && current.files?.byRun?.length && proofTabOn()) { card.close("handed-over"); return; }
     if (handOff(current)) return;
     const extra = [costLine(current), current.rateLimit].filter(Boolean).join(" · ");
@@ -433,7 +442,7 @@ export function followTask(window, ctx, session, { anchor, task = "" } = {}) {
     off = ctx.agents.subscribe(({ type, session: next }) => { if (type === "changed" && next?.id === session.id) render(next); });
   } catch { off = null; }
   render(ctx.agents.get?.(session.id) ?? session);
-  Promise.resolve(ctx.agents.whenDone?.(session.id)).then(final => { if (final) render(final); }).catch(() => {});
+  Promise.resolve(ctx.agents.whenDone?.(session.id)).then(final => { settled = true; shown = null; if (final) render(final); }).catch(() => {});
   return card;
 }
 
