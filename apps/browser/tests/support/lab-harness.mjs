@@ -155,5 +155,7 @@ export function labContext(window, { id = "example", services = null, adapter = 
   const toasts = [];
   const ctx = Object.freeze({ id, window, document: window.document, services, adapter, engineOf, openOverview,
     toast: message => { toasts.push(message); return { close() {} }; }, ai, agents, signal: controller.signal });
-  return Object.assign(Object.create(ctx), { ...ctx, toasts, turnOff: () => controller.abort() });
+  // Frozen like the real ctx, plus the test's handles (assigning over a frozen
+  // prototype's read-only fields would throw).
+  return Object.freeze({ ...ctx, toasts, turnOff: () => controller.abort() });
 }

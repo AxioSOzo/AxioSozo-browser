@@ -62,6 +62,61 @@ No composer is forced on you: the note is optional and focus starts on
   macOS, as `BrowserUtils.copyImageToClipboard`) and, for Copy for agent,
   `text/plain`.
 
+## Adding to the bar (extensions)
+
+Lab experiments add to the bar without forking it, through one documented
+extension point in `RegionCapture.sys.mjs`:
+
+```js
+import { registerCaptureExtension } from "chrome://browser/content/axiosozo/RegionCapture.sys.mjs";
+
+const unregister = registerCaptureExtension(window, {
+  id: "capture-ai",            // lowercase words with dashes; the same id again replaces it
+  order: 10,                   // lower renders first
+  render(bar, capture) {       // once per capture, after the bar is built
+    const section = bar.section({ label: "What your assistant noticed" });
+    // …
+    return () => { /* this capture ended */ };
+  },
+  dispose() {},                // once, when unregistered
+});
+```
+
+`capture` is frozen: `png` (the PNG bytes in memory, a `Uint8Array`),
+`type`, `width`, `height` (device px), `url`, `title`, `project`
+(`{ id, name, root, environment }` or null), `note` (a getter: the field
+now), `browser`, `selection` (CSS px of the browser) and `signal` (aborts
+when this capture ends or the extension is unregistered).
+
+`bar` is a small API, not the DOM:
+
+| | |
+|---|---|
+| `section({ label })` | an element between the note and the buttons, in extension order (even when added later) |
+| `action({ label, title, primary, onClick })` | a button right of Copy for agent; `primary` makes it the main action |
+| `slot()` | an empty inline element there, for a composite control (a split button) |
+| `setDefault(onEnter, { button })` → release | the main action: Return in the note runs it, `button` looks primary, Copy for agent becomes a plain button (it still copies) |
+| `note`, `setNote(text)`, `focusNote()` | the note field |
+| `choose(event, text)` | a proposal became the task: the note is set, then the latest `onChoose` handler runs; when none takes it, focus goes to the main action |
+| `onChoose(handler, { verb })` → release, `chooseVerb` | who takes a chosen proposal ("Start", "Open") |
+| `holdEscape(fn)` → release | Escape calls `fn` (close a menu) instead of discarding the capture |
+| `stillValid()` | the page facts still hold (same address, not private, not sensitive); otherwise the capture ends with the usual refusal |
+| `finish()`, `dismiss()`, `reposition()`, `isOpen`, `signal` | |
+
+With nothing registered the bar is exactly as above (a test pins it).
+Unregistering removes everything an extension added from an open bar and
+gives Return back to Copy for agent. An extension that throws is logged
+(`diagnostics().extension_failures`) and left out; the bar and Copy for
+agent keep working. Extensions are per window. `region-capture.css` carries
+the shared vocabulary they use: `axiosozo-region-section`, `-caption`
+(`-caption-path` for a folder shown verbatim), `-status`, `-quiet`,
+`-choices`/`-choice` (label, why, and a verb that shows on hover and focus),
+`-split`, `-chevron`, `-menu` and `-menu-item` (radio items with a drawn
+check).
+
+Users today: the Lab families "What's wrong here?" (`lab/capture-ai/`) and
+"Start the task" (`lab/start-task/`), see `docs/lab/experiments/`.
+
 ## Privacy and safety
 
 Refused from chrome facts alone, before any capture, with a toast saying why:
@@ -72,6 +127,13 @@ navigation, tab switch or close in between discards the capture. Nothing is
 written to disk, sent to a provider, or offered to the agent bridge. The page
 is never asked anything. Password fields render masked in the image, as on
 screen.
+
+That is the bar on its own. A Lab experiment that extends it may send the
+picture to the user's own AI or agent (through the Lab's `ctx.ai` and
+`ctx.agents`, which check private windows, sensitive sites, the project root
+and the user's click again); it must say in the bar what goes where while it
+is sent, call `stillValid()` first, and stop when the capture's `signal`
+aborts.
 
 ## Prefs
 

@@ -302,6 +302,23 @@ export function failureText(client, { stderr = "", notice = "", exitCode = null,
  * plain text ("Updated the price in [index.html](file://…#L9)." → "Updated
  * the price in index.html."); at most `max` characters.
  */
+/**
+ * What the agent says it did, for the result card: its "Summary:" line (the
+ * task prompt asks for one), else the first sentence of its final message —
+ * agents put the change first and caveats ("I didn't open the page in a
+ * browser") last, so the last sentence is the wrong one to show.
+ */
+export function summarySentence(text, max = 120) {
+  if (typeof text !== "string") return "";
+  const plain = text.replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1").replace(/`+/gu, "").replace(/\*\*|__/gu, "");
+  const lines = plain.split(/\n+/u).map(line => line.replace(/^[\s>*#-]+/u, "").trim()).filter(Boolean);
+  const marked = lines.filter(line => /^summary\s*:/iu.test(line)).at(-1);
+  if (marked) return oneLine(marked.replace(/^summary\s*:\s*/iu, ""), max);
+  const first = lines[0] ?? "";
+  const sentence = first.split(/(?<=[.!?]["”’)]*)\s+/u).map(item => item.trim()).filter(Boolean)[0] ?? first;
+  return oneLine(sentence, max);
+}
+
 export function lastSentence(text, max = 120) {
   if (typeof text !== "string") return "";
   const plain = text.replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1").replace(/`+/gu, "").replace(/\*\*|__/gu, "");

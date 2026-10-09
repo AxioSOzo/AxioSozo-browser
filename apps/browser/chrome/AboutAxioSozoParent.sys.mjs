@@ -39,6 +39,8 @@ export const PROVIDER_STATUS_URL = "chrome://browser/content/axiosozo/ProviderSt
 // The AxioSozo Lab registry (experiments and their switches), loaded only when
 // the Lab section asks, so a broken experiment list never breaks this actor.
 export const LAB_URL = "chrome://browser/content/axiosozo/lab/Lab.sys.mjs";
+// The Lab's today sheet (lab/today/today-page.sys.mjs), loaded only when #today asks.
+export const TODAY_URL = "chrome://browser/content/axiosozo/lab/today/today-page.sys.mjs";
 export const PREFS = Object.freeze({
   contexts: "axiosozo.contexts.enabled",
   enginePreferences: "axiosozo.engine.preferences.enabled",
@@ -46,6 +48,8 @@ export const PREFS = Object.freeze({
   openaiKeyEntry: "axiosozo.openai.keyEntry.enabled",
   // P6: read only here; the page never sets it.
   home: "axiosozo.home.enabled",
+  // The Lab's today sheet (#today and its link): read only here; the Lab page switches it.
+  today: "axiosozo.lab.today-sheet.enabled",
 });
 const MAX_PARAMS_BYTES = 512 * 1024;
 const DOCUMENT_URI = /^about:axiosozo(?:[?#].*)?$/;
@@ -151,6 +155,10 @@ const T = {
   iconPath: value => typeof value === "string" && value.length >= 1 && value.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(value),
   // Shape only: Lab.sys.mjs accepts listed experiment ids alone.
   labId: value => typeof value === "string" && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value) && value.length <= 40,
+  // The Lab's today sheet: a time in ms, an errand id and what to do with it.
+  time: value => Number.isSafeInteger(value) && value >= 0 && value <= 8.64e15,
+  errandId: value => typeof value === "string" && /^e_[a-z0-9]{8}$/u.test(value),
+  errandAction: value => value === "done" || value === "snooze" || value === "reopen",
 };
 const optional = check => Object.assign(value => value === undefined || check(value), { optional: true });
 
@@ -830,6 +838,23 @@ export const METHODS = Object.freeze({
     catch (error) { if (error instanceof OverviewError) throw error; fail("LAB_UNAVAILABLE", "getLabClients failed (LAB_UNAVAILABLE)"); }
     return labClientsReply(value);
   } },
+  // AxioSozo Lab, "Your day" (chrome/lab/today/today-page.sys.mjs): only while the
+  // today sheet is on (LAB_OFF otherwise) and from a normal window. The day's
+  // digest (`look`: this visit counts as looking; `since`: the start the visit
+  // read first), an errand's Done/Tomorrow/Undo and its page (Errands on too),
+  // and one optional suggestion from the user's own AI, on the page's click.
+  // The page names an errand id, an action and times only.
+  getToday: todayMethod("getToday", { since: optional(T.time), look: optional(T.boolean) },
+    (today, ctx, p) => today.todayForPage({ services: ctx.services, prefs: ctx.prefs(), since: p.since ?? null, look: p.look === true }),
+    value => todayReply(value)),
+  setTodayErrand: todayMethod("setTodayErrand", { id: T.errandId, action: T.errandAction },
+    (today, ctx, p) => today.errandForPage({ prefs: ctx.prefs(), id: p.id, action: p.action }), () => ({ ok: true })),
+  openTodayErrand: todayMethod("openTodayErrand", { id: T.errandId },
+    (today, ctx, p, window) => today.openErrandForPage({ services: ctx.services, prefs: ctx.prefs(), window, id: p.id }), () => ({ ok: true })),
+  suggestTodayFirst: todayMethod("suggestTodayFirst", { since: optional(T.time) },
+    (today, ctx, p, window) => today.suggestForPage({ services: ctx.services, prefs: ctx.prefs(), since: p.since ?? null,
+      ai: today.aiForWindow({ window, isPrivate: () => ctx.isPrivate?.() !== false, services: ctx.services }) }),
+    value => todaySuggestionReply(value)),
 });
 
 // ---------------------------------------------------------------- Lab
@@ -868,6 +893,65 @@ export function labClientsReply(value) {
 }
 
 /** The Lab state rebuilt from closed primitives: short texts, fixed words and booleans only. */
+// ---------------------------------------------------------------- Lab: today
+
+const TODAY_ERRORS = new Set(["LAB_OFF", "UNKNOWN_ERRAND", "ERRAND_UNAVAILABLE", "OPEN_FAILED", "UNSUPPORTED", "INVALID_PARAMS"]);
+function todayModule(ctx, name) {
+  let today = null;
+  try { today = ctx.today?.(); } catch { today = null; }
+  if (typeof today?.todayForPage !== "function") fail("LAB_UNAVAILABLE", `${name}: Today is not available`);
+  return today;
+}
+/** Today methods: this page's normal window before and after the work; fixed codes only. */
+function todayMethod(name, params, run, reply) {
+  return { params, run: async (ctx, p) => {
+    const window = normalWindow(ctx, name, "today");
+    const today = todayModule(ctx, name);
+    let value;
+    try { value = await run(today, ctx, p, window); }
+    catch (error) {
+      if (error instanceof OverviewError) throw error;
+      const code = TODAY_ERRORS.has(error?.code) ? error.code : "TODAY_UNAVAILABLE";
+      fail(code, `${name} failed (${code})`);
+    }
+    if (normalWindow(ctx, name, "today") !== window) fail("NO_WINDOW", `${name}: the window changed`);
+    return reply(value);
+  } };
+}
+const TODAY_GROUPS = Object.freeze(["waiting", "failed", "finished", "due"]);
+const TODAY_KINDS = Object.freeze(["agent", "server", "errand"]);
+const TODAY_KEY = /^(?:agent|server|report|errand):[^\u0000-\u001f\u007f]{1,200}$/u;
+const todayText = (value, max) => (typeof value === "string" && value.length <= max && !/[\u0000-\u001f\u007f]/u.test(value) ? value : "");
+const todayCount = value => (Number.isSafeInteger(value) && value >= 0 && value <= 10000 ? value : 0);
+function todayLine(line) {
+  if (!isPlainObject(line) || !TODAY_KEY.test(line.key ?? "") || !TODAY_KINDS.includes(line.kind) || !TODAY_GROUPS.includes(line.group)) return null;
+  const title = todayText(line.title, 240);
+  if (!title) return null;
+  return { key: line.key, kind: line.kind, group: line.group, title, detail: todayText(line.detail, 320), source: todayText(line.source, 40),
+    project: isPlainObject(line.project) && T.projectId(line.project.id) ? { id: line.project.id, name: todayText(line.project.name, 80) } : null,
+    errand: isPlainObject(line.errand) && T.errandId(line.errand.id) ? { id: line.errand.id, spaceName: todayText(line.errand.spaceName, 60) || null } : null };
+}
+/** The today digest rebuilt from closed primitives: fixed words, short texts, ids and counts. */
+export function todayReply(value) {
+  const groups = {}, counts = {}, more = {};
+  for (const group of TODAY_GROUPS) {
+    groups[group] = listOf(value?.groups?.[group]).slice(0, 12).map(todayLine).filter(line => line && line.group === group);
+    counts[group] = todayCount(value?.counts?.[group]);
+    more[group] = todayCount(value?.more?.[group]);
+  }
+  return { version: 1, today: typeof value?.today === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value.today) ? value.today : null,
+    since: T.time(value?.since) ? value.since : null, errands: value?.errands === true, groups, counts, more };
+}
+/** One suggestion: the line it picked (by key) and its sentence, or the honest sentence why there is none. */
+export function todaySuggestionReply(value) {
+  const client = oneOf(value?.client, ["claude-code", "codex"]);
+  if (value?.status === "ok" && TODAY_KEY.test(value.key ?? "") && todayText(value.why, 240)) {
+    return { status: "ok", client, model: typeof value.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(value.model) ? value.model : null,
+      key: value.key, why: todayText(value.why, 240), text: "" };
+  }
+  return { status: "failed", client, model: null, key: null, why: "", text: todayText(value?.text, 240) || "No suggestion this time." };
+}
+
 export function labReply(value) {
   const words = (item, max) => (typeof item === "string" && item.length <= max ? item : "");
   const groups = listOf(value?.groups).map(group => words(group, 40)).filter(Boolean).slice(0, 16);
@@ -919,6 +1003,8 @@ export function readFlags(prefs) {
     openaiKeyEntry: get(PREFS.openaiKeyEntry, false),
     // The experimental start page (P6); absent or unreadable is off.
     home: get(PREFS.home, false),
+    // The Lab's today sheet (#today); absent, false or unreadable is off.
+    today: get(PREFS.today, false),
   };
 }
 
@@ -929,17 +1015,19 @@ let prefsProvider = () => Services.prefs;
 let providerStatusProvider = () => ChromeUtils.importESModule(PROVIDER_STATUS_URL);
 let consoleOwnerProvider = () => ChromeUtils.importESModule(CONSOLE_RUNTIME_URL).getConsoleErrorsNativeRuntime();
 let labProvider = () => ChromeUtils.importESModule(LAB_URL);
-export function setProvidersForTesting({ services, prefs, providerStatus, consoleOwner, lab } = {}) {
+let todayProvider = () => ChromeUtils.importESModule(TODAY_URL);
+export function setProvidersForTesting({ services, prefs, providerStatus, consoleOwner, lab, today } = {}) {
   const previous = { services: servicesProvider, prefs: prefsProvider, providerStatus: providerStatusProvider, consoleOwner: consoleOwnerProvider,
-    lab: labProvider };
+    lab: labProvider, today: todayProvider };
   if (services) servicesProvider = services;
   if (prefs) prefsProvider = prefs;
   if (providerStatus) providerStatusProvider = providerStatus;
   if (consoleOwner) consoleOwnerProvider = consoleOwner;
   if (lab) labProvider = lab;
+  if (today) todayProvider = today;
   return () => {
     servicesProvider = previous.services; prefsProvider = previous.prefs; providerStatusProvider = previous.providerStatus;
-    consoleOwnerProvider = previous.consoleOwner; labProvider = previous.lab;
+    consoleOwnerProvider = previous.consoleOwner; labProvider = previous.lab; todayProvider = previous.today;
   };
 }
 
@@ -977,6 +1065,7 @@ export class AboutAxioSozoParent extends Base {
       providers: () => providerStatusProvider(),
       // The Lab: its registry module and the preferences its switches live in.
       lab: () => labProvider(),
+      today: () => todayProvider(),
       prefs: () => prefsProvider(),
       // Literal privacy only: missing or throwing is undefined, which the
       // normal-window gate refuses like a private window.

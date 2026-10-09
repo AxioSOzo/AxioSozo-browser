@@ -70,6 +70,11 @@ const state = {
   // experiments whose switch is on its way, and the assistants as the Lab's
   // own check sees them (getLabClients; `checking` while a check runs).
   lab: { list: null, error: null, busy: new Set(), clients: null, checking: false },
+  // The Lab's today sheet (#today): this visit's getToday answer (or the code it
+  // refused with), the start of "since you last looked" it read first, the
+  // errands with a change on its way, the last errand change (for Undo) and
+  // the one optional suggestion.
+  today: freshToday(),
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -79,7 +84,7 @@ const state = {
 // counter for all), so clearing them cannot let an old answer match a new one.
 let ticketSerial = 0;
 const nextTicket = () => ++ticketSerial;
-const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0, watches: 0, safety: 0, start: 0 };
+const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0, watches: 0, safety: 0, start: 0, today: 0 };
 const statusTickets = new Map(); // project id → its latest local-server check
 /** Voids any home answer still on its way (and a retry it would schedule). */
 const invalidateHome = () => { latest.home = nextTicket(); };
@@ -360,6 +365,8 @@ function showView(view) {
   if (view === "home" && previous !== "home" && state.connected && state.loaded) { renderStartPage(); loadStartPage(); }
   // The Lab reads its experiments and their switches whenever it is opened.
   if (view === "lab" && previous !== "lab" && state.connected && state.loaded) loadLab();
+  // The today sheet: a new visit is a new look.
+  if (view === "today" && previous !== "today" && state.connected && state.loaded) { state.today = freshToday(); renderToday(); loadToday({ look: true }); }
 }
 
 /** A server that crashed is the only attention item that is a failure. */
@@ -3396,6 +3403,8 @@ async function setLabFlow(experiment, enabled) {
     if (!state.active) return;
     if (ticket === labTicket) { state.lab.list = after; state.lab.error = null; }
     setStatus(M.labToggleText(experiment, enabled, { before, after }));
+    // The today sheet (or its sibling) switched: its link follows.
+    if (experiment.id === "today-sheet" || experiment.family === "today-sheet") refreshTodayLink();
   } catch (error) {
     if (!state.active) return;
     setStatus(labError(error), "error");
@@ -3411,6 +3420,187 @@ async function setLabFlow(experiment, enabled) {
 function setupLab() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && state.view === "lab" && state.admitted && state.active) loadLab();
+  });
+}
+
+// ---------------------------------------------------------------- today (the Lab's today sheet)
+
+// The Lab's today sheet (chrome/lab/today, only while its switch is on): the
+// actor's getToday answer, read when #today shows (that visit counts as
+// looking) and again, with the same "since", on agent, attention, project and
+// space events and when the tab is shown again. Each line links to its
+// project's home or opens its errand's page in its space. Errand buttons and
+// "Suggest a first thing" are this page's own clicks; the suggestion is the
+// only step that asks an AI, and the sheet says what goes to it.
+
+const TODAY_EVENTS = new Set(["agents", "attention", "projects", "contexts"]);
+let todayTimer = null;
+function freshToday() {
+  return { reply: null, error: null, since: null, busy: new Set(), undo: null, suggestion: null, suggesting: false };
+}
+function scheduleToday() {
+  clearTimeout(todayTimer);
+  todayTimer = setTimeout(() => { todayTimer = null; loadToday().catch(console.error); }, 150);
+}
+
+/** The digest; `look`: this visit's first read, which counts as looking. Only the latest answer publishes. */
+async function loadToday({ look = false } = {}) {
+  if (!state.admitted || !state.active || state.view !== "today") return;
+  const ticket = latest.today = nextTicket();
+  const first = look || !Number.isSafeInteger(state.today.since);
+  try {
+    const reply = await call("getToday", first ? { look: true } : { since: state.today.since });
+    if (ticket !== latest.today || !state.active) return;
+    state.today.reply = reply;
+    state.today.error = null;
+    if (first && Number.isSafeInteger(reply?.since)) state.today.since = reply.since;
+  } catch (error) {
+    if (ticket !== latest.today || !state.active) return;
+    state.today.error = error;
+  }
+  await keepFocus(renderToday);
+}
+
+const todayError = error => M.todayErrorText(error?.code) ?? errorText(error);
+
+function renderToday() {
+  const root = $("today-page");
+  if (!root || state.view !== "today") return;
+  const head = h("div", { class: "view-head" },
+    h("div", {}, h("h2", { id: "today-heading", tabindex: "-1" }, "Today"),
+      state.today.reply ? h("p", { class: "block-help" }, M.todaySummary(state.today.reply.counts)) : null),
+    state.today.reply?.today ? h("p", { class: "today-date" }, M.todayDate(state.today.reply.today)) : null);
+  if (!state.connected) { root.removeAttribute("aria-busy"); fill(root, head, h("p", { class: "empty" }, "Today appears here once AxioSozo is connected.")); return; }
+  if (state.today.error && !state.today.reply) { root.removeAttribute("aria-busy"); fill(root, head, h("p", { class: "empty" }, todayError(state.today.error))); return; }
+  if (!state.today.reply) { root.setAttribute("aria-busy", "true"); fill(root, head, h("p", { class: "loading" }, "Reading today…")); return; }
+  root.removeAttribute("aria-busy");
+  const sections = M.todaySections(state.today.reply, { now: Date.now() });
+  const lines = sections.flatMap(section => section.lines);
+  const suggestion = state.today.suggestion;
+  const picked = suggestion?.status === "ok" ? lines.find(line => line.key === suggestion.key) ?? null : null;
+  fill(root, head,
+    todaySuggestion(suggestion, picked),
+    state.today.undo ? todayUndo(state.today.undo) : null,
+    sections.length ? sections.map(section => todaySection(section, picked?.key ?? null))
+      : h("p", { class: "empty" }, "Nothing waiting, failed or due, and nothing new finished since you last looked."),
+    lines.length ? h("div", { class: "today-suggest" },
+      h("button", { type: "button", class: "ghost", "data-focus-key": "today:suggest", disabled: state.today.suggesting || !state.admitted,
+        "aria-describedby": "today-suggest-help", onclick: () => suggestFirst() }, state.today.suggesting ? "Asking…" : "Suggest a first thing"),
+      h("p", { id: "today-suggest-help", class: "help" }, M.TODAY_SUGGEST_HELP)) : null,
+    h("p", { class: "footnote" }, M.TODAY_NOTE));
+}
+
+function todaySection(section, pickedKey) {
+  const headingId = `today-${section.group}-heading`;
+  return h("section", { class: "block today-section", "data-group": section.group, "aria-labelledby": headingId },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, section.title,
+      h("span", { class: "count", "aria-label": `${section.total} ${section.total === 1 ? "item" : "items"}` }, String(section.total)))),
+    h("ul", { class: "rows" }, section.lines.map(line => todayRow(line, pickedKey))),
+    section.more ? h("p", { class: "help today-more" }, `${section.more} more not shown.`) : null);
+}
+
+function todayRow(line, pickedKey) {
+  const target = M.todayTarget(line);
+  const key = `today:${line.key}`;
+  const busy = state.today.busy.has(line.errand?.id);
+  const title = target?.kind === "project" ? h("a", { href: target.href, class: "row-title today-link", "data-focus-key": key }, line.title)
+    : target?.kind === "errand" ? h("button", { type: "button", class: "row-title today-link today-open", "data-focus-key": key,
+      title: "Opens its page in its space", onclick: () => openTodayErrand(line) }, line.title)
+      : h("span", { class: "row-title" }, line.title);
+  const actions = line.errand ? h("div", { class: "today-actions" },
+    h("button", { type: "button", class: "ghost", "data-focus-key": `${key}:done`, "aria-label": `Mark ${line.title} done`, disabled: busy,
+      onclick: () => todayErrand(line, "done") }, "Done"),
+    h("button", { type: "button", class: "ghost", "data-focus-key": `${key}:snooze`, "aria-label": `Snooze ${line.title} to tomorrow`, disabled: busy,
+      onclick: () => todayErrand(line, "snooze") }, "Tomorrow")) : null;
+  return h("li", { class: "row today-row", "data-picked": line.key === pickedKey ? "true" : null },
+    h("span", { class: "dot", "data-status": M.TODAY_DOTS[line.group], "aria-hidden": "true" }),
+    h("div", { class: "row-main" }, title, line.detail ? h("span", { class: "row-detail" }, line.detail) : null),
+    line.key === pickedKey ? h("span", { class: "tag accent" }, "Suggested first") : null,
+    actions);
+}
+
+async function openTodayErrand(line) {
+  try { await call("openTodayErrand", { id: line.errand.id }); }
+  catch (error) { setStatus(todayError(error), "error"); }
+}
+
+async function todayErrand(line, action) {
+  const id = line.errand?.id;
+  if (!id || state.today.busy.has(id) || !state.active) return;
+  state.today.busy.add(id);
+  await keepFocus(renderToday);
+  try {
+    await call("setTodayErrand", { id, action });
+    if (!state.active) return;
+    state.today.undo = action === "reopen" ? null : { id, title: line.title, action };
+    setStatus(action === "done" ? `Done: ${line.title}` : action === "snooze" ? `${line.title} is back tomorrow.` : `${line.title} is back on the list.`);
+  } catch (error) {
+    if (!state.active) return;
+    setStatus(todayError(error), "error");
+  } finally {
+    state.today.busy.delete(id);
+  }
+  await loadToday();
+}
+
+function todayUndo(undo) {
+  return h("p", { class: "notice today-undo", role: "status" },
+    `${undo.title} ${undo.action === "done" ? "is marked done" : "is snoozed to tomorrow"}. `,
+    h("button", { type: "button", class: "link-button", "data-focus-key": "today:undo",
+      onclick: () => todayErrand({ title: undo.title, errand: { id: undo.id } }, "reopen") }, "Undo"));
+}
+
+/** The one AI step, on this click only: the user's own assistant picks one line, with a sentence why. */
+async function suggestFirst() {
+  if (state.today.suggesting || !state.active) return;
+  state.today.suggesting = true;
+  state.today.suggestion = null;
+  await keepFocus(renderToday);
+  try {
+    const reply = await call("suggestTodayFirst", Number.isSafeInteger(state.today.since) ? { since: state.today.since } : {});
+    if (!state.active) return;
+    state.today.suggestion = reply;
+  } catch (error) {
+    if (!state.active) return;
+    state.today.suggestion = { status: "failed", client: null, text: todayError(error) };
+  } finally {
+    state.today.suggesting = false;
+  }
+  await keepFocus(renderToday);
+}
+
+function todaySuggestion(suggestion, picked) {
+  if (state.today.suggesting) {
+    return h("p", { class: "notice today-pick", role: "status" }, "Asking your assistant… The lines on this sheet go to it, without addresses.");
+  }
+  if (!suggestion) return null;
+  const by = M.LAB_CLIENT_LABELS[suggestion.client] ?? "your assistant";
+  if (suggestion.status !== "ok") return h("p", { class: "notice today-pick", role: "status" }, suggestion.text || "No suggestion this time.");
+  return h("div", { class: "notice today-pick", role: "status" },
+    h("p", {}, h("strong", {}, picked ? `Start with: ${picked.title}` : "Its pick is no longer on the sheet."), " ", suggestion.why),
+    h("p", { class: "help" }, `Suggested by ${by} from the lines on this sheet. It can be wrong; the choice is yours.`));
+}
+
+/** The sheet's own link in the views, only while its switch is on. */
+function renderTodayLink() {
+  const nav = document.querySelector(".views");
+  const link = nav?.querySelector('a[data-view="today"]');
+  if (state.flags.today === true && !link) nav?.prepend(h("a", { href: "#today", "data-view": "today" }, "Today"));
+  if (state.flags.today !== true && link) link.remove();
+}
+async function refreshTodayLink() {
+  try {
+    const flags = await call("getOverviewFlags");
+    if (!state.active) return;
+    state.flags = flags;
+  } catch { return; }
+  renderTodayLink();
+}
+
+/** Shown again (another tab, an errand changed elsewhere): the sheet reads again with the same "since". */
+function setupToday() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.view === "today" && state.admitted && state.active) loadToday();
   });
 }
 
@@ -3442,6 +3632,7 @@ const HOME_EVENTS = new Set(["projects", "contexts", "agents", "console"]);
 const pending = new Map();
 function onServicesEvent(event) {
   const name = event?.name;
+  if (state.active && state.view === "today" && TODAY_EVENTS.has(name)) scheduleToday();
   if (!state.active || !Object.hasOwn(loaders, name)) return;
   // From this moment the home being fetched may be out of date: void its
   // answer now, also when this event joins a reload that is already queued.
@@ -3514,6 +3705,7 @@ function renderDisconnected() {
   renderSafety();
   renderStartPage();
   renderLab();
+  renderToday();
   for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
 }
 
@@ -3540,6 +3732,9 @@ function deactivate() {
   latest.watches = nextTicket();
   latest.safety = nextTicket();
   latest.start = nextTicket();
+  latest.today = nextTicket();
+  clearTimeout(todayTimer);
+  state.today.suggesting = false;
   state.agents.busy = false;
   // An action of this page still waiting for its outcome: the next shown page reads the truth afresh.
   clearTimeout(state.watches.pending?.timer);
@@ -3579,6 +3774,9 @@ async function boot() {
   // The experimental start page's link and route follow the flag the actor read.
   renderHomeLink();
   if (M.isHomeHash(location.hash)) applyRoute();
+  // The Lab's today sheet: its link and route follow its switch, as the actor read it.
+  renderTodayLink();
+  if (M.isTodayHash(location.hash)) applyRoute();
   await loadActiveSpace();
   if (!state.active) return;
   // Everything the first view needs is loaded before Projects is drawn once
@@ -3609,6 +3807,8 @@ async function boot() {
   if (state.view === "home") { renderStartPage(); await loadStartPage(); }
   if (!state.active) return;
   if (state.view === "lab") await loadLab();
+  if (!state.active) return;
+  if (state.view === "today") { renderToday(); await loadToday({ look: true }); }
   if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
@@ -3648,7 +3848,8 @@ function routeActions() {
  * to Projects, as before. */
 function currentRoute() {
   const home = state.flags.home === true || (!state.admitted && M.isHomeHash(location.hash));
-  return M.routeFromHash(location.hash, { home });
+  const today = state.flags.today === true || (!state.admitted && M.isTodayHash(location.hash));
+  return M.routeFromHash(location.hash, { home, today });
 }
 
 function applyRoute() {
@@ -3714,6 +3915,7 @@ async function init() {
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
   $("providers-refresh").addEventListener("click", () => { loadProviders({ refresh: true }); loadDecisionKeys(); });
   setupLab();
+  setupToday();
   window.addEventListener("hashchange", onHashChange);
   // Hidden (also into the back/forward cache): inactive until shown again from it.
   window.addEventListener("pagehide", deactivate);

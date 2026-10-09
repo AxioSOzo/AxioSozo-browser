@@ -224,6 +224,234 @@
   }
 }
 
+/* ---- Extensions (registerCaptureExtension) ------------------------------------------
+ * What other chrome code may add to the bar: sections between the note and the
+ * buttons, captions, a short list of choices, and a split button with a small
+ * menu. Same material and tokens as the bar itself. */
+
+.axiosozo-region-bar[data-extended] {
+  width: min(468px, calc(100% - 16px));
+}
+.axiosozo-region-actions {
+  flex-wrap: wrap;
+}
+.axiosozo-region-slot {
+  position: relative;
+  display: inline-flex;
+}
+
+.axiosozo-region-section {
+  display: grid;
+  gap: 6px;
+  padding-inline: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  &:empty,
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* One soft line: what leaves the Mac, where an agent may edit, why something is not offered. */
+.axiosozo-region-caption {
+  margin: 0;
+  font-size: 11.5px;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  overflow-wrap: anywhere;
+}
+.axiosozo-region-caption-path {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
+
+/* A status line with a quiet action at its end (Stop, Look again). */
+.axiosozo-region-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  & > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+}
+.axiosozo-region-quiet {
+  min-height: 24px;
+  padding: 0 8px;
+  background: transparent;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  &:hover {
+    color: inherit;
+  }
+}
+
+/* Choices: at most three short proposals, each one click from becoming the task. */
+.axiosozo-region-choices {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.axiosozo-region-choice {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 6px 9px;
+  border: none;
+  border-radius: calc(8px * var(--zen-squircle-value, 1));
+  background: transparent;
+  box-shadow: inset 0 0 0 1px light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.12));
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: default;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+
+  &:hover {
+    background: var(--button-background-color, light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.08)));
+  }
+  &:focus-visible {
+    outline: var(--focus-outline, 2px solid var(--axiosozo-region-accent));
+    outline-offset: 1px;
+  }
+  &[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--axiosozo-region-accent) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--axiosozo-region-accent) 45%, transparent);
+  }
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+.axiosozo-region-choice-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.axiosozo-region-choice-why {
+  grid-column: 1;
+  font-size: 11.5px;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  overflow-wrap: anywhere;
+}
+/* What a click does ("Start", "Use"): quiet until the row is hovered or focused. */
+.axiosozo-region-choice-verb {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  .axiosozo-region-choice:is(:hover, :focus-visible) & {
+    opacity: 1;
+  }
+}
+
+/* A split button: the action, and a narrow part that opens its menu. */
+.axiosozo-region-split {
+  display: inline-flex;
+  & > .axiosozo-region-button:first-child {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
+  & > .axiosozo-region-button + .axiosozo-region-button {
+    width: 24px;
+    padding: 0;
+    margin-inline-start: 1px;
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+}
+.axiosozo-region-split > .axiosozo-region-primary + .axiosozo-region-button {
+  background: var(--button-background-color-primary, var(--axiosozo-region-accent));
+  color: var(--button-text-color-primary, white);
+  &:hover {
+    background: var(--button-background-color-primary-hover, var(--button-background-color-primary, var(--axiosozo-region-accent)));
+  }
+}
+.axiosozo-region-chevron::before {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: -3px auto 0;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  rotate: 45deg;
+  opacity: 0.85;
+}
+
+.axiosozo-region-menu {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: calc(100% + 6px);
+  z-index: 1;
+  box-sizing: border-box;
+  min-width: 220px;
+  max-width: 300px;
+  display: grid;
+  gap: 1px;
+  padding: 4px;
+  border-radius: calc(10px * var(--zen-squircle-value, 1));
+  background: var(--zen-dialog-background, Canvas);
+  outline: 0.5px solid light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.12));
+  box-shadow: 0 12px 40px -12px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.18);
+  animation: axiosozo-region-rise 140ms ease-out;
+  &[hidden] {
+    display: none;
+  }
+}
+.axiosozo-region-menu-label {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+}
+.axiosozo-region-menu-item {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 6px;
+  margin: 0;
+  padding: 5px 8px;
+  border: none;
+  border-radius: calc(6px * var(--zen-squircle-value, 1));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: start;
+  &:is(:hover, :focus-visible):not(:disabled) {
+    background: var(--button-background-color-hover, light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.12)));
+    outline: none;
+  }
+  &:disabled {
+    opacity: 0.45;
+  }
+  /* The remembered choice: a check, drawn so no icon file is needed. */
+  &[aria-checked="true"]::before {
+    content: "";
+    width: 8px;
+    height: 4px;
+    margin: 4px 0 0 2px;
+    border-inline-start: 1.5px solid currentColor;
+    border-block-end: 1.5px solid currentColor;
+    rotate: -45deg;
+  }
+  & > span {
+    grid-column: 2;
+  }
+}
+.axiosozo-region-menu-note {
+  font-size: 11px;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+}
+
 @keyframes axiosozo-region-fade {
   from { opacity: 0; }
 }
@@ -238,10 +466,13 @@
 @media (prefers-reduced-motion: reduce) {
   .axiosozo-region-shade,
   .axiosozo-region-hint,
-  .axiosozo-region-bar {
+  .axiosozo-region-bar,
+  .axiosozo-region-menu {
     animation: none;
   }
-  .axiosozo-region-button {
+  .axiosozo-region-button,
+  .axiosozo-region-choice,
+  .axiosozo-region-choice-verb {
     transition: none;
   }
 }
@@ -250,11 +481,24 @@
   .axiosozo-region-box {
     outline-color: Highlight;
   }
-  .axiosozo-region-bar {
+  .axiosozo-region-bar,
+  .axiosozo-region-menu {
     outline: 1px solid CanvasText;
   }
   .axiosozo-region-primary {
     background: ButtonText;
     color: ButtonFace;
+  }
+  .axiosozo-region-choice {
+    border: 1px solid ButtonText;
+  }
+  .axiosozo-region-choice[aria-pressed="true"],
+  .axiosozo-region-menu-item:is(:hover, :focus-visible) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .axiosozo-region-choice-verb {
+    opacity: 1;
   }
 }

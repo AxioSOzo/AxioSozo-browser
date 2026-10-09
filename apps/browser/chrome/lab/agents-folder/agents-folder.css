@@ -1,0 +1,28 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Lab "agents-folder": the items of the Agents live folders are Zen's own
+ * tabs with Zen's own second line (zen-show-sublabel). The only additions:
+ * the line reads a little stronger, and in colour only where it means
+ * something, amber when the agent needs you and red when it failed. Held
+ * only while the experiment is on. */
+
+.tabbrowser-tab[axiosozo-agent-state][zen-show-sublabel] .tab-label-container .zen-tab-sublabel {
+  opacity: 0.62;
+}
+.tabbrowser-tab[axiosozo-agent-state="needs_you"][zen-show-sublabel] .tab-label-container .zen-tab-sublabel {
+  opacity: 1;
+  /* Firefox's warning amber is an icon colour; small text needs a deeper one to stay readable. */
+  color: light-dark(rgb(150 95 0), rgb(255 190 70));
+}
+.tabbrowser-tab[axiosozo-agent-state="failed"][zen-show-sublabel] .tab-label-container .zen-tab-sublabel {
+  opacity: 1;
+  color: light-dark(rgb(200 0 30), rgb(255 132 128));
+}
+
+@media (forced-colors: active) {
+  .tabbrowser-tab[axiosozo-agent-state][zen-show-sublabel] .tab-label-container .zen-tab-sublabel {
+    opacity: 1;
+    color: inherit;
+  }
+}

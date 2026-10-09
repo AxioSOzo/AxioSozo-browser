@@ -1,0 +1,271 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Lab "agents-on-rows": what a project's agents do, on its sidebar row
+ * (ProjectSidebar's decoration hook draws the nodes, this sheet the look).
+ * Held only while the experiment is on.
+ *  - expanded sidebar: one small button at the row's end with the state's
+ *    glyph (a slow ring working, an amber dot needs you, a check done, red
+ *    failed, a square stopped); it opens the result card;
+ *  - Zen's collapsed (icon) sidebar: the same glyph as a corner badge on the
+ *    project's mark, since the row has no room;
+ *  - the "Needs you" stack above the list, only while something waits.
+ * Colour only for meaning; the ring turns slowly and stands still under
+ * reduced motion; forced colours keep every glyph visible. */
+
+:root {
+  --axiosozo-agents-amber: var(--axiosozo-run-amber, var(--icon-color-warning, light-dark(rgb(214 140 0), rgb(255 190 70))));
+  --axiosozo-agents-red: var(--axiosozo-run-red, var(--icon-color-critical, light-dark(rgb(215 0 34), rgb(255 132 128))));
+  --axiosozo-agents-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1Zm-.9 3.6h1.8l-.3 5H7.4Zm.9 6.2a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1Z'/%3E%3C/svg%3E");
+  --axiosozo-agents-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 8.4 3 3 6-6.6'/%3E%3C/svg%3E");
+}
+
+/* ---- the button at the row's end --------------------------------------------------- */
+
+/* Room for it, so the server badges and the hover ▶ sit before it. */
+.axiosozo-project[data-agent] > .axiosozo-project-row {
+  padding-inline-end: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 24px);
+}
+.axiosozo-project[data-agent] > .axiosozo-project-quick {
+  inset-inline-end: calc(var(--tab-margin-block, 2px) + 5px + 24px);
+}
+
+.axiosozo-project-agent {
+  position: absolute;
+  inset-inline-end: calc(var(--tab-margin-block, 2px) + 5px);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  transition: background-color 100ms ease, opacity 150ms ease;
+}
+.axiosozo-project-agent:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.axiosozo-project-agent[data-quiet] {
+  opacity: 0.5;
+}
+
+/* One glyph, drawn the same at the row's end and on the icon's corner. */
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)::before {
+  content: "";
+  display: block;
+  box-sizing: border-box;
+  corner-shape: round;
+}
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="needs_you"]::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--axiosozo-agents-amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--axiosozo-agents-amber) 24%, transparent);
+}
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="failed"]::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--axiosozo-agents-red);
+}
+/* At the row's end a server that stopped with an error is a plain red dot already: an agent that failed says "!". */
+.axiosozo-project-agent[data-agent="failed"]::before {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  mask: var(--axiosozo-agents-alert) center / 12px no-repeat;
+}
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="working"]::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, currentColor 60%, transparent);
+  border-block-start-color: transparent;
+  animation: axiosozo-agents-turn 1.6s linear infinite;
+}
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="done"]::before {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask: var(--axiosozo-agents-check) center / 12px no-repeat;
+}
+:is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="stopped"]::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: color-mix(in srgb, currentColor 55%, transparent);
+}
+@keyframes axiosozo-agents-turn {
+  to { rotate: 1turn; }
+}
+
+/* ---- the badge on the project's mark (collapsed sidebar only) -------------------------- */
+
+.axiosozo-project-icon:has(> .axiosozo-project-agent-mark) {
+  position: relative;
+  overflow: visible;
+}
+.axiosozo-project-agent-mark {
+  position: absolute;
+  inset-inline-end: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--zen-main-browser-background, Canvas);
+  color: var(--toolbox-textcolor, CanvasText);
+}
+.axiosozo-project-agent-mark[data-agent="working"]::before { width: 8px; height: 8px; }
+.axiosozo-project-agent-mark[data-agent="done"]::before { width: 9px; height: 9px; mask-size: 9px; }
+.axiosozo-project-agent-mark[data-agent="needs_you"]::before { width: 7px; height: 7px; box-shadow: none; }
+.axiosozo-project-agent-mark[data-agent="failed"]::before { width: 7px; height: 7px; }
+.axiosozo-project-agent-mark[data-agent="stopped"]::before { width: 5px; height: 5px; }
+.axiosozo-project-agent-mark[data-quiet] { opacity: 0.6; }
+:root[zen-sidebar-expanded="true"] .axiosozo-project-agent-mark,
+:root:not([zen-sidebar-expanded="true"]) .axiosozo-project-agent {
+  display: none !important;
+}
+
+/* ---- the Needs you stack ------------------------------------------------------------- */
+
+/* Rows like the projects': a tab's height and padding, a two-line label like
+ * Zen's sublabel, and one amber dot in the heading to say why it is here. */
+.axiosozo-agents-stack {
+  display: flex;
+  flex-direction: column;
+  margin-block: 0 4px;
+}
+.axiosozo-agents-stack[hidden] {
+  display: none;
+}
+.axiosozo-agents-stack-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding-inline: var(--tab-inline-padding, 8px);
+  font-size: small;
+  font-weight: 500;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
+.axiosozo-agents-stack-head::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--axiosozo-agents-amber);
+}
+.axiosozo-agents-stack-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.axiosozo-agents-stack-item,
+.axiosozo-agents-stack-more {
+  display: flex;
+  align-items: center;
+  gap: var(--tab-icon-end-margin, 8.5px);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--tab-margin-block, 2px));
+  min-height: var(--tab-min-height, 36px);
+  margin: var(--tab-margin-block, 2px);
+  padding-inline: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px)
+    calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px));
+  border-radius: var(--tab-border-radius, 8px);
+  transition: background-color 100ms ease, transform 100ms ease;
+}
+.axiosozo-agents-stack-item:hover,
+.axiosozo-agents-stack-more:hover {
+  background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 7%, transparent));
+}
+.axiosozo-agents-stack-item:active {
+  transform: scale(var(--zen-active-tab-scale, 0.985));
+}
+.axiosozo-agents-stack-more {
+  min-height: 28px;
+  padding-inline-start: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px + 16px + var(--tab-icon-end-margin, 8.5px));
+  font-size: small;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
+.axiosozo-agents-stack-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.axiosozo-agents-stack-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.axiosozo-agents-stack-title,
+.axiosozo-agents-stack-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.axiosozo-agents-stack-sub {
+  font-size: x-small;
+  opacity: 0.6;
+}
+/* Zen's collapsed sidebar has no room for it: the amber badges on the marks say it there. */
+:root:not([zen-sidebar-expanded="true"]) .axiosozo-agents-stack {
+  display: none !important;
+}
+
+/* The same buttons as the project rows (axiosozo-runtime.css resets and focus rings). */
+:where(.axiosozo-agents-stack) button {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: default;
+}
+:where(.axiosozo-agents-stack) button:focus-visible {
+  outline: var(--focus-outline, 2px solid AccentColor);
+  outline-offset: var(--focus-outline-inset, -2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="working"]::before {
+    animation: none;
+  }
+  .axiosozo-project-agent,
+  .axiosozo-agents-stack-item,
+  .axiosozo-agents-stack-more {
+    transition: none;
+  }
+  .axiosozo-agents-stack-item:active {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent]::before,
+  .axiosozo-agents-stack-head::before {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+  :is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="working"]::before {
+    background-color: transparent;
+    border-color: CanvasText;
+    border-block-start-color: transparent;
+  }
+  :is(.axiosozo-project-agent, .axiosozo-project-agent-mark)[data-agent="needs_you"]::before {
+    background-color: Mark;
+    box-shadow: 0 0 0 1px CanvasText;
+  }
+  .axiosozo-project-agent-mark {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

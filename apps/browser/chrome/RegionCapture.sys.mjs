@@ -25,6 +25,13 @@
 // effect is the user's own clipboard, after their click. Private windows,
 // sensitive sites, non-web pages and Chromium tabs are refused from chrome
 // facts alone; the page is never asked.
+//
+// Other chrome code (AxioSozo Lab experiments) can add to the bar without
+// forking it: registerCaptureExtension(window, { id, order, render, dispose })
+// renders into every later capture of that window, through a small bar API
+// (sections between the note and the buttons, actions, the note, the main
+// action, Escape, the capture's facts). With nothing registered the bar is
+// exactly as described above. See docs/design/region-capture.md.
 import * as defaultCore from "./contexts/index.mjs";
 import { XHTML, defaultTimers, prefEnabled, webURL } from "./DevLoop.sys.mjs";
 
@@ -103,6 +110,86 @@ export function regionRefusalText(reason) {
   }
 }
 
+// ---- extensions ----------------------------------------------------------------------
+
+const EXTENSION_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const registries = new WeakMap(); // window → { extensions: Map(id → record), listeners: Set(record → void) }
+function registryOf(window) {
+  let registry = registries.get(window);
+  if (!registry) {
+    registry = { extensions: new Map(), listeners: new Set() };
+    registries.set(window, registry);
+  }
+  return registry;
+}
+/** The extensions of `window`, in the order they render (order, then id). */
+function extensionsOf(window) {
+  return [...(registries.get(window)?.extensions.values() ?? [])].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * Adds to the capture bar of one browser window, from the next capture on.
+ *
+ *   const unregister = registerCaptureExtension(window, {
+ *     id: "capture-ai",          // lowercase words with dashes; registering an id again replaces it
+ *     order: 10,                 // lower renders first (default 0)
+ *     render(bar, capture) { …; return { dispose() {} } }, // once per capture; dispose (or a returned
+ *                                                         // function) runs when that capture ends
+ *     dispose() {},              // once, when unregistered
+ *   });
+ *
+ * `capture` (frozen): { png (Uint8Array, PNG bytes in memory), type ("image/png"),
+ * width, height (device px), url, title, project ({ id, name, root,
+ * environment } or null), note (getter: the note field now), browser, selection
+ * ({ x, y, width, height } in CSS px of the browser), signal (aborts when this
+ * capture ends or the extension is unregistered) }.
+ *
+ * `bar` (frozen): document; section({ label }) → an element between the note
+ * and the buttons, in extension order; action({ label, title, primary,
+ * onClick }) → a button right of Copy for agent (so a main action sits where
+ * the main action always is); slot() → an empty inline element there for a
+ * composite control; setDefault(onEnter, { button }) → release():
+ * the bar's main action (Return in the note runs it, `button` looks primary,
+ * Copy for agent becomes a plain button); note / setNote(text) / focusNote();
+ * choose(event, text): a proposal became the task (the note is set, then the
+ * latest onChoose handler runs; when none takes it, focus goes to the main
+ * action); onChoose(handler(event, text) → truthy when taken, { verb }) →
+ * release(), chooseVerb (the latest handler's verb or null); holdEscape(fn) →
+ * release(): Escape calls fn instead of discarding the capture; stillValid()
+ * (the page facts still hold; else the capture ends with the usual refusal);
+ * finish() (ends the capture, as after a copy); dismiss(); reposition();
+ * signal; isOpen.
+ *
+ * Unregistering removes everything it added from an open bar. An extension
+ * that throws is logged and left out; the bar and Copy for agent keep working.
+ */
+export function registerCaptureExtension(window, extension) {
+  if (!window || typeof window !== "object") throw new TypeError("registerCaptureExtension: a browser window");
+  const { id, order = 0, render, dispose = null } = extension ?? {};
+  if (typeof id !== "string" || id.length > 40 || !EXTENSION_ID.test(id)) throw new TypeError("registerCaptureExtension: id is lowercase words with dashes");
+  if (typeof render !== "function") throw new TypeError("registerCaptureExtension: render(bar, capture) is a function");
+  if (typeof order !== "number" || !Number.isFinite(order)) throw new TypeError("registerCaptureExtension: order is a number");
+  if (dispose !== null && typeof dispose !== "function") throw new TypeError("registerCaptureExtension: dispose is a function");
+  const registry = registryOf(window);
+  registry.extensions.get(id)?.unregister();
+  let active = true;
+  const record = { id, order, render, unregister: null };
+  record.unregister = () => {
+    if (!active) return;
+    active = false;
+    if (registry.extensions.get(id) === record) registry.extensions.delete(id);
+    for (const listener of [...registry.listeners]) {
+      try { listener(record); } catch (error) { console.error("AxioSozo: removing a capture extension failed", error); }
+    }
+    try { dispose?.(); } catch (error) { console.error(`AxioSozo: capture extension ${id} did not clean up`, error); }
+  };
+  registry.extensions.set(id, Object.freeze(record));
+  return record.unregister;
+}
+
+/** The ids registered in `window`, in render order (tests, diagnostics). */
+export const captureExtensionIds = window => extensionsOf(window).map(record => record.id);
+
 function nativeClipboard() {
   const { Cc, Ci, Services } = globalThis;
   return {
@@ -154,10 +241,16 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
   const { document, gBrowser } = window;
   const cleanups = [];
   const diagnostics = { drags: 0, menus_kept: 0, select_modes: 0, captures: 0, copied: 0, copied_images: 0,
-    refused: 0, cancelled: 0, failed: 0 };
+    refused: 0, cancelled: 0, failed: 0, extension_failures: 0, handed_off: 0 };
   let disposed = false, lastEnd = null;
   // idle → pending (right button down) → selecting → captured; or select (menu) → selecting → captured.
   let gesture = null, view = null, swallowMenuUntil = 0, replaying = false, menuTab = null;
+
+  // An extension unregistered while its part of a bar is showing: that part goes now.
+  const registry = registryOf(window);
+  const onUnregistered = record => { if (view?.extensions?.has(record.id)) unmountExtension(view, record.id); };
+  registry.listeners.add(onUnregistered);
+  cleanups.push(() => registry.listeners.delete(onUnregistered));
 
   const sheet = document.createProcessingInstruction?.("xml-stylesheet", `href="${REGION_STYLESHEET}" type="text/css"`);
   if (sheet) document.insertBefore(sheet, document.documentElement);
@@ -235,8 +328,11 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
   }
   function closeView() {
     if (!view) return;
-    const { root, browser } = view;
+    const current = view;
+    const { root, browser } = current;
     view = null;
+    // Every extension's part of this capture ends with it.
+    for (const id of [...(current.extensions?.keys() ?? [])]) unmountExtension(current, id);
     root.remove();
     if (gBrowser.selectedBrowser === browser && document.activeElement?.closest?.(".axiosozo-region") == null) {
       try { browser.focus(); } catch {}
@@ -413,7 +509,10 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
       try {
         const match = await services.projectForUrl?.(facts.url, adapter.workspaceForTab?.(facts.tab) ?? undefined);
         const name = match?.project?.manifest?.name ?? match?.project?.name;
-        if (typeof name === "string" && name) project = { name, environment: match.environment?.name ?? null };
+        if (typeof name === "string" && name) {
+          project = { id: typeof match.project.id === "string" ? match.project.id : null, name,
+            root: typeof match.project.root === "string" ? match.project.root : null, environment: match.environment?.name ?? null };
+        }
       } catch {}
       if (gesture?.token !== token) return;
       gesture = { phase: "captured", browser, token, selection, buffer, url: facts.url, title: facts.title,
@@ -456,20 +555,175 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     close.addEventListener("click", () => cancel("dismissed"));
     copyImage.addEventListener("click", event => copy(event, false, noteField.value));
     copyForAgent.addEventListener("click", event => copy(event, true, noteField.value));
+    const current = view;
     bar.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.isComposing && (event.target === noteField || event.target === bar)) {
         event.preventDefault();
-        copy(event, true, noteField.value);
+        const main = current.defaults?.at(-1);
+        if (!main) { copy(event, true, noteField.value); return; }
+        try { main.onEnter(event); } catch (error) { console.error(`AxioSozo: capture extension ${main.own.record.id} failed`, error); }
       }
     });
-    view.bar = bar;
-    const stackRect = view.stack.getBoundingClientRect?.() ?? { width: 0, height: 0 };
-    const barRect = bar.getBoundingClientRect?.() ?? { width: 0, height: 0 };
-    const place = barPlacement(gesture.selection, { width: stackRect.width, height: stackRect.height },
+    Object.assign(current, { bar, noteField, actions, copyImage, copyForAgent, selection: gesture.selection, extensions: new Map(),
+      defaults: [], choosers: [], escapes: [] });
+    placeBar(current);
+    for (const record of extensionsOf(window)) mountExtension(current, record);
+    // Focus starts on the main action unless an extension moved it (to the note, say).
+    if (view === current && !bar.contains(document.activeElement)) (current.defaults.at(-1)?.button ?? copyForAgent).focus();
+  }
+
+  /** Puts the bar under (else over, else inside) the selection for its current size. */
+  function placeBar(current) {
+    if (!current?.bar) return;
+    const stackRect = current.stack.getBoundingClientRect?.() ?? { width: 0, height: 0 };
+    const barRect = current.bar.getBoundingClientRect?.() ?? { width: 0, height: 0 };
+    const place = barPlacement(current.selection, { width: stackRect.width, height: stackRect.height },
       { width: barRect.width || 420, height: barRect.height || 84 });
-    bar.style.left = `${place.left}px`;
-    bar.style.top = `${place.top}px`;
-    copyForAgent.focus();
+    current.bar.style.left = `${place.left}px`;
+    current.bar.style.top = `${place.top}px`;
+  }
+
+  // ---- extensions on this bar ----------------------------------------------------------
+  /** Copy for agent looks primary only while no extension holds the main action. */
+  function applyDefault(current) {
+    const main = current.defaults.at(-1) ?? null;
+    current.copyForAgent.classList[main ? "remove" : "add"]("axiosozo-region-primary");
+    for (const item of current.defaults) item.button?.classList[item === main ? "add" : "remove"]("axiosozo-region-primary");
+  }
+
+  function mountExtension(current, record) {
+    const Controller = window.AbortController ?? globalThis.AbortController;
+    const own = { record, controller: new Controller(), nodes: new Set(), cleanup: null, rank: current.extensions.size };
+    current.extensions.set(record.id, own);
+    current.bar.setAttribute("data-extended", "true");
+    const live = () => view === current && current.extensions.get(record.id) === own && !own.controller.signal.aborted;
+    const keep = element => { own.nodes.add(element); return element; };
+    // Each extension's nodes stay together and in extension order.
+    const insertOwn = (parent, element, fallback) => {
+      const later = [...parent.children].find(child => Number(child.getAttribute?.("data-extension-rank")) > own.rank && child !== element);
+      element.setAttribute("data-extension", record.id);
+      element.setAttribute("data-extension-rank", String(own.rank));
+      parent.insertBefore(element, later ?? fallback);
+      keep(element);
+      placeBar(current);
+      return element;
+    };
+    const facts = gesture;
+    const capture = Object.freeze({
+      png: new Uint8Array(facts.buffer), type: "image/png", width: facts.width, height: facts.height, url: facts.url, title: facts.title,
+      project: facts.project ? Object.freeze({ ...facts.project }) : null,
+      get note() { return current.noteField.value; },
+      browser: facts.browser, selection: Object.freeze({ ...facts.selection }), signal: own.controller.signal,
+    });
+    const release = (list, item) => () => {
+      const at = list.indexOf(item);
+      if (at < 0) return;
+      list.splice(at, 1);
+      if (list === current.defaults) {
+        item.button?.classList.remove("axiosozo-region-primary");
+        applyDefault(current);
+      }
+    };
+    const bar = Object.freeze({
+      document,
+      signal: own.controller.signal,
+      get isOpen() { return live(); },
+      get note() { return current.noteField.value; },
+      section({ label = null } = {}) {
+        if (!live()) return null;
+        const element = node("div", "axiosozo-region-section", null, label ? { role: "group", "aria-label": String(label) } : {});
+        return insertOwn(current.bar, element, current.actions);
+      },
+      action({ label, title = null, primary = false, onClick = null } = {}) {
+        if (!live()) return null;
+        const element = node("button", "axiosozo-region-button", null, { type: "button" });
+        element.textContent = String(label ?? "");
+        if (title) element.setAttribute("title", String(title));
+        if (typeof onClick === "function") {
+          element.addEventListener("click", event => {
+            if (element.disabled || !live()) return;
+            try { onClick(event); } catch (error) { console.error(`AxioSozo: capture extension ${record.id} failed`, error); }
+          });
+        }
+        insertOwn(current.actions, element, null);
+        if (primary && typeof onClick === "function") bar.setDefault(onClick, { button: element });
+        return element;
+      },
+      slot() {
+        if (!live()) return null;
+        return insertOwn(current.actions, node("span", "axiosozo-region-slot"), null);
+      },
+      setDefault(onEnter, { button = null } = {}) {
+        if (!live() || typeof onEnter !== "function") return () => {};
+        const item = { own, onEnter, button };
+        current.defaults.push(item);
+        applyDefault(current);
+        return release(current.defaults, item);
+      },
+      setNote(text) {
+        if (!live()) return;
+        current.noteField.value = String(text ?? "").replace(/\s+/gu, " ").trim().slice(0, NOTE_LIMIT);
+      },
+      focusNote() { if (live()) current.noteField.focus(); },
+      // A proposal only fills the task: the user reads (or trims) it and
+      // presses Return or the bar's own button. AI suggests; it never starts
+      // an agent by itself. (Choosers stay registered for a future "start at
+      // once" variant.)
+      choose(event, text) {
+        if (!live()) return false;
+        bar.setNote(text);
+        if (view === current) (current.defaults.at(-1)?.button ?? current.copyForAgent).focus();
+        return false;
+      },
+      onChoose(handler, { verb = null } = {}) {
+        if (!live() || typeof handler !== "function") return () => {};
+        const item = { own, handler, verb: typeof verb === "string" && verb ? verb : null };
+        current.choosers.push(item);
+        return release(current.choosers, item);
+      },
+      get chooseVerb() { return current.choosers.at(-1)?.verb ?? null; },
+      holdEscape(fn) {
+        if (!live() || typeof fn !== "function") return () => {};
+        const item = { own, fn };
+        current.escapes.push(item);
+        return release(current.escapes, item);
+      },
+      stillValid() {
+        if (!live() || gesture?.token !== facts.token) return false;
+        const again = sample(facts.browser);
+        if (again.ok && again.url === facts.url) return true;
+        cancel("changed");
+        refuse(again.ok ? "UNAVAILABLE" : again.reason);
+        return false;
+      },
+      finish() { if (view === current) { diagnostics.handed_off++; finish(); } },
+      dismiss() { if (view === current) cancel("dismissed"); },
+      reposition() { if (live()) placeBar(current); },
+    });
+    try {
+      const handle = record.render(bar, capture);
+      own.cleanup = typeof handle === "function" ? handle : typeof handle?.dispose === "function" ? () => handle.dispose() : null;
+    } catch (error) {
+      diagnostics.extension_failures++;
+      console.error(`AxioSozo: capture extension ${record.id} failed`, error);
+      unmountExtension(current, record.id);
+    }
+  }
+
+  /** Removes one extension's part of a bar: its signal aborts, its cleanup runs, its nodes and claims go. */
+  function unmountExtension(current, id) {
+    const own = current?.extensions?.get(id);
+    if (!own) return;
+    current.extensions.delete(id);
+    try { own.controller.abort(); } catch {}
+    try { own.cleanup?.(); } catch (error) { console.error(`AxioSozo: capture extension ${id} did not clean up`, error); }
+    for (const element of own.nodes) element.remove();
+    for (const list of [current.defaults, current.choosers, current.escapes]) {
+      for (let at = list.length - 1; at >= 0; at--) if (list[at].own === own) list.splice(at, 1);
+    }
+    applyDefault(current);
+    if (!current.extensions.size) current.bar?.removeAttribute("data-extended");
+    if (view === current) placeBar(current);
   }
 
   function copy(event, withNote, note) {
@@ -515,6 +769,12 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     if (event.key !== "Escape" || !gesture) return;
     event.preventDefault();
     event.stopPropagation();
+    // An extension's open menu (say) closes first; the capture stays.
+    const held = view?.escapes?.at(-1);
+    if (held && gesture.phase === "captured") {
+      try { held.fn(event); } catch (error) { console.error(`AxioSozo: capture extension ${held.own.record.id} failed`, error); }
+      return;
+    }
     cancel("escape");
   }
   const onTabSelect = () => cancel("tab");

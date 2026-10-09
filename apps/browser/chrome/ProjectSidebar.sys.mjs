@@ -100,6 +100,35 @@ const DEFAULT_FAVICON = "chrome://global/skin/icons/defaultFavicon.svg";
 export const UNDO_TOAST_MS = 6000;
 const APP_KINDS = new Set(["mobile", "desktop"]);
 
+// ---- Row decorations: a hook for AxioSozo Lab experiments (docs/lab/experiments/agents-on-rows.md)
+// One decorator per window may give a project row a small mark on its icon and
+// a button beside it, and put one node above the list. The sidebar draws them
+// and redraws on update(); the decorator never touches rows, and remove()
+// takes everything away. decorator: { mark(project) → { state, label, title?,
+// quiet? } | null, activate(project, button, event), top: Node | null }.
+export const ROW_MARKS = Object.freeze(["working", "needs_you", "done", "failed", "stopped"]);
+const decorations = new WeakMap(); // window → { decorator, redraw }
+const decorationOf = window => {
+  if (!decorations.has(window)) decorations.set(window, { decorator: null, redraw: null });
+  return decorations.get(window);
+};
+export function decorateProjectRows(window, decorator) {
+  const slot = decorationOf(window);
+  slot.decorator = decorator;
+  slot.redraw?.();
+  return Object.freeze({
+    update() { if (slot.decorator === decorator) slot.redraw?.(); },
+    remove() { if (slot.decorator !== decorator) return; slot.decorator = null; slot.redraw?.(); },
+  });
+}
+function rowMark(slot, project) {
+  let mark = null;
+  try { mark = slot.decorator?.mark?.(project) ?? null; } catch { mark = null; }
+  if (!mark || !ROW_MARKS.includes(mark.state) || typeof mark.label !== "string" || !mark.label) return null;
+  return { state: mark.state, label: mark.label.slice(0, 160), title: typeof mark.title === "string" ? mark.title.slice(0, 200) : mark.label.slice(0, 160),
+    quiet: mark.quiet === true };
+}
+
 /** "1 server", "3 servers", "2 apps", "3 servers and apps": what a Stop all
  * stopped, named by the kinds of its targets. */
 export function runsPhrase(kinds) {
@@ -237,7 +266,13 @@ export function installProjectSidebar(window, ctx) {
   const overflowItem = el("li", { className: "axiosozo-projects-more" });
   const overflowButton = button(overflowItem, { className: "axiosozo-projects-overflow", focusKey: "overflow",
     onClick: () => { if (showAll.has(shownUuid)) showAll.delete(shownUuid); else showAll.add(shownUuid); render(); } });
-  const rowNodes = new Map(); // project id → { item, row, quick, entry, signature }
+  const rowNodes = new Map(); // project id → { item, row, quick, agent, entry, signature }
+  // A Lab decorator (decorateProjectRows) for this window; a row redraws when its mark changed.
+  const decoration = decorationOf(window);
+  const redraw = () => schedule();
+  decoration.redraw = redraw;
+  cleanups.push(() => { if (decoration.redraw === redraw) decoration.redraw = null; });
+  let shownTop = null;
 
   function render() {
     scheduled = false;
@@ -250,6 +285,10 @@ export function installProjectSidebar(window, ctx) {
       return;
     }
     shownUuid = uuid;
+    const top = decoration.decorator?.top ?? null;
+    if (shownTop && shownTop !== top) shownTop.remove();
+    if (top && top.parentNode !== root) head.after(top);
+    shownTop = top;
     root.toggleAttribute?.("data-collapsed", sectionCollapsed);
     titleButton.setAttribute("aria-expanded", String(!sectionCollapsed));
     const live = allRuns.filter(run => OURS.has(run.status)).length;
@@ -286,11 +325,12 @@ export function installProjectSidebar(window, ctx) {
     pollWhileStarting(all);
   }
 
-  function rowLabel(name, summary, logged) {
+  function rowLabel(name, summary, logged, mark = null) {
     const parts = [name];
     if (summary.live) parts.push(`${summary.live} running`);
     if (summary.failed) parts.push(`${summary.failed} stopped with an error`);
     if (logged) parts.push(ctx.consolePhrase(logged));
+    if (mark) parts.push(mark.label);
     return `${parts.join(", ")}. Show project`;
   }
 
@@ -317,19 +357,30 @@ export function installProjectSidebar(window, ctx) {
     const name = project.manifest?.name ?? "Project";
     const primary = !summary.live && !ctx.privateWindow ? primaryTarget(views) : null;
     const expanded = open?.mode === "project" && open.projectId === id;
+    const mark = rowMark(decoration, project);
     const signature = JSON.stringify([name, icons.get(id) ?? null, ctx.projectColor(project), summary, current, expanded,
-      logged && [logged.count, logged.errors, logged.warnings], primary?.target.name ?? null]);
+      logged && [logged.count, logged.errors, logged.warnings], primary?.target.name ?? null, mark]);
     if (node.signature === signature) return;
     node.signature = signature;
     node.item.setAttribute("data-state", summary.state);
     node.item.toggleAttribute?.("data-current", current);
+    if (mark) node.item.setAttribute("data-agent", mark.state); else node.item.removeAttribute("data-agent");
     const { row, quick } = node;
     row.setAttribute("title", name);
-    row.setAttribute("aria-label", rowLabel(name, summary, logged));
+    row.setAttribute("aria-label", rowLabel(name, summary, logged, mark));
     row.setAttribute("aria-expanded", String(expanded));
     if (current) row.setAttribute("aria-current", "true"); else row.removeAttribute("aria-current");
     while (row.firstChild) row.firstChild.remove();
-    projectIcon(project, row);
+    const tile = projectIcon(project, row);
+    if (mark) el("span", { className: "axiosozo-project-agent-mark", attrs: { "data-agent": mark.state, ...(mark.quiet ? { "data-quiet": "" } : {}) } }, tile);
+    if (mark && typeof decoration.decorator?.activate === "function") {
+      node.agent ??= button(node.item, { className: "axiosozo-project-agent", focusKey: `${id}:agent`, attrs: { "aria-haspopup": "dialog" },
+        onClick: event => { if (node.entry && decoration.decorator) decoration.decorator.activate(node.entry.project, node.agent, event); } });
+      node.agent.setAttribute("data-agent", mark.state);
+      node.agent.toggleAttribute?.("data-quiet", mark.quiet);
+      node.agent.setAttribute("aria-label", `${name}: ${mark.label}. Show`);
+      node.agent.setAttribute("title", mark.title);
+    } else if (node.agent) { node.agent.remove(); node.agent = null; }
     el("span", { className: "axiosozo-project-name", text: name }, row);
     const badges = el("span", { className: "axiosozo-project-badges", attrs: { "aria-hidden": "true" } }, row);
     if (logged) {

@@ -885,16 +885,25 @@ export function isHomeHash(hash) {
   return text === "home";
 }
 
+/** True for exactly the Lab's today sheet's address fragment. */
+export function isTodayHash(hash) {
+  let text = String(hash ?? "").replace(/^#/, "");
+  try { text = decodeURIComponent(text); } catch { return false; }
+  return text === "today";
+}
+
 /** "#projects", "#rules", "#ai", "#lab"; old "#home", "#time", "#settings" redirect;
  * "#project=<id>" (the project's home, see homeIdFromRoute), "#edit-project=<id>",
  * "#add-project=<space uuid>", "#rule=<id>". With the experimental start page
- * on (home: true, P6) "#home" is that page instead of the old Projects link. */
-export function routeFromHash(hash, { home = false } = {}) {
+ * on (home: true, P6) "#home" is that page instead of the old Projects link.
+ * With the Lab's today sheet on (today: true) "#today" is that sheet; off, Projects. */
+export function routeFromHash(hash, { home = false, today = false } = {}) {
   let text = String(hash ?? "").replace(/^#/, "");
   try { text = decodeURIComponent(text); } catch { return { view: "projects" }; }
   const [name, value] = text.split("=", 2);
   if (VIEWS.includes(text)) return { view: text };
   if (text === "home" && home === true) return { view: "home" };
+  if (text === "today" && today === true) return { view: "today" };
   if (Object.hasOwn(LEGACY_VIEWS, text)) return { view: LEGACY_VIEWS[text], legacy: true };
   // A project home: everything after "project=" (decoded) must be one valid id;
   // a tail such as "=x", "%3Dx" or "=/" is not a home, only the list.
@@ -2265,6 +2274,81 @@ export function labErrorText(code) {
     case "LAB_UNAVAILABLE": return "The Lab is not available right now.";
     case "UNKNOWN_EXPERIMENT": return "That experiment is no longer in the Lab. The list was read again.";
     case "PRIVATE_WINDOW": return "Experiments are turned on and off from a normal window.";
+    default: return null;
+  }
+}
+
+// ---------------------------------------------------------------- today (the Lab's today sheet, chrome/lab/today)
+
+// The sheet is the actor's getToday answer (lab/today/today-model composeToday):
+// lines grouped by what they need from you, each with its source. Nothing here
+// is composed by a model; "Suggest a first thing" is the one optional AI step.
+
+export const TODAY_GROUP_TITLES = Object.freeze({ waiting: "Waiting for you", failed: "Failed", finished: "Finished", due: "Due" });
+/** The dot of a line (the overview's dot words; "due" is the accent). */
+export const TODAY_DOTS = Object.freeze({ waiting: "warn", failed: "down", finished: "up", due: "due" });
+export const TODAY_NOTE = "Composed on this Mac from your agents, servers and errands, without AI. Nothing was sent. Close this tab when you are done.";
+export const TODAY_SUGGEST_HELP = "Asks your own assistant once: Claude Code, or Codex when Claude Code is not ready. The lines above go to it, without addresses.";
+export const TODAY_OFF = "Today is a Lab experiment that is off. Turn it on under Lab.";
+const TODAY_ORDER = Object.freeze(["waiting", "failed", "finished", "due"]);
+const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+
+/** "Friday 9 October" for the sheet's day ("YYYY-MM-DD"), or "". */
+export function todayDate(day) {
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(day)) return "";
+  const [y, m, d] = day.split("-").map(Number);
+  const date = new Date(y, m - 1, d, 12);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+}
+
+/** One sentence for the whole sheet: "2 need you, 1 failed and 1 errand is due." or "Nothing needs you." */
+export function todaySummary(counts = {}) {
+  const parts = [];
+  const waiting = counts?.waiting ?? 0, failed = counts?.failed ?? 0, due = counts?.due ?? 0, finished = counts?.finished ?? 0;
+  if (waiting) parts.push(`${waiting} ${waiting === 1 ? "needs" : "need"} you`);
+  if (failed) parts.push(`${failed} failed`);
+  if (due) parts.push(`${plural(due, "errand is", "errands are")} due`);
+  if (!parts.length) return finished ? `Nothing needs you. ${plural(finished, "thing", "things")} finished since you last looked.` : "Nothing needs you.";
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  return `${list[0].toUpperCase()}${list.slice(1)}.`;
+}
+
+/** "since 22:04 yesterday": when "since you last looked" began. */
+export function todaySinceText(since, now = Date.now()) {
+  if (!Number.isSafeInteger(since)) return "";
+  const date = new Date(since);
+  const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const day = new Date(now);
+  if (date.toDateString() === day.toDateString()) return `since ${time} today`;
+  day.setDate(day.getDate() - 1);
+  if (date.toDateString() === day.toDateString()) return `since ${time} yesterday`;
+  return `since ${date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })} ${time}`;
+}
+
+/** The sheet's sections in reading order, empty ones left out: [{ group, title, lines, more, total }]. */
+export function todaySections(reply, { now = Date.now() } = {}) {
+  return TODAY_ORDER.map(group => {
+    const lines = listOf(reply?.groups?.[group]);
+    const total = Number.isSafeInteger(reply?.counts?.[group]) ? reply.counts[group] : lines.length;
+    const title = group === "finished" && reply?.since ? `${TODAY_GROUP_TITLES.finished} ${todaySinceText(reply.since, now)}` : TODAY_GROUP_TITLES[group];
+    return { group, title, lines, more: Number.isSafeInteger(reply?.more?.[group]) ? reply.more[group] : 0, total };
+  }).filter(section => section.lines.length);
+}
+
+/** Where a line leads: { kind: "project", href } | { kind: "errand", id } | null. */
+export function todayTarget(line) {
+  if (line?.errand?.id) return { kind: "errand", id: line.errand.id };
+  if (typeof line?.project?.id === "string" && PROJECT_ID.test(line.project.id)) return { kind: "project", href: homeHash(line.project.id) };
+  return null;
+}
+
+/** A refused today request in one calm sentence. */
+export function todayErrorText(code) {
+  switch (code) {
+    case "LAB_OFF": return TODAY_OFF;
+    case "UNKNOWN_ERRAND": return "That errand is gone.";
+    case "PRIVATE_WINDOW": return "Today is shown from a normal window.";
+    case "OPEN_FAILED": return "The page could not be opened.";
     default: return null;
   }
 }

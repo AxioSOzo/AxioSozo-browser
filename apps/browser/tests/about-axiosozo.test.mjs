@@ -154,13 +154,13 @@ test("the method list is closed and matches contexts-api-v1 §3.3 plus refreshPr
     "acceptProjectBrief", "activeContext", "cancelDecisionKeyOperations", "cancelProjectReadOperations", "cancelSetup", "cancelUnderstand",
     "checkWatch", "clearLedger", "confirmProject", "deleteRule", "detect", "exportLedger",
     "getAgentBridgeConfig", "getAgentEndpointState", "getAgentHookConfig", "getDecisionKeyStatus", "getJevSettings", "getLabClients",
-    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getSafetyStatus", "getUnderstandAvailability", "getUnderstandState",
+    "getOverviewFlags", "getProject", "getProjectHome", "getProviderStatus", "getSafetyStatus", "getToday", "getUnderstandAvailability", "getUnderstandState",
     "getWatchStatus", "linkOrganization", "linkProject",
     "listAgentActivity", "listAgentSessions", "listContexts", "listLab",
-    "listOrphans", "listProjectContainers", "listProjects", "listRules", "listWatches", "needsAttention", "openContext", "openProjectUrl", "openUrl", "pickFolder",
+    "listOrphans", "listProjectContainers", "listProjects", "listRules", "listWatches", "needsAttention", "openContext", "openProjectUrl", "openTodayErrand", "openUrl", "pickFolder",
     "previewIcon", "previewProjectBriefAcceptance", "projectForUrl", "projectIcon", "readProject", "refreshProjectDetection", "reinspectProjectBriefAcceptance",
     "removeDecisionKey", "removeOrphans", "removeProject", "removeWatch", "retryWatchCleanup", "revokeAgentSession", "saveRule", "saveWatch", "serviceStatus",
-    "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setLabEnabled", "setSharedSites", "storeDecisionKey", "suggestSetup", "updateProject",
+    "setAccountLabel", "setAgentEndpointEnabled", "setContextType", "setEnginePreference", "setJevSettings", "setLabEnabled", "setSharedSites", "setTodayErrand", "storeDecisionKey", "suggestSetup", "suggestTodayFirst", "updateProject",
     "usageSummary", "writeManifest",
   ]);
   // Watch changes and safety choices are trusted clicks only (private child messages):
@@ -278,11 +278,11 @@ test("engine preference other than default is refused while the experimental pre
     assert.equal((await request(actor, "setEnginePreference", { uuid: UUID_A, engine: "chromium" })).ok, true);
     assert.deepEqual(calls, [["setEnginePreference", UUID_A, null], ["setEnginePreference", UUID_A, "chromium"]]);
     assert.deepEqual((await request(actor, "getOverviewFlags")).value,
-      { contexts: true, enginePreferences: true, jevKeyEntry: false, openaiKeyEntry: false, home: false });
+      { contexts: true, enginePreferences: true, jevKeyEntry: false, openaiKeyEntry: false, home: false, today: false });
     restore();
     restore = withProviders(services, { "axiosozo.jev.keyEntry.enabled": true, "axiosozo.openai.keyEntry.enabled": true });
     assert.deepEqual((await request(actor, "getOverviewFlags")).value,
-      { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true, home: false });
+      { contexts: true, enginePreferences: false, jevKeyEntry: true, openaiKeyEntry: true, home: false, today: false });
   } finally { restore(); }
 });
 
@@ -935,13 +935,15 @@ test("validateRequest and dispatch are usable without an actor", async () => {
   // Key entry reads as ProviderKeys enforces it: an unreadable or absent pref is off
   // (defaults.yaml declares both on).
   assert.deepEqual(readFlags({ getBoolPref() { throw new Error("no prefs"); } }),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false, today: false });
   assert.deepEqual(readFlags({ getBoolPref: (_name, fallback) => fallback }),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: false, home: false, today: false });
   assert.deepEqual(readFlags(prefs({ "axiosozo.openai.keyEntry.enabled": true })),
-    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: true, home: false });
+    { contexts: true, enginePreferences: false, jevKeyEntry: false, openaiKeyEntry: true, home: false, today: false });
   // P6: the experimental start page flag is read only (absent, false or unreadable is off).
   assert.equal(readFlags(prefs({ "axiosozo.home.enabled": true })).home, true);
+  // The Lab's today sheet: its switch is read only, for the #today route and its link.
+  assert.equal(readFlags(prefs({ "axiosozo.lab.today-sheet.enabled": true })).today, true);
 });
 
 // ---------------------------------------------------------------- child

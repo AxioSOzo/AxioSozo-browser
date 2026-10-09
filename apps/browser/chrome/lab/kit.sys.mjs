@@ -175,13 +175,15 @@ let serial = 0;
  *    quiet, title, disabled, onClick(event, card), closes }].
  *  width (px, default 360), prefer ("below" | "above"), align ("start" |
  *  "end" | "center"), focus (move keyboard focus in; default true),
- *  closeOnOutside (default true), signal (an AbortSignal that closes it;
+ *  closeOnOutside (default true), closeOnNavigate (default true; false keeps
+ *  a card over a page through reloads and navigations, e.g. an agent's status
+ *  while a dev server reloads the page), signal (an AbortSignal that closes it;
  *  pass ctx.signal), onClose(reason).
  * Returns the card, or null when the anchor cannot host one (for example a
  * browser that is not in a tab's browser stack).
  */
 export function floatingCard(window, { anchor, title = "", label = null, body = null, actions = [], width = 360, prefer = "below",
-  align = "start", focus = true, closeOnOutside = true, signal = null, onClose = null } = {}) {
+  align = "start", focus = true, closeOnOutside = true, closeOnNavigate = true, signal = null, onClose = null } = {}) {
   const document = window?.document;
   const target = document ? resolveAnchor(window, anchor) : null;
   if (!target || signal?.aborted) return INERT_CARD;
@@ -283,7 +285,7 @@ export function floatingCard(window, { anchor, title = "", label = null, body = 
     cleanups.push(() => signal.removeEventListener("abort", onAbort));
   }
   // A card over a page ends when that page navigates away.
-  if (target.browser && typeof window.gBrowser?.addTabsProgressListener === "function") {
+  if (closeOnNavigate && target.browser && typeof window.gBrowser?.addTabsProgressListener === "function") {
     const listener = { onLocationChange(browser, webProgress) {
       if (browser === target.browser && webProgress?.isTopLevel !== false) card.close("navigated");
     } };
