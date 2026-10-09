@@ -41,7 +41,8 @@
   /* One is due today or earlier: the space's own accent, still quiet. */
   &[data-due] {
     background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 18%, transparent);
-    color: var(--zen-primary-color, AccentColor);
+    color: light-dark(color-mix(in oklab, var(--zen-primary-color, AccentColor) 85%, black),
+      color-mix(in oklab, var(--zen-primary-color, AccentColor) 40%, white));
   }
   &:focus-visible {
     outline: var(--focus-outline, 2px solid AccentColor);
@@ -137,7 +138,10 @@
 
   & > .axiosozo-lab-button {
     margin-inline-start: -8px;
-    color: var(--zen-primary-color, AccentColor);
+    /* Zen's accent can be a deep navy: lift it on dark cards so it reads. */
+    color: light-dark(color-mix(in oklab, var(--zen-primary-color, AccentColor) 85%, black),
+      color-mix(in oklab, var(--zen-primary-color, AccentColor) 40%, white));
+    font-weight: 500;
   }
 }
 .axiosozo-lab-errand-quiet {
@@ -226,7 +230,8 @@
   font-size: 12px;
 
   &[data-due] {
-    color: var(--zen-primary-color, AccentColor);
+    color: light-dark(color-mix(in oklab, var(--zen-primary-color, AccentColor) 85%, black),
+      color-mix(in oklab, var(--zen-primary-color, AccentColor) 40%, white));
   }
 }
 .axiosozo-lab-errand-actions {
