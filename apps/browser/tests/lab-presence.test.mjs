@@ -248,7 +248,7 @@ test("needs you raises one calm toast naming agent, project and question, with o
   assert.equal(ctx.toasts.length, 1);
   const toast = ctx.toasts[0];
   assert.equal(toast.title, "Claude Code needs you in Harbor");
-  assert.equal(toast.description, "Claude Code wanted to go further (writing outside.txt). Continue in Terminal to decide.");
+  assert.equal(toast.description, "Claude Code wanted to go further (writing outside.txt).", "one short line; the button says how to answer");
   assert.equal(toast.button.label, "Continue in Terminal", "a run started here continues in Terminal");
   assert.equal(toast.timeoutMs, NEEDS_YOU_TOAST_MS);
   toast.button.onCommand({ isTrusted: true });

@@ -21,7 +21,8 @@ export function needsYouToast(session) {
   const resumable = session?.origin === "browser" && session?.canResume === true;
   return {
     title: `${clientLabel(session)} needs you in ${projectName(session)}`,
-    description: line(session?.reason, 160) || "It is waiting for your answer.",
+    // One short line: what it wanted; the button says how to answer.
+    description: line(String(session?.reason ?? "").replace(/\s*Continue in Terminal to decide\.?$/u, ""), 80) || "It is waiting for your answer.",
     action: resumable ? "continue" : "show",
     label: resumable ? "Continue in Terminal" : "Show",
     key: `axiosozo-lab-needs-you:${session?.id ?? ""}`,
