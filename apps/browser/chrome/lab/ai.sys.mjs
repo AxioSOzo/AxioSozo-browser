@@ -102,7 +102,12 @@ const byteLength = text => new TextEncoder().encode(text).length;
 
 /** { type, data: Uint8Array } from an experiment's image, or null when it is not one. */
 export function normalizeImage(image) {
-  const data = image?.data instanceof Uint8Array ? image.data : image?.data instanceof ArrayBuffer ? new Uint8Array(image.data) : null;
+  // Bytes may come from another global (a chrome window's canvas or a test
+  // sandbox), where instanceof fails: recognise them by their class and copy
+  // them into this module's own Uint8Array.
+  const tag = Object.prototype.toString.call(image?.data);
+  const data = tag === "[object Uint8Array]" ? new Uint8Array(image.data)
+    : tag === "[object ArrayBuffer]" ? new Uint8Array(image.data) : null;
   if (!isPlainObject(image) || !IMAGE_TYPES.includes(image.type) || !data || !data.byteLength || data.byteLength > MAX_IMAGE_BYTES) return null;
   return Object.freeze({ type: image.type, data });
 }
