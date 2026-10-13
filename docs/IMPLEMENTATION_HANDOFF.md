@@ -1,6 +1,7 @@
 # Handoff 2 — concrete continuation points
 
-The local repository is `/Volumes/T9/Code/AxioSozo browser`. The product is
+The local repository is the `products/browser` checkout in the AxioSozo workspace on
+T9 (originally `/Volumes/T9/Code/AxioSozo browser`). The product is
 **PARTIAL_ENGINE_BLOCKED**, not READY. The custom Zen app runs on macOS arm64 and
 actual CEF frames run inside it for a strict local fixture. E2 switching passed
 manual inspection for that fixture, while the full E1 safety and accessibility

@@ -35,15 +35,17 @@ run `./dev setup` before starting it again.
 
 Our source, patches, contracts and documentation live in this project folder on
 T9. This project currently assumes Wout's macOS/T9 development layout; the
-setup scripts need adaptation for another machine. This folder is exFAT, so the
-large pinned upstream working checkout, native build, caches, dependencies,
-synthetic profiles and temporary files use the
+setup scripts need adaptation for another machine. The source is kept separate
+from build data, so the large pinned upstream working checkout, native build,
+caches, dependencies, synthetic profiles and temporary files use the
 project-only APFS volume `AxioSozoBuild` mounted at `/Volumes/AxioSozoBuild`, physically
-stored inside `/Volumes/T9/Dev.sparsebundle`.
+stored inside `/Volumes/T9/Dev.sparsebundle`. `scripts/storage.py setup` mounts it
+when needed (through the `mount-axiosozo` helper) and never creates a disk image.
 Before external builds, the project calls `mount-dev-storage`, then the required
 `dev-external` wrapper and `scripts/storage.py exec --` to override its temporary
-and cache paths into the project image. The shared DevStorage image is not moved,
-resized, detached or cleaned. Two build jobs are used on this 16 GiB Mac.
+and cache paths into the AxioSozoBuild volume. Browser scripts never move, resize,
+detach or clean the shared DevStorage volume, and never detach Dev.sparsebundle.
+Two build jobs are used on this 16 GiB Mac.
 The pinned Node 22.22.3, Rust 1.95.0, Python 3.11.16 and GNU tar 1.35 tools pass
 the current component doctor. The lockfile records exact upstream revisions and
 archive hashes; network-enabled setup fetches only verified upstream URLs.

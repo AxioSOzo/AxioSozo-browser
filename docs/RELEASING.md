@@ -71,7 +71,9 @@ real run stops at a dirty tree.
 3. **A packaged build.** The objdir `AxioSozo Dev.app` is not distributable
    (see blockers below). The Zen workstream must add a package step
    (`mach package` via Surfer) with Preview branding.
-4. Mounted project volume: run `/Users/wout/.local/bin/mount-dev-storage`.
+4. Mounted project volume: run `/Users/wout/.local/bin/mount-dev-storage` (DevStorage
+   only), then `python3 scripts/storage.py setup` (mounts the AxioSozoBuild volume
+   via `mount-axiosozo` if needed; `storage.py exec` refuses to run without it).
 5. A clean tree at the commit being released.
 
 ## Commands
@@ -80,6 +82,7 @@ Run through the global wrapper so Apple tools use the build volume's TMPDIR:
 
 ```sh
 /Users/wout/.local/bin/mount-dev-storage
+python3 scripts/storage.py setup   # mounts the AxioSozoBuild volume if needed
 W="/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec --"
 
 # Plan only; modifies nothing, contacts nothing.

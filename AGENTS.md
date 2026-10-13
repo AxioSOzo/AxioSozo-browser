@@ -12,6 +12,8 @@ on external storage in task-specific directories, never internal /tmp or home.
 This project's active build volume is `/Volumes/AxioSozoBuild`: the APFS volume `AxioSozoBuild`
 inside `/Volumes/T9/Dev.sparsebundle` (which also holds the source volume); macOS requires its
 standard volume mountpoint. Never create a separate build image or detach Dev.sparsebundle.
+`mount-dev-storage` mounts only DevStorage; if `/Volumes/AxioSozoBuild` is not mounted,
+run `python3 scripts/storage.py setup` (it mounts the build volume via `mount-axiosozo`).
 Call the global dev-external helper followed by `scripts/storage.py exec -- ...`
 so its TMPDIR/Cargo/cache defaults are overridden into this project's T9-backed volume.
 Do not move active data, clean other projects, or detach DevStorage.

@@ -1,5 +1,11 @@
 # Plan 4 — the workstation
 
+> Historical note (13 October 2026): the `/Volumes/T9/Code/...` paths below predate
+> the workspace move. The main checkout is now `products/browser` in the AxioSozo
+> workspace on T9; the old `AxioSozo-browser-workstation` worktree is a retired legacy
+> checkout, so do not set up or build there. The build volume is the `AxioSozoBuild`
+> volume inside `/Volumes/T9/Dev.sparsebundle`, and the source is no longer on exFAT.
+
 Date: 2 October 2026. Branch: `product/workstation` (worktree
 `/Volumes/T9/Code/AxioSozo-browser-workstation`). This plan replaces the product
 direction of [HANDOFF_3](HANDOFF_3.md); what HANDOFF_3 built stays and is reused.

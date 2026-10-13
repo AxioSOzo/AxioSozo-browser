@@ -1,5 +1,10 @@
 # Setup status — 23 September 2026
 
+> Historical note (13 October 2026): this page records the September state. The
+> "project APFS image" / "project image" below is now the `AxioSozoBuild` volume
+> inside `/Volumes/T9/Dev.sparsebundle` (there is no separate build image any more),
+> and the project folder is on the APFS `AxioSozo` volume, no longer on exFAT.
+
 **27 September, Handoff 3 M1:** contexts, projects, dev loop, site rules and the `about:axiosozo` Overview are implemented on Gecko and exercised in the real app on a synthetic profile (27 PASS, 2 NOT_VERIFIED, 1 BLOCKED). E1/E2, live Jev and signed distribution remain blocked. See [Handoff 3 status](HANDOFF_3_STATUS.md). Not READY.
 
 The latest [26 September provider/engine continuation](PROVIDER_ENGINE_PROGRESS.md)
@@ -29,8 +34,8 @@ that stalled on the old volume now starts in 0.303 seconds. Evidence:
 The automatic approval review initially rejected the CEF build at this mountpoint
 because the earlier instruction named `/Volumes/DevStorage`. On 23 September Wout
 accepted the prepared alternative. Native work resumed there without moving or
-detaching the shared DevStorage image. The project directory itself is on exFAT;
-the prepared T9-backed APFS image supplies native build semantics.
+detaching the shared DevStorage image. The project directory was then on exFAT (now
+the APFS `AxioSozo` volume); the AxioSozoBuild volume supplies native build semantics.
 
 Current continuation evidence: `evidence/coordinator-current-build.json` records a
 2.23-second coordinator build on the project image. The real chrome/coordinator

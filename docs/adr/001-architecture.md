@@ -44,6 +44,10 @@ only `._*` metadata; never clean another checkout or move active data. Only one 
 browser build may run at a time, at two jobs on this 16 GiB machine. The project
 image has capacity and the pinned Zen build completed successfully.
 
+> Historical note (13 October 2026): the project image is now the `AxioSozoBuild`
+> volume inside `/Volumes/T9/Dev.sparsebundle`, and the source project is on the APFS
+> `AxioSozo` volume rather than exFAT. The decision above is unchanged.
+
 The custom development bundle id is `nl.axiosozo.browser.dev`. Upstream automatic
 updates cannot own this locally patched bundle; the build disables its stock updater.
 That is a development safety mechanism with explicit manual security-update ownership
