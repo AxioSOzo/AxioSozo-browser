@@ -6,10 +6,10 @@ actual CEF frames run inside it for a strict local fixture. E2 switching passed
 manual inspection for that fixture, while the full E1 safety and accessibility
 matrix remains open. There is no public fork, push or release.
 
-The project-only APFS image `/Volumes/T9/AxioSozoBuild.sparsebundle` is mounted at
-`/Volumes/AxioSozoBuild`. Wout accepted this T9-backed alternative after the
+The project-only APFS volume `AxioSozoBuild` inside `/Volumes/T9/Dev.sparsebundle` is mounted at
+`/Volumes/AxioSozoBuild` (originally a separate `AxioSozoBuild.sparsebundle` image). Wout accepted this T9-backed alternative after the
 project's exFAT source folder proved unsuitable for native build artifacts.
-`scripts/storage.py` verifies the image and directs build caches and temporary
+`scripts/storage.py` verifies the volume and directs build caches and temporary
 files there after the required `dev-external` wrapper. Shared DevStorage is untouched.
 The pinned Node, Rust, Python and GNU tar toolchain passes component checks;
 the overall `./dev doctor` remains nonzero until READY.

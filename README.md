@@ -38,8 +38,8 @@ T9. This project currently assumes Wout's macOS/T9 development layout; the
 setup scripts need adaptation for another machine. This folder is exFAT, so the
 large pinned upstream working checkout, native build, caches, dependencies,
 synthetic profiles and temporary files use the
-project-only APFS image mounted at `/Volumes/AxioSozoBuild`, physically backed by
-`/Volumes/T9/AxioSozoBuild.sparsebundle`.
+project-only APFS volume `AxioSozoBuild` mounted at `/Volumes/AxioSozoBuild`, physically
+stored inside `/Volumes/T9/Dev.sparsebundle`.
 Before external builds, the project calls `mount-dev-storage`, then the required
 `dev-external` wrapper and `scripts/storage.py exec --` to override its temporary
 and cache paths into the project image. The shared DevStorage image is not moved,

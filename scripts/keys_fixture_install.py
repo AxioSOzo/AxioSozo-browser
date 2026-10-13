@@ -14,7 +14,7 @@ import subprocess
 WORKTREE = Path("/Volumes/T9/Code/AxioSozo-browser-workstation")
 VOLUME = Path("/Volumes/AxioSozoBuild")
 BUILD = VOLUME / "workstation"
-IMAGE = Path("/Volumes/T9/AxioSozoBuild.sparsebundle")
+IMAGE = Path("/Volumes/T9/Dev.sparsebundle")  # holds the AxioSozoBuild APFS volume
 BASE = BUILD / "gui-fixtures"
 PROFILE_BASE = BUILD / "runtime/e626697ad91fe95c"
 PYTHON = VOLUME / "toolchains/zen/python/bin/python3.11"
@@ -46,7 +46,7 @@ def mounted_volume():
     disk = subprocess.run(["/usr/sbin/diskutil", "info", "-plist", str(VOLUME)], capture_output=True,
                           timeout=5, check=True, env={"LANG": "C", "LC_ALL": "C"})
     disk_info = plistlib.loads(disk.stdout)
-    require(disk_info.get("MountPoint") == str(VOLUME)
+    require(disk_info.get("MountPoint") == str(VOLUME) and disk_info.get("VolumeName") == "AxioSozoBuild"
             and str(disk_info.get("FilesystemType", "")).lower() == "apfs")
 
 

@@ -85,7 +85,7 @@ subset below comes from the actual Zen fork, separately from E0 and unit tests.
 
 ## Fresh component execution and earlier blockers
 
-The user approved the prepared `/Volumes/AxioSozoBuild` mountpoint, physically backed by `/Volumes/T9/AxioSozoBuild.sparsebundle`. A verified copy of the pinned archive was built and signed there. The old shared-volume signing stalls and initial approval rejection remain preserved as historical evidence; they no longer block this component.
+The user approved the prepared `/Volumes/AxioSozoBuild` mountpoint, now the `AxioSozoBuild` APFS volume inside `/Volumes/T9/Dev.sparsebundle` (originally a separate `AxioSozoBuild.sparsebundle` image). A verified copy of the pinned archive was built and signed there. The old shared-volume signing stalls and initial approval rejection remain preserved as historical evidence; they no longer block this component.
 
 The first actual runs created CEF targets and helpers but never loaded a page. Samples proved the helpers were executing Chromium, rather than stalling in dyld. Comparing the pinned upstream [`cefsimple_mac.mm`](https://github.com/chromiumembedded/cef/blob/062ebe433bf6575a71cac2dc71c405617202e3d7/tests/cefsimple/cefsimple_mac.mm) revealed that this separate native process can own the official `cef_run_message_loop`. Replacing the handwritten AppKit polling with that loop, plus a bounded UI-thread timer for private commands, produced real loads/paints and clean `cef_shutdown`. The current `cef_key_event_t.size` field was also required before native text input worked.
 

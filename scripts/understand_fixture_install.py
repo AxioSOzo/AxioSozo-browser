@@ -15,7 +15,7 @@ WORKTREE = Path("/Volumes/T9/Code/AxioSozo-browser-workstation")
 SOURCE = WORKTREE
 VOLUME = Path("/Volumes/AxioSozoBuild")
 BUILD = VOLUME / "workstation"
-IMAGE = Path("/Volumes/T9/AxioSozoBuild.sparsebundle")
+IMAGE = Path("/Volumes/T9/Dev.sparsebundle")  # holds the AxioSozoBuild APFS volume
 BASE = BUILD / "gui-fixtures"
 PROFILE_BASE = BUILD / "runtime/e626697ad91fe95c"
 PYTHON = VOLUME / "toolchains/zen/python/bin/python3.11"
@@ -216,6 +216,7 @@ def mounted_volume():
                         for item in image["images"]))
         disk = os_query("disk")
         require(isinstance(disk, dict) and disk.get("MountPoint") == str(VOLUME)
+                and disk.get("VolumeName") == VOLUME.name
                 and str(disk.get("FilesystemType", "")).lower() == "apfs")
 
 

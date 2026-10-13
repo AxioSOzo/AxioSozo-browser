@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Project-only APFS storage physically backed by T9; never resize shared images."""
+"""Project-only APFS build volume on T9; never create, resize or detach disk images.
+
+The build volume `AxioSozoBuild` lives inside the shared `Dev.sparsebundle`
+image next to the `AxioSozo` source volume. Detaching that image would take
+down the source volume, so this script only ever attaches and mounts.
+"""
 import argparse
 import fcntl
 import json
@@ -13,7 +18,9 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE = Path('/Volumes/T9/AxioSozoBuild.sparsebundle')
+IMAGE = Path('/Volumes/T9/Dev.sparsebundle')
+# APFS volume name of the build volume inside IMAGE.
+VOLUME_NAME = 'AxioSozoBuild'
 # The mounted project volume. Several worktrees may build side by side on it,
 # each in its own build root (AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/<name>).
 VOLUME = Path('/Volumes/AxioSozoBuild')
@@ -22,6 +29,8 @@ VOLUME = Path('/Volumes/AxioSozoBuild')
 RESERVED_SUBROOTS = {'zen', 'toolchains', 'cargo-home', 'cargo-target', 'caches', 'runtime', 'tmp',
                      'cef', 'providers', 'logs', 'release', 'diag', 'diagnostics', 'gui-fixtures'}
 MOUNT_SHARED = '/Users/wout/.local/bin/mount-dev-storage'
+# System helper that mounts every Dev.sparsebundle volume (build volume -nobrowse).
+MOUNT_HELPER = Path('/Users/wout/.local/bin/mount-axiosozo')
 
 
 def build_root(value=None):
@@ -40,17 +49,38 @@ def build_root(value=None):
 BUILD_ROOT = build_root()
 
 
-def image_mounts():
+def image_entities():
+    """System entities of IMAGE if attached, else None."""
     result = subprocess.run(['/usr/bin/hdiutil', 'info', '-plist'], capture_output=True, check=True)
     data = plistlib.loads(result.stdout)
-    return [entity.get('mount-point') for item in data.get('images', [])
-            if item.get('image-path') == str(IMAGE)
-            for entity in item.get('system-entities', []) if entity.get('mount-point')]
+    for item in data.get('images', []):
+        if item.get('image-path') == str(IMAGE):
+            return item.get('system-entities', [])
+    return None
+
+
+def image_mounts():
+    return [entity.get('mount-point') for entity in image_entities() or [] if entity.get('mount-point')]
+
+
+def disk_info(target):
+    result = subprocess.run(['/usr/sbin/diskutil', 'info', '-plist', str(target)],
+                            capture_output=True, check=True, timeout=30)
+    return plistlib.loads(result.stdout)
+
+
+def volume_verified():
+    """VOLUME is the APFS volume named VOLUME_NAME inside IMAGE."""
+    if not (VOLUME.is_mount() and str(VOLUME) in image_mounts()):
+        return False
+    info = disk_info(VOLUME)
+    return (info.get('VolumeName') == VOLUME_NAME and info.get('MountPoint') == str(VOLUME)
+            and str(info.get('FilesystemType', '')).lower() == 'apfs')
 
 
 def mounted():
     """The verified project volume is mounted and this build root exists on it."""
-    if not (VOLUME.is_mount() and str(VOLUME) in image_mounts()):
+    if not volume_verified():
         return False
     if BUILD_ROOT != VOLUME:
         BUILD_ROOT.mkdir(exist_ok=True)
@@ -61,17 +91,40 @@ def mounted():
 
 def report():
     active = mounted()
-    return {'image': str(IMAGE), 'mountpoint': str(VOLUME), 'build_root': str(BUILD_ROOT), 'mounted': active,
-            'image_exists': IMAGE.exists(), 'virtual_capacity_gib': 200,
+    return {'image': str(IMAGE), 'volume_name': VOLUME_NAME, 'mountpoint': str(VOLUME),
+            'build_root': str(BUILD_ROOT), 'mounted': active, 'image_exists': IMAGE.exists(),
             't9_free_gib': round(shutil.disk_usage('/Volumes/T9').free / 2**30, 2)
                 if Path('/Volumes/T9').is_mount() else None,
             'build_free_gib': round(shutil.disk_usage(BUILD_ROOT).free / 2**30, 2)
                 if active else None}
 
 
+def attach_and_mount():
+    """Fallback without the helper: attach IMAGE without mounting (if needed) and
+    mount only the APFS volume named VOLUME_NAME, hidden from Finder."""
+    if image_entities() is None:
+        subprocess.run(['/usr/bin/hdiutil', 'attach', '-nomount', str(IMAGE)],
+                       check=True, timeout=180)
+    candidates = []
+    for entity in image_entities() or []:
+        device = entity.get('dev-entry')
+        if not device or entity.get('mount-point'):
+            continue
+        info = disk_info(device)
+        if (info.get('VolumeName') == VOLUME_NAME
+                and str(info.get('FilesystemType', '')).lower() == 'apfs'):
+            candidates.append(device)
+    if len(candidates) != 1:
+        raise RuntimeError('Expected exactly one unmounted APFS volume named ' + VOLUME_NAME
+                           + ' in ' + str(IMAGE) + ', found ' + repr(candidates))
+    # The default mountpoint for this volume name is VOLUME (/Volumes/AxioSozoBuild).
+    subprocess.run(['/usr/sbin/diskutil', 'mount', 'nobrowse', candidates[0]],
+                   check=True, timeout=180)
+
+
 def ensure():
     subprocess.run([MOUNT_SHARED], check=True)
-    # This lock only serializes this project's image creation/attachment.
+    # This lock only serializes this project's build-volume attachment.
     local = ROOT / '.local'
     local.mkdir(exist_ok=True)
     fd = os.open(local / 'storage.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -80,29 +133,25 @@ def ensure():
         if mounted():
             return report()
         if VOLUME.is_mount():
-            raise RuntimeError('Unexpected mounted filesystem at project build path')
+            raise RuntimeError('Unexpected filesystem mounted at ' + str(VOLUME) + '; expected APFS volume '
+                               + VOLUME_NAME + ' from ' + str(IMAGE) + ' (unmount any legacy build image manually)')
         if not Path('/Volumes/T9').is_mount():
             raise RuntimeError('T9 is unavailable; no internal-storage fallback')
         if IMAGE.is_symlink():
             raise RuntimeError('Refusing symlink at project disk-image path')
-        if not IMAGE.exists():
-            if shutil.disk_usage('/Volumes/T9').free < 50 * 2**30:
-                raise RuntimeError('T9 needs at least 50 GiB free before native setup')
-            subprocess.run(['/usr/bin/hdiutil', 'create', '-size', '200g', '-type', 'SPARSEBUNDLE',
-                            '-fs', 'APFS', '-volname', 'AxioSozoBuild', '-nospotlight', str(IMAGE)],
-                           check=True, timeout=180)
+        if not IMAGE.is_dir():
+            # Never create a substitute image; the build volume must already exist in Dev.sparsebundle.
+            raise RuntimeError(str(IMAGE) + ' is missing; it must contain the APFS volume ' + VOLUME_NAME
+                               + '. This script never creates disk images')
         if VOLUME.exists() and any(VOLUME.iterdir()):
             raise RuntimeError('Refusing to obscure files underneath the project mountpoint')
-        mounts = image_mounts()
-        if mounts:
-            raise RuntimeError('Project image already mounted elsewhere: ' + repr(mounts))
-        # macOS allows the standard /Volumes mount but denies a nested mountpoint
-        # under another user-mounted APFS volume without administrator privileges.
-        # The backing image remains on T9; never change global mount permissions.
-        subprocess.run(['/usr/bin/hdiutil', 'attach', str(IMAGE), '-nobrowse'],
-                       check=True, timeout=180)
+        if MOUNT_HELPER.is_file() and os.access(MOUNT_HELPER, os.X_OK):
+            subprocess.run([str(MOUNT_HELPER)], check=True, timeout=300)
+        else:
+            attach_and_mount()
         if not mounted():
-            raise RuntimeError('Project image mount could not be verified')
+            raise RuntimeError('Build volume ' + VOLUME_NAME + ' from ' + str(IMAGE) + ' could not be verified at '
+                               + str(VOLUME) + '; mount it with ' + str(MOUNT_HELPER))
         return report()
 
 

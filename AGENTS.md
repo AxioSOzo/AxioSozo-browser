@@ -9,8 +9,9 @@ without separate explicit authorization. Never read personal profile data or cre
 Before builds run `/Users/wout/.local/bin/mount-dev-storage`; run build commands through
 `/Users/wout/.local/bin/dev-external`. Bulky build output, caches and dependencies belong
 on external storage in task-specific directories, never internal /tmp or home.
-This project's active build volume is `/Volumes/AxioSozoBuild`, backed by
-`/Volumes/T9/AxioSozoBuild.sparsebundle`; macOS requires its standard volume mountpoint.
+This project's active build volume is `/Volumes/AxioSozoBuild`: the APFS volume `AxioSozoBuild`
+inside `/Volumes/T9/Dev.sparsebundle` (which also holds the source volume); macOS requires its
+standard volume mountpoint. Never create a separate build image or detach Dev.sparsebundle.
 Call the global dev-external helper followed by `scripts/storage.py exec -- ...`
 so its TMPDIR/Cargo/cache defaults are overridden into this project's T9-backed volume.
 Do not move active data, clean other projects, or detach DevStorage.
