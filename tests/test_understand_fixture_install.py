@@ -313,11 +313,11 @@ class MountMetadataTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *_args): pass
         good_image = {"images": [{"image-path": str(installer.IMAGE), "system-entities": [{"mount-point": str(installer.VOLUME)}]}]}
-        good_disk = {"MountPoint": str(installer.VOLUME), "FilesystemType": "apfs"}
+        good_disk = {"MountPoint": str(installer.VOLUME), "VolumeName": installer.VOLUME.name, "FilesystemType": "apfs"}
         with patch.object(installer, "Directory", MetadataDirectory), patch.object(Path, "is_mount", return_value=True), patch.object(installer, "os_query", side_effect=[good_image, good_disk]) as query:
             installer.mounted_volume()
             self.assertEqual([call.args for call in query.call_args_list], [("image",), ("disk",)])
-        for image, disk in (({"images": []}, good_disk), (good_image, {"MountPoint": str(installer.VOLUME), "FilesystemType": "exfat"}), (good_image, {"MountPoint": "/other", "FilesystemType": "apfs"})):
+        for image, disk in (({"images": []}, good_disk), (good_image, {"MountPoint": str(installer.VOLUME), "FilesystemType": "exfat"}), (good_image, {"MountPoint": "/other", "FilesystemType": "apfs"}), (good_image, dict(good_disk, VolumeName="AxioSozo"))):
             with patch.object(installer, "Directory", MetadataDirectory), patch.object(Path, "is_mount", return_value=True), patch.object(installer, "os_query", side_effect=[image, disk]):
                 with self.assertRaises(RuntimeError):
                     installer.mounted_volume()

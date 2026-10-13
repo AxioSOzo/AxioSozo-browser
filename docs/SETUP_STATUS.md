@@ -19,8 +19,8 @@ provider/Jev live readiness.
 ## Active continuation
 
 Wout has set an active goal to finish the original handoff using T9 capacity. The
-new project-only APFS image `/Volumes/T9/AxioSozoBuild.sparsebundle` is mounted at
-`/Volumes/AxioSozoBuild`, initially 199.68 GiB free. Shared DevStorage is untouched.
+new project-only APFS build storage is mounted at `/Volumes/AxioSozoBuild`, initially 199.68 GiB
+free (then a separate image; now the `AxioSozoBuild` volume inside `/Volumes/T9/Dev.sparsebundle`). Shared DevStorage is untouched.
 The first coordinator build there completed in 21.04 seconds; the same earlier binary
 that stalled on the old volume now starts in 0.303 seconds. Evidence:
 `evidence/storage-project-ready.log`, `evidence/coordinator-fresh-volume-build.log`,

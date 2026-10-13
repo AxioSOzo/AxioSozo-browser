@@ -82,7 +82,7 @@ def host_check():
     if not BUILD_ROOT.is_mount():
         raise RuntimeError('BLOCKED_ENV: AXIOSOZO_BUILD_ROOT must be the mounted project APFS volume')
     info = plistlib.loads(subprocess.check_output(['/usr/bin/hdiutil', 'info', '-plist']))
-    verified = any(image.get('image-path') == '/Volumes/T9/AxioSozoBuild.sparsebundle'
+    verified = any(image.get('image-path') == '/Volumes/T9/Dev.sparsebundle'
                    and any(entity.get('mount-point') == str(BUILD_ROOT)
                            for entity in image.get('system-entities', []))
                    for image in info.get('images', []))
