@@ -6,12 +6,14 @@ from email.message import Message
 from types import SimpleNamespace
 import os
 from pathlib import Path
+import plistlib
 import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('probe', Path(__file__).with_name('probe.py'))
 probe = importlib.util.module_from_spec(spec)
@@ -207,6 +209,32 @@ class SigningIdentityTests(unittest.TestCase):
         prints = {probe.fingerprint(item) for item in (adhoc, one, two)}
         self.assertEqual(len(prints), 3)
         self.assertEqual(probe.fingerprint(one), probe.fingerprint(dict(one, name='renamed')))
+
+
+class HostCheckTests(unittest.TestCase):
+    """Mocked OS metadata only; no real hdiutil/diskutil query or volume."""
+    def check(self, image_path, disk):
+        image = {'images': [{'image-path': image_path,
+                             'system-entities': [{'mount-point': str(probe.BUILD_ROOT)}]}]}
+        def check_output(argv, **_kwargs):
+            return plistlib.dumps(image if Path(argv[0]).name == 'hdiutil' else disk)
+        with patch.object(probe.platform, 'system', return_value='Darwin'), \
+             patch.object(probe.platform, 'machine', return_value='arm64'), \
+             patch.object(Path, 'is_mount', return_value=True), \
+             patch.object(probe.shutil, 'which', return_value='/usr/bin/xcrun'), \
+             patch.object(probe.subprocess, 'check_output', side_effect=check_output):
+            probe.host_check()
+
+    def test_only_the_build_volume_of_the_dev_image_passes(self):
+        good = {'VolumeName': 'AxioSozoBuild', 'MountPoint': str(probe.BUILD_ROOT), 'FilesystemType': 'apfs'}
+        self.check('/Volumes/T9/Dev.sparsebundle', good)
+        for image_path, disk in (('/Volumes/T9/AxioSozoBuild.sparsebundle', good),
+                                 ('/Volumes/T9/Dev.sparsebundle', dict(good, VolumeName='DevStorage')),
+                                 ('/Volumes/T9/Dev.sparsebundle', dict(good, VolumeName='AxioSozo')),
+                                 ('/Volumes/T9/Dev.sparsebundle', dict(good, FilesystemType='exfat')),
+                                 ('/Volumes/T9/Dev.sparsebundle', dict(good, MountPoint='/Volumes/Other'))):
+            with self.assertRaisesRegex(RuntimeError, 'BLOCKED_ENV'):
+                self.check(image_path, disk)
 
 
 if __name__ == '__main__':
