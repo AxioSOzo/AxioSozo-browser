@@ -12,7 +12,8 @@ the original copyright and license. Run `node packages/provider-host/cli.mjs tes
 and validate the protocol schema for every supported client version. Do not silently
 install/upgrade providers, enable live capabilities, or widen auth/configuration scope.
 
-On this exFAT workspace, Git AppleDouble `._*.idx` metadata was incorrectly treated
+On the exFAT workspace of that time (the source is now on the APFS `AxioSozo`
+volume), Git AppleDouble `._*.idx` metadata was incorrectly treated
 as pack indexes after clone. Only the newly created metadata files in this checkout's
 `.git/objects/pack` were removed. `core.filemode=false`, an index refresh, and sparse
 reapply then produced a clean 186 MiB checkout instead of a 6.6 GiB full working tree.

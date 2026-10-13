@@ -13,6 +13,6 @@
 
   Hook configuration, doc sources and tests:
   [`packages/agent-bridge/README.md`](../packages/agent-bridge/README.md).
-  The script must be committed with mode `100755`. This checkout is on exFAT
-  with `core.fileMode=false`, so set it with
+  The script must be committed with mode `100755`. This checkout keeps
+  `core.fileMode=false` from when it lived on exFAT, so set it with
   `git add --chmod=+x tools/axiosozo-notify`.

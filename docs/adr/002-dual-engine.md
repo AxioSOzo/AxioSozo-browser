@@ -18,7 +18,8 @@ The general CEF documentation describes [macOS bundles and off-screen rendering]
 
 Actual CEF frames and input now run in the content area of the **built Zen fork**.
 The original shared APFS volume had insufficient capacity and stalled native
-reads. The successful build uses a separate project APFS image physically on T9,
+reads. The successful build uses a separate project APFS image physically on T9
+(since 13 October 2026 the `AxioSozoBuild` volume inside `/Volumes/T9/Dev.sparsebundle`),
 mounted at `/Volumes/AxioSozoBuild`; it does not move or detach the shared
 volume. Root `./dev engine-probe` executes E0 and opens the integrated fixture.
 Its exit20 is deliberately conservative because its GUI assertions are not

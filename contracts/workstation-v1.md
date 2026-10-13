@@ -311,7 +311,9 @@ isolation is verified, project account routing to Chromium is unavailable.
 - `rootCandidates(cwd, { home, roots? }) → string[]` — `cwd` and its ancestors,
   deepest first, at most 6. The optional privileged `roots` array allows
   reference projects outside home; native configuration includes
-  `/Volumes/T9/Code`. Candidates stay strictly below the deepest matching
+  `/Volumes/T9/Code` (the workspace location before October 2026; that folder no
+  longer exists, and updating this default is still open). Candidates stay
+  strictly below the deepest matching
   allowed base, never `/`, `home` or a configured base itself. No match → `[]`.
   Chrome canonicalizes bases/cwd, rejects system/profile/credential directories,
   and rechecks own-UID process cwd before issuing any proposal. Pages cannot
