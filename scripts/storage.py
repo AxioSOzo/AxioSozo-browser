@@ -6,6 +6,7 @@ image next to the `AxioSozo` source volume. Detaching that image would take
 down the source volume, so this script only ever attaches and mounts.
 """
 import argparse
+import contextlib
 import fcntl
 import json
 import os
@@ -16,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = Path('/Volumes/T9/Dev.sparsebundle')
@@ -28,9 +30,24 @@ VOLUME = Path('/Volumes/AxioSozoBuild')
 # or are shared; a sub-root may never alias them.
 RESERVED_SUBROOTS = {'zen', 'toolchains', 'cargo-home', 'cargo-target', 'caches', 'runtime', 'tmp',
                      'cef', 'providers', 'logs', 'release', 'diag', 'diagnostics', 'gui-fixtures'}
-MOUNT_SHARED = '/Users/wout/.local/bin/mount-dev-storage'
+# Per-user helpers of this development layout (not part of this repository).
+MOUNT_SHARED = Path.home() / '.local/bin/mount-dev-storage'
 # System helper that mounts every Dev.sparsebundle volume (build volume -nobrowse).
-MOUNT_HELPER = Path('/Users/wout/.local/bin/mount-axiosozo')
+MOUNT_HELPER = Path.home() / '.local/bin/mount-axiosozo'
+# Machine-wide lock that both helpers hold while they attach or mount. This
+# script holds it only for its own fallback attach/mount, never while it runs
+# a helper (the helper takes it itself).
+MOUNT_LOCK = Path.home() / 'Library/Caches/axiosozo-mount.lock'
+# The helper exits 0 without doing anything while another mount holds
+# MOUNT_LOCK, and nonzero when any of its other volumes fails, so its exit
+# status says nothing about the build volume: rerun it at most every
+# HELPER_RETRY seconds until the volume is verified or HELPER_WAIT has passed.
+HELPER_WAIT = 120
+HELPER_RETRY = 15
+# One helper run; a pending macOS removable-volume prompt can block it.
+HELPER_TIMEOUT = 300
+MOUNT_LOCK_WAIT = 120
+POLL_INTERVAL = 1
 
 
 def build_root(value=None):
@@ -122,37 +139,128 @@ def attach_and_mount():
                    check=True, timeout=180)
 
 
-def ensure():
-    subprocess.run([MOUNT_SHARED], check=True)
-    # This lock only serializes this project's build-volume attachment.
-    local = ROOT / '.local'
-    local.mkdir(exist_ok=True)
-    fd = os.open(local / 'storage.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+def run_helper(helper):
+    """Run one mount helper and return its exit status. After HELPER_TIMEOUT it
+    gets SIGTERM, which the helpers turn into a clean exit that stops their own
+    hdiutil/diskutil commands; SIGKILL only if that does not end it. Its output
+    goes to stderr so that `setup` prints only the JSON report on stdout."""
+    process = subprocess.Popen([str(helper)], stdout=2)
+    try:
+        return process.wait(timeout=HELPER_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise RuntimeError(helper.name + ' did not finish within ' + str(HELPER_TIMEOUT) + ' s; a pending '
+                           'macOS removable-volume permission prompt can block it') from None
+
+
+def mount_shared():
+    """Mount the shared DevStorage volume. Builds need it as well (dev-external
+    puts their temporary files there), so a DevStorage problem stops setup
+    here, before the build volume is touched."""
+    try:
+        status = run_helper(MOUNT_SHARED)
+    except OSError as error:
+        raise RuntimeError('Cannot run ' + str(MOUNT_SHARED) + ' to mount the shared DevStorage volume: '
+                           + str(error)) from error
+    if status:
+        raise RuntimeError(MOUNT_SHARED.name + ' exited ' + str(status) + ' (see its message above): the shared '
+                           'DevStorage volume is not available, which builds need, so the build volume was not '
+                           'set up either. Fix DevStorage, then rerun storage.py setup')
+
+
+def preflight():
+    """Refuse every state in which mounting could hide files or pick the wrong
+    volume. Read-only; run again under MOUNT_LOCK before a fallback mount."""
+    if VOLUME.is_mount():
+        if volume_verified():
+            raise RuntimeError('Build root ' + str(BUILD_ROOT) + ' on ' + str(VOLUME)
+                               + ' is not a plain directory (symlink or redirected path)')
+        raise RuntimeError('Unexpected filesystem mounted at ' + str(VOLUME) + '; expected APFS volume '
+                           + VOLUME_NAME + ' from ' + str(IMAGE) + ' (unmount any legacy build image manually)')
+    if not Path('/Volumes/T9').is_mount():
+        raise RuntimeError('T9 is unavailable; no internal-storage fallback')
+    if IMAGE.is_symlink():
+        raise RuntimeError('Refusing symlink at project disk-image path')
+    if not IMAGE.is_dir():
+        # Never create a substitute image; the build volume must already exist in Dev.sparsebundle.
+        raise RuntimeError(str(IMAGE) + ' is missing; it must contain the APFS volume ' + VOLUME_NAME
+                           + '. This script never creates disk images')
+    try:
+        populated = VOLUME.exists() and any(VOLUME.iterdir())
+    except PermissionError:
+        # A mountpoint folder left behind by Disk Arbitration (mode 0111).
+        raise RuntimeError('Cannot read the leftover mountpoint folder ' + str(VOLUME) + '; if it is empty, '
+                           'remove it with `sudo rmdir ' + str(VOLUME) + '` and rerun storage.py setup') from None
+    if populated:
+        raise RuntimeError('Refusing to obscure files underneath the project mountpoint')
+
+
+def wait_for_helper():
+    """Run MOUNT_HELPER until the build volume is verified, rerunning it at most
+    every HELPER_RETRY seconds, for up to HELPER_WAIT seconds (a run already in
+    progress may finish, up to HELPER_TIMEOUT). Its exit status is ignored, and
+    no lock is held here: the helper takes MOUNT_LOCK itself, and an older
+    helper also took the main checkout's former .local/storage.lock, so holding
+    either here would make it skip the build volume."""
+    deadline = time.monotonic() + HELPER_WAIT
+    next_run = time.monotonic()
+    while True:
+        if time.monotonic() >= next_run:
+            run_helper(MOUNT_HELPER)
+            next_run = time.monotonic() + HELPER_RETRY
         if mounted():
-            return report()
-        if VOLUME.is_mount():
-            raise RuntimeError('Unexpected filesystem mounted at ' + str(VOLUME) + '; expected APFS volume '
-                               + VOLUME_NAME + ' from ' + str(IMAGE) + ' (unmount any legacy build image manually)')
-        if not Path('/Volumes/T9').is_mount():
-            raise RuntimeError('T9 is unavailable; no internal-storage fallback')
-        if IMAGE.is_symlink():
-            raise RuntimeError('Refusing symlink at project disk-image path')
-        if not IMAGE.is_dir():
-            # Never create a substitute image; the build volume must already exist in Dev.sparsebundle.
-            raise RuntimeError(str(IMAGE) + ' is missing; it must contain the APFS volume ' + VOLUME_NAME
-                               + '. This script never creates disk images')
-        if VOLUME.exists() and any(VOLUME.iterdir()):
-            raise RuntimeError('Refusing to obscure files underneath the project mountpoint')
-        if MOUNT_HELPER.is_file() and os.access(MOUNT_HELPER, os.X_OK):
-            subprocess.run([str(MOUNT_HELPER)], check=True, timeout=300)
-        else:
-            attach_and_mount()
-        if not mounted():
-            raise RuntimeError('Build volume ' + VOLUME_NAME + ' from ' + str(IMAGE) + ' could not be verified at '
-                               + str(VOLUME) + '; mount it with ' + str(MOUNT_HELPER))
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(POLL_INTERVAL, remaining))
+
+
+@contextlib.contextmanager
+def mount_lock():
+    """Hold MOUNT_LOCK so a fallback attach/mount never races the helpers;
+    wait for it at most MOUNT_LOCK_WAIT seconds."""
+    MOUNT_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(MOUNT_LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as lock:
+        deadline = time.monotonic() + MOUNT_LOCK_WAIT
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Another mount still holds ' + str(MOUNT_LOCK) + ' after '
+                                       + str(MOUNT_LOCK_WAIT) + ' s; rerun storage.py setup later') from None
+                time.sleep(POLL_INTERVAL)
+        yield
+
+
+def ensure():
+    mount_shared()
+    if mounted():
         return report()
+    preflight()
+    if MOUNT_HELPER.is_file() and os.access(MOUNT_HELPER, os.X_OK):
+        if not wait_for_helper():
+            raise RuntimeError('Build volume ' + VOLUME_NAME + ' from ' + str(IMAGE) + ' was still not verified at '
+                               + str(VOLUME) + ' ' + str(HELPER_WAIT) + ' s after starting ' + str(MOUNT_HELPER)
+                               + ' (see its messages above); rerun storage.py setup once it can mount the volume')
+        return report()
+    with mount_lock():
+        # A helper run may have mounted the volume while this one waited.
+        if not mounted():
+            preflight()
+            attach_and_mount()
+    if not mounted():
+        raise RuntimeError('Build volume ' + VOLUME_NAME + ' from ' + str(IMAGE) + ' could not be verified at '
+                           + str(VOLUME) + ' after mounting it')
+    return report()
 
 
 def environment(temporary):

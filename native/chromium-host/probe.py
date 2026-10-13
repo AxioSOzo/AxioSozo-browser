@@ -86,8 +86,13 @@ def host_check():
                    and any(entity.get('mount-point') == str(BUILD_ROOT)
                            for entity in image.get('system-entities', []))
                    for image in info.get('images', []))
+    if verified:
+        # Other volumes of the same image (source, DevStorage) must not pass.
+        disk = plistlib.loads(subprocess.check_output(['/usr/sbin/diskutil', 'info', '-plist', str(BUILD_ROOT)]))
+        verified = (disk.get('VolumeName') == 'AxioSozoBuild' and disk.get('MountPoint') == str(BUILD_ROOT)
+                    and str(disk.get('FilesystemType', '')).lower() == 'apfs')
     if not verified:
-        raise RuntimeError('BLOCKED_ENV: project build root is not backed by the verified T9 image')
+        raise RuntimeError('BLOCKED_ENV: project build root is not the AxioSozoBuild APFS volume of the verified T9 image')
     if not shutil.which('xcrun'):
         raise RuntimeError('BLOCKED_ENV: Xcode command line tools missing')
 
