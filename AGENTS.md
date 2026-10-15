@@ -6,17 +6,9 @@ Never claim READY unless real macOS E1/E2 pass. Preserve TLS, sandboxing, permis
 profiles, accessibility, extensions, and development tools. No live provider calls
 without separate explicit authorization. Never read personal profile data or credentials.
 
-Before builds run `/Users/wout/.local/bin/mount-dev-storage`; run build commands through
-`/Users/wout/.local/bin/dev-external`. Bulky build output, caches and dependencies belong
-on external storage in task-specific directories, never internal /tmp or home.
-This project's active build volume is `/Volumes/AxioSozoBuild`: the APFS volume `AxioSozoBuild`
-inside `/Volumes/T9/Dev.sparsebundle` (which also holds the source volume); macOS requires its
-standard volume mountpoint. Never create a separate build image or detach Dev.sparsebundle.
-`mount-dev-storage` mounts only DevStorage; if `/Volumes/AxioSozoBuild` is not mounted,
-run `python3 scripts/storage.py setup` (it mounts the build volume via `mount-axiosozo`).
-Call the global dev-external helper followed by `scripts/storage.py exec -- ...`
-so its TMPDIR/Cargo/cache defaults are overridden into this project's T9-backed volume.
-Do not move active data, clean other projects, or detach DevStorage.
+Build with `/Users/wout/.local/bin/dev-external python3 scripts/storage.py exec -- ...`; it uses the
+`/Volumes/AxioSozoBuild` volume (`python3 scripts/storage.py setup` mounts it if missing).
+Never create a separate build image or detach Dev.sparsebundle.
 
 Workstreams are explicitly authorized: Zen, CEF, providers, and integration/security.
 Each owns separate paths; integration lead alone owns root dev, shared contracts,
