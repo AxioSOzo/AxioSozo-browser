@@ -43,12 +43,12 @@ function harness({ production = false, clis = [{ cli: "codex", path: "/fixed/pri
   return { api, owner, binding, counts, calls };
 }
 
-test("automatic client choice prefers Codex, then Claude Code; models are the cheapest suitable ones", () => {
+test("automatic client choice prefers Codex, then Claude Code; models are an alias or the client default", () => {
   assert.equal(pickSetupCli(["claude-code", "codex"]), "codex");
   assert.equal(pickSetupCli(["claude-code"]), "claude-code");
   assert.equal(pickSetupCli([]), null);
   assert.equal(pickSetupCli("codex"), null);
-  assert.deepEqual(SETUP_MODELS, { codex: "gpt-6-luna", "claude-code": "claude-sonnet-5-5" });
+  assert.deepEqual(SETUP_MODELS, { codex: "default", "claude-code": "sonnet" });
 });
 
 test("production answers NOT_AUTHORIZED before any binding, admission, lookup or runtime", async () => {
@@ -64,7 +64,7 @@ test("production answers NOT_AUTHORIZED before any binding, admission, lookup or
 test("offline: a previewed fixture folder is checked with Codex; the document is validated and nothing is saved", async () => {
   const s = harness();
   const value = await s.api.setup(s.owner, { binding: s.binding, current: () => true });
-  assert.deepEqual([value.status, value.reason, value.kind, value.cli, value.model, value.data_sent], ["ok", null, "setup", "codex", "gpt-6-luna", true]);
+  assert.deepEqual([value.status, value.reason, value.kind, value.cli, value.model, value.data_sent], ["ok", null, "setup", "codex", "default", true]);
   assert.deepEqual(value.document, core.validateSetupDocument(SETUP()));
   assert.equal(value.document.services[0].url, "http://localhost:5173");
   assert.equal(s.calls.length, 1);
@@ -81,7 +81,7 @@ test("offline: no installed client, a stale preview, an invalid answer and bad b
   assert.equal(none.calls.length, 0);
   const claude = harness({ clis: [{ cli: "claude-code", path: "/fixed/private/claude", version: "1" }] });
   const viaClaude = await claude.api.setup(claude.owner, { binding: claude.binding, current: () => true });
-  assert.deepEqual([viaClaude.cli, viaClaude.model], ["claude-code", "claude-sonnet-5-5"]);
+  assert.deepEqual([viaClaude.cli, viaClaude.model], ["claude-code", "sonnet"]);
   let current = true;
   const stale = harness({ reply: params => { current = false; return { version: 1, request_id: params.request_id, kind: "setup", cli: params.cli,
     status: "ok", reason: null, document: SETUP(), data_sent: true, duration_ms: 1 }; } });

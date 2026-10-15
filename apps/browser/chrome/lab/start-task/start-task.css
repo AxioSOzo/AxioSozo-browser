@@ -1,0 +1,53 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Lab "Start the task here" (start-task.sys.mjs): the small card that takes
+ * the capture bar's place while the agent works, then shows its result. The
+ * card itself is the kit's floating card (lab.css); this adds the quiet
+ * lines and the list of files. Chrome only, over the tab's browser stack. */
+
+.axiosozo-start-task-card {
+  gap: 6px;
+  padding-block: 8px 10px;
+
+  .axiosozo-lab-card-actions:not([hidden]) {
+    margin-top: 2px;
+  }
+}
+
+.axiosozo-start-task-caption {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  overflow-wrap: anywhere;
+}
+.axiosozo-start-task-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.axiosozo-start-task-files {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: calc(7px * var(--zen-squircle-value, 1));
+  background: var(--button-background-color, light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.08)));
+  list-style: none;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.axiosozo-start-task-more {
+  font-family: inherit;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+}
+
+@media (forced-colors: active) {
+  .axiosozo-start-task-files {
+    border: 1px solid CanvasText;
+  }
+}

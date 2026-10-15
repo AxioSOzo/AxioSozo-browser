@@ -90,17 +90,17 @@ async function loadPage({ hash = "", projects = [], handlers = {}, containers = 
 const visibleView = document => document.querySelectorAll("section.view").filter(section => !section.hidden).map(section => section.dataset.view);
 const byText = (root, tag, text) => root.querySelectorAll(tag).find(node => node.textContent.trim() === text);
 
-test("three sections only; the first run guide is the Projects empty state; every space is listed", async () => {
+test("four sections only; the first run guide is the Projects empty state; every space is listed", async () => {
   const page = await loadPage();
   const { document } = page;
   assert.deepEqual(document.querySelectorAll(".views a").map(a => [a.getAttribute("href"), a.textContent]),
-    [["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"]]);
+    [["#projects", "Projects"], ["#rules", "Site rules"], ["#ai", "AI & keys"], ["#lab", "Lab"]]);
   assert.deepEqual(visibleView(document), ["projects"]);
   assert.ok(document.getElementById("guide-heading"), "first-run guidance folds into Projects");
   // Spaces without projects are one quiet row each, never an empty group box.
   const spaces = document.querySelector(".other-spaces");
   assert.equal(spaces.querySelector("h3").textContent, "Your spaces");
-  assert.deepEqual(spaces.querySelectorAll(".row-title").map(node => node.textContent), ["Homethis window", "Acme BV"]);
+  assert.deepEqual(spaces.querySelectorAll(".row-title").map(node => node.textContent), ["HomeCurrent", "Acme BV"]);
   assert.equal(document.querySelectorAll(".space-group").length, 0);
   // One "Add project" button on the page, in the header; adding into a given space sits behind its "…".
   assert.deepEqual(document.querySelectorAll("button:not([role=menuitem])").filter(button => /^Add (a )?project/u.test(button.textContent.trim()))
@@ -513,13 +513,15 @@ test("add project: one sheet with name, type, services and space up front; addre
   const space = sheet.querySelectorAll("select").find(select => select.querySelector("option")?.textContent.startsWith("No space"));
   assert.equal(space.value, HOME, "defaults to the space this window shows");
   assert.deepEqual(space.querySelectorAll("option").map(o => o.textContent),
-    ["No space (not in the sidebar)", "Home (personal) · this window", "Acme BV (organization)"]);
+    ["No space (not in the sidebar)", "Home · current space", "Acme BV"], "named by the space alone, never \"Work (personal)\"");
   // Everything else waits under More options.
   const more = sheet.querySelector("details.setup-more");
   assert.equal(more.open, false);
   assert.deepEqual(more.querySelectorAll(".env-group h4").map(h4 => h4.textContent), ["Desktop app (desktop)", "App web"]);
-  assert.match(more.textContent, /Links in the sidebarRepositorygithub\.comMove behind …/u, "only the repository is shown");
-  assert.match(more.textContent, /Behind … in the sidebar \(4\)Issues.*Vercel \(synthetic-web\)vercel\.com/u, "issues, CI, releases and the Vercel dashboard go behind …");
+  // Links: the panel lists them all, the chosen ones first (no "…" row in the sidebar any more).
+  assert.match(more.textContent, /LinksThe project's panel lists these, the ones shown first at the top\.Repositorygithub\.comShow later/u, "only the repository is shown first");
+  assert.match(more.textContent, /Other links \(4\)Issues.*Vercel \(synthetic-web\)vercel\.com/u, "issues, CI, releases and the Vercel dashboard come after it");
+  assert.doesNotMatch(more.textContent, /…/u, "no copy names the removed \"…\" row");
   const findings = more.querySelector("fieldset.findings");
   assert.equal(findings.querySelector("legend").textContent, "Also found");
   assert.deepEqual(findings.querySelectorAll("dd .tag").map(tag => tag.textContent), ["Vercel", "Desktop (Tauri) · Tauri Plus Web"]);
@@ -814,6 +816,24 @@ test("#add-project=<space> from the space menu preselects that space; #edit-proj
   assert.equal(edit.location.hash, "#project=p_blog1", "the editor opens over the project's home");
   assert.equal(edit.document.getElementById("project-home").hidden, false);
   assert.equal(edit.document.activeElement?.id, "sheet-title", "the home does not take focus from the open editor");
+  const productionField = () => edit.document.getElementById("sheet-body").querySelectorAll(".field")
+    .find(field => field.querySelector("label")?.textContent === "Production URL");
+  assert.equal(productionField().hidden, false, "no production address yet: the shortcut field is offered");
+});
+
+test("edit project: a production address already listed hides the separate Production URL field", async () => {
+  const project = { version: 1, id: "p_blog1", root: "/synthetic/blog", manifest_state: "none", context_uuid: HOME, trusted: false, created_at: 1, updated_at: 1,
+    manifest: { version: 1, name: "Blog", kind: "web", environments: [{ name: "local", base_url: "http://localhost:4321" },
+      { name: "production", base_url: "https://blog.example" }],
+    services: [{ name: "Dev server", url: "http://localhost:4321/", port: 4321 }], surfaces: [] } };
+  const edit = await loadPage({ hash: "#edit-project=p_blog1", projects: [project] });
+  const sheet = edit.document.getElementById("sheet-body");
+  const productionField = () => sheet.querySelectorAll(".field").find(field => field.querySelector("label")?.textContent === "Production URL");
+  assert.equal(productionField().hidden, true, "one place for the production address: its row under Addresses");
+  // Unticking that row offers the field again.
+  const use = sheet.querySelectorAll(".env-group .review-row input").find(input => input.getAttribute("aria-label") === "Use production");
+  use.checked = false; use.dispatchEvent(makeEvent("change"));
+  assert.equal(productionField().hidden, false);
 });
 
 // ---------------------------------------------------------------- agent status (P3)
@@ -1061,4 +1081,14 @@ test("browser tools without the browser's capabilities say so; nothing is claime
   assert.equal(agentBody(page).querySelectorAll(".tool-row").length, 0);
   const hidden = await loadPage({ hash: "#ai", handlers: { getAgentEndpointState: () => { throw { code: "PRIVATE_WINDOW", message: "x" }; } } });
   assert.equal(agentBody(hidden).querySelectorAll(".agent-tools").length, 0, "no tools list where agent status cannot be read");
+});
+
+test("AI & keys: opening reads the status as it is; Check again asks the provider host to check the clients again", async () => {
+  const page = await loadPage({ hash: "#ai" });
+  const providerCalls = () => page.calls.filter(([name]) => name === "getProviderStatus").map(([, params]) => params);
+  assert.deepEqual(providerCalls(), [{}], "opening only reads");
+  page.document.getElementById("providers-refresh").click();
+  await flush();
+  assert.deepEqual(providerCalls(), [{}, { refresh: true }]);
+  assert.doesNotMatch(page.document.getElementById("provider-list").textContent, /this build expects/u, "no pinned version is shown");
 });

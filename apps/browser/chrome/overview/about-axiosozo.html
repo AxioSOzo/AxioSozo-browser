@@ -29,6 +29,7 @@
         <a href="#projects" data-view="projects">Projects</a>
         <a href="#rules" data-view="rules">Site rules</a>
         <a href="#ai" data-view="ai">AI &amp; keys</a>
+        <a href="#lab" data-view="lab">Lab</a>
       </nav>
     </header>
 
@@ -48,7 +49,7 @@
           <div class="view-head">
             <div>
               <h2 id="projects-heading">Projects</h2>
-              <p id="projects-help" class="block-help">Each project is a folder on this Mac. It belongs to one of your Zen spaces and shows in that space's sidebar. Its links open in its own container, so every project keeps its own sign-ins.</p>
+              <p id="projects-help" class="block-help">A project is a folder on this Mac. It lives in one of your spaces, shows in that space's sidebar and opens its links in its own container, so it keeps its own sign-ins.</p>
             </div>
             <button id="add-project" type="button" class="primary" aria-describedby="projects-help">Add project…</button>
           </div>
@@ -143,6 +144,25 @@
           <div id="safety-settings-body" class="panel settings-panel"></div>
         </div>
         <div id="engine-settings" class="block"></div>
+      </section>
+
+      <!-- Lab (chrome/lab, docs/lab/README.md): experiments grouped by what they are
+           for, each with its own switch; variants of one idea side by side. -->
+      <section id="view-lab" class="view" data-view="lab" aria-labelledby="lab-heading" hidden>
+        <div class="view-head">
+          <div>
+            <h2 id="lab-heading">Lab</h2>
+            <p id="lab-help" class="block-help">Experiments to try one at a time. Each stays off until you turn it on, and turning it off removes it from your windows at once. The ones that use AI ask your own assistant on this Mac, only when you click.</p>
+          </div>
+        </div>
+        <div id="lab-body" class="lab" aria-busy="true"></div>
+      </section>
+
+      <!-- Today (the Lab's today sheet, chrome/lab/today; only while that switch is on):
+           what waits for you, what failed or finished since you looked, errands due.
+           Each line a link; composed without a model. -->
+      <section id="view-today" class="view" data-view="today" aria-labelledby="today-heading" hidden>
+        <div id="today-page" class="pane today" aria-busy="true"></div>
       </section>
     </main>
 

@@ -24,16 +24,29 @@
 #axiosozo-rule-indicator[hidden],
 #axiosozo-jev-outgoing[hidden] { display: none; }
 
+/* The pill gives way before the address does: a long name ends in an
+ * ellipsis, and in Zen's narrow sidebar address bar (the same container query
+ * Zen uses for its own container label, zen-omnibox.css) only its dot stays.
+ * The name is always in its tooltip and accessible name. */
 #axiosozo-env-pill {
+  flex-shrink: 1;
+  min-width: 0;
   padding: 1px 8px;
   border-radius: 999px;
   font-weight: 600;
   white-space: nowrap;
   background: color-mix(in srgb, currentColor 10%, transparent);
+  transition: background-color 100ms ease;
 }
 #axiosozo-env-pill:hover { background: color-mix(in srgb, currentColor 17%, transparent); }
 #axiosozo-env-pill[data-environment="production"] {
   background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+}
+#axiosozo-env-pill .axiosozo-env-pill-label {
+  min-width: 0;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #axiosozo-env-pill .axiosozo-env-pill-alert { display: none; }
 /* The tab's container (P2): the status dot in Firefox's own container colour
@@ -43,12 +56,30 @@
   background: var(--identity-icon-color);
   border-color: transparent;
 }
-#axiosozo-env-pill[data-services="down"] .axiosozo-env-pill-alert {
+/* Colour only for what the pill names: its own environment's server stopped
+ * with an error. "Not running" stays in words (tooltip, accessible name). */
+#axiosozo-env-pill[data-status="failed"] .axiosozo-env-pill-alert {
   display: inline-block;
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d93025;
+  background: var(--axiosozo-run-red);
+}
+@container urlbar-container (width < 350px) {
+  /* Only a mark here: without its capsule a lone dot reads as a status, not
+   * as a switch. The capsule comes back on hover, where it is a button. */
+  #axiosozo-env-pill:not(:hover, [aria-expanded="true"]) { background: transparent; }
+  #axiosozo-env-pill { padding-inline: 5px; }
+  #axiosozo-env-pill .axiosozo-env-pill-label { display: none; }
+  /* Nothing else marks it: a quiet dot keeps the pill findable. */
+  #axiosozo-env-pill:not([data-container], [data-status="failed"])::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: color-mix(in srgb, currentColor 55%, transparent);
+  }
 }
 
 #axiosozo-rule-indicator {
@@ -86,10 +117,57 @@
   fill: currentColor;
 }
 
-:is(#axiosozo-env-pill, #axiosozo-rule-indicator):focus-visible,
+:is(#axiosozo-env-pill, #axiosozo-rule-indicator):focus-visible {
+  outline: var(--focus-outline, 2px solid AccentColor);
+  outline-offset: var(--focus-outline-inset, -2px);
+}
 :is(.axiosozo-waiting button, .axiosozo-pause button, .axiosozo-rule-edit):focus-visible {
   outline: var(--focus-outline, 2px solid AccentColor);
-  outline-offset: var(--focus-outline-offset, 1px);
+  outline-offset: var(--focus-outline-offset, 2px);
+}
+
+/* Zen squircles every element (zen-theme.css); pills and dots read as
+ * circles, so they opt out the way Zen's own (squircle-exclusions.inc.css) do. */
+:root :is(#axiosozo-env-pill, #axiosozo-jev-outgoing, .axiosozo-env-pill-alert, .axiosozo-status-dot, .axiosozo-projects-running,
+  .axiosozo-project-failed, .axiosozo-project-console) {
+  corner-shape: round;
+}
+
+/* ---- Toasts (AxioSozoToast.sys.mjs) --------------------------------------------
+ * Zen's own toast, drawn from Zen's markup and painted by zen-popup.css. Zen's
+ * toast buttons are icon-only; ours carry a short word (Undo), so its text
+ * shows and the empty icon does not. A long line ends in an ellipsis rather
+ * than growing past Zen's fixed toast height. */
+#zen-toast-container .zen-toast[axiosozo-toast] {
+  max-width: min(420px, 90vw);
+
+  /* The text column gives way, so the button always stays on the toast. */
+  & > vbox {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  & label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  & button {
+    padding-inline: 10px !important;
+    font-weight: 600;
+
+    & .button-text { display: revert; }
+    & .button-icon { display: none; }
+  }
+
+  /* The toast is accent-coloured: an accent ring would vanish on it. */
+  & button:focus-visible {
+    outline: var(--focus-outline-width, 2px) solid currentColor;
+    outline-offset: 1px;
+  }
 }
 
 /* ---- Rule panel -------------------------------------------------------------- */
@@ -102,7 +180,7 @@
   font-size: 12px;
 }
 #axiosozo-rule-panel h2 { margin: 0; font-size: 13px; font-weight: 600; }
-#axiosozo-rule-panel .axiosozo-rule-hosts { margin: 0; opacity: 0.75; }
+#axiosozo-rule-panel .axiosozo-rule-hosts { margin: 0; color: var(--text-color-deemphasized); }
 .axiosozo-rule-instruction {
   margin: 0;
   padding-inline-start: 8px;
@@ -111,8 +189,11 @@
   overflow-wrap: anywhere;
 }
 #axiosozo-rule-panel .axiosozo-rule-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
-#axiosozo-rule-panel dt { opacity: 0.7; }
+#axiosozo-rule-panel dt { color: var(--text-color-deemphasized); }
 #axiosozo-rule-panel dd { margin: 0; }
+
+/* Buttons: Zen's button tokens (zen-theme.css), one secondary and one primary
+ * style for every AxioSozo surface; Zen's own press scale. */
 .axiosozo-rule-edit,
 .axiosozo-waiting button,
 .axiosozo-pause button {
@@ -123,14 +204,35 @@
   background: var(--button-background-color, var(--button-bgcolor, ButtonFace));
   color: var(--button-text-color, inherit);
   font: inherit;
+  font-weight: var(--button-font-weight, 500);
+}
+:is(.axiosozo-rule-edit, .axiosozo-waiting button, .axiosozo-pause button):not(:disabled):hover {
+  background: var(--button-background-color-hover, color-mix(in srgb, currentColor 12%, transparent));
 }
 .axiosozo-rule-edit { align-self: flex-start; }
-:is(.axiosozo-waiting, .axiosozo-pause) button.primary {
-  border-color: transparent;
+:is(.axiosozo-pp-primary, :is(.axiosozo-waiting, .axiosozo-pause) button.primary) {
+  padding: 4px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--button-border-radius, 8px);
   background: var(--button-background-color-primary, var(--button-primary-bgcolor, AccentColor));
   color: var(--button-text-color-primary, var(--button-primary-color, AccentColorText));
+  font-weight: 600;
+}
+:is(.axiosozo-pp-primary, :is(.axiosozo-waiting, .axiosozo-pause) button.primary):not(:disabled):hover {
+  background: var(--button-background-color-primary-hover, var(--color-accent-primary-hover, var(--button-background-color-primary, AccentColor)));
+}
+:is(.axiosozo-pp-primary, :is(.axiosozo-waiting, .axiosozo-pause) button.primary):not(:disabled):hover:active {
+  background: var(--button-background-color-primary-active, var(--color-accent-primary-active, var(--button-background-color-primary, AccentColor)));
 }
 :is(.axiosozo-waiting, .axiosozo-pause) button:disabled { opacity: 0.6; }
+@media (prefers-reduced-motion: no-preference) {
+  :is(.axiosozo-rule-edit, .axiosozo-pp-primary, .axiosozo-pp-text-button, .axiosozo-waiting button, .axiosozo-pause button) {
+    transition: background-color 100ms ease, scale 100ms ease;
+  }
+  :is(.axiosozo-rule-edit, .axiosozo-pp-primary, .axiosozo-pp-text-button, .axiosozo-waiting button, .axiosozo-pause button):not(:disabled):active {
+    scale: 0.98;
+  }
+}
 
 /* ---- Projects (ProjectSidebar.sys.mjs; docs/design/projects.md §2) ------------------
  * Under the space header: a quiet "Projects" heading and one row per project,
@@ -139,9 +241,11 @@
  * something: the project's own icon or container colour, green for a running
  * server, amber while one starts, red when one stopped with an error. */
 :root {
-  --axiosozo-run-green: light-dark(rgb(36 161 72), rgb(88 214 120));
-  --axiosozo-run-amber: light-dark(rgb(214 140 0), rgb(255 190 70));
-  --axiosozo-run-red: var(--text-color-error, light-dark(rgb(215 0 34), rgb(255 132 128)));
+  /* One green, amber and red everywhere: Firefox's own success, warning and
+   * critical icon colours (light and dark, and plain text under high contrast). */
+  --axiosozo-run-green: var(--icon-color-success, light-dark(rgb(36 161 72), rgb(88 214 120)));
+  --axiosozo-run-amber: var(--icon-color-warning, light-dark(rgb(214 140 0), rgb(255 190 70)));
+  --axiosozo-run-red: var(--icon-color-critical, light-dark(rgb(215 0 34), rgb(255 132 128)));
   --axiosozo-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 3.6c0-.6.6-.9 1.1-.6l6.6 4.4c.4.3.4.9 0 1.2L6.1 13c-.5.3-1.1 0-1.1-.6z'/%3E%3C/svg%3E");
   --axiosozo-icon-stop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='4' y='4' width='8' height='8' rx='1.6'/%3E%3C/svg%3E");
   --axiosozo-icon-output: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M3 4.5h10M3 8h10M3 11.5h6'/%3E%3C/svg%3E");
@@ -156,11 +260,15 @@
   --axiosozo-icon-other: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.5 5 3 3-3 3M8.5 11.5h4'/%3E%3C/svg%3E");
 }
 
+/* The section sits beside Zen's tab sections in the same zen-workspace, so it
+ * uses their geometry tokens (vertical-tabs.css, Firefox tabs.css): the
+ * section is inset like .zen-workspace-tabs-section, and each row pill sits
+ * where a tab's .tab-background does, with its icon where the favicon is and
+ * the tab height and spacing. Text inherits the tab list's font. */
 .axiosozo-projects {
   display: flex;
   flex-direction: column;
-  margin: 2px var(--zen-tab-margin, 6px) 6px;
-  font-size: 12px;
+  margin: 2px var(--zen-toolbox-padding, 5px) 4px;
 }
 /* A plain reset at the lowest specificity, so every rule below wins over it. */
 :where(.axiosozo-projects, .axiosozo-project-panel) button {
@@ -173,19 +281,21 @@
   text-align: start;
   cursor: default;
 }
+/* Rings sit inside the control: Zen's workspace clips what leaves it. */
 :where(.axiosozo-projects, .axiosozo-project-panel) :is(button, pre):focus-visible {
   outline: var(--focus-outline, 2px solid AccentColor);
-  outline-offset: var(--focus-outline-offset, -2px);
+  outline-offset: var(--focus-outline-inset, -2px);
 }
 .axiosozo-projects [hidden],
 .axiosozo-project-panel [hidden] { display: none !important; }
 
+/* Like Zen's own space name: small, medium weight, toned down. */
 .axiosozo-projects-head {
   display: flex;
   align-items: center;
   gap: 4px;
   min-height: 24px;
-  padding-inline: 8px 2px;
+  padding-inline: var(--tab-inline-padding, 8px) var(--tab-margin-block, 2px);
 }
 .axiosozo-projects-title {
   display: inline-flex;
@@ -194,10 +304,10 @@
   flex: 1;
   min-width: 0;
   padding: 2px 0;
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.5;
-  transition: opacity 100ms ease;
+  font-size: small;
+  font-weight: 500;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  transition: color 100ms ease;
 }
 .axiosozo-projects-title::after {
   content: "";
@@ -208,20 +318,21 @@
   opacity: 0;
   transition: opacity 100ms ease, transform 150ms ease;
 }
-.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title { opacity: 0.8; }
-.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title::after { opacity: 0.8; }
-.axiosozo-projects-title[aria-expanded="false"]::after { opacity: 0.8; transform: rotate(-90deg); }
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title { color: inherit; }
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-title::after { opacity: 0.7; }
+.axiosozo-projects-title[aria-expanded="false"]::after { opacity: 0.7; transform: rotate(-90deg); }
 .axiosozo-projects-running {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 1px 8px 1px 7px;
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: x-small;
   font-weight: 600;
   white-space: nowrap;
   color: var(--axiosozo-run-green);
   background: color-mix(in srgb, var(--axiosozo-run-green) 13%, transparent);
+  transition: background-color 100ms ease;
 }
 .axiosozo-projects-running::before {
   content: "";
@@ -231,14 +342,17 @@
   background: currentColor;
 }
 .axiosozo-projects-running:hover { background: color-mix(in srgb, var(--axiosozo-run-green) 20%, transparent); }
+/* Hover actions appear whole (never a half-transparent focus ring); only
+ * their glyph is toned down until the pointer is on them. */
 .axiosozo-projects-add {
   display: grid;
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
   opacity: 0;
-  transition: opacity 100ms ease;
+  transition: opacity 100ms ease, background-color 100ms ease;
 }
 .axiosozo-projects-add::before {
   content: "";
@@ -247,13 +361,12 @@
   background: currentColor;
   mask: var(--axiosozo-icon-plus) center / 14px no-repeat;
 }
-.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-add { opacity: 0.7; }
-.axiosozo-projects-add:hover { opacity: 1 !important; background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 8%, transparent)); }
+.axiosozo-projects-head:is(:hover, :focus-within) .axiosozo-projects-add { opacity: 1; }
+.axiosozo-projects-add:hover { color: inherit; background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 8%, transparent)); }
 
 .axiosozo-projects-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -267,17 +380,22 @@
   gap: var(--tab-icon-end-margin, 8.5px);
   flex: 1;
   min-width: 0;
-  min-height: 32px;
-  padding-inline: var(--tab-inline-padding, 8px);
+  min-height: var(--tab-min-height, 36px);
+  margin: var(--tab-margin-block, 2px);
+  /* Zen insets a tab's favicon by a further 3⅓px (.tab-icon-image margin);
+   * the same here puts the mark and the name on the tabs' columns. */
+  padding-inline: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px)
+    calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px));
   border-radius: var(--tab-border-radius, 8px);
-  transition: background-color 100ms ease;
+  transition: background-color 100ms ease, transform 100ms ease;
 }
-.axiosozo-project-row:hover,
+/* The whole item, so resting on the ▶ keeps the row's wash. */
+.axiosozo-project:hover > .axiosozo-project-row,
 .axiosozo-project-row[aria-expanded="true"],
 .axiosozo-projects-overflow:hover {
   background: var(--tab-background-color-hover, color-mix(in srgb, currentColor 7%, transparent));
 }
-.axiosozo-project-row:hover:active { transform: scale(var(--zen-active-tab-scale, 0.985)); }
+.axiosozo-project-row:active { transform: scale(var(--zen-active-tab-scale, 0.985)); }
 .axiosozo-project[data-current] > .axiosozo-project-row .axiosozo-project-name { font-weight: 600; }
 .axiosozo-project-name {
   flex: 1;
@@ -285,13 +403,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
 }
-.axiosozo-projects-overflow { font-size: 11.5px; opacity: 0.6; padding-inline-start: calc(var(--tab-inline-padding, 8px) + 16px + var(--tab-icon-end-margin, 8.5px)); }
-.axiosozo-projects-overflow:hover { opacity: 1; }
+.axiosozo-projects-overflow {
+  padding-inline-start: calc(var(--tab-inline-padding, 8px) - var(--tab-margin-block, 2px) + 3.333px + 16px + var(--tab-icon-end-margin, 8.5px));
+  font-size: small;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
+.axiosozo-projects-overflow:hover { color: inherit; }
 
-/* The project's mark: its own image, or a monogram tile in its container's
- * colour (Firefox's identity colour, usercontext.css) or a stable hue. */
+/* The project's mark: its own image, or a monogram tile tinted with its
+ * container's colour (Firefox's identity colour, usercontext.css) or a stable
+ * hue, the letter in a deeper shade of the same colour. Quiet next to real
+ * favicons, like Zen's own space marks. Favicon-sized, like a tab's. */
 .axiosozo-project-icon {
   display: grid;
   place-items: center;
@@ -301,14 +424,15 @@
   height: 16px;
   overflow: hidden;
   border-radius: 4.5px;
-  background: light-dark(hsl(var(--axiosozo-project-hue, 220) 52% 50%), hsl(var(--axiosozo-project-hue, 220) 42% 46%));
-  color: white;
+  --axiosozo-mark: oklch(0.6 0.13 var(--axiosozo-project-hue, 250));
+  background: color-mix(in oklab, var(--axiosozo-mark) 22%, transparent);
+  color: light-dark(color-mix(in oklab, var(--axiosozo-mark) 72%, black), color-mix(in oklab, var(--axiosozo-mark) 72%, white));
   font-size: 9.5px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--axiosozo-mark) 40%, transparent);
 }
-.axiosozo-project-icon[class*="identity-color-"] { background: var(--identity-icon-color); }
+.axiosozo-project-icon[class*="identity-color-"] { --axiosozo-mark: var(--identity-icon-color); }
 .axiosozo-project-icon[data-image] { background: none; box-shadow: none; border-radius: 4px; }
 .axiosozo-project-icon > img { width: 100%; height: 100%; object-fit: contain; }
 .axiosozo-project-icon[data-size="large"] { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; }
@@ -319,7 +443,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10.5px;
+  font-size: x-small;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--axiosozo-run-green);
@@ -345,7 +469,7 @@
   min-width: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: x-small;
   font-weight: 600;
   line-height: 15px;
   text-align: center;
@@ -353,19 +477,20 @@
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .axiosozo-project-console[data-level="error"] {
-  background: color-mix(in srgb, var(--icon-color-critical, currentColor) 22%, transparent);
+  background: color-mix(in srgb, var(--axiosozo-run-red) 22%, transparent);
 }
 /* The quick start appears where the badges are, on hover only. */
 .axiosozo-project-quick {
   position: absolute;
-  inset-inline-end: 5px;
+  inset-inline-end: calc(var(--tab-margin-block, 2px) + 5px);
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
   opacity: 0;
-  transition: opacity 100ms ease;
+  transition: opacity 100ms ease, background-color 100ms ease, color 100ms ease;
 }
 .axiosozo-project-quick::before {
   content: "";
@@ -374,8 +499,8 @@
   background: currentColor;
   mask: var(--axiosozo-icon-play) center / 13px no-repeat;
 }
-.axiosozo-project:is(:hover, :focus-within) > .axiosozo-project-quick { opacity: 0.75; }
-.axiosozo-project-quick:hover { opacity: 1 !important; background: color-mix(in srgb, currentColor 10%, transparent); color: var(--axiosozo-run-green); }
+.axiosozo-project:is(:hover, :focus-within) > .axiosozo-project-quick { opacity: 1; }
+.axiosozo-project-quick:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: var(--axiosozo-run-green); }
 .axiosozo-project:is(:hover, :focus-within):has(> .axiosozo-project-quick:not([hidden])) .axiosozo-project-badges { visibility: hidden; }
 
 /* Zen's collapsed (icon) sidebar: projects stay, as their icons. Compact mode
@@ -394,10 +519,14 @@
   & .axiosozo-project[data-state="failed"] .axiosozo-project-icon { box-shadow: 0 0 0 1.5px var(--axiosozo-run-red); }
 }
 
-/* ---- The project panel (beside the sidebar) ------------------------------------------- */
+/* ---- The project panel (beside the sidebar) -------------------------------------------
+ * Three type steps (caption, body, title) and one row radius, on the panel's
+ * own (native, translucent) background: no painted surfaces behind text. */
 #axiosozo-project-panel {
   --panel-padding: 0;
   --arrowpanel-padding: 0;
+  --axiosozo-pp-caption: 11px;
+  --axiosozo-pp-row-radius: var(--arrowpanel-menuitem-border-radius, 8px);
 }
 .axiosozo-pp {
   display: flex;
@@ -407,15 +536,21 @@
   width: 340px;
   max-height: min(600px, 78vh);
   overflow-y: auto;
-  padding: 14px 10px 10px;
+  padding: 14px 8px 8px;
   font: message-box;
   font-size: 12.5px;
-  color: var(--arrowpanel-color, inherit);
 }
-.axiosozo-pp-head { display: flex; align-items: center; gap: 11px; padding-inline: 4px; }
+.axiosozo-pp-head { display: flex; align-items: center; gap: 11px; padding-inline: 6px 2px; }
 .axiosozo-pp-titles { flex: 1; min-width: 0; }
-.axiosozo-pp-title { margin: 0; font-size: 14.5px; font-weight: 650; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-pp-path { margin: 1px 0 0; font-size: 11px; opacity: 0.58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-title { margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axiosozo-pp-path {
+  margin: 1px 0 0;
+  font-size: var(--axiosozo-pp-caption);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .axiosozo-pp-more,
 .axiosozo-pp-icon-button {
   display: grid;
@@ -423,8 +558,9 @@
   flex: none;
   width: 26px;
   height: 26px;
-  border-radius: 7px;
-  opacity: 0.72;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  transition: background-color 100ms ease, color 100ms ease;
 }
 .axiosozo-pp-more::before,
 .axiosozo-pp-icon-button::before {
@@ -438,26 +574,50 @@
 .axiosozo-pp-icon-button[data-action="stop"]::before { mask-image: var(--axiosozo-icon-stop); mask-size: 13px; }
 .axiosozo-pp-icon-button[data-action="log"]::before { mask-image: var(--axiosozo-icon-output); mask-size: 15px; }
 .axiosozo-pp-icon-button[data-action="dismiss"]::before { mask-image: var(--axiosozo-icon-plus); mask-size: 14px; rotate: 45deg; }
-:is(.axiosozo-pp-more, .axiosozo-pp-icon-button):hover,
+:is(.axiosozo-pp-more, .axiosozo-pp-icon-button):not(:disabled):hover,
 .axiosozo-pp-icon-button[aria-expanded="true"],
-.axiosozo-pp-more[aria-expanded="true"] { opacity: 1; background: color-mix(in srgb, currentColor 9%, transparent); }
-.axiosozo-pp-icon-button[data-action="start"]:hover { color: var(--axiosozo-run-green); }
-.axiosozo-pp-icon-button:disabled { opacity: 0.35; }
+.axiosozo-pp-more[aria-expanded="true"] { color: inherit; background: color-mix(in srgb, currentColor 9%, transparent); }
+.axiosozo-pp-icon-button[data-action="start"]:not(:disabled):hover { color: var(--axiosozo-run-green); }
+.axiosozo-pp-icon-button:disabled { opacity: 0.4; }
 
 .axiosozo-pp-section { display: flex; flex-direction: column; gap: 2px; }
 .axiosozo-pp-section-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; padding-inline: 8px 4px; }
-.axiosozo-pp-section-title { margin: 0; font-size: 11px; font-weight: 600; opacity: 0.52; }
+.axiosozo-pp-section-title {
+  margin: 0;
+  font-size: var(--axiosozo-pp-caption);
+  font-weight: 600;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
 .axiosozo-pp-targets,
 .axiosozo-pp-links { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
-.axiosozo-pp-target { display: flex; align-items: center; gap: 2px; padding-inline-end: 4px; border-radius: 9px; transition: background-color 100ms ease; }
+.axiosozo-pp-target {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-inline-end: 4px;
+  border-radius: var(--axiosozo-pp-row-radius);
+  transition: background-color 100ms ease;
+}
 .axiosozo-pp-target:hover { background: color-mix(in srgb, currentColor 6%, transparent); }
-.axiosozo-pp-target-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 6px 8px; border-radius: 9px; }
+.axiosozo-pp-target-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--axiosozo-pp-row-radius);
+}
 .axiosozo-pp-target-text { display: flex; flex-direction: column; min-width: 0; }
 .axiosozo-pp-target-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-pp-target-detail { font-size: 11px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-pp-target[data-state="running"] .axiosozo-pp-target-detail,
-.axiosozo-pp-target[data-state="external"] .axiosozo-pp-target-detail { opacity: 0.75; }
-.axiosozo-pp-target[data-state="failed"] .axiosozo-pp-target-detail { color: var(--axiosozo-run-red); opacity: 1; }
+.axiosozo-pp-target-detail {
+  font-size: var(--axiosozo-pp-caption);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.axiosozo-pp-target[data-state="failed"] .axiosozo-pp-target-detail { color: var(--text-color-error, var(--axiosozo-run-red)); }
 .axiosozo-pp-target-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .axiosozo-pp-target-main .axiosozo-project-icon { width: 28px; height: 28px; border-radius: 7px; font-size: 13px; }
 /* What a target is, and a status mark on its corner. */
@@ -484,15 +644,16 @@
 .axiosozo-pp-kind[data-kind="mobile"]::before { mask-image: var(--axiosozo-icon-mobile); }
 .axiosozo-pp-kind[data-kind="desktop"]::before { mask-image: var(--axiosozo-icon-desktop); }
 .axiosozo-pp-kind[data-kind="worker"]::before { mask-image: var(--axiosozo-icon-worker); }
+/* The panel is native and translucent on macOS, so the mark carries no ring
+ * in a guessed background colour; it sits on the tile's corner. */
 .axiosozo-pp-kind::after {
   content: "";
   position: absolute;
-  inset-block-end: -1px;
-  inset-inline-end: -1px;
-  width: 8px;
-  height: 8px;
+  inset-block-end: 1px;
+  inset-inline-end: 1px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  border: 2px solid var(--arrowpanel-background, Canvas);
   background: transparent;
   display: none;
 }
@@ -503,7 +664,8 @@
 .axiosozo-pp-target[data-state="running"] .axiosozo-pp-kind,
 .axiosozo-pp-target[data-state="external"] .axiosozo-pp-kind { background: color-mix(in srgb, var(--axiosozo-run-green) 14%, transparent); }
 
-/* The one-time question before a command first runs. */
+/* The one-time question before a command first runs: a calm, neutral card
+ * (it is a question, not an alarm); the command stays in monospace. */
 .axiosozo-pp-confirm {
   display: flex;
   flex-direction: column;
@@ -511,12 +673,16 @@
   margin: 2px 4px 6px;
   padding: 11px 12px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--zen-primary-color, AccentColor) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
 }
 .axiosozo-pp-confirm p { margin: 0; }
 .axiosozo-pp-confirm-title { font-weight: 600; }
-.axiosozo-pp-confirm-where { font-size: 11px; opacity: 0.7; line-height: 1.4; }
+.axiosozo-pp-confirm-where {
+  font-size: var(--axiosozo-pp-caption);
+  line-height: 1.4;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
 .axiosozo-pp-command,
 .axiosozo-waiting-command {
   display: block;
@@ -528,23 +694,14 @@
   overflow-wrap: anywhere;
 }
 .axiosozo-pp-confirm-buttons { display: flex; justify-content: flex-end; gap: 6px; }
-.axiosozo-pp-primary,
-.axiosozo-waiting-start {
-  padding: 4px 14px;
-  border-radius: 7px;
-  background: var(--zen-primary-color, AccentColor) !important;
-  color: var(--button-text-color-primary, white) !important;
-  font-weight: 600;
-}
-.axiosozo-pp-primary:hover { filter: brightness(1.08); }
 .axiosozo-pp-text-button {
   padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  opacity: 0.75;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  font-size: var(--axiosozo-pp-caption);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
 }
-.axiosozo-pp-text-button:hover { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
-.axiosozo-pp-error { margin: 0 8px 4px 46px; font-size: 11.5px; color: var(--axiosozo-run-red); }
+.axiosozo-pp-text-button:hover { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
+.axiosozo-pp-error { margin: 0 8px 4px 46px; font-size: var(--axiosozo-pp-caption); color: var(--text-color-error, var(--axiosozo-run-red)); }
 .axiosozo-pp-log { margin: 0 4px 6px; }
 .axiosozo-pp-output {
   margin: 0;
@@ -557,15 +714,20 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.axiosozo-pp-empty { margin: 0; padding: 2px 8px 4px; font-size: 12px; line-height: 1.45; opacity: 0.65; }
+.axiosozo-pp-empty {
+  margin: 0;
+  padding: 2px 8px 4px;
+  line-height: 1.45;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
 .axiosozo-pp-add {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  border-radius: 9px;
-  font-size: 12px;
-  opacity: 0.7;
+  border-radius: var(--axiosozo-pp-row-radius);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  transition: background-color 100ms ease, color 100ms ease;
 }
 .axiosozo-pp-add::before {
   content: "";
@@ -578,26 +740,37 @@
   background: currentColor;
   mask: var(--axiosozo-icon-plus) center / 14px no-repeat;
 }
-.axiosozo-pp-add:hover { opacity: 1; background: color-mix(in srgb, currentColor 6%, transparent); }
+.axiosozo-pp-add:hover { color: inherit; background: color-mix(in srgb, currentColor 6%, transparent); }
 .axiosozo-pp-link {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 5px 8px;
-  border-radius: 8px;
+  border-radius: var(--axiosozo-pp-row-radius);
+  transition: background-color 100ms ease;
 }
 .axiosozo-pp-link:hover { background: color-mix(in srgb, currentColor 6%, transparent); }
+/* A site without a stored favicon gets Firefox's default one, which is drawn
+ * in the context colour: without these it paints nothing. */
 .axiosozo-pp-link-icon {
   flex: none;
   width: 16px;
   height: 16px;
   border-radius: 4px;
   object-fit: contain;
-  background: color-mix(in srgb, currentColor 9%, transparent);
+  -moz-context-properties: fill;
+  fill: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
 }
 .axiosozo-pp-link-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axiosozo-pp-link-detail { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: 0.5; }
+.axiosozo-pp-link-detail {
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--axiosozo-pp-caption);
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+}
 .axiosozo-pp-foot {
   display: flex;
   gap: 4px;
@@ -617,14 +790,57 @@
   background: transparent;
   border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
 }
-.axiosozo-status-dot[data-status="up"] { background: rgb(52 199 89); border-color: transparent; }
+.axiosozo-status-dot[data-status="up"] { background: var(--axiosozo-run-green); border-color: transparent; }
 .axiosozo-status-dot[data-status="down"] { background: color-mix(in srgb, currentColor 35%, transparent); border-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
-  :is(.axiosozo-project-row, .axiosozo-projects-title, .axiosozo-projects-title::after, .axiosozo-projects-add, .axiosozo-project-quick,
-    .axiosozo-pp-target) { transition: none; }
-  :is(.axiosozo-project-live, .axiosozo-pp-kind)::before,
-  .axiosozo-pp-kind::after { animation: none !important; }
-  .axiosozo-project-row:hover:active { transform: none; }
+  :is(.axiosozo-projects, .axiosozo-project-panel, #axiosozo-env-pill) *,
+  :is(.axiosozo-projects, .axiosozo-project-panel, #axiosozo-env-pill) ::before,
+  :is(.axiosozo-projects, .axiosozo-project-panel, #axiosozo-env-pill) ::after,
+  #axiosozo-env-pill { transition: none !important; animation: none !important; }
+  .axiosozo-project-row:active { transform: none; }
+}
+
+/* High contrast: Firefox's state colours fall back to the text colour, and
+ * forced colours repaint backgrounds, so state keeps a shape: a filled dot
+ * runs, a hollow one stopped with an error, and rows and pills keep an edge. */
+@media (forced-colors: active) {
+  :is(#axiosozo-env-pill, #axiosozo-jev-outgoing, .axiosozo-projects-running, .axiosozo-project-console, .axiosozo-pp-confirm) {
+    border: 1px solid CanvasText;
+  }
+  .axiosozo-project:hover > .axiosozo-project-row,
+  .axiosozo-project-row[aria-expanded="true"],
+  .axiosozo-projects-overflow:hover,
+  :is(.axiosozo-pp-target, .axiosozo-pp-link, .axiosozo-pp-add):hover {
+    outline: 1px solid SelectedItem;
+    outline-offset: -1px;
+  }
+  /* Glyphs drawn as masked backgrounds would otherwise be repainted away. */
+  :is(.axiosozo-projects-title, .axiosozo-projects-add, .axiosozo-project-quick, .axiosozo-pp-more, .axiosozo-pp-icon-button,
+    .axiosozo-pp-kind, .axiosozo-pp-add)::before,
+  .axiosozo-projects-title::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  :is(.axiosozo-status-dot, .axiosozo-env-pill-alert, .axiosozo-project-failed),
+  :is(.axiosozo-project-live, .axiosozo-projects-running)::before,
+  .axiosozo-pp-kind::after,
+  #axiosozo-env-pill::before {
+    /* Over the state colours' more specific rules, in this mode only. */
+    forced-color-adjust: none;
+    background: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+  :is(.axiosozo-project-failed, .axiosozo-env-pill-alert),
+  .axiosozo-pp-target[data-state="failed"] .axiosozo-pp-kind::after,
+  .axiosozo-status-dot:not([data-status="up"]) {
+    background: Canvas !important;
+    border: 1.5px solid CanvasText !important;
+  }
+  .axiosozo-project-icon { border: 1px solid CanvasText; }
+  :root:not([zen-sidebar-expanded="true"]) .axiosozo-project:not([data-state="idle"]) .axiosozo-project-icon {
+    outline: 2px solid CanvasText;
+    outline-offset: 1px;
+  }
 }
 
 /* ---- Chrome-owned overlays in the tab's browser stack --------------------------------- */
@@ -656,13 +872,13 @@
 .axiosozo-waiting p,
 .axiosozo-pause p { margin: 0; }
 .axiosozo-waiting-status,
-.axiosozo-waiting-url { opacity: 0.75; }
-.axiosozo-waiting-url { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+.axiosozo-waiting-url { color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent)); }
+.axiosozo-waiting-url { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .axiosozo-waiting-command { margin-top: 4px; max-width: 100%; text-align: start; }
 .axiosozo-waiting-output {
   max-width: 100%;
   font: 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
-  opacity: 0.6;
+  color: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

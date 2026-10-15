@@ -9,7 +9,7 @@ import { createClock, flushMicrotasks } from "./dev-loop-harness.test.mjs";
 
 const {
   installSpaceSwitcher, dotWindow, dotSize, PREF, LIBRARY_STATE_PREF, ROOT_ATTRIBUTE, SWITCHER_ID,
-  STYLESHEET, WHEEL_THRESHOLD, WHEEL_IDLE_MS, MAX_DOTS,
+  STYLESHEET, WHEEL_THRESHOLD, WHEEL_IDLE_MS, MAX_DOTS, DRAG_DWELL_MS,
 } = await import("../chrome/SpaceSwitcher.sys.mjs");
 const { ZEN_SIDEBAR } = await import("../chrome/ZenWorkspaceAdapter.sys.mjs");
 
@@ -266,14 +266,29 @@ test("horizontal scroll steps one space per gesture; vertical scroll is ignored"
   natural.installed.dispose();
 });
 
-test("dragging a tab over a dot switches to that space, like Zen's icons", async () => {
+test("a tab dragged onto a dot and held there switches to that space, like Zen's icons; passing over does not", async () => {
   const t = await setup({ count: 3 });
+  const tabDrag = { dataTransfer: { types: ["application/x-moz-tabbrowser-tab"] } };
   t.fire("dragover", t.dots()[1], { dataTransfer: { types: ["text/plain"] } });
-  await flushMicrotasks();
+  await t.clock.advance(DRAG_DWELL_MS);
   assert.equal(t.f.zen.activeWorkspace, t.list[0].uuid, "only tab drags");
-  t.fire("dragover", t.dots()[1], { dataTransfer: { types: ["application/x-moz-tabbrowser-tab"] } });
+  // Passing over a dot on the way somewhere else never switches.
+  t.fire("dragover", t.dots()[1], tabDrag);
+  assert.equal(t.dots()[1].getAttribute("dragover"), "true", "the dot shows it is the target");
+  await t.clock.advance(DRAG_DWELL_MS - 100);
+  t.fire("dragleave", t.dots()[1], { relatedTarget: null });
+  await t.clock.advance(DRAG_DWELL_MS);
+  assert.equal(t.f.zen.activeWorkspace, t.list[0].uuid);
+  assert.equal(t.dots()[1].hasAttribute("dragover"), false);
+  // Resting on it (repeated dragover events included) switches after Zen's delay.
+  t.fire("dragover", t.dots()[2], tabDrag);
+  await t.clock.advance(DRAG_DWELL_MS / 2);
+  t.fire("dragover", t.dots()[2].firstChild, tabDrag);
+  t.fire("dragleave", t.dots()[2], { relatedTarget: t.dots()[2].firstChild });
+  await t.clock.advance(DRAG_DWELL_MS / 2);
   await flushMicrotasks();
-  assert.equal(t.f.zen.activeWorkspace, t.list[1].uuid);
+  assert.equal(t.f.zen.activeWorkspace, t.list[2].uuid);
+  assert.equal(t.dots()[2].hasAttribute("dragover"), false);
   t.installed.dispose();
 });
 

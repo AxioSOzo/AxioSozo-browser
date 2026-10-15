@@ -1,0 +1,268 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* AxioSozo Lab: the today strip (today-strip.sys.mjs). One quiet line at the
+ * top of the sidebar's Projects section, in the section's own type and
+ * geometry (axiosozo-runtime.css): small, toned-down text like the "Projects"
+ * heading, a 6px status dot in the sidebar's one green, amber and red, the
+ * hover wash of a tab. Open, it lists its lines as small two-line rows.
+ * Loaded only while the strip is on. */
+
+.axiosozo-lab-today {
+  --axiosozo-lab-today-soft: var(--text-color-deemphasized, color-mix(in srgb, currentColor 69%, transparent));
+  --axiosozo-lab-today-faint: color-mix(in srgb, currentColor 45%, transparent);
+  --axiosozo-lab-today-wash: var(--tab-background-color-hover, color-mix(in srgb, currentColor 7%, transparent));
+  --axiosozo-lab-today-warn: var(--axiosozo-run-amber, var(--icon-color-warning, CanvasText));
+  --axiosozo-lab-today-bad: var(--axiosozo-run-red, var(--icon-color-critical, CanvasText));
+  --axiosozo-lab-today-good: var(--axiosozo-run-green, var(--icon-color-success, CanvasText));
+  --axiosozo-lab-today-due: var(--zen-primary-color, AccentColor);
+  display: flex;
+  flex-direction: column;
+  margin: 2px var(--zen-toolbox-padding, 5px) 2px;
+  -moz-window-dragging: no-drag;
+
+  /* Inside the Projects section, its own inset already applies. */
+  .axiosozo-projects > & {
+    margin-inline: 0;
+  }
+
+  & button {
+    appearance: none;
+    margin: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: default;
+  }
+  & button:focus-visible {
+    outline: var(--focus-outline, 2px solid AccentColor);
+    outline-offset: var(--focus-outline-inset, -2px);
+  }
+  & [hidden] {
+    display: none !important;
+  }
+
+  /* Zen's collapsed (icon) sidebar has no room for a sentence. */
+  :root:not([zen-sidebar-expanded="true"]) & {
+    display: none;
+  }
+}
+
+.axiosozo-lab-today-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 2px var(--tab-margin-block, 2px) 2px var(--tab-inline-padding, 8px);
+  border-radius: var(--tab-border-radius, 8px);
+  font-size: small;
+  font-weight: 500;
+  color: var(--axiosozo-lab-today-soft);
+  transition: background-color 100ms ease, color 100ms ease;
+
+  &:hover {
+    background: var(--axiosozo-lab-today-wash);
+    color: inherit;
+  }
+  .axiosozo-lab-today[data-open] > & {
+    color: inherit;
+  }
+}
+
+.axiosozo-lab-today-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one mark: what most needs you. Nothing (an empty ring) when nothing does. */
+.axiosozo-lab-today-dot,
+.axiosozo-lab-today-row-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: currentColor;
+}
+.axiosozo-lab-today-dot {
+  .axiosozo-lab-today[data-tone="warn"] & { color: var(--axiosozo-lab-today-warn); }
+  .axiosozo-lab-today[data-tone="down"] & { color: var(--axiosozo-lab-today-bad); }
+  .axiosozo-lab-today[data-tone="due"] & { color: var(--axiosozo-lab-today-due); }
+  .axiosozo-lab-today[data-tone="quiet"] & {
+    background: none;
+    box-shadow: inset 0 0 0 1.25px var(--axiosozo-lab-today-faint);
+  }
+}
+
+.axiosozo-lab-today-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask: var(--axiosozo-icon-chevron, none) center / 11px no-repeat;
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition: opacity 100ms ease, transform 150ms ease;
+
+  .axiosozo-lab-today-line:is(:hover, :focus-visible) > & {
+    opacity: 0.7;
+  }
+  .axiosozo-lab-today[data-open] & {
+    opacity: 0.7;
+    transform: none;
+  }
+}
+
+.axiosozo-lab-today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.axiosozo-lab-today-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.axiosozo-lab-today-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 5px var(--tab-margin-block, 2px) 5px calc(var(--tab-inline-padding, 8px) + 0.5px);
+  border-radius: var(--tab-border-radius, 8px);
+  transition: background-color 100ms ease;
+
+  .axiosozo-lab-today-item:hover > &:not(:disabled),
+  &:focus-visible {
+    background: var(--axiosozo-lab-today-wash);
+  }
+  &:disabled {
+    opacity: 1;
+  }
+}
+.axiosozo-lab-today-row-dot {
+  margin-top: 6px;
+  .axiosozo-lab-today-row[data-tone="warn"] > & { color: var(--axiosozo-lab-today-warn); }
+  .axiosozo-lab-today-row[data-tone="down"] > & { color: var(--axiosozo-lab-today-bad); }
+  .axiosozo-lab-today-row[data-tone="up"] > & { color: var(--axiosozo-lab-today-good); }
+  .axiosozo-lab-today-row[data-tone="due"] > & { color: var(--axiosozo-lab-today-due); }
+}
+.axiosozo-lab-today-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.axiosozo-lab-today-row-title {
+  font-size: small;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.axiosozo-lab-today-row-detail {
+  font-size: x-small;
+  color: var(--axiosozo-lab-today-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An errand's Done and Tomorrow: two small icon buttons, there when the row
+ * is pointed at or focused (like a tab's close button); the row's text then
+ * ends before them. */
+.axiosozo-lab-today-row-actions {
+  position: absolute;
+  inset-inline-end: calc(var(--tab-margin-block, 2px) + 3px);
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+
+  .axiosozo-lab-today-item:is(:hover, :focus-within) > & {
+    opacity: 1;
+  }
+}
+.axiosozo-lab-today-item:is(:hover, :focus-within):has(> .axiosozo-lab-today-row-actions) > .axiosozo-lab-today-row {
+  padding-inline-end: 54px;
+}
+.axiosozo-lab-today-chip {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--toolbarbutton-border-radius, 6px);
+  color: var(--axiosozo-lab-today-soft);
+  font-size: 0;
+
+  &::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    background: currentColor;
+    mask: var(--axiosozo-lab-today-icon) center / 14px no-repeat;
+  }
+  &[data-action="done"] {
+    --axiosozo-lab-today-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
+  }
+  &[data-action="snooze"] {
+    --axiosozo-lab-today-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8h8.5M8.5 4.5 12 8l-3.5 3.5M13.5 3.5v9'/%3E%3C/svg%3E");
+  }
+  &:hover {
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    color: inherit;
+  }
+}
+
+.axiosozo-lab-today-empty,
+.axiosozo-lab-today-note {
+  padding: 3px var(--tab-margin-block, 2px) 3px var(--tab-inline-padding, 8px);
+  font-size: x-small;
+  color: var(--axiosozo-lab-today-soft);
+}
+.axiosozo-lab-today-note {
+  color: var(--axiosozo-lab-today-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .axiosozo-lab-today-line,
+  .axiosozo-lab-today-chevron,
+  .axiosozo-lab-today-row,
+  .axiosozo-lab-today-row-actions {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .axiosozo-lab-today-dot,
+  .axiosozo-lab-today-row-dot {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .axiosozo-lab-today[data-tone="quiet"] .axiosozo-lab-today-dot {
+    background: none;
+    box-shadow: inset 0 0 0 1.25px GrayText;
+  }
+  .axiosozo-lab-today-chip::before {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
+}
+
+#axiosozo-lab-today-strip[hidden] {
+  display: none;
+}

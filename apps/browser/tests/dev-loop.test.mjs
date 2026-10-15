@@ -49,7 +49,9 @@ test("environment pill appears only on URLs of a declared project environment", 
   assert.equal(t.pill().getAttribute("data-environment"), "local");
   assert.equal(t.pill().localName, "button", "a real button: keyboard and VoiceOver reachable");
   assert.equal(t.pill().getAttribute("aria-haspopup"), "menu");
-  assert.match(t.pill().getAttribute("aria-label"), /^Webapp: local environment, 1 of 1 services not running\. Switch environment$/u);
+  // The pill speaks for its own environment: its declared server is down.
+  assert.match(t.pill().getAttribute("aria-label"), /^Webapp: local environment, not running\. Switch environment$/u);
+  assert.equal(t.pill().getAttribute("data-status"), "down");
   assert.equal(t.pill().parentNode.id, "page-action-buttons");
   for (const url of ["https://unrelated.example/app", "http://localhost:3000/", "about:preferences", "file:///tmp/x.html"]) {
     t.h.commit(tab, url);
@@ -67,6 +69,34 @@ test("environment pill appears only on URLs of a declared project environment", 
   t.h.select(tab);
   await flushMicrotasks();
   assert.equal(t.pill().hidden, false);
+  t.loop.dispose();
+});
+
+test("the pill's status is its own environment's: other servers only in its tooltip, red only when its server failed", async () => {
+  const API = { name: "api", url: "http://localhost:8787/", port: 8787 };
+  const t = setup({ services: [{ ...WEB, command: "bun run dev" }, API],
+    statuses: [{ ...WEB, status: "up", checked_at: 0 }, { ...API, status: "down", checked_at: 0 }] });
+  const tab = t.h.addTab({ url: "http://localhost:5173/app" });
+  await flushMicrotasks();
+  assert.equal(t.pill().getAttribute("data-status"), "up", "its own server answers; another one being down does not colour it");
+  assert.equal(t.pill().getAttribute("aria-label"), "Webapp: local environment. Switch environment");
+  assert.equal(t.pill().getAttribute("title"), "Webapp · local, 1 other server not running");
+  t.h.commit(tab, "https://webapp.example/");
+  await flushMicrotasks();
+  assert.equal(t.pill().hasAttribute("data-status"), false, "a remote environment is never checked");
+  assert.equal(t.pill().getAttribute("title"), "Webapp · production");
+  t.h.commit(tab, "http://localhost:5173/app");
+  await flushMicrotasks();
+  t.services.approved.add(`${t.project.id}\u0000\u0000web`);
+  await t.services.startRun({ window: t.h.window, projectId: t.project.id, key: "\u0000web" });
+  Object.assign(t.services.runs.get(`${t.project.id}\u0000\u0000web`), { status: "failed", exit_code: 1 });
+  t.services.statuses[t.project.id] = [{ ...WEB, status: "down", checked_at: 1 }, { ...API, status: "down", checked_at: 1 }];
+  t.services.emit("services");
+  await flushMicrotasks();
+  t.services.emit("runs");
+  await flushMicrotasks();
+  assert.equal(t.pill().getAttribute("data-status"), "failed");
+  assert.equal(t.pill().getAttribute("aria-label"), "Webapp: local environment, stopped with an error. Switch environment");
   t.loop.dispose();
 });
 
@@ -499,7 +529,8 @@ test("P2 runtime stylesheet: Firefox's container colour paints the marks; a hidd
   // .axiosozo-status-dot sets display: inline-block, which would beat the UA [hidden] rule.
   assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[hidden\] \{ display: none; \}/u);
   assert.match(css, /#axiosozo-env-pill \.axiosozo-env-pill-container\[class\*="identity-color-"\] \{\s*background: var\(--identity-icon-color\);\s*border-color: transparent;\s*\}/u);
-  assert.match(css, /\.axiosozo-project-icon\[class\*="identity-color-"\] \{ background: var\(--identity-icon-color\); \}/u);
+  assert.match(css, /\.axiosozo-project-icon\[class\*="identity-color-"\] \{ --axiosozo-mark: var\(--identity-icon-color\); \}/u);
+  assert.match(css, /\.axiosozo-project-icon \{[^}]*background: color-mix\(in oklab, var\(--axiosozo-mark\) 22%, transparent\);/u);
   assert.doesNotMatch(css, /#[0-9a-f]{6}\b[^}]*identity/iu, "no copied container colours");
 });
 
@@ -1180,7 +1211,9 @@ test("keyboard: a row opened with the keyboard moves focus into the panel; closi
   await flushMicrotasks();
   const panel = projectPanel(t.h);
   panel.dispatch("popupshown", { target: panel });
-  assert.equal(t.h.document.activeElement, panel.querySelector("button"), "the first control of the panel");
+  // Strict identity, not a deep comparison of fake DOM trees.
+  assert.ok(t.h.document.activeElement === panel.querySelector(".axiosozo-pp-target-main"),
+    "the first thing to run or open, not the header's ⋯ menu");
   panel.hidePopup();
   assert.equal(t.h.document.activeElement, row);
   row.dispatch("click", { detail: 1 });
@@ -1189,4 +1222,128 @@ test("keyboard: a row opened with the keyboard moves focus into the panel; closi
   panel.dispatch("popupshown", { target: panel });
   assert.equal(t.h.document.activeElement, row, "a pointer click leaves focus where it was");
   t.loop.dispose();
+});
+
+// ---- Feedback for actions that otherwise happen silently (AxioSozoToast) ------------------
+function toastBox(h) {
+  const box = h.document.createXULElement("vbox");
+  box.id = "zen-toast-container";
+  box.setAttribute("hidden", "true");
+  h.document.documentElement.appendChild(box);
+  return box;
+}
+const toastText = box => box.children.map(toast => toast.children[0].children.map(label => label.textContent));
+
+test("Remove from space says so in a Zen toast whose Undo puts the project back in its space", async () => {
+  const h = createFakeWindow();
+  const box = toastBox(h);
+  const adapter = createFakeAdapter({ elements: uuid => h.document.getElementById(uuid) });
+  const p = project();
+  const services = routed(createFakeServices(core, { projects: [p] }));
+  const loop = installDevLoop(h.window, { services, adapter, core, timers: createClock().timersApi, clock: () => 0, openSettings: () => {} });
+  await flushMicrotasks();
+  await openPanel(h, p.id);
+  projectPanel(h).querySelector(".axiosozo-pp-more").click();
+  const menu = h.document.getElementById("axiosozo-project-more-menu");
+  menu.dispatch("command", { target: menu.querySelectorAll("menuitem").find(i => i.getAttribute("data-action") === "remove") });
+  await flushMicrotasks();
+  assert.equal(section(h), null, "the project left this space");
+  assert.deepEqual(toastText(box), [["Removed Webapp from this space", "It stays on the Projects page."]]);
+  const undo = box.children[0].querySelector("button");
+  assert.equal(undo.getAttribute("label"), "Undo");
+  undo.dispatch("command");
+  await flushMicrotasks();
+  assert.deepEqual(services.calls.updateProject, [[p.id, { context_uuid: null }], [p.id, { context_uuid: WORKSPACE_A }]]);
+  assert.ok(rowFor(h, p.id), "back in its space");
+  assert.equal(box.children.length, 0, "the toast closed with the Undo");
+  loop.dispose();
+});
+
+test("Stop all confirms what stopped; a failed quick start from the row says why", async () => {
+  const t = setup({ services: [runnable] });
+  const box = toastBox(t.h);
+  t.services.approved.add(`${t.project.id}\u0000\u0000web`);
+  await flushMicrotasks();
+  await t.services.startRun({ window: t.h.window, projectId: t.project.id, key: "\u0000web" });
+  await flushMicrotasks();
+  await flushMicrotasks();
+  section(t.h).querySelector(".axiosozo-projects-running").click();
+  await flushMicrotasks();
+  projectPanel(t.h).querySelector(".axiosozo-pp-section-head").querySelector("button").click();
+  await flushMicrotasks();
+  assert.deepEqual(toastText(box), [["Stopped 1 server"]]);
+  projectPanel(t.h).hidePopup();
+  await flushMicrotasks();
+  t.services.startRun = async () => { throw Object.assign(new Error("busy"), { code: "TOO_MANY_RUNS" }); };
+  rowFor(t.h, t.project.id).querySelector(".axiosozo-project-quick").click();
+  await flushMicrotasks();
+  assert.deepEqual(toastText(box).at(-1), ["Could not start web", "Too many servers are running. Stop one first."]);
+  t.loop.dispose();
+});
+
+test("runsPhrase names what stopped by kind", async () => {
+  const { runsPhrase } = await import("../chrome/ProjectSidebar.sys.mjs");
+  assert.equal(runsPhrase(["web"]), "1 server");
+  assert.equal(runsPhrase(["web", "api", "worker"]), "3 servers");
+  assert.equal(runsPhrase(["mobile", "desktop"]), "2 apps");
+  assert.equal(runsPhrase(["web", "mobile"]), "2 servers and apps");
+});
+
+test("a redraw of the panel keeps a scrolled-up output where the user left it", async () => {
+  const t = setup({ services: [{ name: "iOS app", app: "ios", command: "xcodebuild -scheme Acme build" }] });
+  const key = `${t.project.id}\u0000ios\u0000iOS app`;
+  t.services.approved.add(key);
+  t.services.logs[key] = ["one", "two", "three"];
+  await flushMicrotasks();
+  await openPanel(t.h, t.project.id);
+  targetNamed(t.h, "iOS app").querySelector(".axiosozo-pp-target-main").click();
+  await flushMicrotasks();
+  await flushMicrotasks();
+  const before = projectPanel(t.h).querySelector(".axiosozo-pp-output");
+  Object.assign(before, { scrollTop: 40, clientHeight: 100, scrollHeight: 400 }); // scrolled up
+  Object.assign(t.services.runs.get(key), { status: "failed", exit_code: 65 });
+  t.services.emit("runs");
+  await flushMicrotasks();
+  await flushMicrotasks();
+  const after = projectPanel(t.h).querySelector(".axiosozo-pp-output");
+  assert.notEqual(after, before, "the panel was drawn again for the new state");
+  assert.equal(targetNamed(t.h, "iOS app").getAttribute("data-state"), "failed");
+  assert.equal(after.scrollTop, 40, "not thrown back to the bottom");
+  t.loop.dispose();
+});
+
+test("runtime stylesheet: Zen and Firefox tokens, one status palette, round pills, forced colours and solid focus rings", () => {
+  const css = readFileSync(new URL("../chrome/axiosozo-runtime.css", import.meta.url), "utf8");
+  for (const undefinedToken of ["--zen-tab-margin", "--arrowpanel-color"]) assert.doesNotMatch(css, new RegExp(undefinedToken, "u"), undefinedToken);
+  assert.doesNotMatch(css, /#d93025|rgb\(52 199 89\)/u, "status colours come from one set");
+  for (const [name, token] of [["green", "success"], ["amber", "warning"], ["red", "critical"]]) {
+    assert.match(css, new RegExp(`--axiosozo-run-${name}: var\\(--icon-color-${token},`, "u"));
+  }
+  // Rows sit on Zen's tab geometry.
+  assert.match(css, /\.axiosozo-projects \{[^}]*margin: 2px var\(--zen-toolbox-padding, 5px\)/u);
+  assert.match(css, /min-height: var\(--tab-min-height, 36px\);\s*margin: var\(--tab-margin-block, 2px\);/u);
+  assert.match(css, /\.axiosozo-project:hover > \.axiosozo-project-row,/u, "the ▶ keeps the row's wash");
+  // Pills and dots stay circles under Zen's global squircles.
+  assert.match(css, /:root :is\(#axiosozo-env-pill,[^{]*\.axiosozo-status-dot[^{]*\) \{\s*corner-shape: round;/u);
+  assert.match(css, /@media \(forced-colors: active\)/u);
+  assert.match(css, /@container urlbar-container \(width < 350px\)/u, "the pill gives way to the address in a narrow sidebar");
+  // One primary button from Zen's tokens; no forced overrides.
+  assert.match(css, /background: var\(--button-background-color-primary,/u);
+  assert.doesNotMatch(css, /zen-primary-color[^;]*!important|filter: brightness/u);
+  // Focusable sidebar and panel controls are never dimmed with opacity
+  // (their focus ring would be dimmed too); only their colour is toned down.
+  for (const selector of [".axiosozo-projects-title", ".axiosozo-pp-more,\n.axiosozo-pp-icon-button", ".axiosozo-pp-text-button", ".axiosozo-pp-add",
+    ".axiosozo-projects-overflow"]) {
+    const block = css.slice(css.indexOf(`${selector} {`)).split("}")[0];
+    assert.doesNotMatch(block, /opacity: 0\.\d/u, selector);
+  }
+  assert.match(css, /:where\(\.axiosozo-projects, \.axiosozo-project-panel\) :is\(button, pre\):focus-visible \{\s*outline: var\(--focus-outline, [^)]*\);\s*outline-offset: var\(--focus-outline-inset, -2px\);/u);
+});
+
+test("compactPath keeps the project's own folders and a recognisable start", async () => {
+  const { compactPath } = await import("../chrome/DevLoop.sys.mjs");
+  assert.equal(compactPath("~/code/atlas"), "~/code/atlas");
+  assert.equal(compactPath("/Volumes/T9/axiosozo/products/remotedraw"), "/Volumes/…/products/remotedraw");
+  assert.equal(compactPath("~/Developer/clients/acme/website-2026"), "~/…/acme/website-2026");
+  assert.equal(compactPath("/Volumes/AxioSozoBuild/ux-overnight/shots/repos/a-very-long-project-folder-name"), "…/a-very-long-project-folder-name");
 });

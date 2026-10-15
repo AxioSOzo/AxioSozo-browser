@@ -155,7 +155,7 @@ const statusChecks = (page, id = "p_harbor1") => page.calls.filter(([name, param
 test("list: projects grouped under their Zen space; named cards link straight to their home", async () => {
   const page = await loadPage();
   const group = page.document.querySelector(".space-group");
-  assert.equal(group.querySelector(".group-name").textContent, "Workthis window");
+  assert.equal(group.querySelector(".group-name").textContent, "WorkCurrent");
   assert.equal(group.querySelector(".group-meta").textContent, "2 projects in this space's sidebar");
   assert.equal(group.querySelector("ul.project-list").getAttribute("aria-labelledby"), group.querySelector("h3").id);
   const card = page.$("project-p_harbor1");

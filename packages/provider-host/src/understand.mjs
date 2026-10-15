@@ -63,15 +63,15 @@ function schemaFor(kind) {
 }
 
 // ---------------------------------------------------------------------------------------
-// Cheapest suitable model per provider, used for the `setup` kind only (brief and
-// explain_errors keep the CLI's own default model). Model ids were taken from the installed
-// CLIs' own model lists (no provider call): Codex 0.160.0 ships gpt-6-luna; Claude Code ships
-// claude-sonnet-5-5; agy ships gemini-3.8-flash-low/medium/high.
+// Model choice for the `setup` kind only (brief and explain_errors keep the CLI's own default
+// model). No dated model ids: they break when a client updates its catalogue. Claude Code
+// takes its documented `sonnet` alias (the client resolves it to its current Sonnet model);
+// Codex keeps its own default model at low reasoning effort. `model` is the display name.
 export const SETUP_MODELS = Object.freeze({
-  codex: Object.freeze({ model: 'gpt-6-luna', args: Object.freeze(['-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"']) }),
-  'claude-code': Object.freeze({ model: 'claude-sonnet-5-5', args: Object.freeze(['--model', 'claude-sonnet-5-5']) }),
+  codex: Object.freeze({ model: 'default', args: Object.freeze(['-c', 'model_reasoning_effort="low"']) }),
+  'claude-code': Object.freeze({ model: 'sonnet', args: Object.freeze(['--model', 'sonnet']) }),
   // Planned, not runnable: Antigravity (agy) has no Understand route in this build.
-  antigravity: Object.freeze({ model: 'gemini-3.8-flash-low', args: null }),
+  antigravity: Object.freeze({ model: 'default', args: null }),
 });
 /** Automatic provider selection for setup: the first of codex, claude-code among the given CLI names (Codex preferred), else null. */
 export const SETUP_CLI_PREFERENCE = Object.freeze(['codex', 'claude-code']);
@@ -118,7 +118,7 @@ export function claudeUnderstandArgs(kind) {
 //   Codex chat route already passes (live.mjs codexArguments, Codex 0.157.1).
 // Codex has no documented per-path read deny rule, so `.env*` is excluded by the prompt only;
 // the read-only sandbox prevents writes and network access.
-// For `setup` only, `-m <model>` and `-c model_reasoning_effort="low"` follow `exec` (SETUP_MODELS).
+// For `setup` only, `-c model_reasoning_effort="low"` follows `exec` (SETUP_MODELS; no model id).
 export function codexUnderstandArgs(kind = 'brief') {
   schemaFor(kind);
   return ['exec', ...modelArgs('codex', kind), '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',

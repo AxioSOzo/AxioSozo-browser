@@ -2,6 +2,15 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { clientStatus, getDecisionKeyStatus, keychainErrorText, removeDecisionKeyAndReport,
   storeDecisionKeyAndReport } from "./ProviderStatus.sys.mjs";
+// Closed vocabularies of the provider host's capability check (packages/provider-host/src/checks.mjs).
+export const CHECK_STATUSES = Object.freeze(["compatible", "incompatible", "not-installed", "unavailable", "error"]);
+export const CHECK_REASONS = Object.freeze(["OPTION_REJECTED", "TOOLS_NOT_DISABLED", "INSTRUCTIONS_NOT_ISOLATED",
+  "ANSWER_FORMAT_CHANGED", "CHECK_FAILED", "TOOLS_NOT_CONFINABLE", "UNSUPPORTED_PLATFORM", "BROKER_UNAVAILABLE",
+  "UNSUPPORTED_INSTALL", "MANAGED_POLICY"]);
+export const CHECK_SIGN_IN = Object.freeze(["signed-in", "needs-sign-in", "unsupported-account", "unknown", "not-applicable"]);
+const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/u;
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
+const OPTION_NAME = /^[a-z0-9_.]{1,80}$/u;
 import { DECISION_KEY_PROVIDERS, validateDecisionKey } from "./ProviderKeys.sys.mjs";
 const SETTINGS_URI = "chrome://browser/content/axiosozo/providers-settings.xhtml";
 const PREF = "axiosozo.providers.instances.v1";
@@ -45,6 +54,34 @@ export function validateDiscovery(value) {
       client_version: item.client_version, version_source: item.version_source, protocol: item.route.protocol,
       fixture_version: item.route.pinned_version, version_status: item.version_status, protocol_status: "UNTESTED",
       status: item.status, auth_status: "unknown", live_verified: false, automatic_browser_control: false });
+  });
+  return Object.freeze(DRIVERS.map(driver => providers.find(item => item.driver === driver)));
+}
+
+/**
+ * The provider host's capability-check report (`cli.mjs clients`) is untrusted data too:
+ * closed vocabularies, bounded text, and a status that agrees with `installed`. It can
+ * describe a client; it never grants a live capability by itself (each Send re-checks).
+ */
+export function validateClientChecks(value) {
+  requireValue(value?.version === 1 && Array.isArray(value.providers) && value.providers.length === 3, "INVALID_CLIENT_CHECKS");
+  const seen = new Set();
+  const providers = value.providers.map(item => {
+    requireValue(item && DRIVERS.includes(item.driver) && !seen.has(item.driver), "INVALID_CLIENT_CHECKS");
+    seen.add(item.driver);
+    requireValue(typeof item.installed === "boolean" && CHECK_STATUSES.includes(item.status)
+      && (item.status === "not-installed") === !item.installed
+      && (item.executable === null || text(item.executable))
+      && (item.version === null || (typeof item.version === "string" && item.version.length <= 64 && VERSION.test(item.version)))
+      && (item.reason_code === null || CHECK_REASONS.includes(item.reason_code))
+      && (item.reason_detail === null || text(item.reason_detail, 400))
+      && Array.isArray(item.dropped_options) && item.dropped_options.length <= 40 && item.dropped_options.every(name => OPTION_NAME.test(name))
+      && CHECK_SIGN_IN.includes(item.sign_in) && (item.sign_in !== "signed-in" || item.status === "compatible")
+      && (item.checked_at === null || (typeof item.checked_at === "string" && ISO_TIME.test(item.checked_at)))
+      && typeof item.cached === "boolean" && (item.summary === undefined || text(item.summary, 800)), "INVALID_CLIENT_CHECKS");
+    return Object.freeze({ driver: item.driver, installed: item.installed, executable: item.executable, version: item.version,
+      status: item.status, reason_code: item.reason_code, reason_detail: item.reason_detail,
+      dropped_options: Object.freeze([...item.dropped_options]), sign_in: item.sign_in, checked_at: item.checked_at, cached: item.cached });
   });
   return Object.freeze(DRIVERS.map(driver => providers.find(item => item.driver === driver)));
 }
@@ -144,17 +181,19 @@ function nativeRuntime() {
   return { spawn: options => Subprocess.call(options), timers, env: name => Services.env.get(name) };
 }
 
-// Metadata only: no stdin input, and only a zero exit is accepted. Key operations
-// run through ProviderKeys, never here.
-async function runOwned(runtime, command, args, { signal } = {}) {
+// No stdin input, and only a zero exit is accepted. Key operations run through
+// ProviderKeys, never here. Discovery gets PATH and LANG only; the capability check also
+// gets the external build root (its sandbox broker and cache) and HOME (a location: the
+// clients' own sign-in lives there; the host never reads credentials).
+async function runOwned(runtime, command, args, { signal, environment = null, timeoutMs = 5000 } = {}) {
   requireValue(text(command) && command.startsWith("/"), "INVALID_HELPER_PATH");
   if (signal?.aborted) throw new Error("SETTINGS_CLOSED");
   const child = await runtime.spawn({ command, arguments: args, environmentAppend: false,
-    environment: { PATH: runtime.env("AXIOSOZO_DISCOVERY_PATH") || "/usr/bin:/bin", LANG: "C" }, stderr: "pipe" });
+    environment: environment ?? { PATH: runtime.env("AXIOSOZO_DISCOVERY_PATH") || "/usr/bin:/bin", LANG: "C" }, stderr: "pipe" });
   let timeout = false; let cancelled = false;
   const stop = () => { child.kill(250).catch(() => {}); };
   const onAbort = () => { cancelled = true; stop(); };
-  const timer = runtime.timers.setTimeout(() => { timeout = true; stop(); }, 5000);
+  const timer = runtime.timers.setTimeout(() => { timeout = true; stop(); }, timeoutMs);
   signal?.addEventListener("abort", onAbort, { once: true });
   async function collect(pipe, keep) {
     let output = ""; let size = 0;
@@ -184,6 +223,25 @@ export async function discoverForSettings(runtime = nativeRuntime(), signal) {
   const node = runtime.env("AXIOSOZO_PROVIDER_NODE"); const host = runtime.env("AXIOSOZO_PROVIDER_HOST");
   requireValue(text(host) && host.startsWith("/") && host.endsWith("/packages/provider-host/cli.mjs"), "PROVIDER_HOST_UNAVAILABLE");
   return validateDiscovery(JSON.parse(await runOwned(runtime, node, [host, "discover"], { signal })));
+}
+
+/** Upper bound for one capability-check run (two clients checked offline, ~1-3 s normally). */
+export const CLIENT_CHECK_TIMEOUT_MS = 60000;
+/**
+ * The provider host's capability check of the installed clients (`cli.mjs clients`): each
+ * client runs offline in the browser sandbox against a loopback stand-in, so nothing is sent
+ * to a provider and no sign-in page opens. Results are cached per executable by the host;
+ * `refresh` checks again.
+ */
+export async function checkClientsForSettings(runtime = nativeRuntime(), signal, { refresh = false } = {}) {
+  const node = runtime.env("AXIOSOZO_PROVIDER_NODE"); const host = runtime.env("AXIOSOZO_PROVIDER_HOST");
+  requireValue(text(host) && host.startsWith("/") && host.endsWith("/packages/provider-host/cli.mjs"), "PROVIDER_HOST_UNAVAILABLE");
+  const environment = { PATH: runtime.env("AXIOSOZO_DISCOVERY_PATH") || "/usr/bin:/bin", LANG: "C" };
+  const root = runtime.env("AXIOSOZO_BUILD_ROOT"); const home = runtime.env("AXIOSOZO_PROVIDER_HOME");
+  if (text(root) && root.startsWith("/")) environment.AXIOSOZO_BUILD_ROOT = root;
+  if (text(home) && home.startsWith("/")) environment.HOME = home;
+  const args = [host, "clients", ...(refresh === true ? ["--refresh"] : [])];
+  return validateClientChecks(JSON.parse(await runOwned(runtime, node, args, { signal, environment, timeoutMs: CLIENT_CHECK_TIMEOUT_MS })));
 }
 
 function addText(document, parent, tag, value, className) {
@@ -237,14 +295,9 @@ export function initializeProviderSettings(win) {
       addText(document, summary, "span", LABELS[instance.driver], "instance-driver");
       addText(document, summary, "code", instance.instance_id, "instance-id");
       if (instance.driver === "codex") {
-        const root = runtime.env("AXIOSOZO_BUILD_ROOT");
-        if (text(root) && root.startsWith("/Volumes/")) {
-          const profile = `${root}/providers/runtime/codex/${instance.instance_id}/codex-home`;
-          // Display only a quoted, locally-derived command; never execute login from settings.
-          const quoted = "'" + profile.replaceAll("'", "'\"'\"'") + "'";
-          addText(document, summary, "span", "After the first Send prepares this separate browser profile, sign in once with the official Codex client:", "section-note");
-          addText(document, summary, "code", `CODEX_HOME=${quoted} codex login`, "path");
-        }
+        // Display only; settings never run login. Ask AI uses the user's own Codex sign-in.
+        addText(document, summary, "span", "Uses your own Codex sign-in. If Codex is not signed in, run this in Terminal:", "section-note");
+        addText(document, summary, "code", "codex login", "path");
       }
       const controls = addText(document, row, "div", "", "instance-controls");
       const enabledLabel = addText(document, controls, "label", "", "instance-toggle");
@@ -283,18 +336,26 @@ export function initializeProviderSettings(win) {
       ? `Default: ${policy.instances.find(item => item.instance_id === policy.defaultId)?.label}. Automatic fallback is off. Select a provider in Ask AI to start a conversation.`
       : "Select a provider in Ask AI. No default configuration is needed.";
   }
-  async function refresh() {
-    if (busy) return; busy = true; byId("refresh").disabled = true; status("Reading installation metadata…");
+  async function refresh(again = false) {
+    if (busy) return; busy = true; byId("refresh").disabled = true; status("Checking the installed AI clients offline…");
     byId("providers").setAttribute("aria-busy", "true");
     try {
-      const providers = await discoverForSettings(runtime, controller.signal);
+      // The host checks each client offline (no model call, nothing sent, no sign-in page).
+      // Without a check, installation metadata alone is shown.
+      let providers; let checked = true;
+      try { providers = await checkClientsForSettings(runtime, controller.signal, { refresh: again === true }); }
+      catch (error) {
+        if (controller.signal.aborted) return;
+        checked = false; providers = await discoverForSettings(runtime, controller.signal);
+      }
       if (controller.signal.aborted) return;
       const list = byId("providers"); list.replaceChildren();
       for (const provider of providers) {
+        const version = provider.version ?? provider.client_version ?? null;
         const row = addText(document, list, "section", "", provider.installed ? "provider" : "provider missing");
         const head = addText(document, row, "div", "", "provider-head");
         addText(document, head, "h3", LABELS[provider.driver]);
-        if (provider.installed) addText(document, head, "span", provider.client_version ?? "version unknown", provider.client_version ? "version" : "version unknown");
+        if (provider.installed) addText(document, head, "span", version ?? "version unknown", version ? "version" : "version unknown");
         addText(document, head, "span", provider.installed ? "Installed" : "Client not found", "install-state");
         if (provider.executable) addText(document, row, "code", provider.executable, "path");
         // Same status model as about:axiosozo (ProviderStatus.sys.mjs).
@@ -302,24 +363,16 @@ export function initializeProviderSettings(win) {
         const facts = addText(document, row, "dl", "", "facts");
         const fact = (term, build) => { addText(document, facts, "dt", term); build(addText(document, facts, "dd", "")); };
         fact("Status", dd => {
-          addText(document, dd, "span", model.state_label, `badge ${model.state === "unavailable" || model.state === "unknown" ? "warning" : "neutral"}`);
+          addText(document, dd, "span", model.state_label, `badge ${["unavailable", "unknown", "incompatible", "needs-sign-in"].includes(model.state) ? "warning" : "neutral"}`);
           addText(document, dd, "span", ` ${model.detail}`);
         });
-        fact("Connection", dd => addText(document, dd, "span", provider.driver === "antigravity"
-          ? "Unavailable in this build — Antigravity startup and tool isolation have not been verified. Select Codex or Claude Code."
-          : provider.installed ? "Connection is attempted when you Send. Client compatibility, authentication and the security boundary are checked then."
-            : "Install the official client before sending a question."));
-        fact("Authentication", dd => addText(document, dd, "span", "Not checked by installation discovery."));
+        fact("Connection", dd => addText(document, dd, "span", !provider.installed ? "Install the official client before sending a question."
+          : "Each Send checks this exact client again (in the browser sandbox) before anything leaves the browser."));
+        fact("Authentication", dd => addText(document, dd, "span", provider.driver === "antigravity" ? "Not used."
+          : "Your own sign-in in the official client. AxioSozo never opens a sign-in page or reads credentials."));
         fact("Browser actions", dd => addText(document, dd, "span", "Unavailable. AI receives only your question and any page reference you explicitly share."));
-        const fixture = addText(document, row, "details", "", "fixture-details");
-        addText(document, fixture, "summary", "Older offline fixture metadata");
-        addText(document, fixture, "p", "This comparison describes the offline test fixture, not live client compatibility. Live connection results appear in Ask AI after you Send.", "section-note");
-        const metadata = addText(document, fixture, "p", "", "section-note");
-        addBadge(document, metadata, provider.version_status);
-        addText(document, metadata, "span", ` fixture version ${provider.fixture_version ?? "not pinned"}; live protocol not checked during discovery.`);
-        addText(document, fixture, "code", provider.protocol, "path");
       }
-      status("Metadata refreshed. No provider client was started.");
+      status(checked ? "Checked offline. Nothing was sent to a provider." : "Installation metadata only: the offline check did not run.");
     } catch (error) {
       if (!controller.signal.aborted) {
         const code = /^[A-Z][A-Z0-9_]{2,80}$/u.test(error?.message ?? "") ? error.message : "DISCOVERY_FAILED";
@@ -338,7 +391,7 @@ export function initializeProviderSettings(win) {
   byId("browser-addons").addEventListener("click", () => {
     win.opener.openTrustedLinkIn("about:addons", "tab"); win.close();
   });
-  byId("refresh").addEventListener("click", refresh);
+  byId("refresh").addEventListener("click", () => refresh(true));
   byId("instance-form").addEventListener("submit", event => {
     event.preventDefault();
     try { store.add(byId("driver").value, byId("instance-name").value); byId("instance-name").value = ""; renderInstances(); status("Local configuration saved. Authentication remains unknown."); }

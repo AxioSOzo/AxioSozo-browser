@@ -331,9 +331,10 @@ test("projects are grouped by space (any type) and the page says where a new pro
   assert.deepEqual(M.TYPE_LABELS, { personal: "Personal", organization: "Organization", project: "Project" });
 });
 
-test("deep links: three views, old hashes redirect, item links validated", () => {
-  assert.deepEqual(M.VIEWS, ["projects", "rules", "ai"]);
+test("deep links: four views, old hashes redirect, item links validated", () => {
+  assert.deepEqual(M.VIEWS, ["projects", "rules", "ai", "lab"]);
   assert.deepEqual(M.routeFromHash("#ai"), { view: "ai" });
+  assert.deepEqual(M.routeFromHash("#lab"), { view: "lab" });
   assert.deepEqual(M.routeFromHash("#home"), { view: "projects", legacy: true });
   assert.deepEqual(M.routeFromHash("#time"), { view: "rules", legacy: true });
   assert.deepEqual(M.routeFromHash("#settings"), { view: "ai", legacy: true });
@@ -355,7 +356,7 @@ test("AI & keys: provider cards keep the honest labels; Jev key form rules; Keyc
     jev: { keyEntryEnabled: true, key: "missing" } });
   const cards = M.providerCards(status);
   assert.deepEqual(cards.map(card => [card.id, card.stateLabel, card.tone]), [
-    ["codex", "Installed · not yet verified", "info"], ["claude-code", "Not installed", "off"],
+    ["codex", "Installed · not checked yet", "info"], ["claude-code", "Not installed", "off"],
     ["antigravity", "Status unknown", "unknown"], ["jev", "No key stored", "off"]]);
   assert.ok(cards.every(card => card.detail.length > 0));
   assert.ok(!cards.some(card => card.state === "ready"), "nothing is claimed ready");

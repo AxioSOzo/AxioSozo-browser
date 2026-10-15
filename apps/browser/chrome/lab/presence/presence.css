@@ -1,0 +1,67 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Agent presence (lab/presence/): the inside of the result card, on top of
+ * the Lab kit's card (lab.css). Colour only where it means something: amber
+ * when an agent needs you, red when it failed; everything else is the card's
+ * own text in Zen's tones. Held by the presence experiments while they are
+ * on (kit useStylesheet), so nothing of it stays when they go off. */
+
+.axiosozo-presence-card {
+  /* Text in the warning and critical colours: deeper than Firefox's icon amber, so small text stays readable. */
+  --axiosozo-presence-amber: light-dark(rgb(150 95 0), rgb(255 190 70));
+  --axiosozo-presence-red: light-dark(rgb(200 0 30), rgb(255 132 128));
+  gap: 6px;
+}
+
+.axiosozo-presence-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--axiosozo-lab-soft, color-mix(in srgb, currentColor 62%, transparent));
+}
+.axiosozo-presence-status[data-state="needs_you"] {
+  color: var(--axiosozo-presence-amber);
+}
+.axiosozo-presence-status[data-state="failed"] {
+  color: var(--axiosozo-presence-red);
+}
+.axiosozo-presence-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+/* The agent's own sentence (or the honest reason): the one line to read. */
+.axiosozo-presence-lead {
+  font-size: 13px;
+}
+
+.axiosozo-presence-files,
+.axiosozo-presence-note,
+.axiosozo-presence-meta,
+.axiosozo-presence-error {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.axiosozo-presence-muted,
+.axiosozo-presence-note,
+.axiosozo-presence-meta {
+  color: var(--axiosozo-lab-soft, color-mix(in srgb, currentColor 62%, transparent));
+}
+.axiosozo-presence-meta {
+  font-variant-numeric: tabular-nums;
+}
+.axiosozo-presence-error {
+  color: var(--axiosozo-presence-red, var(--text-color-error, CanvasText));
+}
+
+@media (forced-colors: active) {
+  .axiosozo-presence-status[data-state] {
+    color: CanvasText;
+  }
+}

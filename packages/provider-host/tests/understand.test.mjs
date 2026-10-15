@@ -233,11 +233,11 @@ const CLAUDE_TAIL = ['--permission-mode', 'plan', '--permission-prompts', 'none'
 const CODEX_TAIL = ['--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
   '-c', 'approval_policy="never"', '-c', 'web_search="disabled"', '-'];
 
-test('setup: kinds, exact argv with the cheapest model per CLI; brief and explain_errors argv unchanged', () => {
+test('setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged', () => {
   assert.deepEqual(UNDERSTAND_KINDS, ['brief', 'explain_errors', 'setup']);
-  assert.deepEqual(claudeUnderstandArgs('setup'), ['--print', '--model', 'claude-sonnet-5-5', '--output-format', 'json',
+  assert.deepEqual(claudeUnderstandArgs('setup'), ['--print', '--model', 'sonnet', '--output-format', 'json',
     '--json-schema', JSON.stringify(SETUP_SCHEMA), ...CLAUDE_TAIL]);
-  assert.deepEqual(codexUnderstandArgs('setup'), ['exec', '-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"', ...CODEX_TAIL]);
+  assert.deepEqual(codexUnderstandArgs('setup'), ['exec', '-c', 'model_reasoning_effort="low"', ...CODEX_TAIL]);
   assert.deepEqual(understandArgs('codex', 'setup'), codexUnderstandArgs('setup'));
   assert.deepEqual(understandArgs('claude-code', 'setup'), claudeUnderstandArgs('setup'));
   // Byte-identical to the pre-setup argv: no model flags for brief and explain_errors.
@@ -249,8 +249,10 @@ test('setup: kinds, exact argv with the cheapest model per CLI; brief and explai
   }
   assert.throws(() => codexUnderstandArgs('chat'), { code: 'INVALID_INPUT' });
   assert.throws(() => claudeUnderstandArgs('chat'), { code: 'INVALID_INPUT' });
-  assert.deepEqual(SETUP_MODELS, { codex: { model: 'gpt-6-luna', args: ['-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"'] },
-    'claude-code': { model: 'claude-sonnet-5-5', args: ['--model', 'claude-sonnet-5-5'] }, antigravity: { model: 'gemini-3.8-flash-low', args: null } });
+  assert.deepEqual(SETUP_MODELS, { codex: { model: 'default', args: ['-c', 'model_reasoning_effort="low"'] },
+    'claude-code': { model: 'sonnet', args: ['--model', 'sonnet'] }, antigravity: { model: 'default', args: null } });
+  // Dated model ids break when a client updates its catalogue: only aliases or the default.
+  assert(!JSON.stringify(Object.values(SETUP_MODELS)).match(/\d{1,2}-\d|gpt-|claude-|gemini-/u));
   assert(Object.isFrozen(SETUP_MODELS) && Object.isFrozen(SETUP_MODELS.codex) && Object.isFrozen(SETUP_MODELS.codex.args));
   assert(Object.isFrozen(SETUP_SCHEMA)); assert.equal(SETUP_SCHEMA.additionalProperties, false);
   assert.deepEqual(SETUP_SCHEMA.required, ['version', 'name', 'kind', 'kind_reason', 'icon', 'services']);

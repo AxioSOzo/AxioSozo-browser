@@ -1,0 +1,56 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Lab "proof-tab": the "To verify" strip over a project's page (a Lab kit
+ * card at the top of the page) and its one-line note. The tab's own mark is
+ * Zen's sublabel; it only reads a little stronger here. Held only while the
+ * experiment is on. */
+
+.tabbrowser-tab[axiosozo-proof][zen-show-sublabel] .tab-label-container .zen-tab-sublabel {
+  opacity: 0.72;
+}
+
+/* The newest console errors: quoted from the page, in the code face, one line each. */
+.axiosozo-proof-console {
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: calc(5px * var(--zen-squircle-value, 1));
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.axiosozo-proof-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+.axiosozo-proof-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  margin: 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: calc(7px * var(--zen-squircle-value, 1));
+  background: var(--zen-colors-input-bg, light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.08)));
+  outline: 0.5px solid light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.14));
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+.axiosozo-proof-input:focus-visible {
+  outline: var(--focus-outline, 2px solid var(--zen-primary-color, AccentColor));
+  outline-offset: 0;
+}
+
+@media (forced-colors: active) {
+  .axiosozo-proof-input {
+    outline: 1px solid CanvasText;
+  }
+  .axiosozo-proof-console {
+    border: 1px solid CanvasText;
+  }
+}

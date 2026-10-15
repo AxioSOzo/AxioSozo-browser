@@ -66,6 +66,15 @@ const state = {
   start: { homes: new Map(), loading: false },
   // Project icons (workstation-v1 §1.5): id → data: URL, or null when it has none the browser could read.
   icons: new Map(),
+  // Lab: the actor's listLab answer (or the code it refused with), the
+  // experiments whose switch is on its way, and the assistants as the Lab's
+  // own check sees them (getLabClients; `checking` while a check runs).
+  lab: { list: null, error: null, busy: new Set(), clients: null, checking: false },
+  // The Lab's today sheet (#today): this visit's getToday answer (or the code it
+  // refused with), the start of "since you last looked" it read first, the
+  // errands with a change on its way, the last errand change (for Undo) and
+  // the one optional suggestion.
+  today: freshToday(),
 };
 
 // ---------------------------------------------------------------- request lifetimes
@@ -75,7 +84,7 @@ const state = {
 // counter for all), so clearing them cannot let an old answer match a new one.
 let ticketSerial = 0;
 const nextTicket = () => ++ticketSerial;
-const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0, watches: 0, safety: 0, start: 0 };
+const latest = { home: 0, projects: 0, contexts: 0, agents: 0, admission: 0, watches: 0, safety: 0, start: 0, today: 0 };
 const statusTickets = new Map(); // project id → its latest local-server check
 /** Voids any home answer still on its way (and a retry it would schedule). */
 const invalidateHome = () => { latest.home = nextTicket(); };
@@ -205,13 +214,24 @@ document.addEventListener("click", event => {
 });
 
 let toastTimer = null;
+const TOAST_MS = { info: 3200, error: 9000 };
+function hideStatusLater(node, ms) {
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.removeAttribute("data-visible"), ms);
+}
 function setStatus(message, kind = "info") {
   const node = $("status");
   node.dataset.kind = kind;
   node.textContent = message;
   node.toggleAttribute("data-visible", !!message);
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.removeAttribute("data-visible"), kind === "error" ? 6000 : 3200);
+  hideStatusLater(node, TOAST_MS[kind] ?? TOAST_MS.info);
+}
+/** A pointer over the toast keeps it; a click puts it away. */
+function setupStatus() {
+  const node = $("status");
+  node?.addEventListener("mouseenter", () => clearTimeout(toastTimer));
+  node?.addEventListener("mouseleave", () => { if (node.hasAttribute("data-visible")) hideStatusLater(node, 2000); });
+  node?.addEventListener("click", () => { clearTimeout(toastTimer); node.removeAttribute("data-visible"); });
 }
 
 function errorText(error) {
@@ -312,7 +332,9 @@ function setupSheet() {
 const contextName = uuid => state.contexts.find(context => context.uuid === uuid)?.name ?? null;
 const projectName = M.projectName;
 const hostOf = url => { try { return new URL(url).host; } catch { return url; } };
-const DOT_STATUS = { up: "up", down: "down", warn: "warn" };
+// A local server that is not running is a project's normal state: a neutral
+// ring, never the red of a failure. Some of several running reads as running.
+const DOT_STATUS = { up: "up", down: "off", warn: "up" };
 const dotStatus = tone => DOT_STATUS[tone] ?? "unknown";
 const dateText = ms => (Number.isSafeInteger(ms) && ms > 0
   ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null);
@@ -341,12 +363,24 @@ function showView(view) {
   if ((view === "ai" || (view === "projects" && !state.homeId)) && !state.safety.requested && state.connected && state.loaded) loadSafety();
   // The experimental start page reads its projects' activity when it shows.
   if (view === "home" && previous !== "home" && state.connected && state.loaded) { renderStartPage(); loadStartPage(); }
+  // The Lab reads its experiments and their switches whenever it is opened.
+  if (view === "lab" && previous !== "lab" && state.connected && state.loaded) loadLab();
+  // The today sheet: a new visit is a new look.
+  if (view === "today" && previous !== "today" && state.connected && state.loaded) { state.today = freshToday(); renderToday(); loadToday({ look: true }); }
 }
+
+/** A server that crashed is the only attention item that is a failure. */
+const attentionFailed = item => item?.kind === "run_failed";
 
 function renderViewCounts() {
   const link = document.querySelector('.views a[data-view="projects"]');
   link.querySelector(".count")?.remove();
-  if (state.attention.length) link.append(h("span", { class: "count", "aria-label": `${state.attention.length} need attention` }, String(state.attention.length)));
+  const count = state.attention.length;
+  if (!count) return;
+  // The link's name is "Projects, N need attention": the number is shown, the words are read.
+  link.append(h("span", { class: "count", "data-tone": state.attention.some(attentionFailed) ? "bad" : null },
+    h("span", { "aria-hidden": "true" }, String(count)),
+    h("span", { class: "visually-hidden" }, `, ${count} need${count === 1 ? "s" : ""} attention`)));
 }
 
 // ---------------------------------------------------------------- attention
@@ -375,7 +409,7 @@ function renderAttention() {
     if (action?.kind === "rule") button = h("button", { type: "button", onclick: () => { location.hash = `rule=${action.id}`; } }, "Edit rule");
     else if (action?.kind === "project") button = h("button", { type: "button", onclick: () => { location.hash = M.homeHash(action.id); } }, "Show project");
     else if (action?.kind === "url") button = h("button", { type: "button", onclick: () => act("openUrl", { url: action.url }) }, "Open");
-    const status = item.kind === "service_down" ? "down" : "warn";
+    const status = attentionFailed(item) ? "down" : "warn";
     items.push(h("li", { class: "row" },
       h("span", { class: "dot", "data-status": status, "aria-hidden": "true" }),
       h("div", { class: "row-main" },
@@ -416,8 +450,11 @@ function spaceIcon(space) {
   return box;
 }
 
-const spaceLabel = context => `${context.name} (${TYPE_LABELS[context.type]?.toLowerCase() ?? context.type})`;
-const thisWindowTag = context => (context.uuid === state.activeSpace ? h("span", { class: "tag" }, "this window") : null);
+// A space is named by its own name. Its type in brackets ("Work (personal)")
+// read like a second name, so the type is said only where it is the subject.
+const spaceLabel = context => context.name;
+const thisWindowTag = context => (context.uuid === state.activeSpace
+  ? h("span", { class: "tag", title: "The space this window shows" }, "Current") : null);
 
 /** A space's actions behind "…": add a project straight into it, switch to
  * it, its type. The page has one "Add project" button, in its header. */
@@ -1043,6 +1080,14 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
 
   // ---- more options: addresses, production URL, links, findings, files
   const environmentsBox = h("div", { class: "form-rows" });
+  // The Production URL field shows only while no ticked address is named
+  // production (or while it holds a value of its own), so the two never disagree.
+  let productionField = null;
+  const syncProductionField = () => {
+    if (!productionField || !review) return;
+    const listed = review.environments.some(env => env.enabled !== false && String(env.name ?? "").trim() === "production");
+    productionField.hidden = listed && !String(review.productionUrl ?? "").trim();
+  };
   const addEnvironmentButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     const apps = M.reviewApps(review).filter(Boolean);
     review.environments.push({ app: apps.find(app => app !== "desktop") ?? apps[0] ?? null, name: "", base_url: "",
@@ -1060,7 +1105,7 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
         const use = h("input", { type: "checkbox", checked: row.enabled !== false, id: newId("env"), "aria-label": `Use ${label}`,
           onchange: event => { row.enabled = event.target.checked; renderEnvironments(); } });
         const nameField = h("input", { type: "text", value: row.name, placeholder: "local", "aria-label": `Name of ${label}`,
-          class: "env-name", disabled: row.enabled === false, oninput: event => { row.name = event.target.value; } });
+          class: "env-name", disabled: row.enabled === false, oninput: event => { row.name = event.target.value; syncProductionField(); } });
         const urlField = h("input", { type: "url", value: row.base_url, placeholder: "http://localhost:5173", "aria-label": `Address of ${label}`,
           class: "env-url", disabled: row.enabled === false, oninput: event => { row.base_url = event.target.value; } });
         const appSelect = row.added && apps.length > 1 ? h("select", { class: "compact", "aria-label": `App of ${label}`,
@@ -1071,21 +1116,23 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
           use, appSelect, nameField, urlField, remove, row.guess ? h("span", { class: "tag guess", title: row.source || null }, "guess") : null);
       }))));
     if (!review.environments.length) environmentsBox.append(h("p", { class: "help" }, "None yet."));
+    syncProductionField();
     if (focusIndex !== undefined && focusIndex >= 0) environmentsBox.querySelector(`[data-index="${focusIndex}"] input:not([type="checkbox"])`)?.focus();
     else if (focusIndex !== undefined) addEnvironmentButton.focus();
   };
 
   const surfacesShown = h("div", { class: "form-rows" });
   const surfacesMore = h("div", { class: "form-rows" });
-  const moreLinks = h("details", {}, h("summary", {}, "Behind … in the sidebar"), surfacesMore);
+  const moreLinks = h("details", {}, h("summary", {}, "Other links"), surfacesMore);
   const renderSurfaces = () => {
     const rowFor = (row, index) => {
       const label = row.name || `link ${index + 1}`;
       const keep = h("input", { type: "checkbox", checked: row.enabled !== false, "aria-label": `Keep ${label}`,
         onchange: event => { row.enabled = event.target.checked; renderSurfaces(); } });
       const move = h("button", { type: "button", class: "ghost small", disabled: row.enabled === false,
+        "aria-label": row.prominence === "primary" ? `Show ${label} later` : `Show ${label} first`,
         onclick: () => { row.prominence = row.prominence === "primary" ? "secondary" : "primary"; renderSurfaces(); } },
-      row.prominence === "primary" ? "Move behind …" : "Show in sidebar");
+      row.prominence === "primary" ? "Show later" : "Show first");
       const controls = row.added
         ? [h("input", { type: "text", value: row.name, placeholder: "Name", "aria-label": `Name of ${label}`, oninput: event => { row.name = event.target.value; } }),
           h("input", { type: "url", value: row.url, placeholder: "https://", "aria-label": `Address of ${label}`, class: "env-url", oninput: event => { row.url = event.target.value; } }),
@@ -1097,10 +1144,10 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
     const shown = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence === "primary");
     const more = review.surfaces.map((row, index) => [row, index]).filter(([row]) => row.prominence !== "primary");
     surfacesShown.replaceChildren(...shown.map(([row, index]) => rowFor(row, index)));
-    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "None in the sidebar."));
+    if (!shown.length) surfacesShown.append(h("p", { class: "help" }, "None shown first."));
     surfacesMore.replaceChildren(...more.map(([row, index]) => rowFor(row, index)));
     moreLinks.hidden = !more.length;
-    moreLinks.querySelector("summary").textContent = `Behind … in the sidebar (${more.length})`;
+    moreLinks.querySelector("summary").textContent = `Other links (${more.length})`;
   };
   const addLinkButton = h("button", { type: "button", class: "ghost small", onclick: () => {
     review.surfaces.push({ name: "", url: "", kind: "other", prominence: "primary", source: "", guess: false, enabled: true, added: true });
@@ -1116,17 +1163,21 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
     const spaceControl = h("select", { onchange: event => { review.contextUuid = event.target.value || null; } },
       option("", "No space (not in the sidebar)", review.contextUuid ?? ""),
       state.contexts.map(context => option(context.uuid,
-        `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · this window" : ""}`, review.contextUuid)));
+        `${spaceLabel(context)}${context.uuid === state.activeSpace ? " · current space" : ""}`, review.contextUuid)));
     const productionInput = h("input", { type: "url", value: review.productionUrl, placeholder: "https://example.com",
       oninput: event => { review.productionUrl = event.target.value; } });
+    productionField = field({ label: "Production URL", control: productionInput, help: "The live site, for switching between local and live." });
+    syncProductionField();
     const findingRows = isNew ? findingFacts(review.findings) : [];
     const more = h("details", { class: "setup-more" }, h("summary", {}, "More options"),
       h("div", { class: "setup-more-body" },
         h("fieldset", {}, h("legend", {}, "Addresses"),
           h("p", { class: "help" }, "A tab on one of these belongs to this project."),
           environmentsBox, h("div", {}, addEnvironmentButton)),
-        field({ label: "Production URL", control: productionInput, help: "The live site, for switching between local and live." }),
-        h("fieldset", {}, h("legend", {}, "Links in the sidebar"), surfacesShown, moreLinks, h("div", {}, addLinkButton)),
+        productionField,
+        h("fieldset", {}, h("legend", {}, "Links"),
+          h("p", { class: "help" }, "The project's panel lists these, the ones shown first at the top."),
+          surfacesShown, moreLinks, h("div", {}, addLinkButton)),
         findingRows.length ? h("fieldset", { class: "findings" }, h("legend", {}, "Also found"),
           h("p", { class: "help" }, "Kept in this browser only. Agent files and app folders are noted by name, never opened."),
           h("dl", { class: "facts" }, findingRows.map(([label, value]) => [h("dt", {}, label), h("dd", {}, value)]))) : null,
@@ -1146,7 +1197,7 @@ function openProjectReview({ mode, root = null, project = null, contextUuid = nu
       h("section", { class: "setup-section", "aria-labelledby": `${kindLabel}-services` },
         h("div", { class: "setup-section-head" },
           h("h3", { id: `${kindLabel}-services`, class: "setup-label" }, "Services"),
-          h("span", { class: "help" }, "Commands are for you to copy; AxioSozo never runs them.")),
+          h("span", { class: "help" }, "Nothing runs until you start it, and the first start shows the exact command.")),
         servicesBox, h("div", {}, addServiceButton)),
       h("div", { class: "setup-section setup-space" }, field({ label: "Space", control: spaceControl })),
       more);
@@ -2393,7 +2444,7 @@ function safetyPanel(place) {
     const box = h("input", { type: "checkbox", id: ids.checked, checked: view.checked, "aria-describedby": `safety-${place}-help`, disabled: !!pending });
     parts.push(h("div", { class: "choice safety-choice" }, box,
       h("div", {}, h("label", { for: ids.checked }, M.SAFETY_TITLE),
-        h("span", { class: "help", id: `safety-${place}-help` }, offer ? `${M.SAFETY_TEXT} ${M.SAFETY_LATER}` : M.SAFETY_TEXT))));
+        h("span", { class: "help", id: `safety-${place}-help` }, M.SAFETY_TEXT))));
     parts.push(h("p", { class: "safety-now", "data-tone": view.tone }, h("span", { class: "dot", "data-status": toneDot(view.tone), "aria-hidden": "true" }),
       h("span", {}, view.text)));
     parts.push(h("div", { class: "button-row" },
@@ -2405,6 +2456,8 @@ function safetyPanel(place) {
           beginSafetyChoice("choose");
           renderSafety();
         } }, pending?.kind === "choose" ? "Saving…" : offer ? "Save my choice" : "Save")));
+    // Where else it can be changed: a quiet line after the choice, not more text in it.
+    if (offer) parts.push(h("p", { class: "footnote safety-later" }, M.SAFETY_LATER));
   } else {
     parts.push(h("p", { class: "quiet-text", "data-tone": view.tone }, view.text));
   }
@@ -2473,7 +2526,7 @@ function renderStartPage() {
     const action = item.action;
     const link = action?.kind === "project" ? h("a", { href: M.homeHash(action.id), class: "button-link small" }, "Show project")
       : action?.kind === "rule" ? h("a", { href: `#rule=${action.id}`, class: "button-link small" }, "Edit rule") : null;
-    return h("li", { class: "row" }, h("span", { class: "dot", "data-status": item.kind === "service_down" ? "down" : "warn", "aria-hidden": "true" }),
+    return h("li", { class: "row" }, h("span", { class: "dot", "data-status": attentionFailed(item) ? "down" : "warn", "aria-hidden": "true" }),
       h("div", { class: "row-main" }, h("span", { class: "row-title" }, item.title), item.detail ? h("span", { class: "row-detail" }, item.detail) : null),
       link);
   })) : h("p", { class: "quiet-text" }, "Nothing needs you right now.");
@@ -2718,12 +2771,13 @@ function toggle(list, value, on) {
 
 // ---------------------------------------------------------------- AI & keys
 
-async function loadProviders() {
+/** The assistants as AI & keys shows them; refresh: true (Check again) runs the offline capability check again. */
+async function loadProviders({ refresh = false } = {}) {
   if (!state.admitted || !state.active) return;
   state.providersLoading = true;
   renderProviders();
   try {
-    state.providers = await call("getProviderStatus");
+    state.providers = await call("getProviderStatus", refresh ? { refresh: true } : {});
   } catch (error) {
     state.providers = { version: 1, discovery: "unavailable", providers: [] };
     setStatus("Could not check assistants. " + errorText(error), "error");
@@ -2739,7 +2793,7 @@ function providerCard(card) {
       h("div", { class: "card-titles" },
         h("h3", { class: "card-title" }, card.label,
           h("span", { class: "tag state", "data-tone": card.tone }, card.stateLabel)),
-        card.version ? h("span", { class: "card-sub" }, `Version ${card.version}${card.expectedVersion && card.expectedVersion !== card.version ? ` · this build expects ${card.expectedVersion}` : ""}`) : null)),
+        card.version ? h("span", { class: "card-sub" }, `Version ${card.version}`) : null)),
     h("p", { class: "help provider-detail" }, card.detail));
 }
 
@@ -3199,6 +3253,357 @@ async function clearLedgerFlow() {
   if (ok) await act("clearLedger", {}, "Screen time deleted.").then(loadLedger);
 }
 
+// ---------------------------------------------------------------- Lab (chrome/lab)
+
+// Experiments, each with its own switch. The list and every switch's state are
+// the actor's answer (listLab); a switch asks setLabEnabled with the
+// experiment's id and nothing else, and open windows install or remove the
+// experiment themselves. Which assistants the Lab can use is its own check
+// (getLabClients): opening the Lab only finds them; "Check again" starts each
+// one without a model call to read its version and check its options.
+
+let labTicket = 0;
+let labClientsTicket = 0;
+
+/** The experiments and their switches; only the latest answer publishes. */
+async function loadLab() {
+  if (!state.admitted || !state.active) return;
+  const ticket = labTicket = nextTicket();
+  try {
+    const list = await call("listLab");
+    if (ticket !== labTicket || !state.active) return;
+    state.lab.list = list;
+    state.lab.error = null;
+  } catch (error) {
+    if (ticket !== labTicket || !state.active) return;
+    state.lab.error = error;
+  }
+  await keepFocus(renderLab);
+  await loadLabClients({ check: false });
+}
+
+/** The assistants as the Lab sees them; check: true reads versions and checks options (no model call). */
+async function loadLabClients({ check = false } = {}) {
+  if (!state.admitted || !state.active || (check && state.lab.checking)) return;
+  const ticket = labClientsTicket = nextTicket();
+  if (check) { state.lab.checking = true; await keepFocus(renderLab); }
+  try {
+    const reply = await call("getLabClients", { check });
+    if (ticket !== labClientsTicket || !state.active) return;
+    state.lab.clients = reply;
+    if (check) setStatus("Assistants checked.");
+  } catch (error) {
+    if (ticket !== labClientsTicket || !state.active) return;
+    if (check) setStatus(error?.code === "PRIVATE_WINDOW" ? "Assistants are checked from a normal window." : labError(error), "error");
+  } finally {
+    if (ticket === labClientsTicket) state.lab.checking = false;
+  }
+  if (state.active) await keepFocus(renderLab);
+}
+
+const labError = error => M.labErrorText(error?.code) ?? errorText(error);
+
+function renderLab() {
+  const body = $("lab-body");
+  if (!body) return;
+  if (!state.connected || (state.lab.error && !state.lab.list)) {
+    body.removeAttribute("aria-busy");
+    fill(body, h("p", { class: "empty" }, state.connected ? `Could not open the Lab. ${labError(state.lab.error)}` : "This page is not connected to AxioSozo."));
+    return;
+  }
+  if (!state.lab.list) {
+    body.setAttribute("aria-busy", "true");
+    fill(body, h("p", { class: "loading" }, "Loading the Lab…"));
+    return;
+  }
+  body.removeAttribute("aria-busy");
+  fill(body,
+    labClientsBlock(),
+    M.labHasExperiments(state.lab.list) ? null : h("p", { class: "empty lab-empty" }, M.LAB_EMPTY),
+    M.labSections(state.lab.list).map(labSection));
+}
+
+/** "Your assistants": each client the Lab can run, as its own check found it, and "Check again". */
+function labClientsBlock() {
+  const headingId = newId("lab-clients");
+  const rows = M.labClientRows(state.lab.clients, { checking: state.lab.checking });
+  return h("section", { class: "block lab-group lab-clients", "aria-labelledby": headingId, "aria-busy": state.lab.checking ? "true" : null },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, M.LAB_CLIENTS_TITLE),
+      h("p", { class: "block-help" }, M.LAB_CLIENTS_HELP)),
+    h("ul", { class: "lab-client-list" }, rows.map(row => h("li", { class: "lab-client", "data-client": row.id, "data-state": row.state },
+      h("span", { class: "dot", "data-status": row.dot }),
+      h("span", { class: "lab-client-name" }, row.label),
+      h("span", { class: "lab-client-text" }, row.text),
+      row.note ? h("span", { class: "lab-client-note" }, row.note) : null))),
+    h("div", { class: "lab-client-actions" },
+      h("button", { type: "button", class: "ghost", "data-focus-key": "lab:check-clients", disabled: state.lab.checking || !state.admitted,
+        onclick: () => loadLabClients({ check: true }) }, state.lab.checking ? "Checking…" : "Check again")));
+}
+
+function labSection(section) {
+  const headingId = newId("lab-group");
+  return h("section", { class: "block lab-group", "aria-labelledby": headingId, "data-graduated": section.graduated },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, section.title),
+      section.help ? h("p", { class: "block-help" }, section.help) : null),
+    h("ul", { class: "lab-list" }, section.items.map(item => (item.kind === "family" ? labFamily(item)
+      : h("li", { class: "lab-item" }, labCard(item.experiment))))));
+}
+
+/** Variants of one idea, side by side; one of them can be on at a time. */
+function labFamily(family) {
+  const labelId = newId("lab-family");
+  return h("li", { class: "lab-family" },
+    h("div", { role: "group", "aria-labelledby": labelId },
+      h("p", { class: "lab-family-head", id: labelId }, family.label),
+      h("ul", { class: "lab-variants" }, family.members.map(member => h("li", { class: "lab-item" }, labCard(member))))));
+}
+
+/** One experiment: what it is, how to try it, what it uses, and its switch. */
+function labCard(experiment) {
+  const titleId = newId("lab-title");
+  const pitchId = newId("lab-pitch");
+  const busy = state.lab.busy.has(experiment.id);
+  const clients = M.labClientStates(experiment.needs, state.lab.clients, { checking: state.lab.checking });
+  const problem = M.labProblemText(experiment.problem);
+  const toggle = h("input", { type: "checkbox", class: "switch", role: "switch", checked: experiment.enabled,
+    disabled: busy || !state.admitted, "aria-labelledby": titleId, "aria-describedby": pitchId,
+    "data-focus-key": `lab:${experiment.id}`, title: experiment.enabled ? "On" : "Off",
+    onchange: event => setLabFlow(experiment, event.target.checked) });
+  if (busy) toggle.setAttribute("aria-busy", "true");
+  return h("article", { class: "card lab-card", "aria-labelledby": titleId, "data-experiment": experiment.id, "data-on": experiment.enabled },
+    h("div", { class: "card-head" },
+      h("div", { class: "card-titles" },
+        h("h4", { class: "card-title", id: titleId }, experiment.title,
+          experiment.graduated ? h("span", { class: "tag accent" }, "On by default") : null)),
+      toggle),
+    h("p", { class: "lab-pitch", id: pitchId }, experiment.pitch),
+    experiment.howToTry.length ? h("div", { class: "lab-try" },
+      h("h5", {}, "How to try"),
+      h("ol", { class: "lab-steps" }, experiment.howToTry.map(step => h("li", {}, step)))) : null,
+    h("div", { class: "lab-foot" },
+      h("p", { class: "lab-needs" }, M.labNeedsText(experiment)),
+      clients.length ? h("ul", { class: "lab-clients", "aria-label": "Assistants on this Mac" },
+        clients.map(client => h("li", { class: "tag", "data-state": client.state },
+          h("span", { class: "dot", "data-status": client.dot }), client.text))) : null),
+    experiment.graduated && !experiment.live ? h("p", { class: "lab-note" }, "Part of AxioSozo. Turning it off applies to new windows.") : null,
+    problem ? h("p", { class: "lab-problem" }, problem) : null);
+}
+
+/** The switch: the actor writes it and answers with the whole new state. */
+async function setLabFlow(experiment, enabled) {
+  if (state.lab.busy.has(experiment.id) || !state.active) return;
+  const before = state.lab.list;
+  state.lab.busy.add(experiment.id);
+  await keepFocus(renderLab);
+  // An older list answer still on its way is void: this one is newer.
+  const ticket = labTicket = nextTicket();
+  let refresh = false;
+  try {
+    const after = await call("setLabEnabled", { id: experiment.id, enabled });
+    if (!state.active) return;
+    if (ticket === labTicket) { state.lab.list = after; state.lab.error = null; }
+    setStatus(M.labToggleText(experiment, enabled, { before, after }));
+    // The today sheet (or its sibling) switched: its link follows.
+    if (experiment.id === "today-sheet" || experiment.family === "today-sheet") refreshTodayLink();
+  } catch (error) {
+    if (!state.active) return;
+    setStatus(labError(error), "error");
+    refresh = error?.code === "UNKNOWN_EXPERIMENT";
+  } finally {
+    state.lab.busy.delete(experiment.id);
+  }
+  await keepFocus(renderLab);
+  if (refresh) loadLab();
+}
+
+/** Back on the Lab (another tab or about:config may have flipped a switch): read it again. */
+function setupLab() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.view === "lab" && state.admitted && state.active) loadLab();
+  });
+}
+
+// ---------------------------------------------------------------- today (the Lab's today sheet)
+
+// The Lab's today sheet (chrome/lab/today, only while its switch is on): the
+// actor's getToday answer, read when #today shows (that visit counts as
+// looking) and again, with the same "since", on agent, attention, project and
+// space events and when the tab is shown again. Each line links to its
+// project's home or opens its errand's page in its space. Errand buttons and
+// "Suggest a first thing" are this page's own clicks; the suggestion is the
+// only step that asks an AI, and the sheet says what goes to it.
+
+const TODAY_EVENTS = new Set(["agents", "attention", "projects", "contexts"]);
+let todayTimer = null;
+function freshToday() {
+  return { reply: null, error: null, since: null, busy: new Set(), undo: null, suggestion: null, suggesting: false };
+}
+function scheduleToday() {
+  clearTimeout(todayTimer);
+  todayTimer = setTimeout(() => { todayTimer = null; loadToday().catch(console.error); }, 150);
+}
+
+/** The digest; `look`: this visit's first read, which counts as looking. Only the latest answer publishes. */
+async function loadToday({ look = false } = {}) {
+  if (!state.admitted || !state.active || state.view !== "today") return;
+  const ticket = latest.today = nextTicket();
+  const first = look || !Number.isSafeInteger(state.today.since);
+  try {
+    const reply = await call("getToday", first ? { look: true } : { since: state.today.since });
+    if (ticket !== latest.today || !state.active) return;
+    state.today.reply = reply;
+    state.today.error = null;
+    if (first && Number.isSafeInteger(reply?.since)) state.today.since = reply.since;
+  } catch (error) {
+    if (ticket !== latest.today || !state.active) return;
+    state.today.error = error;
+  }
+  await keepFocus(renderToday);
+}
+
+const todayError = error => M.todayErrorText(error?.code) ?? errorText(error);
+
+function renderToday() {
+  const root = $("today-page");
+  if (!root || state.view !== "today") return;
+  const head = h("div", { class: "view-head" },
+    h("div", {}, h("h2", { id: "today-heading", tabindex: "-1" }, "Today"),
+      state.today.reply ? h("p", { class: "block-help" }, M.todaySummary(state.today.reply.counts)) : null),
+    state.today.reply?.today ? h("p", { class: "today-date" }, M.todayDate(state.today.reply.today)) : null);
+  if (!state.connected) { root.removeAttribute("aria-busy"); fill(root, head, h("p", { class: "empty" }, "Today appears here once AxioSozo is connected.")); return; }
+  if (state.today.error && !state.today.reply) { root.removeAttribute("aria-busy"); fill(root, head, h("p", { class: "empty" }, todayError(state.today.error))); return; }
+  if (!state.today.reply) { root.setAttribute("aria-busy", "true"); fill(root, head, h("p", { class: "loading" }, "Reading today…")); return; }
+  root.removeAttribute("aria-busy");
+  const sections = M.todaySections(state.today.reply, { now: Date.now() });
+  const lines = sections.flatMap(section => section.lines);
+  const suggestion = state.today.suggestion;
+  const picked = suggestion?.status === "ok" ? lines.find(line => line.key === suggestion.key) ?? null : null;
+  fill(root, head,
+    todaySuggestion(suggestion, picked),
+    state.today.undo ? todayUndo(state.today.undo) : null,
+    sections.length ? sections.map(section => todaySection(section, picked?.key ?? null))
+      : h("p", { class: "empty" }, "Nothing waiting, failed or due, and nothing new finished since you last looked."),
+    lines.length ? h("div", { class: "today-suggest" },
+      h("button", { type: "button", class: "ghost", "data-focus-key": "today:suggest", disabled: state.today.suggesting || !state.admitted,
+        "aria-describedby": "today-suggest-help", onclick: () => suggestFirst() }, state.today.suggesting ? "Asking…" : "Suggest a first thing"),
+      h("p", { id: "today-suggest-help", class: "help" }, M.TODAY_SUGGEST_HELP)) : null,
+    h("p", { class: "footnote" }, M.TODAY_NOTE));
+}
+
+function todaySection(section, pickedKey) {
+  const headingId = `today-${section.group}-heading`;
+  return h("section", { class: "block today-section", "data-group": section.group, "aria-labelledby": headingId },
+    h("div", { class: "block-head" }, h("h3", { id: headingId }, section.title,
+      h("span", { class: "count", "aria-label": `${section.total} ${section.total === 1 ? "item" : "items"}` }, String(section.total)))),
+    h("ul", { class: "rows" }, section.lines.map(line => todayRow(line, pickedKey))),
+    section.more ? h("p", { class: "help today-more" }, `${section.more} more not shown.`) : null);
+}
+
+function todayRow(line, pickedKey) {
+  const target = M.todayTarget(line);
+  const key = `today:${line.key}`;
+  const busy = state.today.busy.has(line.errand?.id);
+  const title = target?.kind === "project" ? h("a", { href: target.href, class: "row-title today-link", "data-focus-key": key }, line.title)
+    : target?.kind === "errand" ? h("button", { type: "button", class: "row-title today-link today-open", "data-focus-key": key,
+      title: "Opens its page in its space", onclick: () => openTodayErrand(line) }, line.title)
+      : h("span", { class: "row-title" }, line.title);
+  const actions = line.errand ? h("div", { class: "today-actions" },
+    h("button", { type: "button", class: "ghost", "data-focus-key": `${key}:done`, "aria-label": `Mark ${line.title} done`, disabled: busy,
+      onclick: () => todayErrand(line, "done") }, "Done"),
+    h("button", { type: "button", class: "ghost", "data-focus-key": `${key}:snooze`, "aria-label": `Snooze ${line.title} to tomorrow`, disabled: busy,
+      onclick: () => todayErrand(line, "snooze") }, "Tomorrow")) : null;
+  return h("li", { class: "row today-row", "data-picked": line.key === pickedKey ? "true" : null },
+    h("span", { class: "dot", "data-status": M.TODAY_DOTS[line.group], "aria-hidden": "true" }),
+    h("div", { class: "row-main" }, title, line.detail ? h("span", { class: "row-detail" }, line.detail) : null),
+    line.key === pickedKey ? h("span", { class: "tag accent" }, "Suggested first") : null,
+    actions);
+}
+
+async function openTodayErrand(line) {
+  try { await call("openTodayErrand", { id: line.errand.id }); }
+  catch (error) { setStatus(todayError(error), "error"); }
+}
+
+async function todayErrand(line, action) {
+  const id = line.errand?.id;
+  if (!id || state.today.busy.has(id) || !state.active) return;
+  state.today.busy.add(id);
+  await keepFocus(renderToday);
+  try {
+    await call("setTodayErrand", { id, action });
+    if (!state.active) return;
+    state.today.undo = action === "reopen" ? null : { id, title: line.title, action };
+    setStatus(action === "done" ? `Done: ${line.title}` : action === "snooze" ? `${line.title} is back tomorrow.` : `${line.title} is back on the list.`);
+  } catch (error) {
+    if (!state.active) return;
+    setStatus(todayError(error), "error");
+  } finally {
+    state.today.busy.delete(id);
+  }
+  await loadToday();
+}
+
+function todayUndo(undo) {
+  return h("p", { class: "notice today-undo", role: "status" },
+    `${undo.title} ${undo.action === "done" ? "is marked done" : "is snoozed to tomorrow"}. `,
+    h("button", { type: "button", class: "link-button", "data-focus-key": "today:undo",
+      onclick: () => todayErrand({ title: undo.title, errand: { id: undo.id } }, "reopen") }, "Undo"));
+}
+
+/** The one AI step, on this click only: the user's own assistant picks one line, with a sentence why. */
+async function suggestFirst() {
+  if (state.today.suggesting || !state.active) return;
+  state.today.suggesting = true;
+  state.today.suggestion = null;
+  await keepFocus(renderToday);
+  try {
+    const reply = await call("suggestTodayFirst", Number.isSafeInteger(state.today.since) ? { since: state.today.since } : {});
+    if (!state.active) return;
+    state.today.suggestion = reply;
+  } catch (error) {
+    if (!state.active) return;
+    state.today.suggestion = { status: "failed", client: null, text: todayError(error) };
+  } finally {
+    state.today.suggesting = false;
+  }
+  await keepFocus(renderToday);
+}
+
+function todaySuggestion(suggestion, picked) {
+  if (state.today.suggesting) {
+    return h("p", { class: "notice today-pick", role: "status" }, "Asking your assistant… The lines on this sheet go to it, without addresses.");
+  }
+  if (!suggestion) return null;
+  const by = M.LAB_CLIENT_LABELS[suggestion.client] ?? "your assistant";
+  if (suggestion.status !== "ok") return h("p", { class: "notice today-pick", role: "status" }, suggestion.text || "No suggestion this time.");
+  return h("div", { class: "notice today-pick", role: "status" },
+    h("p", {}, h("strong", {}, picked ? `Start with: ${picked.title}` : "Its pick is no longer on the sheet."), " ", suggestion.why),
+    h("p", { class: "help" }, `Suggested by ${by} from the lines on this sheet. It can be wrong; the choice is yours.`));
+}
+
+/** The sheet's own link in the views, only while its switch is on. */
+function renderTodayLink() {
+  const nav = document.querySelector(".views");
+  const link = nav?.querySelector('a[data-view="today"]');
+  if (state.flags.today === true && !link) nav?.prepend(h("a", { href: "#today", "data-view": "today" }, "Today"));
+  if (state.flags.today !== true && link) link.remove();
+}
+async function refreshTodayLink() {
+  try {
+    const flags = await call("getOverviewFlags");
+    if (!state.active) return;
+    state.flags = flags;
+  } catch { return; }
+  renderTodayLink();
+}
+
+/** Shown again (another tab, an errand changed elsewhere): the sheet reads again with the same "since". */
+function setupToday() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.view === "today" && state.admitted && state.active) loadToday();
+  });
+}
+
 // ---------------------------------------------------------------- wiring
 
 const onStart = run => async () => { await run(); if (state.view === "home") await keepFocus(renderStartPage); };
@@ -3227,6 +3632,7 @@ const HOME_EVENTS = new Set(["projects", "contexts", "agents", "console"]);
 const pending = new Map();
 function onServicesEvent(event) {
   const name = event?.name;
+  if (state.active && state.view === "today" && TODAY_EVENTS.has(name)) scheduleToday();
   if (!state.active || !Object.hasOwn(loaders, name)) return;
   // From this moment the home being fetched may be out of date: void its
   // answer now, also when this event joins a reload that is already queued.
@@ -3298,6 +3704,8 @@ function renderDisconnected() {
   renderDecisionKeys();
   renderSafety();
   renderStartPage();
+  renderLab();
+  renderToday();
   for (const control of document.querySelectorAll("main button, main select, main input")) control.disabled = true;
 }
 
@@ -3324,6 +3732,9 @@ function deactivate() {
   latest.watches = nextTicket();
   latest.safety = nextTicket();
   latest.start = nextTicket();
+  latest.today = nextTicket();
+  clearTimeout(todayTimer);
+  state.today.suggesting = false;
   state.agents.busy = false;
   // An action of this page still waiting for its outcome: the next shown page reads the truth afresh.
   clearTimeout(state.watches.pending?.timer);
@@ -3363,6 +3774,9 @@ async function boot() {
   // The experimental start page's link and route follow the flag the actor read.
   renderHomeLink();
   if (M.isHomeHash(location.hash)) applyRoute();
+  // The Lab's today sheet: its link and route follow its switch, as the actor read it.
+  renderTodayLink();
+  if (M.isTodayHash(location.hash)) applyRoute();
   await loadActiveSpace();
   if (!state.active) return;
   // Everything the first view needs is loaded before Projects is drawn once
@@ -3391,6 +3805,10 @@ async function boot() {
   else renderSafety();
   if (!state.active) return;
   if (state.view === "home") { renderStartPage(); await loadStartPage(); }
+  if (!state.active) return;
+  if (state.view === "lab") await loadLab();
+  if (!state.active) return;
+  if (state.view === "today") { renderToday(); await loadToday({ look: true }); }
   if (!state.active) return;
   routeActions();
   // Local servers are checked when the page opens (declared loopback ports only).
@@ -3430,7 +3848,8 @@ function routeActions() {
  * to Projects, as before. */
 function currentRoute() {
   const home = state.flags.home === true || (!state.admitted && M.isHomeHash(location.hash));
-  return M.routeFromHash(location.hash, { home });
+  const today = state.flags.today === true || (!state.admitted && M.isTodayHash(location.hash));
+  return M.routeFromHash(location.hash, { home, today });
 }
 
 function applyRoute() {
@@ -3486,6 +3905,7 @@ function setupSkipLink() {
 async function init() {
   setupDialog();
   setupSheet();
+  setupStatus();
   setupSkipLink();
   applyRoute();
   $("add-project").addEventListener("click", () => addProjectFlow({}));
@@ -3493,7 +3913,9 @@ async function init() {
   $("ledger-days").addEventListener("change", loadLedger);
   $("ledger-export").addEventListener("click", exportLedgerFlow);
   $("ledger-clear").addEventListener("click", clearLedgerFlow);
-  $("providers-refresh").addEventListener("click", () => { loadProviders(); loadDecisionKeys(); });
+  $("providers-refresh").addEventListener("click", () => { loadProviders({ refresh: true }); loadDecisionKeys(); });
+  setupLab();
+  setupToday();
   window.addEventListener("hashchange", onHashChange);
   // Hidden (also into the back/forward cache): inactive until shown again from it.
   window.addEventListener("pagehide", deactivate);

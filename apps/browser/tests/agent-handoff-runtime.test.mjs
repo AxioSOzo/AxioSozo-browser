@@ -177,15 +177,19 @@ test("one trusted shortcut opens the doorhanger after a privacy precheck; untrus
       [["AxioSozoHandoff", HANDOFF_MESSAGES.PRECHECK, { url: PAGE, inner_window_id: 11 }]]);
     assert.deepEqual(f.reads, [], "opening reads no title and no selected text");
     const doorhanger = f.compose();
-    assert.deepEqual([doorhanger.message, doorhanger.options.name, doorhanger.anchor], ["Copy <> for an agent", "localhost:5173/settings", null]);
+    assert.deepEqual([doorhanger.message, doorhanger.options.name, doorhanger.anchor], ["Send <> to an agent", "localhost:5173/settings", null]);
     assert.deepEqual([doorhanger.mainAction.label, doorhanger.secondaryActions.map(action => action.label)], ["Copy for agent", ["Cancel"]]);
     assert.equal(doorhanger.secondaryActions[0].disableSecurityDelay, true, "Cancel is never delayed; Copy keeps the clickjacking delay");
     assert.equal(doorhanger.mainAction.disableSecurityDelay, undefined);
     assert.equal(f.textarea().getAttribute("aria-labelledby"), "axiosozo-handoff-task-label");
     assert.equal(f.document.activeElement, f.textarea(), "focus moves into the task field");
-    assert.deepEqual([f.checkbox().checked, f.checkbox().disabled], [true, false]);
-    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent, /Project folder: \/Volumes\/Synthetic\/harbor-suite \(Harbor Suite\)/u);
-    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent, /Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet\./u);
+    assert.deepEqual([f.checkbox().checked, f.checkbox().disabled], [false, false], "selected text is an opt-in: offered, never pre-ticked");
+    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent, /Project: Harbor Suite \(\/Volumes\/Synthetic\/harbor-suite\)/u);
+    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent, /AxioSozo copies this as text\. Paste it into Claude Code, Codex or another agent\./u);
+    // What this build cannot do yet stays truthful, but out of the body.
+    const route = f.document.getElementById("axiosozo-handoff-content").childNodes.find(node => /copies this as text/u.test(node.textContent));
+    assert.match(route.getAttribute("tooltiptext"), /Screenshots, console errors and opening Claude Code or Codex directly are not in this build yet\./u);
+    assert.doesNotMatch(f.document.getElementById("axiosozo-handoff-content").textContent, /not in this build/u);
   } finally { f.runtime.dispose(); }
 });
 
@@ -194,6 +198,7 @@ test("Copy: the trusted click sends one exact request through the core; the clip
   try {
     await f.press();
     f.textarea().value = "Fix the\r\nsettings form";
+    f.checkbox().checked = true; // the user opts in to the selected text
     await f.copy();
     assert.equal(f.copies.length, 1);
     const context = JSON.parse(f.copies[0]);
@@ -226,11 +231,11 @@ test("an untrusted Copy click copies nothing and ends the session", async () => 
   } finally { f.runtime.dispose(); }
 });
 
-test("unticking the selection: no selected text is read and none is copied; no selection means the opt-in is disabled", async () => {
+test("an unticked selection (the default): no selected text is read and none is copied; no selection means the opt-in is disabled", async () => {
   const f = fixture();
   try {
     await f.press();
-    f.checkbox().checked = false;
+    assert.equal(f.checkbox().checked, false, "nothing to untick: the opt-in starts unticked");
     await f.copy();
     assert.deepEqual(f.reads, ["title"]);
     assert.equal(JSON.parse(f.copies[0]).page.selection, null);
@@ -941,8 +946,8 @@ test("with the console owner: console errors are offered unticked; unticked copi
     await f.press();
     assert.deepEqual([consoleBox(f).checked, consoleBox(f).disabled, consoleBox(f).getAttribute("label")],
       [false, false, "Include this tab's console errors"]);
-    assert.match(f.document.getElementById("axiosozo-handoff-content").textContent,
-      /Screenshots and opening Claude Code or Codex directly are not in this build yet\./u);
+    const route = f.document.getElementById("axiosozo-handoff-content").childNodes.find(node => /copies this as text/u.test(node.textContent));
+    assert.match(route.getAttribute("tooltiptext"), /^Screenshots and opening Claude Code or Codex directly are not in this build yet\.$/u);
     await f.copy();
     assert.deepEqual(JSON.parse(f.copies[0]).console_errors, []);
     assert.deepEqual([native.calls.readHandoff.length, native.calls.ownerForTab], [0, 0], "nothing of the console is read");

@@ -350,6 +350,8 @@ export class AxioSozoServices {
   #icons = new Map();
   // Project runs (ProjectRunner): built on first use; null when unavailable.
   #runner = undefined; #runsTimer = null; #runsPending = false;
+  // The runs that failed, as last announced: "attention" is emitted only when it changes.
+  #failedRuns = "";
   #setupSerial = 0;
   // Arrival acceptances between token consumption and the store append.
   #acceptances = new Set();
@@ -1705,12 +1707,20 @@ export class AxioSozoServices {
   #emitRuns() {
     if (this.#runsTimer !== null) { this.#runsPending = true; return; }
     this.#emit("runs");
+    // A run that just failed (or a failed run dismissed) changes what needs the user.
+    const failed = this.#failedRunList().map(run => `${run.project_id}\u0000${run.key}\u0000${run.run}`).join("\n");
+    if (failed !== this.#failedRuns) { this.#failedRuns = failed; this.#emit("attention"); }
     try {
       this.#runsTimer = this.#deps.timers.setTimeout(() => {
         this.#runsTimer = null;
         if (this.#runsPending) { this.#runsPending = false; this.#emitRuns(); }
       }, RUNS_EVENT_MS);
     } catch { this.#runsTimer = null; }
+  }
+
+  /** This process's runs that exited non-zero or could not start (never builds the runner). */
+  #failedRunList() {
+    try { return (this.#runner?.list() ?? []).filter(run => run.status === "failed"); } catch { return []; }
   }
 
   /** The run targets of a project with this process's run of each:
@@ -2123,19 +2133,23 @@ export class AxioSozoServices {
   }
 
   // ── attention ─────────────────────────────────────────────────────────
-  /** A declared service found down by the last requested probe, an agent whose
-   * latest report says it needs input or failed (current project root only),
-   * and rules whose daily limit is reached today. Never probes by itself. */
+  /** A server this browser started that crashed or could not start, an agent
+   * whose latest report says it needs input or failed (current project root
+   * only), and rules whose daily limit is reached today. A declared server that
+   * is simply not running is the normal state of a project, not something that
+   * needs the user (docs/design/projects.md §2): the project lists it as "Not
+   * running". Never probes and never starts the runner by itself. */
   async needsAttention() {
     const items = [];
     const { projects } = await this.#loadContexts();
-    for (const project of projects) {
-      for (const entry of this.#serviceStatus.get(project.id)?.values() ?? []) {
-        if (entry.status !== "down") continue;
-        items.push({ kind: "service_down", title: `${entry.name} is not responding`,
-          detail: `${project.manifest.name} · ${entry.url}`,
-          target: { type: "project", id: project.id, service: entry.name } });
-      }
+    for (const run of this.#failedRunList()) {
+      const project = projects.find(item => item.id === run.project_id);
+      if (!project) continue;
+      const name = run.name || run.key;
+      const started = run.error === null || run.error === undefined;
+      items.push({ kind: "run_failed", title: started ? `${name} stopped with an error` : `${name} could not start`,
+        detail: [project.manifest.name, Number.isInteger(run.exit_code) ? `exit code ${run.exit_code}` : null].filter(Boolean).join(" · "),
+        target: { type: "project", id: project.id, run: run.key } });
     }
     let waiting = [];
     try { waiting = this.#agentChannel?.needsAttention() ?? []; } catch { waiting = []; }
