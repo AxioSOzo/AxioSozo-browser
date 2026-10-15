@@ -103,7 +103,7 @@ handling first.") in 8.5 s. Both valid against the schema and the line count.
 
 ## Open questions
 
-- 05:00 and "first focus": right for Wout? A fixed time (07:30) or the first
+- 05:00 and "first focus": right for the owner? A fixed time (07:30) or the first
   new tab might be calmer than a focus.
 - The agents service forgets a browser run at quit and only polls Claude
   sessions elsewhere while someone watches; the today data notes endings while
@@ -118,6 +118,6 @@ handling first.") in 8.5 s. Both valid against the schema and the line count.
 Useful on mornings after an agent ran overnight or an errand fell due; on the
 other mornings the toast is all you see, which is the point. The risk is that
 a tab opening by itself is one more thing to close. I expect it to lose to the
-strip for Wout, and to be the better fit for a director (P4) who wants a plain
+strip for the owner, and to be the better fit for a director (P4) who wants a plain
 status once a day. "Suggest a first thing" is the weakest part: the
 deterministic order already puts "waiting for you" first.

@@ -5,9 +5,9 @@ and what a clean version would be.
 
 ## The idea
 
-An organization space (Zen space of type "Organization", e.g. "BV admin")
+An organization space (Zen space of type "Organization", e.g. "Company admin")
 holds a Zen live folder, "Watches", whose items are the user's own watches of
-signed-in pages: "a new message in Mijn Belastingdienst", "the September
+signed-in pages: "a new message in the tax portal", "the September
 invoice is ready on the Vercel billing page", "a failed payment in Stripe".
 Each item is a lazy tab that opens the page in the space (its container,
 its accounts); a changed watch shows on the item, and on the space's dot.
@@ -39,7 +39,7 @@ cleanly is not possible without decisions that are not mine to take:
    observation, hidden tabs in the right container are an unverified native
    capability, and "an agent acting with my logins" is the trust line users
    draw (pain #18). eHerkenning sessions also expire, so a background check of
-   the Belastingdienst would mostly see a login page.
+   the tax office would mostly see a login page.
 4. **A custom Zen live-folder provider** is possible at runtime
    (`ZenLiveFoldersManager.registry.set(...)`), but Zen restores live folders
    from `zen-live-folders.jsonlz4` before a Lab experiment registers its type,
@@ -70,7 +70,7 @@ cleanly is not possible without decisions that are not mine to take:
 
 ## Honest expectation
 
-Step 1 (recurring errands) would give Wout most of the value next week and is
+Step 1 (recurring errands) would give the owner most of the value next week and is
 a small change to the errand store. Step 2 is the interesting, safe novelty.
 Step 3 is where products like this go wrong (acting with the user's identity
 in the background) and should stay out until a real need is shown.

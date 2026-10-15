@@ -52,6 +52,6 @@ instead of during the drag.
 ## Honest expectation
 
 Safer and quieter, and likely used less: an extra button is exactly the
-"composer asking what you want" Wout wanted to avoid. If the auto variant
+"composer asking what you want" the owner wanted to avoid. If the auto variant
 does not annoy on project pages, it should win; this one stays useful for
 pages outside projects.

@@ -5,14 +5,13 @@ user is, what role the browser plays in their day, and which ideas we test.
 Sources: the user research, landscape and agent launch reports in
 `/Volumes/AxioSozoBuild/ux-overnight/notes/lab/` (research-users.md,
 research-landscape.md, agents-launch.md; local, not in the repo), and
-Wout's own words across earlier threads.
+the owner's own words across earlier threads.
 
 ## 1. Who the user is
 
-The anchor is **the founder-dev who runs several agents**: Wout. He owns a small
-company, ships several products, runs Claude Code, Codex and Antigravity side by
-side, has many Google and Microsoft accounts, and does his own admin (VAT,
-invoices, the Belastingdienst). Around him: the solo indie maker who also does
+The anchor is **the founder-dev who runs several agents**: someone who ships
+several products, runs coding agents side by side, juggles many accounts and
+does their own admin. Around them: the solo indie maker who also does
 the marketing, the developer in a team of 5-15, and the director who barely codes.
 
 Their day has changed shape. Writing code is no longer the slow part:
@@ -180,14 +179,14 @@ Problems the real browser found, all fixed on the branch:
 
 | Family | Keep | Why |
 |---|---|---|
-| What's wrong here | **auto**, on project pages only | It is what Wout described: no composer, the browser thinks first. 3 s, a tenth of a cent, and "Nothing obvious" when nothing is. On other pages the button stays. |
+| What's wrong here | **auto**, on project pages only | It is what the owner described: no composer, the browser thinks first. 3 s, a tenth of a cent, and "Nothing obvious" when nothing is. On other pages the button stays. |
 | Start the task | **here**, with "Open in the app" in its menu | It keeps the return path in the browser (live step, To verify, Reload). The deep link is the safe fallback for people who want to press Enter themselves. |
 | Agent presence | **on the project rows**, folder as an option | Rows put status where the eye already is and add no tabs. The folder is the most Zen-native, but every run becomes a tab to tidy. Worth a week of real use each. |
 | Proof tab | **yes**, graduate first | The most distinctive piece: the verdict on the real, signed-in page before reading code. No agent app can do this. |
 | Today | **strip** (hidden on quiet days), sheet on demand | No new place; it appears only when something needs you. |
 | Errands | **yes**, small | The first step into the non-code day without pretending to automate admin. |
 
-## 8. Decisions for Wout
+## 8. Decisions for the owner
 
 1. **Keychain access for Ask AI.** To use the existing Claude sign-in, Ask
    AI's sandbox lets Claude Code read the login keychain file (the browser

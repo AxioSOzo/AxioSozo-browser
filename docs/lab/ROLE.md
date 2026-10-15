@@ -5,7 +5,7 @@ Branch `ux/lab`, 9 October. Follows [STUDY.md](STUDY.md). Research notes
 research-feasibility.md, research-dashboards.md, the destination findings, and
 the concept pages (role.html, and ../marks/concept.html).
 
-## What Wout said about the Marks concept
+## What the owner said about the Marks concept
 
 - The mark gesture is the right direction, but the component isn't loved yet,
   and it should wait until agent management is defined. Users choose where
@@ -15,7 +15,7 @@ the concept pages (role.html, and ../marks/concept.html).
 - Before/after on the page: a game-changer, but how?
 - New idea: after time away, an agent walks you through what changed in a
   project's frontend, choosing the order and driving the browser.
-- The open question he finds most interesting: dashboard or not, and what
+- The open question they find most interesting: dashboard or not, and what
   could it do?
 
 ## 1. What we stand for
@@ -91,7 +91,7 @@ walk through the changed pages. The user's own agent (in their chosen home)
 picks the order and writes one line per step; the browser plays it on the real
 pages, only scrolling and highlighting.
 
-## 4. Wout's favourite pieces: how
+## 4. the owner's favourite pieces: how
 
 - **Work happening on the component.** The browser already knows the files an
   agent edits from its stream. Map files to elements with the dev metadata the
@@ -157,7 +157,7 @@ More, unsketched:
 - Front page: a daily, finite page of what moved, gone at night.
 - Empty is success: the new tab shows at most three decisions.
 
-## 7. Decisions for Wout
+## 7. Decisions for the owner
 
 1. **Exception for local project pages** to read the framework's dev metadata
    (X-ray, live work on components).
@@ -180,5 +180,5 @@ More, unsketched:
 2. Live work drawn on the component, for Vite projects.
 3. Element-anchored before/after on the mark.
 4. The walk, on one real project (RemoteDraw web).
-5. The Atlas, after the walk shows whether Wout wants to *see* his frontends
+5. The Atlas, after the walk shows whether the owner wants to *see* their frontends
    after time away or only to know that nothing broke.

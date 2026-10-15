@@ -39,7 +39,7 @@ collapsed (icon) sidebar.
 - Pain #7: it replaces the "is everything fine?" round with a glance; pain #2
   and the attention rule: only "waiting on you" is coloured strongly, "done"
   waits quietly in the open list.
-- Wout's taste: Zen's sidebar stays Zen; one line added, in its own type.
+- the owner's taste: Zen's sidebar stays Zen; one line added, in its own type.
 
 ## How to try
 
@@ -80,7 +80,7 @@ call) so "waiting" is current.
 
 ## Honest expectation
 
-This is the one I expect Wout to keep. It costs one line of sidebar, adds no
-place and no tab, and turns the morning round into a glance he already makes.
+This is the one I expect the owner to keep. It costs one line of sidebar, adds no
+place and no tab, and turns the morning round into a glance they already makes.
 Its weakness: one line is easy to stop seeing, so a waiting agent still needs
 the separate "waiting on you" notification the agents experiments test.

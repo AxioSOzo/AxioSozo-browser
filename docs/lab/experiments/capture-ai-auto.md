@@ -10,7 +10,7 @@ Tests: `apps/browser/tests/lab-capture-ai.test.mjs`.
 
 ## What it is
 
-Wout, about the capture gesture: "a kind of quick screenshot, with an
+the owner, about the capture gesture: "a kind of quick screenshot, with an
 intelligence layer that does not immediately show a composer asking 'what do
 you want with this', but thinks smartly: OK, I see this image, what should
 happen with it?"
@@ -169,5 +169,5 @@ What tuning changed, and why:
 The first proposal is right every time on Harbor, in about three seconds and
 a tenth of a cent, and it is the fastest way yet from "that looks wrong" to a
 task. The risk is the second and third proposals: plausible product advice
-that nobody asked for. If Wout ends up clicking only the first one, the bar
+that nobody asked for. If the owner ends up clicking only the first one, the bar
 should show only one.
