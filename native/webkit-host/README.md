@@ -36,7 +36,7 @@ Packages (exact pins; `probe.py setup --apt` installs them, root or passwordless
 ```sh
 apt-get install --no-install-recommends \
   libwpewebkit-2.0-1=2.48.3-1 libwpe-1.0-1=1.16.2-1 libwpebackend-fdo-1.0-1=1.16.0-1 \
-  bubblewrap=0.12.0-1~deb13u1 xdg-dbus-proxy=0.1.6-1+deb13u2 libegl1=1.7.0-1+b2 \
+  bubblewrap=0.12.0-1~deb13u1 xdg-dbus-proxy=0.1.6-1+deb13u3 libegl1=1.7.0-1+b2 \
   libegl-mesa0=25.0.7-2+deb13u1 libgl1-mesa-dri=25.0.7-2+deb13u1 \
   libwpewebkit-2.0-dev=2.48.3-1 libwpe-1.0-dev=1.16.2-1 libwpebackend-fdo-1.0-dev=1.16.0-1 \
   libwayland-dev=1.23.1-3 g++=4:14.2.0-1 pkg-config=1.8.1-4
