@@ -1,0 +1,21 @@
+# Self-test of the reusable regression gate documented in docs/PERFORMANCE.md: the same
+# caller another branch (e.g. cloud/perf-pixel-path) adds, here presenter-only with the
+# same-job A/B against cloud/integration and compare.py against the reference run.
+name: linux-engine-bench-gate
+on:
+  push:
+    branches: [cloud/engine-bench]
+    paths:
+      - .github/workflows/linux-engine-bench-gate.yml
+      - tools/engine-bench/presenter/**
+      - tools/engine-bench/compare.py
+permissions:
+  contents: read
+jobs:
+  bench:
+    permissions: { contents: write, actions: read }
+    uses: ./.github/workflows/linux-engine-bench.yml
+    with:
+      jobs: presenter
+      presenter_baseline_ref: cloud/integration
+      baseline: '39330954155'
