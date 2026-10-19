@@ -41,6 +41,7 @@ VOLUME_NAME = 'AxioSozoBuild'
 # The mounted project volume. Several worktrees may build side by side on it,
 # each in its own build root (AXIOSOZO_BUILD_ROOT=/Volumes/AxioSozoBuild/<name>).
 VOLUME = Path('/Volumes/AxioSozoBuild')
+DARWIN_VOLUME = VOLUME  # VOLUME becomes the build root on Linux (below)
 # Top-level names on the volume that belong to the default (volume-root) build
 # or are shared; a sub-root may never alias them.
 RESERVED_SUBROOTS = {'zen', 'toolchains', 'cargo-home', 'cargo-target', 'caches', 'runtime', 'tmp',
@@ -87,11 +88,16 @@ def build_root(value=None):
     else (relative, nested, `..`, a shared top-level name) is refused."""
     if LINUX:
         return linux_build_root(value)
+    return darwin_build_root(value)
+
+
+def darwin_build_root(value=None):
+    """macOS policy of build_root (pure; tests exercise it on every platform)."""
     raw = os.environ.get('AXIOSOZO_BUILD_ROOT') if value is None else value
-    if not raw or Path(raw) == VOLUME:
-        return VOLUME
+    if not raw or Path(raw) == DARWIN_VOLUME:
+        return DARWIN_VOLUME
     path = Path(raw)
-    if (not path.is_absolute() or path.parent != VOLUME or path.name in RESERVED_SUBROOTS
+    if (not path.is_absolute() or path.parent != DARWIN_VOLUME or path.name in RESERVED_SUBROOTS
             or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', path.name)):
         raise RuntimeError('INVALID_AXIOSOZO_BUILD_ROOT: ' + str(raw))
     return path

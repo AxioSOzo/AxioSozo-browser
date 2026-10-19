@@ -18,14 +18,20 @@ SOURCE = Path(__file__).with_name('manifest_accept.py')
 spec = importlib.util.spec_from_file_location('manifest_accept', SOURCE)
 writer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(writer)
-FIXTURES = Path('/Volumes/AxioSozoBuild/workstation/manifest-accept-fixtures')
+LINUX = sys.platform.startswith('linux')
+# macOS: the external workstation volume. Linux: the build root that
+# scripts/storage.py exec names in AXIOSOZO_BUILD_ROOT (no volume to mount).
+_LINUX_ROOT = os.environ.get('AXIOSOZO_BUILD_ROOT', '') if LINUX else ''
+FIXTURES = (Path(_LINUX_ROOT) / 'manifest-accept-fixtures' if _LINUX_ROOT.startswith('/')
+            else Path('/Volumes/AxioSozoBuild/workstation/manifest-accept-fixtures'))
 BASE = {'version': 2, 'name': 'Harbor Suite', 'kind': 'web', 'environments': [{'name': 'local', 'app': 'web', 'base_url': 'http://127.0.0.1:44123/'}], 'services': [], 'surfaces': []}
 
 
 class AcceptanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not Path('/Volumes/AxioSozoBuild').is_mount() or not FIXTURES.parent.is_dir():
+        volume_ready = FIXTURES.parent.is_dir() if _LINUX_ROOT.startswith('/') else Path('/Volumes/AxioSozoBuild').is_mount()
+        if not volume_ready or not FIXTURES.parent.is_dir():
             raise RuntimeError('EXTERNAL_WORKSTATION_FIXTURE_VOLUME_REQUIRED')
         FIXTURES.mkdir(mode=0o700, exist_ok=True)
         info = FIXTURES.lstat()

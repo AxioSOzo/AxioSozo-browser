@@ -25,10 +25,17 @@ const call = (binary, args, input = '') => {
 };
 const record = { steps: {} };
 try {
-  // The service registers on the private bus shortly after start.
+  // Wait until THIS daemon owns the name and has its unlocked default (login)
+  // collection, asking the bus without activating anything: an early helper call
+  // would D-Bus-activate a second, passwordless daemon without a default
+  // collection, and the helper (correctly) refuses to store there.
+  const bus = (...args) => spawnSync('gdbus', ['call', '--session', ...args],
+    { env: { PATH: '/usr/bin:/bin', LANG: 'C', DBUS_SESSION_BUS_ADDRESS: env.DBUS_SESSION_BUS_ADDRESS }, encoding: 'utf8', timeout: 5000 }).stdout || '';
   for (let attempt = 0; attempt < 100; attempt++) {
-    const probe = call(helper, ['exists']);
-    if (probe.status !== 1) break;
+    const owned = bus('-d', 'org.freedesktop.DBus', '-o', '/org/freedesktop/DBus', '-m', 'org.freedesktop.DBus.NameHasOwner',
+      'org.freedesktop.secrets').includes('true');
+    if (owned && bus('-d', 'org.freedesktop.secrets', '-o', '/org/freedesktop/secrets', '-m',
+      'org.freedesktop.Secret.Service.ReadAlias', 'default').includes('/collection/')) break;
     await delay(100);
   }
   const key = 'synthetic-fixture-key-jev-0001';

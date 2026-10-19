@@ -65,7 +65,8 @@ test('JS adapter: an unavailable Secret Service is KEYCHAIN_ERROR, never null or
     await assert.rejects(store.exists(), { code: 'KEYCHAIN_ERROR' });
     await assert.rejects(store.store('synthetic-nonsecret-input'), { code: 'KEYCHAIN_ERROR' });
     await assert.rejects(store.remove(), { code: 'KEYCHAIN_ERROR' });
-    await assert.rejects(new MacKeychain(artifact('keychain')).read(), { code: 'BLOCKED_ENV' });
+    // async wrapper: MacKeychain refuses synchronously off macOS.
+    await assert.rejects(async () => new MacKeychain(artifact('keychain')).read(), { code: 'BLOCKED_ENV' });
   } finally {
     if (saved === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS; else process.env.DBUS_SESSION_BUS_ADDRESS = saved;
   }

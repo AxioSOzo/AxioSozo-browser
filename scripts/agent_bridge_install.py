@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import stat
 import storage
@@ -25,8 +26,17 @@ SOURCE_PINS = (
     ('src/tools.mjs', 'ba8f64908ff3f80d3f3e0b60ea26ac77fbbd65d9ede43b59f0a51491fbdb5e0c'),
 )
 NODE_SOURCE = storage.VOLUME / 'toolchains/zen/node/bin/node'
-NODE_SHA256 = '5d9d3872911e2340a43b707962e68143de8a4e8d54628845c0c4f2de1fb7cd5c'
-BUNDLE_SHA256 = '9a03b23584b179763152186d19b954c5b06440fba07b006d935fece194e4daf0'
+# bin/node of each host's pinned Node archive (patches/zen/toolchains.json,
+# toolchains-linux-x86_64.json); the bundle digest is sha256(manifest_bytes(node)).
+# macOS values are the ones chrome pins (AgentBridgePins.sys.mjs). The Linux bundle
+# installs and verifies, but chrome's bridge stays macOS-only (fails closed on Linux).
+HOST_PINS = {
+    'linux-x86_64': ('e6ec2c188d83d813f81f2de8aea084d74dce603ac1abedd0a30ad941b10087b2',
+                     '4cdfe8349d228bc3f9c74d686f94dae011d892da264fa687ff05e6b2401feca1'),
+}
+NODE_SHA256, BUNDLE_SHA256 = HOST_PINS.get('linux-' + platform.machine() if storage.LINUX else None, (
+    '5d9d3872911e2340a43b707962e68143de8a4e8d54628845c0c4f2de1fb7cd5c',
+    '9a03b23584b179763152186d19b954c5b06440fba07b006d935fece194e4daf0'))
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_NODE_BYTES = 128 * 1024 * 1024
 CHUNK_BYTES = 64 * 1024

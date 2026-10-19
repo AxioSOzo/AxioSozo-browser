@@ -173,7 +173,10 @@ def extract(archive, destination):
                 raise RuntimeError('UNSAFE_ARCHIVE_PATH')
     # BSD tar (macOS) or the system GNU tar (Linux) is sufficient for tool
     # extraction. The pinned GNU tar is used by Surfer.
-    run([system_tar(), '-xf', archive, '--strip-components=1', '-C', destination])
+    # GNU tar run as root (containers) keeps archive modes such as 0775, which
+    # the installers' "no group/other write" checks then refuse; apply the umask.
+    owner_flags = ['--no-same-owner', '--no-same-permissions'] if LINUX else []
+    run([system_tar(), '-xf', archive, '--strip-components=1', *owner_flags, '-C', destination])
     (destination / '.extracted').write_text(archive_hash + '\n')
 
 

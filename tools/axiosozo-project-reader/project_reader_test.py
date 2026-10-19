@@ -23,10 +23,21 @@ reader = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reader)
 
 
+def workstation_tmp(temporary):
+    """macOS: the external workstation volume. Linux: the build root's tmp/
+    (scripts/storage.py exec sets both TMPDIR and AXIOSOZO_BUILD_ROOT)."""
+    resolved = str(Path(temporary).resolve()) + "/" if temporary else ""
+    if resolved.startswith("/Volumes/AxioSozoBuild/workstation/tmp/"):
+        return True
+    build_root = os.environ.get("AXIOSOZO_BUILD_ROOT", "")
+    return (sys.platform.startswith("linux") and build_root.startswith("/")
+            and resolved.startswith(str(Path(build_root).resolve()) + "/tmp/"))
+
+
 class ReaderTests(unittest.TestCase):
     def setUp(self):
         temporary = os.environ.get("TMPDIR", "")
-        if not str(Path(temporary).resolve()).startswith("/Volumes/AxioSozoBuild/workstation/tmp/"):
+        if not workstation_tmp(temporary):
             raise RuntimeError("tests require the external workstation TMPDIR")
         self.temp = tempfile.TemporaryDirectory(prefix="project-reader-", dir=temporary)
         self.addCleanup(self.temp.cleanup)

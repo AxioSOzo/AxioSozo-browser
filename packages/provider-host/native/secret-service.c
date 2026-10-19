@@ -13,9 +13,12 @@
 
 #define MAX_SECRET 4096
 
+/* Designated initializers: the reserved fields stay zero without tripping
+ * -Wmissing-field-initializers (gcc -Wextra -Werror). */
 static const SecretSchema SCHEMA = {
-  "nl.axiosozo.browser.dev.ProviderKey", SECRET_SCHEMA_NONE,
-  { { "service", SECRET_SCHEMA_ATTRIBUTE_STRING }, { "account", SECRET_SCHEMA_ATTRIBUTE_STRING }, { NULL, 0 } },
+  .name = "nl.axiosozo.browser.dev.ProviderKey",
+  .flags = SECRET_SCHEMA_NONE,
+  .attributes = { { "service", SECRET_SCHEMA_ATTRIBUTE_STRING }, { "account", SECRET_SCHEMA_ATTRIBUTE_STRING }, { NULL, 0 } },
 };
 
 static void wipe(void *buffer, size_t size) {

@@ -55,9 +55,17 @@ RESULTS = []
 # (for example a missing setup step) is a failure like on macOS.
 LINUX_EXPECTED_BLOCKED = {
     "native/chromium-host/probe.py": "macOS CEF probe; the Linux CEF host is the cloud/linux-cef workstream",
+    "native/chromium-host/test_probe.py": "depends on the CEF probe above (cloud/linux-cef)",
+    "native/chromium-host/stream_test.py": "depends on the CEF probe above (cloud/linux-cef)",
     "packages/provider-host/cli.mjs keychain-positive-setup": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
     "packages/provider-host/cli.mjs keychain-positive-test": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
 }
+
+
+def cef_blocked_here():
+    """True when this run's CEF probe gate reported BLOCKED_ENV (not FAIL)."""
+    cef = str(CEF.relative_to(ROOT))
+    return any(label.startswith(cef) and status == "BLOCKED_ENV" for label, status, _ in RESULTS)
 
 
 def expected_block(label):
@@ -340,9 +348,12 @@ def test():
                component(PROVIDER, "keychain-negative-test"),
                component(PROVIDER, "keychain-positive-test"),
                component(ZEN, "check"),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-manifest/manifest_accept_test.py"], build=True),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True,
+                   label="tools/axiosozo-project-reader/project_reader_test.py"),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True,
+                   label="tools/axiosozo-arrival/arrival_lsof_test.py"),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-manifest/manifest_accept_test.py"], build=True,
+                   label="tools/axiosozo-manifest/manifest_accept_test.py"),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
                run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
                # Handoff 3 contexts core: DOM-free logic and fixture repositories.
@@ -376,13 +387,24 @@ def test():
     else:
         print("FAIL: current coordinator build unavailable; lifecycle tests were not run against a stale executable")
         results.append(record("coordinator lifecycle tests (stale or missing build)", 1))
-    results.append(run([sys.executable, ROOT / "native/chromium-host/test_probe.py"], build=True))
+    if LINUX and cef_blocked_here():
+        # The probe itself reported that its pinned binary does not run on this
+        # host (macOS-only CEF probe); its unit/stream tests depend on it. They
+        # run here as soon as the probe supports Linux (cloud/linux-cef).
+        for name in ("test_probe.py", "stream_test.py"):
+            print(f"BLOCKED_ENV: native/chromium-host/{name} needs the CEF probe, which reported BLOCKED_ENV on this host", flush=True)
+            results.append(record(f"native/chromium-host/{name}", 2, blocked=True))
+        gate_summary("TEST")
+        return 1 if outcome(results) else 0
+    results.append(run([sys.executable, ROOT / "native/chromium-host/test_probe.py"], build=True,
+                       label="native/chromium-host/test_probe.py"))
     # Real CEF OSR fixture/input/lifecycle coverage is a component gate. A PASS
     # here still does not establish E1 in the Zen content area.
     if SUBROOT:
         print("SKIPPED_ENGINE_WORKSTREAM: native/chromium-host/stream_test.py (needs the volume-root CEF build)", flush=True)
     else:
-        results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True))
+        results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True,
+                           label="native/chromium-host/stream_test.py"))
     gate_summary("TEST")
     return 1 if outcome(results) else 0
 

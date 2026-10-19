@@ -10,7 +10,7 @@ GROUPS = {
     # ./dev check and ./dev test (coordinator, Node/Python suites, provider
     # host native fixtures: Secret Service helper and bubblewrap launcher).
     'test': ['build-essential', 'pkg-config', 'git', 'curl', 'xz-utils', 'libsecret-1-dev', 'bubblewrap',
-             'dbus', 'gnome-keyring', 'openssl', 'procps'],
+             'dbus', 'gnome-keyring', 'libglib2.0-bin', 'openssl', 'procps', 'lsof'],
     # Zen/Firefox from source (scripts/zen.py setup) with system clang/lld.
     # Firefox 156 needs clang/LLVM >= 19; noble's default clang is 18, so the
     # versioned LLVM 19 packages are used (scripts/zen_toolchain.linux_llvm).

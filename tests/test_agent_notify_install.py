@@ -201,7 +201,7 @@ class InstallTest(unittest.TestCase):
         self.io = MemoryOS()
         self.io.put(SOURCE, content=HELPER)
         self.io.put(str(BUILD_ROOT), kind='directory', mode=0o755)
-        self.store = SimpleNamespace(BUILD_ROOT=BUILD_ROOT, build_root=installer.storage.build_root, mounted=lambda: True)
+        self.store = SimpleNamespace(BUILD_ROOT=BUILD_ROOT, build_root=installer.storage.darwin_build_root, mounted=lambda: True)
         self.output = []
 
     def tearDown(self):
