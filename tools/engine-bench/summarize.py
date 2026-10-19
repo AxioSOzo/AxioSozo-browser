@@ -71,7 +71,7 @@ def main():
     parser.add_argument('--json')
     parser.add_argument('--run-id', default='')
     args = parser.parse_args()
-    benches, presenters = {}, []
+    benches, presenters, zens = {}, [], []
     for path in find(args.paths):
         try:
             data = json.loads(path.read_text())
@@ -82,6 +82,8 @@ def main():
             benches[key] = data
         elif str(data.get('schema', '')).startswith('axiosozo-presenter-'):
             presenters.append(data)
+        elif data.get('schema') == 'axiosozo-zen-bench-v1':
+            zens.append(data)
     columns = sorted(benches)
     lines = [f'# Engine bench summary{" — run " + args.run_id if args.run_id else ""}', '',
              'Component benchmark over the AXCF pipe (tools/engine-bench). Median over repetitions, [p95]. '
@@ -125,11 +127,22 @@ def main():
                 lines.append(f'| {key[:-3]} | ' + ' | '.join(fmt(r.get(key), '', 2) for r in results) + ' |')
         if p.get('error'):
             lines.append(f'Error: {p["error"]}')
+    for z in zens:
+        lines += ['', f'## Integrated (Zen app) — engine {z.get("engine")}: {z.get("status")}', '']
+        if z.get('reason'):
+            lines.append(f'Reason: {z["reason"]}')
+        app = z.get('app') or {}
+        if app:
+            lines.append(f'App: {app.get("source")} run {app.get("run_id")}, commit {app.get("repository_commit")}')
+        summary = z.get('summary') or {}
+        if summary:
+            lines += ['', '| Metric | median [p95] |', '| --- | --- |']
+            lines += [f'| {key} | {fmt(value, "", 2)} |' for key, value in summary.items()]
     Path(args.out).write_text('\n'.join(lines) + '\n')
     if args.json:
         Path(args.json).write_text(json.dumps(dict(run_id=args.run_id, benches={k: dict(status=v['status'], summary=v.get('summary'),
                                                     machine=v.get('machine'), ready=v.get('ready')) for k, v in benches.items()},
-                                                    presenters=presenters), indent=1) + '\n')
+                                                    presenters=presenters, zen=[dict(engine=z.get('engine'), status=z.get('status'), reason=z.get('reason'), summary=z.get('summary')) for z in zens]), indent=1) + '\n')
     print('\n'.join(lines))
 
 

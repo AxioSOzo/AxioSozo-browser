@@ -32,6 +32,8 @@ FIREFOX_PREFS = {
     'browser.safebrowsing.phishing.enabled': False, 'network.connectivity-service.enabled': False,
     'browser.startup.homepage_override.mstone': 'ignore', 'extensions.update.enabled': False,
     'app.normandy.enabled': False, 'browser.newtabpage.enabled': False,
+    # Headless runners have no GPU: allow Gecko's software WebGL so the WebGL candidate can be measured.
+    'webgl.force-enabled': True,
 }
 
 
@@ -50,7 +52,7 @@ def main():
     parser.add_argument('--browser', choices=['firefox', 'chromium'], required=True)
     parser.add_argument('--binary', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--iter', type=int, default=30)
+    parser.add_argument('--iter', type=int, default=60)
     parser.add_argument('--timeout', type=int, default=300)
     args = parser.parse_args()
     function = extract_function(PRESENTER.read_text(), 'bgraToRGBA')
@@ -69,6 +71,9 @@ def main():
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', str(len(page)))
+            # Cross-origin isolated, so performance.now() has fine resolution (Gecko: 1 ms otherwise).
+            self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+            self.send_header('Cross-Origin-Embedder-Policy', 'require-corp')
             self.end_headers()
             self.wfile.write(page)
 

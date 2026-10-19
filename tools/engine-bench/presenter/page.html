@@ -8,7 +8,7 @@
 <script>
 /*BGRA_TO_RGBA*/
 const SIZES = [[900, 650], [1800, 1300]];
-const ITER = Number(new URLSearchParams(location.search).get('iter') || 30);
+const ITER = Number(new URLSearchParams(location.search).get('iter') || 60);
 function frame(width, height) {
   const buffer = new ArrayBuffer(width * height * 4), px = new Uint8Array(buffer);
   for (let i = 0, p = 0; i < px.length; i += 4, p++) { const x = p % width, y = (p / width) | 0;
@@ -69,7 +69,7 @@ async function run() {
     const ctx = canvas.getContext('2d', { alpha: false });
     const flush = () => ctx.getImageData(0, 0, 1, 1);  // forces the pending upload to complete
     const band = Math.max(1, Math.round(h * 0.1));      // damage: a 10 % full-width band
-    r.copy_ms = await time(b => new Uint8Array(b.byteLength).set(new Uint8Array(b)), make);
+    r.alloc_copy_ms = await time(b => new Uint8Array(b.byteLength).set(new Uint8Array(b)), make);
     r.presenter_bgraToRGBA_ms = await time(bgraToRGBA, make);
     r.candidate_u32_fast_path_ms = await time(bgraToRGBAFast, make);
     const rgba = new ImageData(bgraToRGBA(make()), w, h);
@@ -92,6 +92,7 @@ async function run() {
     results.push(r);
   }
   return { schema: 'axiosozo-presenter-browser-v1', userAgent: navigator.userAgent, iterations: ITER,
+           crossOriginIsolated: self.crossOriginIsolated,
            hardwareConcurrency: navigator.hardwareConcurrency, results };
 }
 run().then(result => fetch('/result', { method: 'POST', body: JSON.stringify(result) }),

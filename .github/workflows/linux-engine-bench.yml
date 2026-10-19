@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: write
     env:
-      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-webkit
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,7 +88,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       AXIOSOZO_BUILD_ROOT: ${{ github.workspace }}/cef-src/.local/build
-      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-chromium
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-chromium
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,7 +170,7 @@ jobs:
     permissions:
       contents: write
     env:
-      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-presenter
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-presenter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,15 +202,95 @@ jobs:
           path: ${{ env.EVIDENCE_OUT }}/presenter-*.json
           retention-days: 30
 
+  # Integrated: fixtures in Zen tabs (Gecko now; Chromium/WebKit once their scripts/gui_engines
+  # plug-ins exist). Uses the newest successful linux-zen-build artifact (or ZEN_BUILD_RUN_ID);
+  # with none available the job records BLOCKED_ENV and passes.
+  zen:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # find and download the build artifact of another run
+    defaults:
+      run:
+        shell: bash
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-zen
+      ZEN_BUILD_RUN_ID: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Find a Linux Zen build artifact
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          run="$ZEN_BUILD_RUN_ID"
+          if [ -z "$run" ]; then
+            for id in $(gh api "repos/${{ github.repository }}/actions/workflows/linux-zen-build.yml/runs?status=success&per_page=20" --jq '.workflow_runs[].id'); do
+              if gh api "repos/${{ github.repository }}/actions/runs/$id/artifacts" --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and .expired==false) | .id' | grep -q .; then run=$id; break; fi
+            done
+          fi
+          echo "run_id=$run" >> "$GITHUB_OUTPUT"
+          if [ -z "$run" ]; then
+            echo '{"schema":"axiosozo-zen-bench-v1","status":"BLOCKED_ENV","reason":"no successful linux-zen-build run with an unexpired axiosozo-zen-linux-x86_64 artifact yet"}' > "$EVIDENCE_OUT/zen-bench-gecko.json"
+          fi
+          echo "build run: ${run:-none}" | tee "$EVIDENCE_OUT/source.txt"
+      - name: GUI packages (scripts/linux_packages.py gui)
+        if: steps.source.outputs.run_id != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui)
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        if: steps.source.outputs.run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: artifact
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Verify and unpack (./dev fetch-build)
+        if: steps.source.outputs.run_id != ''
+        run: ./dev fetch-build --from-dir artifact --run "${{ steps.source.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+      - name: Zen bench (Gecko tabs)
+        if: steps.source.outputs.run_id != ''
+        run: timeout 2400 python3 tools/engine-bench/zen_bench.py --engine gecko --app fetched --out "$EVIDENCE_OUT/gecko" --reps "$BENCH_REPS" 2>&1 | tail -n 40
+      - name: Zen bench (Chromium and WebKit tabs; BLOCKED_ENV until their GUI plug-ins exist)
+        if: steps.source.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          for engine in chromium webkit; do
+            timeout 1200 python3 tools/engine-bench/zen_bench.py --engine $engine --app fetched --out "$EVIDENCE_OUT/$engine" --reps "$BENCH_REPS" 2>&1 | tail -n 5 || true
+          done
+      - name: Keep evidence small
+        if: always()
+        run: find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-zen
+          path: ${{ env.EVIDENCE_OUT }}/**/zen-bench-*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
   summary:
     if: always()
-    needs: [webkit, chromium, presenter]
+    needs: [webkit, chromium, presenter, zen]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     env:
-      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-summary
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-summary
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -218,13 +298,13 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bench-*
-          path: ${{ github.workspace }}/../bench-artifacts
+          path: ${{ github.workspace }}/.local/bench-artifacts
       - name: Combined summary
         run: |
           mkdir -p "$EVIDENCE_OUT"
-          python3 tools/engine-bench/summarize.py "${{ github.workspace }}/../bench-artifacts" --out "$EVIDENCE_OUT/summary.md" \
+          python3 tools/engine-bench/summarize.py "${{ github.workspace }}/.local/bench-artifacts" --out "$EVIDENCE_OUT/summary.md" \
             --json "$EVIDENCE_OUT/summary.json" --run-id "${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '{"webkit":"${{ needs.webkit.result }}","chromium":"${{ needs.chromium.result }}","presenter":"${{ needs.presenter.result }}"}' > "$EVIDENCE_OUT/jobs.json"
+          echo '{"webkit":"${{ needs.webkit.result }}","chromium":"${{ needs.chromium.result }}","presenter":"${{ needs.presenter.result }}","zen":"${{ needs.zen.result }}"}' > "$EVIDENCE_OUT/jobs.json"
       - if: always()
         uses: ./.github/actions/publish-ci-results
         with:
