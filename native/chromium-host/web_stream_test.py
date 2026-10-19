@@ -80,7 +80,7 @@ def serve(tls=None):
 
 
 def run(interaction_timeout=15):
-    probe.check()
+    stream.require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-web-stream-', dir=probe.EVIDENCE))
     session, servers = None, []
     result = dict(status='FAIL', E1='NOT_TESTED', E2='NOT_TESTED', tests=[], started_at=time.time())
@@ -118,7 +118,11 @@ def run(interaction_timeout=15):
             def navigate(url, capture=None):
                 answer = completed('navigate', url=url)
                 assert answer['status'] == 'success', answer
-                return session.until(lambda kind, _: kind == 2, capture=capture)
+                # The first frame of a new document can precede its first paint; evidence
+                # frames are the first painted (non-uniform) frame of the new document.
+                # (/animate is one flat colour, so only evidence captures wait for content.)
+                return session.until(lambda kind, _: kind == 2 and (not capture or stream.painted(session.pixels)), 15,
+                                     capture=capture)
 
             navigate(origin + '/page', directory / 'web-page.png')
             session.until(lambda _, item: item.get('event') == 'title' and item.get('title') == 'web cross-origin-data') if not any(item.get('title') == 'web cross-origin-data' for item in session.events) else None
@@ -133,7 +137,10 @@ def run(interaction_timeout=15):
             completed('key', type='down', native_key_code=36, windows_key_code=13, modifiers=0, text='')
             completed('key', type='char', native_key_code=36, windows_key_code=13, modifiers=0, text='\r')
             session.until(lambda _, item: item.get('title') == 'post received')
-            session.until(lambda kind, _: kind == 2, capture=directory / 'post.png')
+            session.until(lambda kind, _: kind == 2 and stream.painted(session.pixels), 15, capture=directory / 'post.png')
+            if probe.IS_LINUX:
+                # The unstyled result page has an opaque white background (alpha 255), not transparency.
+                assert bytes(session.pixels[:4]) == b'\xff\xff\xff\xff', bytes(session.pixels[:4])
             assert main.submitted == ['value=WEB'], main.submitted
             result['tests'].append('native_input_edit_select_all_user_POST')
             navigate(origin + '/redirect')
@@ -175,6 +182,10 @@ def run(interaction_timeout=15):
             def since(mark, match):
                 seen = [item for item in session.events[mark:] if match(item)]
                 return seen[0] if seen else session.until(lambda _, item: match(item))
+
+            def session_wait(mark, match, seconds):
+                seen = [item for item in session.events[mark:] if match(item)]
+                return seen[0] if seen else session.until(lambda _, item: match(item), seconds)
             is_dialog = lambda item: item.get('event') == 'prompt' and item.get('kind') == 'dialog'
             # A blocked renderer may not paint before its alert: wait for the prompt, not a frame.
             mark = len(session.events)
@@ -197,10 +208,26 @@ def run(interaction_timeout=15):
             result['tests'].append('navigation_cancels_open_javascript_dialog_without_hang')
             # Right-click off any link: CEF reports the empty link/source URLs as NULL
             # userfree strings (E1 2026-09-30: freeing them hung the host).
-            mark = len(session.events)
-            for kind in ('down', 'up'):
-                completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1, mouse_leave=False)
-            menu = since(mark, lambda item: item.get('event') == 'prompt' and item.get('kind') == 'context_menu')
+            # Chromium drops input to a new document while it still holds the previous
+            # paint (same-origin paint holding). A host frame labelled with the new
+            # generation can still show the old content, so the right-click is repeated
+            # (at most 4 times, 2 s apart) until Chromium asks for its menu; the attempt
+            # count is recorded.
+            current = session.target['document_generation']
+            if not any(target['document_generation'] == current for target in session.frame_targets):
+                session.until(lambda kind, item: kind == 2 and item['target']['document_generation'] == current)
+            is_menu = lambda item: item.get('event') == 'prompt' and item.get('kind') == 'context_menu'
+            menu = None
+            for attempt in range(1, 5):
+                mark = len(session.events)
+                for kind in ('down', 'up'):
+                    completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1,
+                              mouse_leave=False)
+                with contextlib.suppress(TimeoutError):
+                    menu = since(mark, is_menu) if attempt == 4 else session_wait(mark, is_menu, 2)
+                if menu:
+                    break
+            result['context_menu_attempts'] = attempt
             assert menu['details']['link_url'] == '' and menu['details']['source_url'] == '', menu['details']
             assert completed('context_menu_command', prompt_id=menu['prompt_id'], command='dismiss', index=0)['status'] == 'success'
             assert completed('focus', focused=True)['status'] == 'success' and session.process.poll() is None
@@ -248,7 +275,10 @@ def run(interaction_timeout=15):
         if session:
             # Protocol events only (no pixels): the last few explain where it stopped.
             result['last_events'] = [{key: value for key, value in item.items() if key != 'target'}
-                                     for item in session.events[-12:]]
+                                     for item in session.events[-12:] if item.get('event') != 'heartbeat']
+            result['last_frame_targets'] = [dict(tab=target['tab_id'], doc=target['document_generation'])
+                                            for target in session.frame_targets[-8:]]
+            result['frames'] = session.frames
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if session:

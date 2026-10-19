@@ -2,13 +2,15 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // The single list of engines a tab can run in (docs/ideas/multi-engine-lineup.md).
-// Internal ids are technical engine names (`gecko`, `chromium`, later `webkit`);
-// UI labels are separate and friendly ("Firefox", "Chromium", "Safari"). Menus,
+// Internal ids are technical engine names (`gecko`, `chromium`, `webkit`);
+// UI labels are separate and friendly ("Firefox", "Chromium", "WebKit"). Menus,
 // tab markers and preference validation read this list instead of comparing
 // against "chromium", so adding an engine is one entry plus its presenter.
 //
 // This module only describes engines. It renders nothing and never starts an
 // engine: rendering, input and process code stay in the presenters.
+
+import { webkitAvailabilityFor } from "./WebKitEngineAdapter.sys.mjs";
 
 /** Pref that lists engines that are not available yet (disabled, with a reason) in menus. Developer use. */
 export const SHOW_UNAVAILABLE_PREF = "axiosozo.engines.showUnavailable";
@@ -44,9 +46,13 @@ const ENGINES = Object.freeze([
     available: window => (chromiumWebModeEnabled(window) ? yes : no("Chromium is not enabled in this browser")),
   }),
   Object.freeze({
-    id: "webkit", label: "Safari", devLabel: "WebKit", icon: `${ICON_BASE}engine-webkit.svg`,
-    experimental: true, contractValue: null, // not in context-v1 yet
-    available: () => no("not yet available"),
+    // "WebKit", not "Safari": on Linux this is WPE WebKit, which is not Safari.
+    id: "webkit", label: "WebKit", devLabel: "WebKit (WPE)", icon: `${ICON_BASE}engine-webkit.svg`,
+    // Not in context-v1 (its readers reject unknown engines): storing it needs a contract version.
+    experimental: true, contractValue: null,
+    // Linux x86_64, `axiosozo.engines.webkit.enabled`, the pinned host installed, fixture page only.
+    // macOS and other platforms say why it is unavailable (WebKitEngineAdapter.webkitAvailability).
+    available: window => webkitAvailabilityFor(window),
   }),
 ]);
 

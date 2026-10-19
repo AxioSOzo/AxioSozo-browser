@@ -15,6 +15,8 @@ python3 native/chromium-host/stream_security_test.py
 python3 native/chromium-host/web_stream_test.py
 ```
 
+On Linux (`linux64`, `linuxarm64`) the same commands work without the macOS wrapper; see "Linux" below.
+
 The root `./dev engine-probe` owns combined acceptance. Native compiler and signing commands have a ten-minute limit and report `BLOCKED_ENV` on timeout; they clean only their owned process groups. Every new run archives previous real logs and frames under `docs/evidence/cef-run-*`, and clears current images so a failed run cannot display stale evidence. The component's first setup downloads a pinned official macOS arm64 minimal archive, verifies its SHA256, and compiles our Objective-C++ C API host with Xcode. It uses the unchanged CEF scoped sandbox helper source from that archive. This avoids installing CMake or compiling the entire C++ wrapper. Build artifacts and profiles live in `$AXIOSOZO_BUILD_ROOT/cef`; the build root must be the mounted project APFS volume, default `/Volumes/AxioSozoBuild`. Compiler temporary files and module caches are overridden after `dev-external` to remain on that fresh volume. The verified legacy archive is copied and rechecked; older outputs stay in place. The host bundle ID is `dev.axiosozo.cef-probe`; it never sets the default browser or opens a personal profile.
 
 The process uses real CEF off-screen BGRA frames at 2× device scale and native input calls. It renders `tests/fixtures/engine.html`, types synthetic text, resizes, scrolls, navigates to another local GET URL and goes back, then closes through CEF before shutdown. PNGs are encoded directly from CEF `on_paint` bytes; they are actual render output, not screenshots of another browser. The process has no visible product window. This rendering test does not prove native IME, selection, clipboard, accessibility or UI integration in Zen.
@@ -209,3 +211,111 @@ bypass, personal-profile access, or system-Keychain mutation is implemented here
 An explicitly authorized user may respond to macOS themselves during an isolated
 fixture run. `web_stream_test.py --interaction-timeout 60` waits longer for that
 response; the flag itself is **not** authorization to access Keychain.
+
+## Linux (`linux64`, `linuxarm64`)
+
+The Linux host is the portable C++ core (`core/`) with a thin Linux layer
+(`linux/`), built with CMake against the pinned CEF minimal distribution
+(`upstreams.lock.json` → `cef.platforms`). It speaks the same cef-v1 protocol;
+`contracts/cef-v1.md` "Linux hosts" lists the differences. The macOS host
+(`host.mm`, `stream.inc`, …) is a separate build and is not affected.
+
+```sh
+# Ubuntu 24.04 packages (the same list as .github/workflows/linux-cef-host.yml)
+sudo apt-get install -y --no-install-recommends xvfb xauth cmake ninja-build g++ zlib1g-dev bzip2 curl openssl \
+  util-linux libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 libgbm1 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
+  libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core fonts-liberation
+# AXIOSOZO_BUILD_ROOT defaults to <checkout>/.build (as ./dev); any absolute directory outside /proc, /sys, /dev
+python3 native/chromium-host/probe.py setup            # download, sha256-verify, extract, CMake build
+python3 native/chromium-host/probe.py install-sandbox  # sudo: chrome-sandbox root:root 4755 (see Sandbox)
+python3 native/chromium-host/probe.py check            # build current + a usable sandbox, else BLOCKED_ENV
+python3 native/chromium-host/probe.py test-native      # transport, damage, a11y-core, core, exit watchdog
+python3 native/chromium-host/test_probe.py
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & export DISPLAY=:99   # or a real X/XWayland display
+python3 native/chromium-host/probe.py run              # E0
+python3 native/chromium-host/stream_test.py
+python3 native/chromium-host/stream_security_test.py
+python3 native/chromium-host/input_test.py
+python3 native/chromium-host/web_stream_test.py
+python3 native/chromium-host/damage_test.py
+node --test apps/browser/tests/cef-adapter.test.mjs    # Zen-side adapter/presenter (no CEF needed)
+```
+
+**Layout.** `setup` builds into `$AXIOSOZO_BUILD_ROOT/cef/`:
+- `cef_binary_…_linux64_minimal/`: the verified, extracted distribution.
+- `cmake-linux64/`: the build tree.
+- `linux64/`: the runtime. It holds `AxioCEFProbe`, `AxioCEFProbeHelper`, `libcef.so`
+  and the other runtime libraries (hard links), the resources, the en-US locale, a
+  copy of `chrome-sandbox`, `LICENSE.txt` and `CREDITS.html`.
+- `linux` → `linux64`: the alias that `./dev` exports as
+  `AXIOSOZO_CEF_BINARY=$AXIOSOZO_BUILD_ROOT/cef/linux/AxioCEFProbe`.
+
+`build-linux64.json` is the build fingerprint. CEF's `-Wl,-rpath,.` is replaced by
+`$ORIGIN`. The host uses the C API and links `libcef.so` directly;
+`libcef_dll_wrapper` is not built. GCC 13 with the distribution's `-Werror` flags is
+the reference compiler.
+
+**Sandbox.** The host never passes `--no-sandbox`.
+- Chromium uses its user-namespace sandbox when the kernel allows it. Ubuntu
+  23.10 and later restrict unprivileged user namespaces through AppArmor
+  (`kernel.apparmor_restrict_unprivileged_userns=1`), so there the SUID helper is
+  needed. `probe.py install-sandbox` makes the copied, pinned `chrome-sandbox`
+  root:root 4755. It is an explicit privileged step, never done by `setup`.
+- `check` reports BLOCKED_ENV when neither sandbox is usable.
+- E0 and `stream_test` read `/proc` and require that every renderer runs with
+  seccomp-bpf (`Seccomp: 2`) in its own PID namespace.
+- SUID-sandboxed processes are not dumpable, so their namespace links read as
+  "unreadable". With the SUID helper installed, they count as layer 1 = `suid`.
+
+**Display and environment.** The host gets only `PATH`, `TMPDIR=<profile>` and
+`HOME=<profile>`, plus `DISPLAY`/`XAUTHORITY` when set.
+- With a display, Chromium uses the X11 ozone backend, and page copy/paste uses the
+  desktop clipboard (XWayland works). Without one it uses the headless backend, and
+  the clipboard is process-local. A Wayland-only session therefore falls back to
+  headless.
+- The host passes no D-Bus address: Chromium logs D-Bus connection errors and uses
+  its "basic" password store. That is fine for fixture profiles. For the persistent
+  web profile it is still an open decision (libsecret/KWallet).
+- If `TMPDIR` is too deep for Chromium's process-singleton socket, the host uses
+  its own `/tmp/axio-cef-XXXXXX` (0700) and removes it on exit.
+
+**Input on Linux.**
+- `native_key_code` is the XKB keycode (evdev + 8). `windows_key_code` is Gecko's
+  `keyCode`, with a US-layout fallback for 0. Text arrives as char events.
+- The presenter routes shortcuts the Linux way:
+  - Ctrl is the accelerator.
+  - Ctrl+arrows, Ctrl+Backspace/Delete and Ctrl+Home/End stay with the page.
+  - Alt+Left/Right/Home go to history and home.
+  - Super chords go to the desktop or Zen.
+  - Modifier presses alone reach the page.
+- The presenter sends AltGr, NumLock, keypad, left/right and repeat flags.
+- With the host's `ime`, the presenter's transparent proxy editor runs in pipe mode
+  too, so GTK input methods, compose and dead keys work as in a Gecko field.
+- Mouse back/forward buttons are Gecko app commands (routed to the tab's history),
+  never clicks.
+- Touchpad (pixel) wheel deltas are `precise` and scroll at once. Wheel notches keep
+  Chromium's smooth scrolling.
+- Cursor changes arrive as CSS keywords on the presenter's canvas.
+
+Known limit: CEF derives the DOM `key` of keydown/keypress from
+`windows_key_code`, so AltGr characters report the base letter as `key`. The
+inserted text is correct.
+
+**Frame damage.** Linux pipe hellos negotiate `frame_damage`. Each frame then names
+the one rectangle that changed. The presenter converts and uploads only that
+rectangle (`diagnostics().uploadedPixelShare`). `damage_test.py` rebuilds every frame
+from damage alone and compares it with the full payload byte for byte.
+
+**CI.** `.github/workflows/linux-cef-host.yml` (`ubuntu-24.04`) runs everything above
+under Xvfb with the SUID sandbox. It publishes logs, result JSON and frame PNGs to
+the `ci-results` branch (`cloud_linux-cef/<run>-<attempt>-linux-ubuntu-24.04/`).
+`verdict.json` there fails the job unless every gate passed. A second job
+compile-checks the unchanged macOS host and the portable core against the pinned
+macOS headers.
+
+**Not covered on Linux:**
+- Zen embedding (E1/E2).
+- AT-SPI exposure of the mirrored accessibility tree.
+- Wayland-native clipboard.
+- The `linuxarm64` build: the pin is recorded, but nothing has been built yet.

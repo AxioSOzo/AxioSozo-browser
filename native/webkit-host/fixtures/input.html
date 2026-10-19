@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>wk</title>
+<!-- SYNTHETIC LOCAL WEBKIT INPUT FIXTURE - NO ACCOUNTS. Served as /engine.html by input_test.py only. -->
+<style>html,body{margin:0}body{height:4000px;background:linear-gradient(#ffffff,#3366aa)}#hit{position:fixed;left:0;top:0;width:400px;height:200px;background:#cc3333}#t{position:fixed;left:20px;top:260px;width:300px;height:40px;font:20px monospace}#drag{position:fixed;left:0;top:340px;width:400px;height:200px;background:#33aa33}a{position:fixed;left:500px;top:20px;font:24px sans-serif}</style>
+<div id="hit"></div><input id="t" autocomplete="off"><div id="drag"></div><a href="?page=2">link</a>
+<script>
+const s={d:0,u:0,b:'',dr:0,k:[],w:0};const t=document.querySelector('#t');
+function out(){document.title=`wk|d=${s.d}|u=${s.u}|b=${s.b}|dr=${s.dr}|sy=${Math.round(scrollY)}|w=${Math.round(s.w)}|dpr=${devicePixelRatio}|vw=${innerWidth}|v=${t.value}|f=${document.activeElement===t?1:0}|k=${s.k.join(',')}|`;}
+addEventListener('mousedown',e=>{s.d++;s.b+=e.button;out();},true);
+addEventListener('mouseup',()=>{s.u++;out();},true);
+addEventListener('mousemove',e=>{if(e.buttons&1){s.dr++;out();}},true);
+addEventListener('wheel',e=>{s.w+=e.deltaY;out();},{passive:true});
+addEventListener('scroll',out);addEventListener('resize',out);
+addEventListener('keydown',e=>{s.k.push(e.key);if(s.k.length>8)s.k.shift();out();},true);
+addEventListener('contextmenu',e=>e.preventDefault());
+t.addEventListener('input',out);t.addEventListener('focus',out);addEventListener('load',out);
+</script></html>

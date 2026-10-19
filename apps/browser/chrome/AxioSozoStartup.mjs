@@ -248,10 +248,15 @@ async function initialize() {
   const adapter = new GeckoEngineAdapter(window);
   // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
   // (`./dev engine-probe`) adds its own explicit toolbar action.
-  const engineProbe = installEngineProbeControls(window, adapter, {
+  const chromiumProbe = installEngineProbeControls(window, adapter, {
     Presenter: CEFPresenter,
     onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
+  // Linux with a configured WebKit host: three-engine switching over the Chromium probe.
+  // Null everywhere else (macOS included), and then the Chromium probe is used as before.
+  const engineProbe = guarded("webkit engine", () => optionalModule("WebKitEngineControls.sys.mjs")?.installWebKitEngine(window, adapter, {
+    chromium: chromiumProbe, onFailure: () => console.error("AxioSozo WebKit switch unavailable; Firefox tab retained"),
+  })) ?? chromiumProbe;
   // The engine glyph on hovered tabs; the selected tab's glyph is the switch.
   const engineTabs = engineProbe ? guarded("engine tabs", () => optionalModule("EngineTabs.sys.mjs")?.installEngineTabs(window, { engineProbe })) : null;
   // Bottom space switcher; axiosozo.ui.spaceSwitcher.enabled=false is stock Zen.

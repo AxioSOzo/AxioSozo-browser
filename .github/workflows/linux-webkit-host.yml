@@ -1,0 +1,100 @@
+# WPE WebKit engine host on real Linux: pinned Debian 13 packages in a pinned
+# debian:13 container, native build, then probe.py test (unit, real-frame stream,
+# input, damage, security, process cleanup, bubblewrap sandbox observation).
+# Results (logs, JSON, frame PNGs) go to the ci-results branch for cloud sessions.
+#
+# CI environment settings (not product changes): GitHub's ubuntu-24.04 host sets
+# kernel.apparmor_restrict_unprivileged_userns=1 and Docker's defaults (seccomp,
+# AppArmor, masked /proc paths) stop bubblewrap from creating its user/pid namespaces
+# and mounting /proc. The job relaxes exactly those on the runner and the container
+# so WebKit's own sandbox can run as it does on a Debian desktop. The sandbox itself
+# is never disabled (WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS is never set; the host
+# refuses to start if it is). The `sandbox-probe` job records which setting is needed.
+name: linux-webkit-host
+on:
+  push:
+    branches: [cloud/webkit-host]
+    paths:
+      - native/webkit-host/**
+      - '!native/webkit-host/upstream/**'
+      - contracts/engine-stream-v1.md
+      - tests/fixtures/engine.html
+      - upstreams.lock.json
+      - .github/workflows/linux-webkit-host.yml
+      - .github/actions/publish-ci-results/**
+
+concurrency:
+  group: linux-webkit-host-${{ github.ref }}
+  cancel-in-progress: false   # queue: every pushed head keeps its evidence
+
+env:
+  # upstreams.lock.json webkit.ci_image
+  IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+
+jobs:
+  sandbox-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-sandbox
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe bubblewrap under each container setting
+        run: |
+          set -u
+          mkdir -p "$EVIDENCE_OUT"
+          docker pull -q "$IMAGE"
+          docker run --name bw "$IMAGE" sh -c 'rm -f /etc/apt/apt.conf.d/docker-clean; apt-get update -qq && apt-get install -y -qq --no-install-recommends bubblewrap >/dev/null && useradd -m -u 1500 axio'
+          docker commit bw bwimage >/dev/null
+          probe='setpriv --reuid=axio --regid=axio --init-groups bwrap --ro-bind / / --unshare-user --unshare-pid --dev /dev --proc /proc --die-with-parent /bin/true'
+          result() { # name, host userns sysctl, docker options...
+            name=$1; shift
+            if docker run --rm "$@" bwimage sh -c "$probe" >"$EVIDENCE_OUT/$name.log" 2>&1; then r=PASS; else r=FAIL; fi
+            printf '{"setting":"%s","apparmor_restrict_unprivileged_userns":%s,"docker_options":"%s","bwrap":"%s"}\n' \
+              "$name" "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" "$*" "$r" | tee -a "$EVIDENCE_OUT/sandbox-probe.jsonl"
+          }
+          result default-host-default-docker
+          result default-host-unconfined --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          result userns-host-default-docker
+          result userns-host-seccomp-only --security-opt seccomp=unconfined
+          result userns-host-seccomp-apparmor --security-opt seccomp=unconfined --security-opt apparmor=unconfined
+          result userns-host-unconfined --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+
+  wpe-debian13:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-wpe
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner info
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { echo "runner_os=$(lsb_release -ds)"; echo "kernel=$(uname -r)"; echo "nproc=$(nproc)"; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build and test the WPE host in debian:13 (pinned)
+        run: |
+          docker pull -q "$IMAGE"
+          start=$(date +%s)
+          set +e
+          docker run --rm --shm-size=1g \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$EVIDENCE_OUT:/out" "$IMAGE" sh /src/native/webkit-host/ci/container_test.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/job.json"
+          tail -n 60 "$EVIDENCE_OUT/test.log" 2>/dev/null
+          exit $code
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
