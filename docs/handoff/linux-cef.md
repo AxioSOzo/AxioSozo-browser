@@ -4,9 +4,23 @@ Status: **WIP, NOT_VERIFIED on Linux.** This session ran on the owner's macOS la
 (remote isolation fell back to local), so no Linux build or CEF run happened locally.
 GitHub Actions, on the hosted ubuntu-24.04 runner, did download and verify the pinned
 linux64 archive. The first CMake configure failed (`project()` lacked C); the fix is
-commit `fa9f968`. Its CI run (39291055281) was still in progress at handoff. Its result
-is unknown here. Read it before you trust anything below. Nothing in this branch is
-E0/E1/E2 evidence yet.
+commit `fa9f968`. Its CI run (39291055281) then failed compiling `core/host_core.cc` with
+GCC 13. The errors were inside libstdc++ (`memory`, `shared_ptr_atomic.h`).
+
+**Cause (diagnosed, not yet fixed):** `core/a11y_bridge.inc` is included inside
+`namespace axio::host { … }`, and it `#include`s `<cstddef>`, `../a11y_core.hpp` (which pulls
+in `<memory>`, `<unordered_map>` and more) and the CEF accessibility/values headers. Clang on
+macOS accepted this only because those headers were already included. **First fix:** move
+these includes to the top of `host_core.cc`, outside the namespace:
+- `include/capi/cef_accessibility_handler_capi.h`
+- `include/capi/cef_values_capi.h`
+- `../a11y_core.hpp`
+- `<cstddef>`
+- `<functional>`
+
+Then delete them from `a11y_bridge.inc`, and check `delegation.inc`, `input.inc` and
+`handlers.inc` for any other `#include`. After that, expect further GCC `-Werror` findings.
+Nothing in this branch is E0/E1/E2 evidence yet.
 
 Machine used for this session: Darwin 27.0.0 arm64 (MacBook Pro, 10 cores, 16 GiB RAM,
 127 GiB free on the data volume). That is not a Linux cloud machine. The next session
