@@ -1,0 +1,30 @@
+# Evaluation of a current upstream WPE WebKit release (ADR 004): discover the
+# official checksum, then (once pinned in upstreams.lock.json webkit.upstream)
+# build it in the pinned debian:13 image with a cached ccache and run the host
+# test suite against it. Not a product build; evidence only.
+name: linux-webkit-upstream
+on:
+  push:
+    branches: [cloud/webkit-host]
+    paths:
+      - native/webkit-host/upstream/**
+      - .github/workflows/linux-webkit-upstream.yml
+
+env:
+  IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-discover
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh native/webkit-host/upstream/discover.sh "$EVIDENCE_OUT"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
