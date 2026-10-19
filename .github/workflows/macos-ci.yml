@@ -1,0 +1,152 @@
+# macOS regression lane on GitHub-hosted macos-15 (arm64). The same gate list
+# (scripts/macos_ci.py) runs on the branch under test ("head") and on the
+# pre-program baseline `dev` ("base"); `compare` fails only on regressions
+# (PASS on dev, not passing on head). No Zen build, no GUI app, no provider
+# client, no live model call, no secrets. See docs/MACOS_CI.md.
+name: macOS CI
+
+on:
+  push:
+    branches: [cloud/macos-ci, claude/macos-ci-regression-lane-8xric1]
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
+  pull_request:
+    branches: [cloud/integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lane:
+    name: lane (${{ matrix.side }})
+    runs-on: macos-15
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [head, base]
+    permissions:
+      contents: write  # publish-ci-results
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Outside every checkout (storage.py refuses build roots inside tracked source).
+      AXIOSOZO_BUILD_ROOT: /Users/runner/axiosozo-build
+      CARGO_TERM_COLOR: never
+      EVIDENCE_OUT: ${{ github.workspace }}/../macos-ci-${{ matrix.side }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # base side needs origin/dev
+          persist-credentials: false
+
+      - name: Checkout under test
+        id: target
+        run: |
+          if [ "${{ matrix.side }}" = base ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" origin/dev
+            # The baseline has no macOS CI build root. Its probe.py macOS code is
+            # identical to head's except for that mode (diff in docs/MACOS_CI.md), so
+            # head's probe.py builds dev's CEF host sources with the same commands.
+            cp native/chromium-host/probe.py "$RUNNER_TEMP/base/native/chromium-host/probe.py"
+            dir="$RUNNER_TEMP/base"
+          else
+            dir="$GITHUB_WORKSPACE"
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          git -C "$dir" log -1 --format='%H %s'
+
+      - name: Runner resources
+        run: |
+          sw_vers
+          uname -a
+          sysctl -n hw.ncpu hw.memsize
+          df -h / "$HOME"
+          xcodebuild -version
+          xcrun clang++ --version
+          /usr/bin/python3 --version
+          mkdir -p "$AXIOSOZO_BUILD_ROOT"
+          chmod 700 "$AXIOSOZO_BUILD_ROOT"
+
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json ci_node)
+        run: /usr/bin/python3 scripts/macos_ci.py node --dest "$AXIOSOZO_BUILD_ROOT/ci-tools" | tail -1 >> "$GITHUB_PATH"
+
+      - name: Rust 1.94.0 (rustup, signed channel manifest)
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.94.0
+          rustc --version
+          node --version
+
+      - name: CEF macosarm64 archive cache (sha256-verified by probe.py)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /Users/runner/axiosozo-build/cef/cef-minimal.tar.bz2
+          key: cef-macosarm64-5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777
+
+      - name: Lane
+        run: |
+          /usr/bin/python3 scripts/macos_ci.py run --side "${{ matrix.side }}" \
+            --checkout "${{ steps.target.outputs.dir }}" --out "$EVIDENCE_OUT"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat "$EVIDENCE_OUT/summary.txt" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lane results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-lane-${{ matrix.side }}
+          path: ${{ env.EVIDENCE_OUT }}
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: macos-${{ matrix.side }}
+
+  compare:
+    needs: lane
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write  # publish-ci-results
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../macos-ci-compare
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-lane-head
+          path: ${{ runner.temp }}/head
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-lane-base
+          path: ${{ runner.temp }}/base
+      - name: Compare head with dev
+        run: |
+          python3 scripts/macos_ci.py compare --head "$RUNNER_TEMP/head" --base "$RUNNER_TEMP/base" --out "$EVIDENCE_OUT"
+      - name: Summary
+        if: always()
+        run: cat "$EVIDENCE_OUT/compare.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: macos-compare

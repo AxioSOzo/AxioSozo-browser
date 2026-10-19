@@ -327,5 +327,51 @@ class LinuxBuildRoot(unittest.TestCase):
                 storage.ensure()
 
 
+class MacosCiBuildRoot(unittest.TestCase):
+    """The macOS CI build root (docs/MACOS_CI.md) exists only on GitHub Actions
+    runners without the owner's layout; anywhere else it is refused or inactive."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='storage-macos-ci-')
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name).resolve()
+        for target in [patch.object(storage.platform, 'system', return_value='Darwin'),
+                       patch.object(storage, 'MOUNT_SHARED', self.home / '.local/bin/mount-dev-storage'),
+                       patch.object(storage.Path, 'exists', autospec=True, side_effect=self.exists)]:
+            target.start()
+            self.addCleanup(target.stop)
+        self.present = set()
+        self.env = {'AXIOSOZO_MACOS_CI': '1', 'GITHUB_ACTIONS': 'true', 'AXIOSOZO_BUILD_ROOT': '/Users/runner/b'}
+
+    def exists(self, path):
+        return str(path) in self.present
+
+    def check(self, **changes):
+        env = {**self.env, **changes}
+        with patch.dict(os.environ, {k: v for k, v in env.items() if v is not None}, clear=True):
+            return storage.macos_ci()
+
+    def test_runner_without_owner_layout_uses_the_explicit_root(self):
+        self.assertTrue(self.check())
+
+    def test_inactive_unless_requested_on_macos(self):
+        self.assertFalse(self.check(AXIOSOZO_MACOS_CI=None))
+        with patch.object(storage.platform, 'system', return_value='Linux'):
+            self.assertFalse(self.check())
+
+    def test_owner_layout_always_refuses_the_mode(self):
+        for path in ['/Volumes/T9', str(self.home / '.local/bin/mount-dev-storage'),
+                     str(self.home / '.local/bin/dev-external')]:
+            self.present = {path}
+            with self.subTest(path=path), self.assertRaisesRegex(RuntimeError, 'owner macOS layout'):
+                self.check()
+
+    def test_outside_actions_or_without_a_root_is_refused(self):
+        with self.assertRaisesRegex(RuntimeError, 'only for GitHub Actions'):
+            self.check(GITHUB_ACTIONS=None)
+        with self.assertRaisesRegex(RuntimeError, 'explicit AXIOSOZO_BUILD_ROOT'):
+            self.check(AXIOSOZO_BUILD_ROOT=None)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
