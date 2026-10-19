@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, BLANK_IDENTITY } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, keyboardRoute, addressLabel } from '../chrome/CEFPresenter.sys.mjs';
+import { CEFPresenter, keyboardRoute, addressLabel, loopbackURL } from '../chrome/CEFPresenter.sys.mjs';
 import { validFavicon, MAX_FAVICON_LENGTH } from '../chrome/CEFEngineAdapter.sys.mjs';
 import { installEngineProbeControls } from '../chrome/EngineProbeControls.sys.mjs';
 
@@ -382,6 +382,39 @@ test('the Not secure badge shows only while the address bar describes the active
     off(); callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
     assert.equal(shown(), true, `back after ${name}`);
   }
+  await presenter.dispose();
+});
+
+test('loopback pages are potentially trustworthy: no Not secure badge, as in Firefox and Chromium', async () => {
+  for (const url of ['http://127.0.0.1:8080/a', 'http://127.255.0.9/', 'http://localhost:3000/', 'http://app.localhost/', 'http://[::1]:9/'])
+    assert.equal(loopbackURL(url), true, url);
+  for (const url of ['http://127.0.0.1.example/', 'http://128.0.0.1/', 'http://localhost.example/', 'http://10.0.0.1/', 'not a url'])
+    assert.equal(loopbackURL(url), false, url);
+  const z = zenWindow();
+  const identity = { before(node) { this.badge = node; } };
+  z.win.document.getElementById = id => (id === 'identity-box' ? identity : null);
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  callbacks.onEvent({ event: 'url', url: 'http://127.0.0.1:4321/feel.html' });
+  assert.equal(identity.badge.hasAttribute('insecure'), false, 'loopback');
+  callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
+  assert.equal(identity.badge.hasAttribute('insecure'), true, 'a remote http page');
+  await presenter.dispose();
+});
+
+test('a Chromium page title is a content title, so Zen puts it in the window title like a Firefox page', async () => {
+  const z = zenWindow();
+  const labels = [];
+  z.win.gBrowser._setTabLabel = (tab, label, options) => { labels.push([label, options?.isContentTitle]); tab.label = label; };
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  assert.deepEqual(labels.at(-1), ['example.com/start', false], 'an address-only label is not a content title');
+  callbacks.onEvent({ event: 'title', title: 'Page title' });
+  assert.deepEqual(labels.at(-1), ['Page title', true]);
+  callbacks.onEvent({ event: 'error', code: 'load_failed', native_code: -105 });
+  assert.equal(labels.at(-1)[1], true, "a Firefox-style error page title is the document's title too");
   await presenter.dispose();
 });
 

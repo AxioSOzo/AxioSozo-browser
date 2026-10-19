@@ -49,9 +49,11 @@ from gui_engines.chromium import ChromiumEngine, ENGINE_STATE
 ROOT = Path(__file__).resolve().parents[1]
 FEEL = ROOT / 'tests/fixtures/cef-zen-feel.html'
 ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
+# Address-bar focus checks run last: the Linux parent process has a known WebRender crash around
+# address-bar input (owned by cloud/linux-platform), and a crash ends the session.
 WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
-                 'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'shortcuts', 'ime', 'middle_click',
-                 'history', 'beforeunload', 'to_gecko', 'host_kill')
+                 'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
+                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_gecko', 'urlbar_chromium')
 SCALE_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'selection', 'wheel', 'to_gecko')
 FIXTURE_SCENARIOS = ('launch', 'chrome', 'fixture_roundtrip', 'fixture_host_kill')
 HOST = 'AxioCEFProbe --stream'
@@ -250,6 +252,15 @@ class CEFZenHarness(gui_test.Harness):
         self.gecko_tab = None      # index of the Gecko baseline tab
         self.cef_tab = None        # index of the Chromium tab
 
+    def launch(self, session, executable, profile):
+        super().launch(session, executable, profile)
+        # Zen's dialogs over a Chromium page must stay open for the user (and for this test):
+        # Marionette's default user-prompt handler ("dismiss and notify") would answer them first.
+        self.marionette.call('WebDriver:DeleteSession')
+        self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
+        self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
+        self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
+
     # -- state and geometry ---------------------------------------------------------------
     def web(self):
         return self.chrome_script(WEB_STATE)
@@ -336,6 +347,7 @@ class CEFZenHarness(gui_test.Harness):
                     submenu: submenu && !submenu.hidden ? [...submenu.querySelectorAll('menuitem')].map(entry =>
                       entry.getAttribute('label')) : null};
         """), 'tab context menu open', timeout=15)
+        time.sleep(0.6)
         self.screenshot(name + '-menu', settle=False)
         picked = self.chrome_script("""
             const [label] = arguments;
@@ -401,9 +413,13 @@ class CEFZenHarness(gui_test.Harness):
         native = state['native']
         if native.get('renderPath') != 'native-osr-bgra' or not native.get('pipeFallback'):
             raise AssertionError('unexpected Linux render path: ' + repr(native))
-        self.wait(lambda: 'AxioSozo feel' in self.window_title(), 'X11 window title from the Chromium page')
+        try:
+            self.wait(lambda: 'AxioSozo feel' in self.window_title(), 'X11 window title from the Chromium page', timeout=10)
+        except AssertionError as error:
+            raise AssertionError(f'{error}; X11 title is {self.window_title()!r}') from None
         time.sleep(1)
         self.screenshot('02-chromium')
+        self.gate('window_title', 'PASS', x11_title=self.window_title())
         self.gate('e1_render_in_content_area', 'PASS', screenshot='02-chromium.png', seconds=seconds,
                   surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'))
         return {'menu': menu, 'seconds': seconds, 'gecko_page': gecko, 'state': {k: state[k] for k in
@@ -645,11 +661,18 @@ class CEFZenHarness(gui_test.Harness):
         self.click_at(*AT['color'])
         time.sleep(1.5)
         self.screenshot('09-color')
+        # Chromium's chooser opens below the swatch (page x 520..753, y 156..): click near its
+        # top-left (white) corner of the saturation/value area.
+        self.click_at(528, 166)
+        try:
+            picked = self.wait_page(lambda page: page['col'] != '#336699', 'a colour picked in Chromium\'s chooser', timeout=8)['col']
+        except AssertionError:
+            picked = None
+        self.screenshot('09-color-picked')
         self.key('Escape')
-        page = self.page()
-        out['color'] = {'value': page['col'], 'state': self.web()['notice']}
-        self.gate('color_popup', 'NOT_VERIFIED', screenshot='09-color.png', observed=out['color'],
-                  note='no Zen-drawn colour chooser exists for Chromium tabs; see screenshot for what Chromium shows')
+        out['color'] = {'picked': picked, 'value': self.page()['col']}
+        self.gate('color_popup', 'PASS' if picked else 'EXPERIMENTAL', screenshots=['09-color.png', '09-color-picked.png'],
+                  observed=out['color'], note="Chromium's own colour chooser, composited into the engine frame (no Zen/GTK dialog)")
         if self.matrix['select_popup']['status'] == 'FAIL':
             raise AssertionError('select popup: ' + out['select'])
         return out
@@ -662,6 +685,7 @@ class CEFZenHarness(gui_test.Harness):
         self.click_at(self.char_x(7), SEL_TOP, button=3)
         menu = self.wait(lambda: (lambda m: m if m['open'] else None)(self.chrome_script(CONTEXT_MENU)),
                          'Zen-drawn context menu for the Chromium selection', timeout=15)
+        time.sleep(0.8)  # the menu is its own X window; let it paint
         self.screenshot('10-context-menu', settle=False)
         actions = [item['action'] for item in menu['items']]
         if 'copy' not in actions or 'open_in_firefox' not in actions:
@@ -674,6 +698,7 @@ class CEFZenHarness(gui_test.Harness):
         self.click_at(*AT['blank'], button=3)
         page_menu = self.wait(lambda: (lambda m: m if m['open'] else None)(self.chrome_script(CONTEXT_MENU)),
                               'page context menu', timeout=15)
+        time.sleep(0.8)
         self.screenshot('10-page-menu', settle=False)
         self.key('Escape')
         self.wait(lambda: not self.chrome_script(CONTEXT_MENU)['open'], 'context menu closed by Escape', timeout=10)
@@ -726,8 +751,34 @@ class CEFZenHarness(gui_test.Harness):
         self.gate('find_in_page', 'PASS', screenshot='12-find.png', findbar=found)
         return {'opened': bar, 'found': found, 'closed': closed}
 
+    ZOOM_KEYS = """
+        return [...document.querySelectorAll('key')].filter(k => ['0', '=', '+', '-'].includes(k.getAttribute('key'))
+          || ['VK_ADD', 'VK_SUBTRACT'].includes(k.getAttribute('keycode'))).map(k => ({id: k.id, key: k.getAttribute('key'),
+          modifiers: k.getAttribute('modifiers'), command: k.getAttribute('command'), oncommand: k.getAttribute('oncommand'),
+          disabled: k.getAttribute('disabled')}));"""
+
+    def zoom_cycle(self):
+        """Ctrl+= then Ctrl+0 on the selected tab: (zoomed, reset) page zoom factors."""
+        self.click_at(*AT['blank'])
+        base = self.page()['z'][0]
+        self.key('ctrl+equal')
+        zoomed = self.wait_page(lambda page: page['z'][0] > base * 1.05, 'Ctrl+= zooms', timeout=10)['z'][0]
+        self.key('ctrl+0')
+        try:
+            reset = self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, 'Ctrl+0 resets', timeout=8)['z'][0]
+        except AssertionError:
+            reset = self.page()['z'][0]
+        return {'base': base, 'zoomed': zoomed, 'after_ctrl_0': reset}
+
     def scenario_zoom(self):
         self.require_chromium()
+        self.select_tab(self.gecko_tab)
+        gecko = self.zoom_cycle()
+        self.chrome_script('FullZoom.reset(); return true;')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        self.result['zoom_keys'] = self.chrome_script(self.ZOOM_KEYS)
+        self.result['zoom_gecko'] = gecko
         self.click_at(*AT['blank'])
         base = self.page()['z']
         self.key('ctrl+equal')
@@ -745,28 +796,29 @@ class CEFZenHarness(gui_test.Harness):
                   urlbar_zoom_button=button)
         return {'base': base, 'zoomed': zoomed, 'button': button, 'reset': reset, 'smaller': smaller}
 
+    def ensure_chromium(self, name):
+        """The Chromium test tab selected and presented in Chromium (through the tab menu if needed)."""
+        if self.web()['tabIndex'] != self.cef_tab:
+            self.select_tab(self.cef_tab)
+        if not self.chromium_ready():
+            if self.web()['engine'] != 'chromium':
+                self.tab_menu('Open in Chromium', name)
+            self.wait(lambda: self.chromium_ready(), 'the test tab presented in Chromium', timeout=60)
+        return self.web()
+
     def scenario_shortcuts(self):
-        self.require_chromium()
+        self.ensure_chromium('20-to-chromium')
         out = {}
         self.click_at(*AT['blank'])
         key_before = self.page()['k']
-        self.key('ctrl+l')
-        out['ctrl_l'] = self.wait(lambda: self.web()['urlbarFocused'], 'Ctrl+L focuses the address bar', timeout=10)
-        self.screenshot('14-ctrl-l', settle=False)
-        self.key('Escape')
-        self.key('Escape')
-        out['escape_focus'] = self.wait(lambda: (lambda s: s['focus'] if not s['urlbarFocused'] and (
-            s['focus'] == 'canvas' or str(s['focus']).startswith('proxy')) else None)(self.web()),
-                                        'Escape returns focus to the Chromium page', timeout=10)
         tabs = self.web()['tabs']
         self.key('ctrl+t')
         out['ctrl_t'] = self.wait(lambda: (lambda s: s['tabs'] if s['tabs'] == tabs + 1 else None)(self.web()), 'Ctrl+T opens a tab', timeout=10)
-        time.sleep(0.5)
+        time.sleep(0.8)
         self.key('ctrl+w')
         out['ctrl_w'] = self.wait(lambda: (lambda s: s['tabs'] if s['tabs'] == tabs else None)(self.web()), 'Ctrl+W closes it', timeout=10)
-        if self.web()['tabIndex'] != self.cef_tab:
-            out['ctrl_w_selected'] = self.web()['tabIndex']
-            self.select_tab(self.cef_tab)
+        out['selected_after_ctrl_w'] = self.web()['tabIndex']
+        self.ensure_chromium('20-to-chromium')
         self.click_at(*AT['blank'])
         self.key('ctrl+Tab')
         out['ctrl_tab'] = self.wait(lambda: (lambda s: s['tabIndex'] if s['tabIndex'] != self.cef_tab else None)(self.web()),
@@ -779,11 +831,49 @@ class CEFZenHarness(gui_test.Harness):
         loads = self.page()['l']
         self.key('F5')
         out['f5'] = self.wait_page(lambda page: page['l'] == loads + 1, 'F5 reloads the Chromium page', timeout=20)['l']
-        out['page_saw_chrome_keys'] = self.page()['k'] not in (key_before, '') and any(
-            self.page()['k'].startswith(prefix) for prefix in ('C:l', 'C:t', 'C:w'))
-        self.gate('shortcut_ownership', 'PASS' if not out['page_saw_chrome_keys'] else 'FAIL', screenshot='14-ctrl-l.png',
-                  checked=['Ctrl+L', 'Escape', 'Ctrl+T', 'Ctrl+W', 'Ctrl+Tab', 'Ctrl+Shift+Tab', 'F5', 'Ctrl+F (find)', 'Ctrl+=/-/0 (zoom)',
-                           'Alt+Left/Right (history)'], details=out)
+        self.click_at(*AT['blank'])
+        loads = self.page()['l']
+        self.key('ctrl+r')
+        out['ctrl_r'] = self.wait_page(lambda page: page['l'] == loads + 1, 'Ctrl+R reloads the Chromium page', timeout=20)['l']
+        last = self.page()['k']
+        out['page_last_key'] = last
+        out['page_saw_chrome_keys'] = last != key_before and any(last.startswith(p) for p in ('C:t:', 'C:w:', 'C:Tab:', 'C:r:', ':F5:'))
+        self.gate('shortcut_ownership', 'FAIL' if out['page_saw_chrome_keys'] else 'PASS',
+                  checked=['Ctrl+T', 'Ctrl+W', 'Ctrl+Tab', 'Ctrl+Shift+Tab', 'F5', 'Ctrl+R', 'Ctrl+F (find)', 'Ctrl+=/-/0 (zoom)',
+                           'Alt+Left (history)', 'Ctrl+L (urlbar_*)'], details=out)
+        if out['page_saw_chrome_keys']:
+            raise AssertionError('the page received a Zen shortcut: ' + last)
+        return out
+
+    def urlbar_focus(self, engine):
+        """Ctrl+L focuses Zen's address bar over the page; Escape gives focus back to the page. No typing."""
+        self.click_at(*AT['blank'])
+        self.key('ctrl+l')
+        focused = self.wait(lambda: self.web()['urlbarFocused'], f'Ctrl+L focuses the address bar over {engine}', timeout=10)
+        self.screenshot(f'21-ctrl-l-{engine}', settle=False)
+        self.key('Escape')
+        time.sleep(0.4)
+        self.key('Escape')
+        def back():
+            state = self.web()
+            if state['urlbarFocused']:
+                return None
+            if engine == 'gecko':
+                return state['focus'] or 'browser'
+            return state['focus'] if state['focus'] == 'canvas' or str(state['focus']).startswith('proxy') else None
+        returned = self.wait(back, f'Escape returns focus to the {engine} page', timeout=10)
+        return {'focused': focused, 'returned': returned}
+
+    def scenario_urlbar_gecko(self):
+        self.select_tab(self.gecko_tab)
+        out = self.urlbar_focus('gecko')
+        self.gate('ctrl_l_gecko_baseline', 'PASS', **out)
+        return out
+
+    def scenario_urlbar_chromium(self):
+        self.ensure_chromium('22-to-chromium')
+        out = self.urlbar_focus('chromium')
+        self.gate('ctrl_l_escape', 'PASS', screenshot='21-ctrl-l-chromium.png', **out)
         return out
 
     def scenario_ime(self):

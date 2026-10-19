@@ -20,6 +20,17 @@ const ERROR_ICONS = { certificate_error: "chrome://global/skin/icons/warning.svg
 // Tab state Gecko's hidden about:blank browser would otherwise overwrite.
 const TAB_STATE = ["image", "busy", "progress"];
 
+/**
+ * Loopback hosts are potentially trustworthy origins (W3C Secure Contexts §3.2): neither
+ * Firefox nor Chromium marks them "Not secure", so a Chromium tab does not either.
+ */
+export function loopbackURL(value) {
+  let host;
+  try { host = new URL(value).hostname; } catch { return false; }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]"
+    || /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/u.test(host);
+}
+
 /** Firefox's tab label for a page without a title: its address without the scheme. */
 export function addressLabel(url) {
   if (!transferableURL(url)) return "";
@@ -572,7 +583,7 @@ export class CEFPresenter {
   }
   #updateBadge(record = this.active) {
     if (!this.badge || !record || this.active !== record) return;
-    const insecure = record.latestURL?.startsWith("http:") && this.#urlbarShowsPage();
+    const insecure = record.latestURL?.startsWith("http:") && !loopbackURL(record.latestURL) && this.#urlbarShowsPage();
     this.badge.toggleAttribute("insecure", !!insecure);
   }
 
@@ -943,10 +954,14 @@ export class CEFPresenter {
   }
   /** The tab label: Firefox's error-page title while an error page shows, else the page title, else its address. */
   #labelTitle(record) { return record.errorTitle || record.title || addressLabel(record.latestURL); }
-  #setLabel(record) { this.#setTabLabel(record.tab, this.#labelTitle(record)); }
-  #setTabLabel(tab, title) {
+  #setLabel(record) {
+    // Firefox puts a tab's label in the window title only when it is a document title
+    // (an error page's title counts); an address-only label leaves just the brand.
+    this.#setTabLabel(record.tab, this.#labelTitle(record), !!(record.errorTitle || record.title));
+  }
+  #setTabLabel(tab, title, isContentTitle = true) {
     const gBrowser = this.window.gBrowser;
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title);
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title, { isContentTitle });
     else tab.label = title;
   }
   // ---- Tab icon and throbber ---------------------------------------------------
