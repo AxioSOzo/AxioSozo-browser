@@ -124,8 +124,33 @@ export function fitCEFRenderSurface({ width, height, device_scale }, { maxBytes 
 const BUILD_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?$/u;
 const CEF_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+$/u;
 
-export function validCEFSessionRuntime(root, session, geckoProfile) {
-  if (typeof root !== "string" || !BUILD_ROOT.test(root)
+/** `ready.platform` labels of the pinned CEF distributions (contracts/cef-v1.md). */
+export const CEF_PLATFORMS = Object.freeze(["macosarm64", "linux64", "linuxarm64"]);
+const linuxPlatform = platform => platform === "linux64" || platform === "linuxarm64";
+/**
+ * The host label this Gecko build must see, from Services.appinfo.OS and XPCOMABI
+ * ("x86_64-gcc3", "aarch64-gcc3"); null when no pinned host exists. macOS has the
+ * one arm64 host whatever the ABI, exactly as before.
+ */
+export function expectedCEFPlatform(os, abi) {
+  if (os === "Darwin") return "macosarm64";
+  const cpu = typeof abi === "string" ? abi.split("-")[0] : "";
+  if (os === "Linux") return cpu === "x86_64" ? "linux64" : (cpu === "aarch64" ? "linuxarm64" : null);
+  return null;
+}
+// Linux has no project volume: the build root is any absolute, normalized directory
+// ($AXIOSOZO_BUILD_ROOT or <checkout>/.build), never a kernel pseudo file system.
+function validLinuxRoot(root) {
+  if (typeof root !== "string" || root.length > 1024 || !root.startsWith("/")) return false;
+  const parts = root.slice(1).split("/");
+  return parts.every(part => /^[A-Za-z0-9._-]{1,255}$/u.test(part) && part !== "." && part !== "..")
+    && !["proc", "sys", "dev"].includes(parts[0]);
+}
+const validBuildRoot = (root, platform) => linuxPlatform(platform) ? validLinuxRoot(root)
+  : typeof root === "string" && BUILD_ROOT.test(root);
+
+export function validCEFSessionRuntime(root, session, geckoProfile, platform = "macosarm64") {
+  if (!validBuildRoot(root, platform)
       || typeof session !== "string" || typeof geckoProfile !== "string") return false;
   const prefix = `${root}/runtime/`;
   if (!session.startsWith(prefix)) return false;
@@ -135,10 +160,42 @@ export function validCEFSessionRuntime(root, session, geckoProfile) {
     && geckoProfile === `${session}/gecko`;
 }
 
-/** The CEF root is the build root itself, or the volume that directly contains it. */
-export function validCEFRoot(root, cefRoot) {
-  return typeof root === "string" && typeof cefRoot === "string" && BUILD_ROOT.test(root) && CEF_ROOT.test(cefRoot)
+/** The CEF root is the build root itself, or the volume (Linux: directory) that directly contains it. */
+export function validCEFRoot(root, cefRoot, platform = "macosarm64") {
+  const cefRootValid = linuxPlatform(platform) ? validLinuxRoot(cefRoot) && cefRoot !== "/"
+    : typeof cefRoot === "string" && CEF_ROOT.test(cefRoot);
+  return typeof root === "string" && typeof cefRoot === "string" && validBuildRoot(root, platform) && cefRootValid
     && (root === cefRoot || root.slice(0, root.lastIndexOf("/")) === cefRoot);
+}
+
+/**
+ * The only host executables Zen spawns. macOS: the signed app bundle. Linux: the
+ * runtime directory probe.py setup writes (`cef/<platform>/`), or its `cef/linux`
+ * alias, beside libcef.so and the SUID chrome-sandbox.
+ */
+export function cefBinaryPaths(cefRoot, platform = "macosarm64") {
+  if (linuxPlatform(platform)) return [`${cefRoot}/cef/${platform}/AxioCEFProbe`, `${cefRoot}/cef/linux/AxioCEFProbe`];
+  return [`${cefRoot}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`];
+}
+
+const DISPLAY_VALUE = /^[A-Za-z0-9._/-]{0,200}:[0-9]{1,5}(?:\.[0-9]{1,3})?$/u;
+/**
+ * The complete environment of a host process: no inherited variables, secrets or
+ * personal paths. macOS keeps exactly PATH and TMPDIR. Linux adds HOME = the owned
+ * profile (Chromium's NSS database, fonts cache and dot-directories stay inside it)
+ * and the X display (X11 ozone: clipboard shared with the desktop, also via XWayland).
+ * `env(name)` reads Zen's own environment.
+ */
+export function cefHostEnvironment(profile, platform = "macosarm64", env = () => "") {
+  const environment = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: profile };
+  if (!linuxPlatform(platform)) return environment;
+  environment.HOME = profile;
+  const display = env("DISPLAY"), authority = env("XAUTHORITY");
+  if (typeof display === "string" && DISPLAY_VALUE.test(display)) {
+    environment.DISPLAY = display;
+    if (validLinuxRoot(authority)) environment.XAUTHORITY = authority;
+  }
+  return environment;
 }
 
 // Trackpad phases as reported by the engine-view component's NSEvent monitor.
@@ -334,12 +391,17 @@ export class CEFHostConnection {
   #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
     shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
-    now = () => Date.now(), observers = globalThis.Services?.obs ?? null }) {
+    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64" }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
-    if (surface && (!surface.endpoint || ![60, 120].includes(surface.frameRate))) throw new Error("INVALID_CEF_BOOTSTRAP");
+    if (!CEF_PLATFORMS.includes(platform)) throw new Error("INVALID_CEF_BOOTSTRAP");
+    // The IOSurface path (engine-surface-v1) exists on macOS only.
+    if (surface && (platform !== "macosarm64" || !surface.endpoint || ![60, 120].includes(surface.frameRate))) {
+      throw new Error("INVALID_CEF_BOOTSTRAP");
+    }
     if (!["fixture", "web"].includes(browsingMode)) throw new Error("INVALID_CEF_MODE");
     if (!id(instance) || !(browsingMode === "web" ? validWebOrigin(identity) : validFixtureOrigin(identity))) throw new Error("INVALID_CEF_BOOTSTRAP");
     this.browsingMode = browsingMode; this.shared = shared; this.instance = instance; this.identity = identity;
+    this.platform = platform;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
@@ -610,7 +672,7 @@ export class CEFHostConnection {
     const web = this.browsingMode === "web", capabilities = value.capabilities, surface = !!this.#endpoint;
     if (this.#ready || this.status !== "starting" || value.cef !== CEF_VERSION || value.chromium !== CHROMIUM_VERSION
         || value.runtime_cef !== CEF_VERSION.split("+")[0] || value.runtime_chromium !== CHROMIUM_VERSION
-        || value.engine_instance !== this.instance || value.platform !== "macosarm64"
+        || value.engine_instance !== this.instance || value.platform !== this.platform
         || value.render_path !== (surface ? RENDER_PATH_SURFACE : RENDER_PATH_PIPE) || value.sandbox_configured !== true
         // Surface mode must be exactly what the hello negotiated; the pipe never claims it.
         || (surface ? capabilities?.surface !== true || capabilities?.external_begin_frame !== this.#endpoint.externalBeginFrames
@@ -1152,14 +1214,15 @@ export function chromiumHost() {
 async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
+  const platform = expectedCEFPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI);
   const root = Services.env.get("AXIOSOZO_BUILD_ROOT");
   const session = Services.env.get("AXIOSOZO_SESSION_RUNTIME");
   const command = Services.env.get("AXIOSOZO_CEF_BINARY");
   // The CEF host is built once at the volume root; a named sub build root
   // (e.g. /Volumes/AxioSozoBuild/workstation) shares it.
   const cefRoot = Services.env.get("AXIOSOZO_CEF_ROOT") || root;
-  if (!validCEFRoot(root, cefRoot) || command !== `${cefRoot}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`
-      || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path)
+  if (!platform || !validCEFRoot(root, cefRoot, platform) || !cefBinaryPaths(cefRoot, platform).includes(command)
+      || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path, platform)
       || !(browsingMode === "web"
         ? Services.env.get("AXIOSOZO_ENGINE_SWITCHING") === "1" && origin === BLANK_IDENTITY
         : browsingMode === "fixture" && origin === Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") && validFixtureOrigin(origin))) {
@@ -1175,7 +1238,7 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   // GPU surface path (engine-surface-v1): the endpoint exists before the host is
   // spawned, so the host can connect before CEF starts. Without the engine-view
   // component this build uses the BGRA pipe fallback, and says so.
-  const service = engineSurfaceService();
+  const service = platform === "macosarm64" ? engineSurfaceService() : null;
   let endpoint = null;
   try { endpoint = service?.createEndpoint(true) ?? null; } catch { endpoint = null; }
   if (!endpoint) {
@@ -1185,7 +1248,8 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   let process;
   try {
     process = await Subprocess.call({ command, arguments: ["--stream", profile, profile],
-      environmentAppend: false, environment: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: profile }, stderr: "pipe" });
+      environmentAppend: false, environment: cefHostEnvironment(profile, platform, name => Services.env.get(name)),
+      stderr: "pipe" });
   } catch (error) {
     try { endpoint?.close(); } catch {}
     if (browsingMode !== "web") await IOUtils.remove(profile, { recursive: true });
@@ -1198,7 +1262,8 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
-    shared: browsingMode === "web", surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
+    shared: browsingMode === "web", platform,
+    surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
   try { return await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
 }

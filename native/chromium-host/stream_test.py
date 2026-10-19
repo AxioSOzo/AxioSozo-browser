@@ -54,6 +54,13 @@ def read_packet(pipe, deadline):
     return kind, metadata, read_exact(pipe, size, deadline)
 
 
+def painted(bgra):
+    """True when a BGRA frame has content: not every sampled pixel has the same value
+    (a document's first, not yet painted frame is one flat colour)."""
+    step = 4 * 211  # a prime stride samples across rows and columns
+    return len({bytes(bgra[i:i + 4]) for i in range(0, len(bgra) - 3, step)}) > 1
+
+
 def png(path, width, height, bgra):
     # Lossless encoding of actual OnPaint bytes, not generated/simulated evidence.
     rgba = bytearray(bgra)
@@ -118,6 +125,7 @@ class Session:
                     if self.target is None or target['tab_id'] == self.target['tab_id']:
                         self.target = target
             else:
+                self.pixels = pixels
                 self.frames += 1
                 self.frame_targets.append(item['target'])
                 self.command('frame_ack', target=item['target'], frame_id=item['frame_id'])

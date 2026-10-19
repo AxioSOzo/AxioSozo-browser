@@ -118,7 +118,9 @@ def run(interaction_timeout=15):
             def navigate(url, capture=None):
                 answer = completed('navigate', url=url)
                 assert answer['status'] == 'success', answer
-                return session.until(lambda kind, _: kind == 2, capture=capture)
+                # The first frame of a new document can precede its first paint; evidence
+                # frames are the first painted (non-uniform) frame of the new document.
+                return session.until(lambda kind, _: kind == 2 and stream.painted(session.pixels), 15, capture=capture)
 
             navigate(origin + '/page', directory / 'web-page.png')
             session.until(lambda _, item: item.get('event') == 'title' and item.get('title') == 'web cross-origin-data') if not any(item.get('title') == 'web cross-origin-data' for item in session.events) else None
@@ -133,7 +135,7 @@ def run(interaction_timeout=15):
             completed('key', type='down', native_key_code=36, windows_key_code=13, modifiers=0, text='')
             completed('key', type='char', native_key_code=36, windows_key_code=13, modifiers=0, text='\r')
             session.until(lambda _, item: item.get('title') == 'post received')
-            session.until(lambda kind, _: kind == 2, capture=directory / 'post.png')
+            session.until(lambda kind, _: kind == 2 and stream.painted(session.pixels), 15, capture=directory / 'post.png')
             assert main.submitted == ['value=WEB'], main.submitted
             result['tests'].append('native_input_edit_select_all_user_POST')
             navigate(origin + '/redirect')

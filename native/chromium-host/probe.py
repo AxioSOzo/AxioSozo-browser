@@ -442,9 +442,23 @@ def link_or_copy(source, target):
         shutil.copy2(source, target)
 
 
+def linux_alias():
+    """`<build root>/cef/linux` -> `<linux64|linuxarm64>`: the architecture-neutral path
+    ./dev exports as AXIOSOZO_CEF_BINARY; the adapter accepts both spellings."""
+    alias = BASE / 'linux'
+    if alias.is_symlink() and os.readlink(alias) == LINUX_ARCH:
+        return
+    if alias.is_symlink():
+        alias.unlink()
+    elif alias.exists():
+        raise RuntimeError(f'FAIL: {alias} exists and is not the runtime alias; refusing to replace it')
+    alias.symlink_to(LINUX_ARCH, target_is_directory=True)
+
+
 def linux_setup():
     linux_host_check()
     BASE.mkdir(parents=True, exist_ok=True)
+    linux_alias()
     pin = LINUX_PINS[LINUX_ARCH]
     if not ARCHIVE.exists() or ARCHIVE.stat().st_size != pin['bytes']:
         run_command(['curl', '--fail', '--location', '--max-time', '1800', '--speed-time', '30',
@@ -494,13 +508,17 @@ def read_int(path):
         return None
 
 
+def suid_helper_installed():
+    helper = APP / 'chrome-sandbox'
+    if not helper.exists():
+        return False
+    info = helper.stat()
+    return info.st_uid == 0 and info.st_gid == 0 and (info.st_mode & 0o7777) == 0o4755
+
+
 def linux_sandbox_status():
     """Which Chromium layer-1 sandbox this machine can provide. Read-only."""
-    helper = APP / 'chrome-sandbox'
-    suid = False
-    if helper.exists():
-        info = helper.stat()
-        suid = info.st_uid == 0 and info.st_gid == 0 and (info.st_mode & 0o7777) == 0o4755
+    suid = suid_helper_installed()
     status = dict(suid_helper_installed=suid,
                   apparmor_restrict_unprivileged_userns=read_int('/proc/sys/kernel/apparmor_restrict_unprivileged_userns'),
                   unprivileged_userns_clone=read_int('/proc/sys/kernel/unprivileged_userns_clone'),
@@ -616,6 +634,17 @@ def linux_descendants(root):
     return found
 
 
+def linux_process_type(argv):
+    """Chromium process type from /proc/<pid>/cmdline. Chromium rewrites its process title
+    (setproctitle) into one space-separated string, so `--type=` is searched in the whole
+    command line, not only as a separate argument."""
+    text = b' '.join(argv).decode(errors='replace')
+    found = re.search(r'(?:^|\s)--type=([A-Za-z0-9_-]+)', text)
+    if found:
+        return found.group(1)
+    return Path(text.split(' ', 1)[0]).name
+
+
 def linux_process_snapshot(root):
     """Sandbox state of this host's own processes (process type and kernel status only)."""
     own_user_ns = os.readlink('/proc/self/ns/user')
@@ -626,8 +655,7 @@ def linux_process_snapshot(root):
             status = Path(f'/proc/{pid}/status').read_text()
         except OSError:
             continue
-        kind = 'browser' if pid == root else next((arg[7:].decode() for arg in argv if arg.startswith(b'--type=')),
-                                                  Path(argv[0].decode(errors='replace')).name)
+        kind = 'browser' if pid == root else linux_process_type(argv)
         fields = dict(line.split(':', 1) for line in status.splitlines() if ':' in line)
         user_ns = None
         with contextlib.suppress(OSError):
@@ -643,10 +671,14 @@ def linux_process_snapshot(root):
                        suid_helper_process=any(row['type'] == 'chrome-sandbox' for row in rows))
     # Layer 1 (Chromium docs/linux/sandboxing.md): the namespace sandbox puts renderers in a
     # new user namespace; the SUID helper keeps our user namespace but a new PID namespace.
+    # SUID-sandboxed processes are not dumpable, so their namespace links are unreadable;
+    # they count as SUID only when the installed root:root 4755 helper is the one available.
     if any(row['user_namespace'] == 'new' for row in renderers):
         observation['layer1'] = 'namespace'
-    elif observation['suid_helper_process'] or (observation['renderer_pid_namespace']
-                                                and all(row['user_namespace'] == 'same' for row in renderers)):
+    elif observation['suid_helper_process'] or (
+            observation['renderer_pid_namespace'] and all(row['user_namespace'] == 'same' for row in renderers)) or (
+            observation['renderer_pid_namespace'] and suid_helper_installed()
+            and all(row['user_namespace'] in ('same', 'unreadable') for row in renderers)):
         observation['layer1'] = 'suid'
     else:
         observation['layer1'] = 'unknown' if observation['renderer_pid_namespace'] else 'none'

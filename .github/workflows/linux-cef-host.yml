@@ -115,6 +115,14 @@ jobs:
         run: |
           set -o pipefail
           timeout 600 python3 native/chromium-host/web_stream_test.py 2>&1 | tee "$EVIDENCE_OUT/web.log"
+      - name: Zen-side adapter/presenter node tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --version | tee "$EVIDENCE_OUT/node-tests.log"
+          node --test apps/browser/tests/cef-adapter.test.mjs apps/browser/tests/chromium-tabs.test.mjs \
+            apps/browser/tests/chromium-browser-ui.test.mjs apps/browser/tests/engine-surface.test.mjs 2>&1 \
+            | tail -n 30 | tee -a "$EVIDENCE_OUT/node-tests.log"
       - name: macOS-only surface test reports its skip
         continue-on-error: true
         run: python3 native/chromium-host/surface_test.py 2>&1 | tee "$EVIDENCE_OUT/surface.log"
@@ -122,6 +130,34 @@ jobs:
         if: always()
         run: |
           ps -eo pid,ppid,pgid,stat,etime,args | grep -E "AxioCEFProbe|chrome-sandbox" | grep -v grep | tee "$EVIDENCE_OUT/leftover-processes.txt" || true
+      - name: Verdict (every gate's last JSON line must say PASS)
+        id: verdict
+        if: always()
+        run: |
+          python3 - "$EVIDENCE_OUT" <<'PY'
+          import json, pathlib, sys
+          out = pathlib.Path(sys.argv[1])
+          def last_status(name):
+              path = out / name
+              if not path.exists():
+                  return 'MISSING'
+              for line in reversed(path.read_text(errors='replace').splitlines()):
+                  try:
+                      value = json.loads(line)
+                  except ValueError:
+                      continue
+                  if isinstance(value, dict) and 'status' in value:
+                      return value['status']
+              return 'NO_RESULT'
+          gates = {name: last_status(name + '.log') for name in ('check', 'test-native', 'e0', 'stream', 'security', 'input', 'web')}
+          node = (out / 'node-tests.log').read_text(errors='replace') if (out / 'node-tests.log').exists() else ''
+          gates['node-tests'] = 'PASS' if '# fail 0' in node else 'FAIL'
+          probe_tests = (out / 'test-probe.log').read_text(errors='replace') if (out / 'test-probe.log').exists() else ''
+          gates['test-probe'] = 'PASS' if any(line.startswith('OK') for line in probe_tests.splitlines()) else 'FAIL'
+          verdict = 'PASS' if all(value == 'PASS' for value in gates.values()) else 'FAIL'
+          (out / 'verdict.json').write_text(json.dumps(dict(verdict=verdict, gates=gates), indent=2) + '\n')
+          print(json.dumps(dict(verdict=verdict, gates=gates)))
+          PY
       - name: Collect evidence
         if: always()
         run: |
@@ -140,6 +176,9 @@ jobs:
           name: linux-cef-evidence-${{ matrix.runner }}
           path: ${{ github.workspace }}/.local/ci-evidence
           retention-days: 14
+      - name: Fail the job unless every gate passed
+        if: always()
+        run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); print(v); sys.exit(v['verdict']!='PASS')"
 
   macos-compile:
     runs-on: macos-15

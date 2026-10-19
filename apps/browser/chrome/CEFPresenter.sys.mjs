@@ -66,12 +66,70 @@ const MAC_KEYS = {
   Home:0x73, PageUp:0x74, Delete:0x75, End:0x77, PageDown:0x79,
   ArrowLeft:0x7b, ArrowRight:0x7c, ArrowDown:0x7d, ArrowUp:0x7e,
 };
+// Linux: XKB keycodes (evdev KEY_* of linux/input-event-codes.h + 8). CEF's Linux
+// translator turns native_key_code into the DOM `code` (KeycodeConverter) and
+// windows_key_code into the keydown `key`; text always arrives as a char event.
+const LINUX_KEYS = {
+  Escape:9, Digit1:10, Digit2:11, Digit3:12, Digit4:13, Digit5:14, Digit6:15, Digit7:16, Digit8:17,
+  Digit9:18, Digit0:19, Minus:20, Equal:21, Backspace:22, Tab:23, KeyQ:24, KeyW:25, KeyE:26, KeyR:27,
+  KeyT:28, KeyY:29, KeyU:30, KeyI:31, KeyO:32, KeyP:33, BracketLeft:34, BracketRight:35, Enter:36,
+  ControlLeft:37, KeyA:38, KeyS:39, KeyD:40, KeyF:41, KeyG:42, KeyH:43, KeyJ:44, KeyK:45, KeyL:46,
+  Semicolon:47, Quote:48, Backquote:49, ShiftLeft:50, Backslash:51, KeyZ:52, KeyX:53, KeyC:54, KeyV:55,
+  KeyB:56, KeyN:57, KeyM:58, Comma:59, Period:60, Slash:61, ShiftRight:62, NumpadMultiply:63, AltLeft:64,
+  Space:65, CapsLock:66, F1:67, F2:68, F3:69, F4:70, F5:71, F6:72, F7:73, F8:74, F9:75, F10:76,
+  NumLock:77, ScrollLock:78, Numpad7:79, Numpad8:80, Numpad9:81, NumpadSubtract:82, Numpad4:83,
+  Numpad5:84, Numpad6:85, NumpadAdd:86, Numpad1:87, Numpad2:88, Numpad3:89, Numpad0:90, NumpadDecimal:91,
+  IntlBackslash:94, F11:95, F12:96, IntlRo:97, Convert:100, KanaMode:101, NonConvert:102, NumpadEnter:104,
+  ControlRight:105, NumpadDivide:106, PrintScreen:107, AltRight:108, Home:110, ArrowUp:111, PageUp:112,
+  ArrowLeft:113, ArrowRight:114, End:115, ArrowDown:116, PageDown:117, Insert:118, Delete:119,
+  NumpadEqual:125, Pause:127, NumpadComma:129, Lang1:130, Lang2:131, IntlYen:132, MetaLeft:133,
+  MetaRight:134, ContextMenu:135, F13:191, F14:192, F15:193, F16:194, F17:195, F18:196, F19:197,
+  F20:198, F21:199, F22:200, F23:201, F24:202,
+};
+// Windows/DOM virtual key codes of the US layout by physical key, for the keys Gecko
+// reports with keyCode 0 (characters its layout tables have no ASCII key for).
+const LINUX_VKEY_FALLBACK = { Semicolon:186, Equal:187, Comma:188, Minus:189, Period:190, Slash:191,
+  Backquote:192, BracketLeft:219, Backslash:220, BracketRight:221, Quote:222, IntlBackslash:226 };
+export function linuxWindowsKeyCode(event) {
+  if (event.keyCode) return Math.min(255, event.keyCode);
+  const code = String(event.code ?? "");
+  if (/^Key[A-Z]$/u.test(code)) return code.charCodeAt(3);
+  if (/^Digit[0-9]$/u.test(code)) return code.charCodeAt(5);
+  return LINUX_VKEY_FALLBACK[code] ?? 0;
+}
+/** Keyboard conventions of this Zen build: "linux", or "mac" (also the default without Services). */
+export function keyboardPlatform(win = globalThis) {
+  try { return win?.Services?.appinfo?.OS === "Linux" ? "linux" : "mac"; } catch { return "mac"; }
+}
 // Command chords that edit or move within page text stay with the page.
 const PAGE_CHORDS = new Set(["arrowleft", "arrowright", "arrowup", "arrowdown", "backspace", "delete", "home", "end"]);
-export function cefModifiers(event) {
-  return (event.getModifierState?.("CapsLock") ? 1 : 0) | (event.shiftKey ? 2 : 0)
+const MODIFIER_KEYS = new Set(["control", "shift", "alt", "altgraph", "meta", "capslock", "numlock"]);
+export function cefModifiers(event, platform = "mac") {
+  const flags = (event.getModifierState?.("CapsLock") ? 1 : 0) | (event.shiftKey ? 2 : 0)
     | (event.ctrlKey ? 4 : 0) | (event.altKey ? 8 : 0) | (event.metaKey ? 128 : 0)
     | ((event.buttons & 1) ? 16 : 0) | ((event.buttons & 4) ? 32 : 0) | ((event.buttons & 2) ? 64 : 0);
+  if (platform !== "linux") return flags;
+  // EVENTFLAG_NUM_LOCK_ON, IS_KEY_PAD, IS_LEFT, IS_RIGHT, ALTGR_DOWN, IS_REPEAT.
+  return flags | (event.getModifierState?.("NumLock") ? 256 : 0) | (event.location === 3 ? 512 : 0)
+    | (event.location === 1 ? 1024 : 0) | (event.location === 2 ? 2048 : 0)
+    | (event.getModifierState?.("AltGraph") ? 4096 : 0) | (event.repeat === true ? 8192 : 0);
+}
+/**
+ * Linux shortcut heuristic (pipe mode has no key verdicts): Ctrl is the accelerator
+ * (Ctrl+T/W/L/Tab/PageUp… stay with Zen; word movement and deletion stay with the
+ * page), Alt+Left/Right/Home are history and home, Super chords belong to the
+ * desktop. Modifier presses alone and AltGr characters reach the page.
+ */
+function linuxKeyboardRoute(event, editing) {
+  if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
+  const key = event.key.toLowerCase();
+  if (MODIFIER_KEYS.has(key)) return Object.hasOwn(LINUX_KEYS, event.code) ? "cef" : "unsupported";
+  const accel = event.ctrlKey && !event.altKey && !event.metaKey;
+  if (accel && ((["c", "v", "x", "a"].includes(key) && !event.shiftKey) || key === "z")) return editing ? "edit" : "unsupported";
+  if (event.metaKey || (event.ctrlKey && !PAGE_CHORDS.has(key))
+      || (event.altKey && !event.ctrlKey && ["arrowleft", "arrowright", "home"].includes(key))
+      || /^F\d{1,2}$/u.test(event.key)) return "chrome";
+  return Object.hasOwn(LINUX_KEYS, event.code) ? "cef" : "unsupported";
 }
 /**
  * The fixed shortcut heuristic. With a host that reports key verdicts, surface
@@ -79,7 +137,8 @@ export function cefModifiers(event) {
  * unconsumed ones to Zen (the remote-tab reply model); `native` marks a key
  * whose macOS keyCode the engine-view component supplied.
  */
-export function keyboardRoute(event, { editing = false, native = false } = {}) {
+export function keyboardRoute(event, { editing = false, native = false, platform = "mac" } = {}) {
+  if (platform === "linux") return linuxKeyboardRoute(event, editing);
   if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
   const key = event.key.toLowerCase();
   if (event.metaKey && ["c", "v", "x", "a", "z"].includes(key)) return editing ? "edit" : "unsupported";
@@ -89,8 +148,12 @@ export function keyboardRoute(event, { editing = false, native = false } = {}) {
       || /^F\d{1,2}$/u.test(event.key)) return "chrome";
   return Object.hasOwn(MAC_KEYS, event.code) || native ? "cef" : "unsupported";
 }
-export function cefKey(event, type) {
-  if (keyboardRoute(event) !== "cef") throw new Error("UNSUPPORTED_KEY");
+export function cefKey(event, type, platform = "mac") {
+  if (keyboardRoute(event, { platform }) !== "cef") throw new Error("UNSUPPORTED_KEY");
+  if (platform === "linux") {
+    return { type, native_key_code: LINUX_KEYS[event.code], windows_key_code: linuxWindowsKeyCode(event),
+      modifiers: cefModifiers(event, platform), text: event.key.length <= 2 ? event.key : "" };
+  }
   return { type, native_key_code: MAC_KEYS[event.code], windows_key_code: Math.min(255, event.keyCode || 0),
     modifiers: cefModifiers(event), text: event.key.length <= 2 ? event.key : "" };
 }
@@ -163,6 +226,8 @@ export class CEFPresenter {
     this.onEngineChange = onEngineChange; this.onTargetEvent = onTargetEvent; this.onFailure = onFailure;
     this.onSwitchStart = onSwitchStart;
     this.browsingMode = browsingMode;
+    // Keyboard conventions and native key codes of this build ("linux" or "mac").
+    this.keyPlatform = keyboardPlatform(win);
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = [];
     this.restoreURLs = new WeakMap(); this.restoreTitles = new WeakMap();
     this.onTabClose = event => {
@@ -993,6 +1058,7 @@ export class CEFPresenter {
     // the component adds only what DOM events lose (docs/design/engine-view-gecko.md §7).
     this.#pointerInput(record);
     if (record.native) { this.#surfaceKeyboard(record); this.#surfaceFocus(record); }
+    else if (this.#pipeIME(record)) { this.#pipeKeyboard(record, record.overlay); this.#surfaceFocus(record); }
     else this.#pipeKeyboard(record);
     // Chromium asks for its menu natively (run_context_menu); Zen draws it via ChromiumBrowserUI.
     this.#listen(record, "contextmenu", event => { event.preventDefault(); });
@@ -1002,6 +1068,9 @@ export class CEFPresenter {
     const point = event => this.#point(record, event);
     for (const type of ["pointerdown", "pointerup", "pointermove"]) this.#listen(record, type, event => {
       if (!event.isTrusted || !record.committed) return;
+      // Linux back/forward buttons (X11 buttons 8/9) are Gecko app commands that the
+      // wrapped BrowserCommands.back/forward already route to this tab; never a click.
+      if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
       event.preventDefault();
@@ -1066,8 +1135,11 @@ export class CEFPresenter {
       const scale = event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? record.adapter.surface.height : 1);
       dx = -event.deltaX * scale; dy = -event.deltaY * scale;
     }
+    // Linux (no native description): Gecko reports touchpad scrolling in pixels and
+    // wheel notches in lines, so pixel deltas are the precise ones.
+    const precise = this.keyPlatform === "linux" && !native ? event.deltaMode === 0 : !!native?.precise;
     const phases = features.wheelPhases ? { phase:wheelPhase(native?.phase), momentum_phase:wheelPhase(native?.momentumPhase),
-      precise:!!native?.precise } : {};
+      precise } : {};
     this.#coalesce(record, "wheel", { ...position, ...phases }, { delta_x:dx, delta_y:dy });
   }
   /** Sum wheel (or pinch) deltas per frame; a phase or modifier change flushes first. */
@@ -1099,12 +1171,29 @@ export class CEFPresenter {
     if (!delta_x && !delta_y && !phased) return;
     this.#send(record, "wheel", { ...pending.fields, delta_x, delta_y });
   }
-  /** BGRA pipe fallback: default-group listeners and the fixed shortcut heuristic. */
-  #pipeKeyboard(record) {
+  /**
+   * Linux has no engine-view component, so Chromium tabs always use the pipe. With a
+   * host that announces `ime`, the transparent proxy editor of surface mode is used
+   * there too: GTK input methods, compose and dead keys then work as in a Gecko field.
+   */
+  #pipeIME(record) {
+    return !record.native && this.keyPlatform === "linux" && record.adapter.inputFeatures?.ime === true;
+  }
+  /**
+   * BGRA pipe fallback: default-group listeners and the fixed shortcut heuristic.
+   * `element` is the canvas, or on Linux with IME the overlay that also holds the proxy editor.
+   */
+  #pipeKeyboard(record, element = record.canvas) {
     const send = (method, fields) => this.#send(record, method, fields);
-    for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, eventName, event => {
+    const platform = this.keyPlatform, ime = element !== record.canvas;
+    for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listenOn(record, element, eventName, event => {
       if (!event.isTrusted) return;
-      const route = keyboardRoute(event, { editing:this.browsingMode === "web" });
+      if (ime) {
+        if (!this.#contentElement(record, event.target)) return;
+        // Keys the input method owns (composition, dead keys) reach it untouched.
+        if (event.isComposing || event.keyCode === 229 || event.key === "Process" || event.key === "Dead") return;
+      }
+      const route = keyboardRoute(event, { editing:this.browsingMode === "web", platform });
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
@@ -1112,12 +1201,13 @@ export class CEFPresenter {
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
-      const fields = cefKey(event, type); send("key", fields);
+      const fields = cefKey(event, type, platform); send("key", fields);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });
         else if (event.key === "Enter") send("key", { ...fields, type:"char", text:"\r" }); // newline in text areas
       }
     });
+    if (ime) return; // focus follows the content elements (#surfaceFocus); the proxy runs the IME
     this.#listen(record, "focus", () => this.#action(record, target => record.adapter.focus(target, true)));
     this.#listen(record, "blur", () => this.#action(record, target => record.adapter.focus(target, false)));
     this.#listen(record, "compositionstart", event => { event.preventDefault(); this.#indicator(record, "IME is unsupported in the experimental Chromium surface"); });
@@ -1217,7 +1307,7 @@ export class CEFPresenter {
    * <input type=password> so secure event input turns on as for a Gecko field.
    */
   #textInput(record, event) {
-    if (!record.native || !record.adapter.inputFeatures?.ime) return;
+    if ((!record.native && !this.#pipeIME(record)) || !record.adapter.inputFeatures?.ime) return;
     const ime = record.ime ??= this.#createIME(record);
     const focused = this.window.document.activeElement;
     const hadFocus = this.#contentElement(record, focused);

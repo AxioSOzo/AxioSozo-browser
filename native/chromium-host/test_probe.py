@@ -263,6 +263,14 @@ class LinuxPortTests(unittest.TestCase):
             self.assertEqual(probe.host_environment('/owned/profile'),
                              dict(base, HOME='/owned/profile', DISPLAY=':99', XAUTHORITY='/tmp/x'))
 
+    def test_process_type_from_rewritten_title(self):
+        # Chromium's setproctitle joins its argv into the first cmdline field.
+        title = [b'/build/cef/linux64/AxioCEFProbeHelper --type=renderer --log-severity=warning --lang=en-US', b'']
+        self.assertEqual(probe.linux_process_type(title), 'renderer')
+        self.assertEqual(probe.linux_process_type([b'/x/AxioCEFProbeHelper', b'--type=zygote', b'']), 'zygote')
+        self.assertEqual(probe.linux_process_type([b'/x/AxioCEFProbeHelper', b'--no-type=gpu', b'']), 'AxioCEFProbeHelper')
+        self.assertEqual(probe.linux_process_type([b'/usr/bin/python3', b'-c', b'']), 'python3')
+
     @unittest.skipUnless(sys.platform.startswith('linux'), 'reads /proc')
     def test_process_snapshot_of_a_plain_process(self):
         child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])

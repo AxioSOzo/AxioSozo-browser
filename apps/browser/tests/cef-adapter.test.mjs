@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { CEFEngineAdapter, CEF_VERSION, CHROMIUM_VERSION, readAXCF,
+import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, readAXCF,
   validateCEFTarget, validateSurface, fitCEFRenderSurface, validCEFSessionRuntime, validCEFRoot,
-  validateCEFInput, allowedFixtureURL, allowedWebURL } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey, transferableGeckoURL } from '../chrome/CEFPresenter.sys.mjs';
+  validateCEFInput, allowedFixtureURL, allowedWebURL, expectedCEFPlatform, cefBinaryPaths,
+  cefHostEnvironment } from '../chrome/CEFEngineAdapter.sys.mjs';
+import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey, cefModifiers, keyboardPlatform, linuxWindowsKeyCode,
+  transferableGeckoURL } from '../chrome/CEFPresenter.sys.mjs';
 
 // All packets in this file are visibly controlled protocol fixtures. They never
 // count as Chromium rendering, an engine integration, or screenshot evidence.
@@ -37,7 +39,8 @@ class Pipe {
   close(){this.closed=true;this.flush();}
 }
 function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRace=false,nativeInputError=null,
-  nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200}={}) {
+  nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200,
+  platform=null}={}) {
   const pipe = new Pipe(), writes=[], rendered=[], failures=[], events=[];
   let finished, current=full, frameID=1;
   const exit = new Promise(resolve => { finished=resolve; });
@@ -89,9 +92,12 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
         event({event:'completed',request_id:command.request_id,status:'success',target:current});
       }
     }} };
-  const adapter=new CEFEngineAdapter(process,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,
-    onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)});
-  return {adapter,pipe,writes,rendered,failures,events,sendFrame,event};
+  const callbacks={onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)};
+  // `platform`: an owned connection built the way launchHost builds one on that platform.
+  const host=platform?new CEFHostConnection(process,{token,timers,deadline:1000,browsingMode,platform,
+    instance:pending.engine_instance,identity:pending.identity}):process;
+  const adapter=new CEFEngineAdapter(host,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,...callbacks});
+  return {adapter,host,pipe,writes,rendered,failures,events,sendFrame,event};
 }
 
 test('AXCF is big endian, rejects dangerous lengths before metadata/pixel allocation', async()=>{
@@ -668,4 +674,170 @@ test('a malformed or unannounced accessibility event ends the tab with a fixed c
     f.event(mutate(axUpdate(f.adapter.target)));await tick();await tick();
     assert.equal(f.failures.at(-1)?.message,'INVALID_CEF_ACCESSIBILITY');
   }
+});
+
+// ---- Linux (linux64 / linuxarm64): runtime discovery, ready platform, keyboard ----------
+
+test('the expected host platform follows Gecko OS and XPCOM ABI; macOS stays macosarm64',()=>{
+  assert.equal(expectedCEFPlatform('Darwin','aarch64-gcc3'),'macosarm64');
+  assert.equal(expectedCEFPlatform('Darwin','x86_64-gcc3'),'macosarm64');
+  assert.equal(expectedCEFPlatform('Linux','x86_64-gcc3'),'linux64');
+  assert.equal(expectedCEFPlatform('Linux','aarch64-gcc3'),'linuxarm64');
+  for(const [os,abi] of [['Linux','x86-gcc3'],['Linux','ppc64-gcc3'],['Linux',undefined],['WINNT','x86_64-msvc'],[undefined,'x86_64-gcc3']])
+    assert.equal(expectedCEFPlatform(os,abi),null,`${os} ${abi}`);
+});
+
+test('Linux build roots are absolute normalized directories; the macOS volume rules are unchanged',()=>{
+  const root='/home/dev/AxioSozo-browser/.build', session=root+'/runtime/0123456789abcdef/engine-probe';
+  assert.equal(validCEFSessionRuntime(root,session,session+'/gecko','linux64'),true);
+  assert.equal(validCEFSessionRuntime(root,session,session+'/gecko'),false,'macOS keeps /Volumes only');
+  assert.equal(validCEFSessionRuntime('/Volumes/AxioSozoBuild','/Volumes/AxioSozoBuild/runtime/0123456789abcdef/x',
+    '/Volumes/AxioSozoBuild/runtime/0123456789abcdef/x/gecko'),true);
+  for(const bad of ['relative/root','/home/dev/../etc','/home/dev/./x','/home//dev','/proc/self','/sys/x','/dev/shm',
+    '/home/dev/', '/home/dev/a b','/home/dev/\u00e9',undefined,'x'.repeat(1100)])
+    assert.equal(validCEFSessionRuntime(bad,`${bad}/runtime/0123456789abcdef/x`,`${bad}/runtime/0123456789abcdef/x/gecko`,'linux64'),false,String(bad));
+  assert.equal(validCEFRoot(root,root,'linux64'),true);
+  assert.equal(validCEFRoot(root+'/workstation',root,'linux64'),true);
+  assert.equal(validCEFRoot(root+'/a/b',root,'linux64'),false);
+  assert.equal(validCEFRoot('/build','/','linux64'),false);
+  assert.equal(validCEFRoot(root,root),false,'macOS keeps /Volumes only');
+  assert.deepEqual(cefBinaryPaths(root,'linux64'),[root+'/cef/linux64/AxioCEFProbe',root+'/cef/linux/AxioCEFProbe']);
+  assert.deepEqual(cefBinaryPaths(root,'linuxarm64'),[root+'/cef/linuxarm64/AxioCEFProbe',root+'/cef/linux/AxioCEFProbe']);
+  assert.deepEqual(cefBinaryPaths('/Volumes/AxioSozoBuild'),['/Volumes/AxioSozoBuild/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe']);
+});
+
+test('host environment: macOS exactly PATH/TMPDIR; Linux adds HOME=profile and only a well-formed X display',()=>{
+  const env={DISPLAY:':99',XAUTHORITY:'/run/user/1000/xauth',HOME:'/home/someone',DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/bus',
+    WAYLAND_DISPLAY:'wayland-0',SSH_AUTH_SOCK:'/tmp/agent'};
+  const get=name=>env[name]??'';
+  const base={PATH:'/usr/bin:/bin:/usr/sbin:/sbin',TMPDIR:'/p'};
+  assert.deepEqual(cefHostEnvironment('/p','macosarm64',get),base);
+  assert.deepEqual(cefHostEnvironment('/p','linux64',get),{...base,HOME:'/p',DISPLAY:':99',XAUTHORITY:'/run/user/1000/xauth'});
+  assert.deepEqual(cefHostEnvironment('/p','linux64',name=>({DISPLAY:'localhost:10.0'})[name]??''),{...base,HOME:'/p',DISPLAY:'localhost:10.0'});
+  for(const display of ['',':99; rm -rf /','wayland-0','$(id):0'])
+    assert.deepEqual(cefHostEnvironment('/p','linux64',name=>name==='DISPLAY'?display:'/x'),{...base,HOME:'/p'},display);
+});
+
+test('a Linux host must announce its own platform label; surface mode is macOS only',async()=>{
+  const linux=fixture({platform:'linux64',overrideReady:{platform:'linux64'}});
+  await linux.host.connect();await linux.adapter.connect();
+  assert.equal(linux.failures.length,0);assert.equal(linux.host.platform,'linux64');
+
+  const mismatch=fixture({platform:'linux64'}); // host says macosarm64
+  await assert.rejects(mismatch.host.connect());
+  const macOnly=fixture({overrideReady:{platform:'linux64'}});
+  await assert.rejects(macOnly.adapter.connect());
+  const arm=fixture({platform:'linuxarm64',overrideReady:{platform:'linux64'}});
+  await assert.rejects(arm.host.connect());
+  const process={wait:()=>new Promise(()=>{})};
+  assert.throws(()=>new CEFHostConnection(process,{token,timers,instance:'i',identity:origin,platform:'linux64',
+    surface:{endpoint:{},frameRate:60}}),/INVALID_CEF_BOOTSTRAP/);
+  assert.throws(()=>new CEFHostConnection(process,{token,timers,instance:'i',identity:origin,platform:'win64'}),/INVALID_CEF_BOOTSTRAP/);
+});
+
+const linuxKey=(fields={})=>({key:'a',code:'KeyA',keyCode:65,location:0,repeat:false,metaKey:false,ctrlKey:false,altKey:false,
+  shiftKey:false,buttons:0,getModifierState:()=>false,...fields});
+
+test('Linux keys carry XKB keycodes, layout keyCodes with a US fallback, and Linux modifier flags',()=>{
+  assert.equal(keyboardPlatform({Services:{appinfo:{OS:'Linux'}}}),'linux');
+  assert.equal(keyboardPlatform({Services:{appinfo:{OS:'Darwin'}}}),'mac');
+  assert.equal(keyboardPlatform({}),'mac');
+  const codes={KeyA:38,KeyQ:24,KeyL:46,Enter:36,Tab:23,Escape:9,Space:65,Backspace:22,ArrowLeft:113,ArrowUp:111,
+    ArrowRight:114,ArrowDown:116,Home:110,End:115,PageUp:112,PageDown:117,Delete:119,F1:67,F11:95,F12:96,
+    ShiftLeft:50,ShiftRight:62,ControlLeft:37,ControlRight:105,AltLeft:64,AltRight:108,MetaLeft:133,
+    Numpad0:90,NumpadEnter:104,IntlBackslash:94,Digit1:10,Minus:20,Quote:48};
+  for(const [code,xkb] of Object.entries(codes))
+    assert.equal(cefKey(linuxKey({code,key:code.length===4?code[3].toLowerCase():'x'}),'down','linux').native_key_code,xkb,code);
+  // Gecko's layout-aware keyCode wins (AZERTY "a" is on KeyQ); 0 falls back to the US key.
+  assert.equal(cefKey(linuxKey({code:'KeyQ',key:'a',keyCode:65}),'down','linux').windows_key_code,65);
+  assert.equal(linuxWindowsKeyCode({code:'KeyE',keyCode:0}),69);
+  assert.equal(linuxWindowsKeyCode({code:'Digit7',keyCode:0}),55);
+  assert.equal(linuxWindowsKeyCode({code:'Semicolon',keyCode:0}),186);
+  assert.equal(linuxWindowsKeyCode({code:'Lang1',keyCode:0}),0);
+  // AltGr text: the page receives the character; AltGr, keypad, side and repeat flags.
+  const euro=cefKey(linuxKey({key:'\u20ac',code:'KeyE',keyCode:69,getModifierState:name=>name==='AltGraph'}),'down','linux');
+  assert.equal(euro.text,'\u20ac');assert.equal(euro.modifiers,4096);assert.equal(euro.native_key_code,26);
+  assert.equal(cefModifiers(linuxKey({location:3,getModifierState:name=>name==='NumLock'}),'linux'),256|512);
+  assert.equal(cefModifiers(linuxKey({key:'Shift',code:'ShiftLeft',shiftKey:true,location:1}),'linux'),2|1024);
+  assert.equal(cefModifiers(linuxKey({key:'Control',code:'ControlRight',ctrlKey:true,location:2}),'linux'),4|2048);
+  assert.equal(cefModifiers(linuxKey({repeat:true}),'linux'),8192);
+  // macOS flags are unchanged by the Linux additions.
+  assert.equal(cefModifiers(linuxKey({location:3,repeat:true,getModifierState:name=>name==='AltGraph'})),0);
+  assert.equal(cefKey(linuxKey(),'down').native_key_code,0);
+});
+
+test('Linux shortcut routing: Ctrl is the accelerator, word editing stays with the page, Alt+arrows are history',()=>{
+  const route=(fields,editing=true)=>keyboardRoute(linuxKey(fields),{editing,platform:'linux'});
+  for(const key of ['t','w','l','n','r','f','tab','pageup','pagedown','1','+'])
+    assert.equal(route({key,ctrlKey:true}),'chrome',key);
+  for(const key of ['ArrowLeft','ArrowRight','Backspace','Delete','Home','End'])
+    assert.equal(route({key,code:key,ctrlKey:true}),'cef',`ctrl ${key}`);
+  assert.equal(route({key:'ArrowLeft',code:'ArrowLeft',ctrlKey:true,shiftKey:true}),'cef');
+  for(const key of ['c','v','x','a']) assert.equal(route({key,ctrlKey:true}),'edit',key);
+  assert.equal(route({key:'Z',ctrlKey:true,shiftKey:true}),'edit');
+  assert.equal(route({key:'C',ctrlKey:true,shiftKey:true}),'chrome','Ctrl+Shift+C is a browser shortcut');
+  assert.equal(route({key:'c',ctrlKey:true},false),'unsupported');
+  assert.equal(route({key:'ArrowLeft',code:'ArrowLeft',altKey:true}),'chrome');
+  assert.equal(route({key:'ArrowRight',code:'ArrowRight',altKey:true}),'chrome');
+  assert.equal(route({key:'Home',code:'Home',altKey:true}),'chrome');
+  assert.equal(route({key:'f',code:'KeyF',altKey:true}),'cef','Alt+letter reaches the page first');
+  assert.equal(route({key:'F5',code:'F5'}),'chrome');
+  assert.equal(route({key:'a',code:'KeyA',metaKey:true}),'chrome');
+  assert.equal(route({key:'Control',code:'ControlLeft',ctrlKey:true}),'cef','modifier presses reach the page');
+  assert.equal(route({key:'AltGraph',code:'AltRight'}),'cef');
+  assert.equal(route({key:'\u20ac',code:'KeyE',getModifierState:name=>name==='AltGraph'}),'cef');
+  assert.equal(route({key:'Dead',code:'BracketLeft'}),'unsupported');
+  assert.equal(route({key:'a',code:'KeyA',isComposing:true}),'unsupported');
+  assert.equal(route({key:'Unidentified',code:'Fn'}),'unsupported');
+  // The macOS heuristic is unchanged: Ctrl+T is a page key there, Cmd+T the browser's.
+  assert.equal(keyboardRoute(linuxKey({key:'t',ctrlKey:true})),'cef');
+  assert.equal(keyboardRoute(linuxKey({key:'t',metaKey:true})),'chrome');
+});
+
+test('Linux presenter pipe: XKB key events, no clicks for back/forward buttons, precise pixel wheel',async()=>{
+  const f=presenterFixture();f.win.Services.appinfo={OS:'Linux'};
+  const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch});
+  const switching=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await switching;
+  presenter.record.adapter.inputFeatures={wheelPhases:true};
+  const canvas=presenter.record.canvas,base={isTrusted:true,preventDefault(){},stopPropagation(){}};
+  canvas.handlers.get('keydown')({...base,...linuxKey()});
+  canvas.handlers.get('keydown')({...base,...linuxKey({key:'t',code:'KeyT',keyCode:84,ctrlKey:true})});
+  canvas.handlers.get('keyup')({...base,...linuxKey()});
+  await tick();
+  assert.deepEqual(f.inputCalls.map(call=>[call.fields.type,call.fields.native_key_code,call.fields.windows_key_code,call.fields.text]),
+    [['down',38,65,'a'],['char',38,65,'a'],['up',38,65,'a']]);
+  f.inputCalls.length=0;
+  for(const type of ['pointerdown','pointerup'])
+    canvas.handlers.get(type)({...base,pointerId:1,clientX:1,clientY:1,button:3,buttons:0});
+  await tick();assert.equal(f.inputCalls.length,0,'X11 button 8 is the back app command, never a left click');
+  canvas.handlers.get('wheel')({...base,clientX:1,clientY:1,deltaMode:0,deltaX:0,deltaY:7,buttons:0});
+  await tick();await tick();
+  assert.deepEqual(f.inputCalls.map(call=>[call.method,call.fields.delta_y,call.fields.precise]),[['wheel',-7,true]]);
+  f.inputCalls.length=0;
+  canvas.handlers.get('wheel')({...base,clientX:1,clientY:1,deltaMode:1,deltaX:0,deltaY:3,buttons:0});
+  await tick();await tick();
+  assert.deepEqual(f.inputCalls.map(call=>[call.method,call.fields.delta_y,call.fields.precise]),[['wheel',-60,false]]);
+  await presenter.dispose();
+});
+
+test('Linux presenter with host IME: keys and composition run through the proxy editor',async()=>{
+  const f=presenterFixture();f.win.Services.appinfo={OS:'Linux'};
+  const launch=async(win,callbacks)=>{const adapter=await f.launch(win,callbacks);adapter.inputFeatures={ime:true};return adapter;};
+  const presenter=new CEFPresenter(f.win,f.gecko,{launch});
+  const switching=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await switching;
+  const record=presenter.record,base={isTrusted:true,preventDefault(){},stopPropagation(){}};
+  assert.equal(record.canvas.handlers.has('keydown'),false);
+  assert.equal(record.canvas.handlers.has('compositionstart'),false,'no "IME unsupported" notice on Linux');
+  const keydown=record.overlay.handlers.get('keydown');
+  presenter.onCEFEvent?.(record,{event:'text_input',mode:'text',caret_x:10,caret_y:20,caret_width:1,caret_height:16});
+  keydown({...base,...linuxKey(),target:record.canvas});
+  // Dead keys and composition belong to the input method: nothing is sent, nothing prevented.
+  let prevented=false;
+  keydown({...base,...linuxKey({key:'Dead',code:'BracketLeft',keyCode:0}),target:record.canvas,preventDefault(){prevented=true;}});
+  keydown({...base,...linuxKey({key:'e',isComposing:true}),target:record.canvas,preventDefault(){prevented=true;}});
+  keydown({...base,...linuxKey(),target:{}}); // not a content element (e.g. an error panel button)
+  await tick();
+  assert.equal(prevented,false);
+  assert.deepEqual(f.inputCalls.map(call=>[call.method,call.fields.type,call.fields.native_key_code]),[['key','down',38],['key','char',38]]);
+  await presenter.dispose();
 });

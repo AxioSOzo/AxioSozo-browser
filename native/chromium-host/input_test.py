@@ -26,7 +26,7 @@ probe = stream.probe
 PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8"><title>input fixture</title>
 <style>html,body{margin:0}body{height:3000px;font:16px system-ui;background:#edf2f5;color:#163247}
 input{position:absolute;left:40px;width:300px;height:30px;font:16px system-ui}#t{top:40px}#p{top:120px}
-#blank{position:absolute;left:500px;top:300px;width:200px;height:100px;background:#c4dfd8}
+#blank{position:absolute;left:500px;top:300px;width:200px;height:100px;background:#c4dfd8;cursor:pointer}
 .badge{position:absolute;left:40px;top:200px;font:12px ui-monospace}</style>
 <input id="t" autofocus autocomplete="off"><input id="p" type="password" autocomplete="off">
 <div id="blank">not editable</div><p class="badge">SYNTHETIC LOCAL INPUT FIXTURE - NO ACCOUNTS</p>
@@ -55,6 +55,7 @@ addEventListener('input',out);addEventListener('load',out);
 if probe.IS_LINUX:
     KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (38, 65), (56, 66), (46, 76), (113, 37), (9, 27)
     SHORTCUT, SHORTCUT_MARK = 1 << 2, '+ctrl'
+    LINUX_KEY_E, ALTGR = (26, 69), 1 << 12
 else:
     KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (0x00, 0), (0x0B, 0), (0x25, 0), (0x7B, 0), (0x35, 0)
     SHORTCUT, SHORTCUT_MARK = 1 << 7, '+meta'
@@ -212,6 +213,34 @@ def run():
         none = session.text_input(lambda item: item['mode'] == 'none' and item['caret_height'] == 0, 5)
         check(checks, 'text_input_none', none['mode'] == 'none', none)
 
+        if probe.IS_LINUX:
+            # Cursor changes are forwarded as CSS keywords (the presenter sets them on its canvas).
+            def cursor_after(x, y, expected):
+                mark = len(session.events)
+                session.done(session.command('mouse', type='move', x=x, y=y, modifiers=0, button='left',
+                                             click_count=1, mouse_leave=False))
+                if any(item.get('event') == 'cursor' and item.get('cursor') == expected for item in session.events[mark:]):
+                    return expected
+                with contextlib.suppress(TimeoutError):
+                    session.until(lambda kind, item: kind == 1 and item.get('event') == 'cursor'
+                                  and item.get('cursor') == expected, 5)
+                    return expected
+                return [item.get('cursor') for item in session.events[mark:] if item.get('event') == 'cursor']
+            over_input, over_blank = cursor_after(100, 55, 'text'), cursor_after(600, 350, 'pointer')
+            check(checks, 'linux_cursor_forwarding', over_input == 'text' and over_blank == 'pointer',
+                  dict(over_input=over_input, over_pointer_area=over_blank))
+
+            # AltGr (EVENTFLAG_ALTGR_DOWN) on KeyE as the presenter sends it for a layout's
+            # euro sign: XKB keycode 26, keyCode 69, text from Gecko's event.key.
+            session.click(100, 55)
+            session.text_input(lambda item: item['mode'] == 'text', 5)
+            before = session.state['v']
+            verdict, _ = session.key(LINUX_KEY_E, '\u20ac', modifiers=ALTGR)
+            state = session.page(lambda s: '\u20ac' in s['v'], 5)
+            check(checks, 'linux_altgr_text', '\u20ac' in state['v'] and len(state['v']) == len(before) + 1,
+                  dict(value=state['v'], keydown_key=state['kd'][-1], keypress=state['kp'][-1:],
+                       verdict=verdict.get('reason')))
+
         # Wheel with trackpad phases; zero-delta boundary events are accepted and dropped.
         wheel = dict(x=450, y=500, modifiers=0, delta_x=0, precise=True)
         for phase, momentum, dy in (('may_begin', 'none', 0), ('began', 'none', -100), ('changed', 'none', -100),
@@ -221,6 +250,22 @@ def run():
         session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-50))  # legacy shape
         state = session.page(lambda s: s['w'] >= 350 and s['sy'] > 0)
         check(checks, 'wheel_phases_delta', state['w'] >= 350 and state['sy'] > 0, dict(wheel_delta_y=state['w'], scroll_y=state['sy']))
+
+        # Information only: does one non-precise wheel notch scroll in one jump or animate
+        # (Chromium smooth scrolling)? scrollY is sampled from the page's scroll events.
+        start_y = state['sy']
+        samples, started = [], time.monotonic()
+        session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-120,
+                                     phase='none', momentum_phase='none', precise=False))
+        def sample(kind, item):
+            if kind == 1 and item.get('event') == 'title' and session.state is not None:
+                samples.append((round((time.monotonic() - started) * 1000), session.state['sy']))
+            return time.monotonic() - started > 0.6
+        with contextlib.suppress(TimeoutError):
+            session.until(sample, 2)
+        checks['wheel_notch_animation_info'] = dict(passed=True, detail=dict(
+            start_scroll_y=start_y, samples_ms_scroll_y=samples[:40],
+            distinct_positions=len({value for _, value in samples})))
 
         # Pinch: a two-point touch sequence zooms the visual viewport.
         session.done(session.command('pinch', x=450, y=325, modifiers=0, phase='began', magnification=0))
