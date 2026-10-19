@@ -1,0 +1,75 @@
++ curl --fail --location --max-time 1800 --speed-time 30 --speed-limit 1024 --continue-at - https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_linuxarm64_minimal.tar.bz2 --output /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm64_minimal.tar.bz2
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  3  404M    3 13.3M    0     0  24.2M      0  0:00:16 --:--:--  0:00:16 24.2M 19  404M   19 78.9M    0     0  50.9M      0  0:00:07  0:00:01  0:00:06 50.9M 33  404M   33  136M    0     0  53.0M      0  0:00:07  0:00:02  0:00:05 53.0M 50  404M   50  202M    0     0  56.9M      0  0:00:07  0:00:03  0:00:04 56.9M 66  404M   66  270M    0     0  59.5M      0  0:00:06  0:00:04  0:00:02 59.5M 85  404M   85  348M    0     0  62.5M      0  0:00:06  0:00:05  0:00:01 66.7M 93  404M   93  380M    0     0  57.8M      0  0:00:06  0:00:06 --:--:-- 59.9M100  404M  100  404M    0     0  58.0M      0  0:00:06  0:00:06 --:--:-- 61.0M
++ tar -xjf /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm64_minimal.tar.bz2 -C /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef
++ cmake -S /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host -B /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linuxarm64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCEF_ROOT=/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm64_minimal -DAXIO_OUT=/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linuxarm64
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE - Success
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS - Success
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX - Success
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING - Success
+-- Found ZLIB: /usr/lib/aarch64-linux-gnu/libz.so (found version "1.3")
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linuxarm64
++ cmake --build /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linuxarm64 --parallel 4
+[1/17] Building CXX object CMakeFiles/AxioCEFProbeHelper.dir/linux/helper_linux.cc.o
+[2/17] Building CXX object CMakeFiles/axio_host_core.dir/linux/platform_linux.cc.o
+[3/17] Building CXX object CMakeFiles/AxioCEFProbe.dir/linux/main_linux.cc.o
+[4/17] Building CXX object CMakeFiles/axio_core_test.dir/tests/core_test.cc.o
+[5/17] Building CXX object CMakeFiles/axio_transport_damage_test.dir/tests/transport_damage_test.cc.o
+[6/17] Building CXX object CMakeFiles/axio_transport_test.dir/test_transport.cc.o
+[7/17] Linking CXX executable tests/axio_core_test
+[8/17] Linking CXX executable tests/axio_transport_test
+[9/17] Linking CXX executable tests/axio_transport_damage_test
+[10/17] Building CXX object CMakeFiles/axio_transport_damage_payload_test.dir/tests/transport_damage_payload_test.cc.o
+[11/17] Linking CXX executable tests/axio_transport_damage_payload_test
+[12/17] Building CXX object CMakeFiles/axio_a11y_core_test.dir/tests/a11y_core_test.cc.o
+/home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/a11y_core_test.cc:3:1: warning: multi-line comment [-Wcomment]
+    3 | //   clang++ -std=c++17 -Wall -Wextra -I native/chromium-host \
+      | ^
+[13/17] Linking CXX executable tests/axio_a11y_core_test
+[14/17] Building CXX object CMakeFiles/axio_host_core.dir/core/host_core.cc.o
+[15/17] Linking CXX static library libaxio_host_core.a
+[16/17] Linking CXX executable /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linuxarm64/AxioCEFProbeHelper
+[17/17] Linking CXX executable /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linuxarm64/AxioCEFProbe
+{"component": "cef", "status": "PASS", "action": "native_build", "binary": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linuxarm64/AxioCEFProbe", "platform": "linuxarm64", "sandbox": {"suid_helper_installed": false, "apparmor_restrict_unprivileged_userns": 1, "unprivileged_userns_clone": 1, "max_user_namespaces": 63642, "unprivileged_userns": false, "expected": null, "usable": false}}
+	Command being timed: "python3 native/chromium-host/probe.py setup"
+	User time (seconds): 94.08
+	System time (seconds): 6.60
+	Percent of CPU this job got: 115%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:26.95
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 473620
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1700
+	Minor (reclaiming a frame) page faults: 708591
+	Voluntary context switches: 547594
+	Involuntary context switches: 5133
+	Swaps: 0
+	File system inputs: 436560
+	File system outputs: 6136256
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
