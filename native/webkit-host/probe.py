@@ -405,10 +405,22 @@ def syntax_check(sysroot):
 
 def full_test():
     check()
-    native_test()
+    # Every suite runs even after a failure, so one run reports all of them.
+    suites = {}
+    try:
+        native_test()
+        suites['test-native'] = 'PASS'
+    except (RuntimeError, subprocess.CalledProcessError) as error:
+        suites['test-native'] = 'FAIL: ' + str(error)[:200]
     for script in ('stream_test.py', 'input_test.py', 'stream_security_test.py'):
-        run_command([sys.executable, HERE / script], timeout=900)
-    emit('PASS', action='test', tests=['unit', 'stream', 'input', 'damage', 'security', 'process_cleanup'])
+        try:
+            run_command([sys.executable, HERE / script], timeout=900)
+            suites[script] = 'PASS'
+        except (RuntimeError, subprocess.CalledProcessError) as error:
+            suites[script] = 'FAIL: ' + str(error)[:200]
+    if any(value != 'PASS' for value in suites.values()):
+        raise RuntimeError('FAIL: ' + json.dumps(suites))
+    emit('PASS', action='test', suites=suites, tests=['unit', 'stream', 'input', 'damage', 'security', 'process_cleanup'])
     return 0
 
 

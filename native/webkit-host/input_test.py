@@ -88,9 +88,10 @@ def scenario(session, origin, directory, port='wpe'):
         # Click into the field, then type through the text commit path.
         mouse(session, 'down', 150, 280); mouse(session, 'up', 150, 280)
         wait_state(session, lambda s: s.get('f') == '1')
+        count = session.frames
         session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='abc')
         wait_state(session, lambda s: s.get('v') == 'abc')
-        session.until(lambda kind, item: kind == 2, capture=directory / 'input-typed.png')
+        session.frame_after(count, capture=directory / 'input-typed.png')
         return 'abc'
     step('click_focus_and_type', click_and_type)
 
@@ -114,10 +115,11 @@ def scenario(session, origin, directory, port='wpe'):
     def wheel():
         # Pixel deltas; cef-v1 delta_y < 0 scrolls the page down.
         before = int(state(session).get('sy', '0'))
+        count = session.frames
         session.command('wheel', x=450, y=300, modifiers=0, delta_x=0, delta_y=-400)
         scrolled = wait_state(session, lambda s: int(s.get('sy', '0')) > before, seconds=4)
         assert int(scrolled['w']) > 0, scrolled
-        session.until(lambda kind, item: kind == 2, capture=directory / 'input-scrolled.png')
+        session.frame_after(count, capture=directory / 'input-scrolled.png')
         return dict(delta_y=-400, scroll_y=int(scrolled['sy']), dom_delta_y=int(scrolled['w']))
     step('wheel', wheel)
 

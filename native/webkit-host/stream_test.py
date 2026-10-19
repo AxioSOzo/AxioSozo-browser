@@ -159,6 +159,20 @@ class Session:
             if predicate(kind, item):
                 return item
 
+    def frame_after(self, count, predicate=lambda item: True, capture=None, **kwargs):
+        """A frame delivered after the first `count` frames. Events are written before frames,
+        but a frame flushed earlier can precede a later title event, so it may already be here."""
+        if self.frames > count and predicate(self.last[0]):
+            item, pixels = self.last
+            if capture:
+                png(capture, item['width'], item['height'], pixels)
+            return item
+        return self.until(lambda kind, item: kind == 2 and predicate(item), capture=capture, **kwargs)
+
+    def current_frame(self, count, **kwargs):
+        """A frame of the current target generation (after navigation, back or forward)."""
+        return self.frame_after(count, lambda item: item['target'] == self.target, **kwargs)
+
     def check_damage(self, item, pixels):
         rects = item['damage']
         assert isinstance(rects, list) and len(rects) == 1, rects
@@ -285,9 +299,10 @@ def scenario(session, origin, directory, engine, port='wpe'):
     # Typed input reaches the page through the text commit path and is visible in title and pixels.
     focus = session.command('focus', focused=True)
     session.completed(focus)
+    count = session.frames
     session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='WPE')
     session.title('input=WPE |')
-    typed = session.until(lambda kind, item: kind == 2, capture=directory / 'input.png')
+    typed = session.frame_after(count, lambda item: session.last[1] != initial_pixels, capture=directory / 'input.png')
     assert session.last[1] != initial_pixels, 'typed text changed no pixel'
     # CEF-style down/char/up inserts the character once.
     for key_type in ('down', 'char', 'up'):
@@ -310,9 +325,10 @@ def scenario(session, origin, directory, engine, port='wpe'):
     # GET navigation: exactly one generation step, then the new document's frame.
     before = generations(session.target)
     start = time.monotonic()
+    count = session.frames
     nav = session.command('navigate', url=origin + '/engine.html?page=2')
     session.title('page=2')
-    session.until(lambda kind, item: kind == 2, capture=directory / 'page-2.png')
+    session.current_frame(count, capture=directory / 'page-2.png')
     timings['navigate_to_frame_s'] = round(time.monotonic() - start, 3)
     assert session.completed(nav)['status'] == 'success'
     assert generations(session.target) == (before[0] + 1, before[1] + 1), (before, session.target)
@@ -321,9 +337,10 @@ def scenario(session, origin, directory, engine, port='wpe'):
     # Back: exactly one generation step and an explicit history restore label.
     before_back = dict(session.target)
     start = time.monotonic()
+    count = session.frames
     back = session.command('back')
     session.title('page=1')
-    session.until(lambda kind, item: kind == 2, capture=directory / 'back.png')
+    session.current_frame(count, capture=directory / 'back.png')
     assert session.completed(back)['status'] == 'success'
     timings['back_to_frame_s'] = round(time.monotonic() - start, 3)
     assert generations(session.target) == (before_back['document_generation'] + 1, before_back['navigation_generation'] + 1)
@@ -332,9 +349,10 @@ def scenario(session, origin, directory, engine, port='wpe'):
     back_stale = session.command('focus', target=before_back, focused=True)
     session.until(lambda kind, item: item.get('request_id') == back_stale and item.get('code') == 'stale_target')
     before_forward = generations(session.target)
+    count = session.frames
     forward = session.command('forward')
     session.title('page=2')
-    session.until(lambda kind, item: kind == 2)
+    session.current_frame(count)
     assert generations(session.target) == (before_forward[0] + 1, before_forward[1] + 1)
     boundary = session.command('forward')
     session.until(lambda kind, item: item.get('request_id') == boundary and item.get('reason') == 'history_boundary')
@@ -365,10 +383,11 @@ def damage_scenario(binary, origin, directory, engine):
         session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=1)
         session.until(lambda kind, item: kind == 2)
         session.command('focus', focused=True)
+        count = session.frames
         for character in 'damage':
             session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text=character)
         session.title('input=damage |')
-        session.until(lambda kind, item: kind == 2, seconds=10)
+        session.frame_after(count, seconds=10)
         session.command('close')
         session.until(lambda kind, item: item.get('event') == 'closed')
         session.process.wait(timeout=20)
