@@ -60,6 +60,57 @@ function setDefault(branch, prefs, name, value) {
   return "set";
 }
 
+// Firefox's first-window rule (browser/base/content/browser-init.js): 90% of
+// the available screen, at most 1280x1040, maximized when both fall short.
+const FIREFOX_TARGET = Object.freeze({ width: 1280, height: 1040 });
+export function firefoxWindowSize(screen) {
+  const width = Math.min(screen.availWidth * 0.9, FIREFOX_TARGET.width);
+  const height = Math.min(screen.availHeight * 0.9, FIREFOX_TARGET.height);
+  return { width: Math.round(width), height: Math.round(height),
+    maximized: width < FIREFOX_TARGET.width && height < FIREFOX_TARGET.height };
+}
+
+const WELCOME = "zen-welcome-stage";
+
+/** Zen's welcome locks the first window to 1200x720, centred, and leaves it
+ * that size when it ends. On Linux the window then takes the size stock
+ * Firefox gives a first window on this screen: maximized on screens below
+ * 1280x1040 (most laptops), otherwise Firefox's default size, centred. Only
+ * the welcome's own end triggers it; any later resize is the user's. Returns
+ * a disposer, or null when there is nothing to do. */
+export function installLinuxWindowSizing(window, { os = globalThis.Services?.appinfo?.OS } = {}) {
+  const root = window?.document?.documentElement;
+  if (os !== "Linux" || !root || typeof window.MutationObserver !== "function") return null;
+  let seen = root.hasAttribute(WELCOME);
+  const observer = new window.MutationObserver(() => {
+    if (root.hasAttribute(WELCOME)) { seen = true; return; }
+    if (!seen) return;
+    observer.disconnect();
+    // After Zen's unlockWindowSize() and its fade-in, on the next frame.
+    window.requestAnimationFrame(() => {
+      if (window.closed || window.windowState !== window.STATE_NORMAL) return;
+      const size = firefoxWindowSize(window.screen);
+      if (size.maximized) { window.maximize(); return; }
+      window.resizeTo(size.width, size.height);
+      window.moveTo(window.screen.availLeft + (window.screen.availWidth - size.width) / 2,
+        window.screen.availTop + (window.screen.availHeight - size.height) / 2);
+    });
+  });
+  observer.observe(root, { attributes: true, attributeFilter: [WELCOME] });
+  return () => observer.disconnect();
+}
+
+export const LINUX_SHEET = "chrome://browser/content/axiosozo/linux-desktop.css";
+
+/** The Linux chrome sheet (linux-desktop.css) in this window. Returns a disposer, or null off Linux. */
+export function installLinuxStyles(window, { os = globalThis.Services?.appinfo?.OS } = {}) {
+  const document = window?.document;
+  if (os !== "Linux" || typeof document?.createProcessingInstruction !== "function") return null;
+  const sheet = document.createProcessingInstruction("xml-stylesheet", `href="${LINUX_SHEET}" type="text/css"`);
+  document.insertBefore(sheet, document.documentElement);
+  return () => sheet.remove();
+}
+
 /** Applies LINUX_DEFAULTS to the default branch on Linux. Idempotent per prefs
  * service; returns { platform, results: { name: "set" | "type-mismatch" | error } }. */
 export function applyLinuxDesktopDefaults({ prefs = globalThis.Services?.prefs, os = globalThis.Services?.appinfo?.OS } = {}) {

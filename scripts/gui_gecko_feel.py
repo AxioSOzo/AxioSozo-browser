@@ -220,7 +220,8 @@ class FeelHarness(Harness):
     def __init__(self, args, engine, evidence):
         super().__init__(args, engine, evidence)
         self.result.update({'harness': 'axiosozo-linux-gecko-feel', 'label': args.label,
-                            'mode': {'wm': args.wm, 'theme': args.theme, 'scale': args.scale, 'first_run': args.first_run},
+                            'mode': {'wm': args.wm, 'compositor': args.compositor, 'theme': args.theme, 'scale': args.scale,
+                                     'first_run': args.first_run},
                             'checks': {}})
         self.wm = None
 
@@ -241,6 +242,18 @@ class FeelHarness(Harness):
         self.result['wm'] = self.wm or 'none'
         if self.args.wm not in ('none', 'auto') and not self.wm:
             raise Blocked(f'window manager {self.args.wm} not available')
+        # GNOME and KDE always composite; GTK only offers client-side
+        # decorations (Zen's own titlebar buttons) on a composited screen.
+        self.compositor = None
+        if self.wm and self.args.compositor != 'none' and which('xcompmgr'):
+            log = (self.evidence / 'compositor.log').open('w')
+            process = session.spawn(['xcompmgr', '-n'], env=env, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            time.sleep(1)
+            if process.poll() is None:
+                self.compositor = 'xcompmgr'
+        elif self.args.compositor == 'xcompmgr':
+            raise Blocked('xcompmgr not available')
+        self.result['compositor'] = self.compositor or 'none'
 
     def xprop(self, *args):
         if not which('xprop'):
@@ -286,8 +299,17 @@ class FeelHarness(Harness):
                    f'WM_CLASS contains "{linux_desktop.WM_CLASS}" (StartupWMClass of the .desktop file)')
         prefs = self.chrome_script(PREFS_SCRIPT, [['zen.view.hide-window-controls']])
         hidden = prefs['zen.view.hide-window-controls']['value']
-        self.check('window.controls_visible', state['windowControls']['visible'] > 0,
-                   {**state['windowControls'], 'zen.view.hide-window-controls': hidden}, 'close/minimize/maximize visible (GNOME/KDE)')
+        extents = self.xprop('-id', self.window, '_NET_FRAME_EXTENTS') or ''
+        frame = [int(value) for value in extents.split('=', 1)[1].replace(' ', '').split(',')] if '=' in extents else []
+        state['frame_extents'] = frame
+        # Who draws close/minimize/maximize: Zen (client-side decorations,
+        # customTitlebar) or the window manager's frame (server-side).
+        owner = 'zen' if state['customTitlebar'] else 'window-manager' if frame and frame[2] > 0 else 'nobody'
+        state['controls_owner'] = owner
+        if self.wm:
+            self.check('window.controls_visible', state['windowControls']['visible'] > 0 if owner == 'zen' else owner == 'window-manager',
+                       {**state['windowControls'], 'owner': owner, 'frame_extents': frame, 'gtk_csd': state['gtkCsd'],
+                        'zen.view.hide-window-controls': hidden}, 'close/minimize/maximize visible (GNOME/KDE)')
         self.screenshot('window')
         return state
 
@@ -404,10 +426,51 @@ class FeelHarness(Harness):
             const r = page?.getBoundingClientRect();
             return {stage: root.getAttribute("zen-welcome-stage"), page: r ? [Math.round(r.width), Math.round(r.height)] : null,
                     start: !!document.getElementById("zen-welcome-start-button"), dpr: window.devicePixelRatio,
-                    text: (page?.innerText ?? "").slice(0, 400)};""")
+                    text: (page?.innerText ?? "").slice(0, 400),
+                    video: (v => v ? {readyState: v.readyState, paused: v.paused, error: v.error?.code ?? null,
+                                      canPlayH264: v.canPlayType('video/mp4; codecs="avc1.42E01E"')} : null)(
+                      document.getElementById("zen-welcome-video")),
+                    backdrop: (w => w ? getComputedStyle(w).backgroundColor : null)(document.getElementById("zen-welcome"))};""")
         time.sleep(1.5)
         self.screenshot(f'firstrun-{self.args.scale}x')
         self.check('firstrun.welcome_shown', bool(state['stage'] is not None or state['start']), state, 'Zen welcome is on screen')
+        state['during'] = self.chrome_script(WINDOW_SCRIPT)
+        # Through the welcome as a new user who keeps the defaults: Start, then
+        # "Next" on every page, then "Start browsing" (never "set as default").
+        steps = []
+        self.chrome_script('document.getElementById("zen-welcome-start-button")?.click(); return true;')
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            time.sleep(1.2)
+            step = self.chrome_script("""
+                if (!document.documentElement.hasAttribute("zen-welcome-stage")) return "done";
+                const buttons = [...document.querySelectorAll("#zen-welcome-page-sidebar-buttons button")];
+                const pick = buttons.find(b => b.getAttribute("data-l10n-id") === "zen-welcome-start-browsing")
+                  ?? buttons.find(b => b.getAttribute("data-l10n-id") === "zen-generic-next")
+                  ?? buttons.find(b => /skip|later|next/i.test(b.getAttribute("data-l10n-id") ?? ""));
+                if (!pick) return "waiting:" + buttons.map(b => b.getAttribute("data-l10n-id")).join(",");
+                pick.click();
+                return pick.getAttribute("data-l10n-id");""")
+            steps.append(step)
+            if step == 'done':
+                break
+            if len(steps) == 3:
+                self.screenshot(f'firstrun-{self.args.scale}x-page')
+        state['welcome_steps'] = steps
+        time.sleep(2.5)
+        after = self.chrome_script(WINDOW_SCRIPT)
+        state['after_welcome'] = after
+        self.screenshot(f'firstrun-{self.args.scale}x-done')
+        width, height = (int(value) for value in self.xdotool('getdisplaygeometry').split())
+        scale = after['devicePixelRatio'] or 1
+        fills = after['outer'][0] * scale >= width * 0.97 and after['outer'][1] * scale >= height * 0.9
+        self.check('firstrun.welcome_finished', steps[-1:] == ['done'], steps, 'the welcome ends with Start browsing')
+        if self.wm:
+            # Screens below 1280x1040 CSS px: Firefox's first window is maximized.
+            small = after['screen']['availWidth'] * 0.9 < 1280 and after['screen']['availHeight'] * 0.9 < 1040
+            self.check('firstrun.window_after_welcome', (after['maximized'] and fills) if small else not after['maximized'],
+                       {'windowState': after['windowState'], 'outer': after['outer'], 'screen': after['screen']},
+                       'the size stock Firefox gives a first window on this screen')
         return state
 
     def scenario_desktop(self):
@@ -459,6 +522,8 @@ def main():
     parser.add_argument('--evidence-dir')
     parser.add_argument('--label', default='local', help='before/after (recorded only)')
     parser.add_argument('--wm', default='auto', choices=('auto', 'metacity', 'openbox', 'none'))
+    parser.add_argument('--compositor', default='auto', choices=('auto', 'xcompmgr', 'none'),
+                        help='composite the screen under the window manager (GTK client-side decorations)')
     parser.add_argument('--theme', default='light', choices=('system', 'light', 'dark'))
     parser.add_argument('--scale', type=int, default=1, choices=(1, 2))
     parser.add_argument('--first-run', action='store_true', help='keep the Zen welcome (do not mark it seen)')
@@ -509,7 +574,7 @@ def main():
     harness.result['evidence_dir'] = str(evidence)
     if evidence.is_dir():
         (evidence / 'feel.json').write_text(json.dumps(harness.result, indent=2, ensure_ascii=False) + '\n')
-    summary = {key: harness.result.get(key) for key in ('status', 'label', 'mode', 'wm', 'failed_checks', 'reason')}
+    summary = {key: harness.result.get(key) for key in ('status', 'label', 'mode', 'wm', 'compositor', 'failed_checks', 'reason')}
     summary['scenarios'] = {name: item['status'] for name, item in harness.result['scenarios'].items()}
     print(json.dumps(summary, indent=2, ensure_ascii=False), flush=True)
     return code

@@ -5,7 +5,8 @@
 // macOS are never touched.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FIREFOX_LINUX_SCROLLING, LINUX_DEFAULTS, applyLinuxDesktopDefaults } from "../chrome/LinuxDesktop.sys.mjs";
+import { FIREFOX_LINUX_SCROLLING, LINUX_DEFAULTS, applyLinuxDesktopDefaults, firefoxWindowSize, installLinuxStyles, installLinuxWindowSizing }
+  from "../chrome/LinuxDesktop.sys.mjs";
 
 const PREF_INVALID = 0, PREF_STRING = 32, PREF_INT = 64, PREF_BOOL = 128;
 
@@ -68,4 +69,68 @@ test("the scrolling values are Firefox 156's release defaults (not Zen's fastfox
     "mousewheel.min_line_scroll_amount": 5,
     "mousewheel.default.delta_multiplier_y": 100,
   });
+});
+
+test("firefoxWindowSize: browser-init.js's first-window rule", () => {
+  assert.deepEqual(firefoxWindowSize({ availWidth: 1280, availHeight: 800 }), { width: 1152, height: 720, maximized: true });
+  assert.deepEqual(firefoxWindowSize({ availWidth: 1366, availHeight: 768 }), { width: 1229, height: 691, maximized: true });
+  assert.deepEqual(firefoxWindowSize({ availWidth: 1920, availHeight: 1080 }), { width: 1280, height: 972, maximized: false });
+  assert.deepEqual(firefoxWindowSize({ availWidth: 2560, availHeight: 1440 }), { width: 1280, height: 1040, maximized: false });
+});
+
+function welcomeWindow({ screen, staged = true, state = 1 }) {
+  const attributes = new Set(staged ? ["zen-welcome-stage"] : []);
+  const calls = [];
+  let observer = null;
+  const win = {
+    STATE_NORMAL: 3, windowState: state, closed: false, screen: { availLeft: 0, availTop: 0, ...screen },
+    document: { documentElement: { hasAttribute: name => attributes.has(name) } },
+    MutationObserver: class { constructor(callback) { this.callback = callback; observer = this; }
+      observe(target, options) { calls.push(["observe", options.attributeFilter]); }
+      disconnect() { calls.push(["disconnect"]); } },
+    requestAnimationFrame: callback => callback(),
+    maximize: () => calls.push(["maximize"]),
+    resizeTo: (w, h) => calls.push(["resizeTo", w, h]),
+    moveTo: (x, y) => calls.push(["moveTo", x, y]),
+  };
+  return { win, calls, set: on => { if (on) attributes.add("zen-welcome-stage"); else attributes.delete("zen-welcome-stage"); observer.callback([]); } };
+}
+
+test("after Zen's welcome a small screen gets Firefox's maximized window, a large one Firefox's size", () => {
+  const small = welcomeWindow({ screen: { availWidth: 1280, availHeight: 800 }, state: 3 });
+  const dispose = installLinuxWindowSizing(small.win, { os: "Linux" });
+  assert.equal(typeof dispose, "function");
+  small.set(false);
+  assert.deepEqual(small.calls, [["observe", ["zen-welcome-stage"]], ["disconnect"], ["maximize"]]);
+
+  const large = welcomeWindow({ screen: { availWidth: 1920, availHeight: 1080 }, staged: false, state: 3 });
+  installLinuxWindowSizing(large.win, { os: "Linux" });
+  large.set(true); large.set(false);
+  assert.deepEqual(large.calls.slice(1), [["disconnect"], ["resizeTo", 1280, 972], ["moveTo", 320, 54]]);
+});
+
+test("window sizing: no welcome, a window the user already maximized, and macOS are left alone", () => {
+  const none = welcomeWindow({ screen: { availWidth: 1280, availHeight: 800 }, staged: false, state: 3 });
+  installLinuxWindowSizing(none.win, { os: "Linux" });
+  none.set(false);
+  assert.deepEqual(none.calls, [["observe", ["zen-welcome-stage"]]]);
+  const maximized = welcomeWindow({ screen: { availWidth: 1280, availHeight: 800 }, state: 1 });
+  installLinuxWindowSizing(maximized.win, { os: "Linux" });
+  maximized.set(false);
+  assert.deepEqual(maximized.calls, [["observe", ["zen-welcome-stage"]], ["disconnect"]]);
+  const mac = welcomeWindow({ screen: { availWidth: 1280, availHeight: 800 }, state: 3 });
+  assert.equal(installLinuxWindowSizing(mac.win, { os: "Darwin" }), null);
+  assert.deepEqual(mac.calls, []);
+});
+
+test("the Linux sheet is added on Linux only and removed by its disposer", () => {
+  const nodes = [];
+  const document = { documentElement: {}, createProcessingInstruction: (target, data) => ({ target, data, remove() { nodes.splice(nodes.indexOf(this), 1); } }),
+    insertBefore: node => nodes.push(node) };
+  assert.equal(installLinuxStyles({ document }, { os: "Darwin" }), null);
+  assert.equal(nodes.length, 0);
+  const dispose = installLinuxStyles({ document }, { os: "Linux" });
+  assert.deepEqual(nodes.map(node => node.data), ['href="chrome://browser/content/axiosozo/linux-desktop.css" type="text/css"']);
+  dispose();
+  assert.equal(nodes.length, 0);
 });

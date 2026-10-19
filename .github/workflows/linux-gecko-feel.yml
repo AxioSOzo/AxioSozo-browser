@@ -8,9 +8,10 @@
 #         (maximized first window, WM_CLASS, visible window controls, Firefox-on-Linux
 #         prefs, theme following, no Mac wording, Zen welcome at 1x/2x, .desktop file)
 #         must pass.
-# Modes: light 1x under metacity (all scenarios), dark 1x, 2x first run (GDK_SCALE=2),
-#        1x first run, and bare Xvfb without a window manager (as linux-gui.yml, for
-#        timing comparisons). The address bar is never typed into (WebRender crash,
+# Modes: light 1x under metacity + xcompmgr (composited like GNOME/KDE, so GTK uses
+#        client-side decorations; all scenarios), dark 1x, 2x first run (GDK_SCALE=2),
+#        1x first run, metacity without a compositor (server-side decorations), and bare
+#        Xvfb without a window manager (as linux-gui.yml, for timing comparisons). The address bar is never typed into (WebRender crash,
 #        owned by cloud/linux-platform).
 # Results: ci-results branch, <branch>/<run>-<attempt>-feel-{before,after}-<mode>/ and
 #          <run>-<attempt>-gecko-feel-build/.
@@ -115,6 +116,7 @@ jobs:
           - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
           - { id: firstrun-1x, args: '--theme light --scale 1 --wm auto --first-run --scenario firstrun,window,startup' }
           - { id: bare-xvfb, args: '--theme light --scale 1 --wm none --scenario window,startup,tabs,scroll' }
+          - { id: ssd-1x, args: '--theme light --scale 1 --wm metacity --compositor none --scenario window' }
     env:
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
       EVIDENCE_OUT: ${{ github.workspace }}/feel
@@ -146,6 +148,7 @@ jobs:
           - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
           - { id: firstrun-1x, args: '--theme light --scale 1 --wm auto --first-run --scenario firstrun,window,startup' }
           - { id: bare-xvfb, args: '--theme light --scale 1 --wm none --scenario window,startup,tabs,scroll' }
+          - { id: ssd-1x, args: '--theme light --scale 1 --wm metacity --compositor none --scenario window' }
     env:
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
       EVIDENCE_OUT: ${{ github.workspace }}/feel
