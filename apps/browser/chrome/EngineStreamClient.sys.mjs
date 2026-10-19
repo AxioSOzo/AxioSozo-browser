@@ -440,7 +440,8 @@ export class EngineStreamHost {
       this.#requests.clear();
       for (const adapter of [...this.#targets.values()]) adapter.hostFailed(unavailable);
       this.#targets.clear();
-      await this.#process.stdin.close().catch(() => {});
+      // The host already exited: closing our end is cleanup and must never hold the caller.
+      this.#process.stdin.close().catch(() => {});
     } catch (error) { this.#closing = false; this.fail("ENGINE_CLOSE_OUTCOME_UNCERTAIN"); throw error; }
   }
 }

@@ -39,6 +39,7 @@ function wrap(child) {
   };
   child.stdout.on("data", chunk => { buffer = Buffer.concat([buffer, chunk]); flush(); });
   child.stdout.on("end", () => { ended = true; flush(); });
+  child.stdin.on("error", () => {}); // EPIPE once the host is gone is expected, not a crash
   const stderr = [];
   child.stderr.on("data", chunk => stderr.push(chunk));
   const exit = new Promise(resolve => child.on("exit", (code, signal) => resolve({ exitCode: code ?? (signal ? -1 : 0) })));
@@ -46,7 +47,11 @@ function wrap(child) {
     stdout: { read: n => new Promise(resolve => { waiting.push({ n, resolve }); flush(); }) },
     stderr: null, wait: () => exit,
     stdin: { write: text => new Promise((resolve, reject) => child.stdin.write(text, error => (error ? reject(error) : resolve()))),
-      close: () => new Promise(resolve => child.stdin.end(resolve)) },
+      // Resolves however the pipe ends: after the host exited, `end` sees EPIPE and never finishes.
+      close: () => new Promise(resolve => {
+        if (child.stdin.destroyed || child.stdin.writableFinished) { resolve(); return; }
+        child.stdin.once("close", resolve); child.stdin.once("error", resolve); child.stdin.end();
+      }) },
     kill: async () => { child.kill("SIGKILL"); } };
 }
 
@@ -109,6 +114,7 @@ const log = { requests, frames: [], events: [], steps: {}, at: "start" };
     step('const target = await adapter.create('); const target = await adapter.create(origin + "/engine.html", { width: 900, height: 650, device_scale: 2 });
     assert.equal(target.engine, "webkit");
     assert.equal(log.frames[0].w, 1800); assert.equal(log.frames[0].damage, null, "first presented frame is whole");
+    const initial = last.pixels;
     if (EVIDENCE) png(join(EVIDENCE, "live-initial.png"), 1800, 1300, last.pixels);
     const title = text => until(item => item.kind === "event" && item.event.event === "title" && item.event.title.includes(text), "title " + text);
     step('await adapter.focus(adapter.target, true'); await adapter.focus(adapter.target, true);
@@ -119,16 +125,26 @@ const log = { requests, frames: [], events: [], steps: {}, at: "start" };
     const committed = title("input=wk |");
     await adapter.input(adapter.target, "ime_commit_text", { text: "k" });
     step('await committed;'); await committed;
-    step('const damaged = await until'); const damaged = await until(item => item.kind === "frame" && item.metadata.damage
-      && item.metadata.damage[0][2] * item.metadata.damage[0][3] < 1800 * 1300, "a partially damaged frame (caret or text)");
-    const [, , dw, dh] = damaged.metadata.damage[0];
-    log.steps.typing_damage_fraction = (dw * dh) / (1800 * 1300);
-    assert.ok(log.steps.typing_damage_fraction < 0.5, "typing repaints a small rectangle");
+    // The typed text must be visible in the field's pixels (right of the caret, inside the
+    // focus ring, as native/webkit-host/stream_test.py INPUT_TEXT_2X), not merely in the title.
+    step("typed pixels");
+    const region = pixels => { const rows = []; for (let y = 325; y < 400; y++) rows.push(Buffer.from(pixels.subarray((y * 1800 + 240) * 4, (y * 1800 + 770) * 4)).toString("base64")); return rows.join(""); };
+    const blank = region(initial);
+    const textFrame = last && region(last.pixels) !== blank ? last
+      : await until(item => item.kind === "frame" && region(last.pixels) !== blank, "typed text in the field's pixels").then(() => last);
+    const smallest = log.frames.filter(frame => frame.damage).map(frame => frame.damage[0][2] * frame.damage[0][3]).sort((a, b) => a - b)[0];
+    log.steps.smallest_damage_fraction = smallest / (1800 * 1300);
+    log.steps.typed_frame_id = textFrame.metadata.frame_id;
+    assert.ok(log.steps.smallest_damage_fraction < 0.5, "typing and the caret repaint small rectangles");
     if (EVIDENCE) png(join(EVIDENCE, "live-typed.png"), 1800, 1300, last.pixels);
     // Wheel (CSS px, engine-stream sign): the page scrolls and repaints.
-    const scrolled = until(item => item.kind === "frame", "frame after wheel");
+    const beforeScroll = last.pixels;
+    const changed = pixels => { let count = 0; for (let i = 0; i < pixels.length; i += 16) if (pixels[i] !== beforeScroll[i] || pixels[i + 1] !== beforeScroll[i + 1]) count++; return count / (pixels.length / 16); };
+    const scrolled = until(item => item.kind === "frame" && changed(last.pixels) > 0.05, "scrolled pixels after wheel");
     await adapter.input(adapter.target, "wheel", { x: 400, y: 300, modifiers: 0, delta_x: 0, delta_y: -400 });
     step('await scrolled;'); await scrolled;
+    log.steps.scroll_changed_fraction = changed(last.pixels);
+    if (EVIDENCE) png(join(EVIDENCE, "live-scrolled.png"), 1800, 1300, last.pixels);
     // GET navigation advances both generations by exactly one.
     const before = adapter.target;
     const page2 = title("page=2");
