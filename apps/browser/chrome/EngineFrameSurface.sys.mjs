@@ -58,13 +58,29 @@ export function convertBGRARect(source, sourceWidth, sx, sy, target, targetWidth
 }
 
 function swizzleRun(src32, src8, from, dst32, dst8, to, count) {
+  if (from === to) {
+    // Same pixel index in source and target (whole frames, and every surface paint): one
+    // index, the shape SpiderMonkey compiles best (presenter bench, run 39340129366).
+    const end = from + count;
+    for (let p = from; p < end; p++) {
+      const value = src32[p], alpha = value >>> 24;
+      if (alpha === 255) {
+        // Memory B,G,R,A (little-endian 0xAARRGGBB) to R,G,B,A (0xAABBGGRR).
+        dst32[p] = (value & 0xff00ff00) | ((value & 0xff) << 16) | ((value >>> 16) & 0xff);
+        continue;
+      }
+      unpremultiply(src8, p * 4, dst8, p * 4, alpha);
+    }
+    return;
+  }
   const delta = to - from, end = from + count;
   for (let p = from; p < end; p++) {
-    const value = src32[p];
-    if (value >>> 24 === 255) {
-      // Memory B,G,R,A (little-endian 0xAARRGGBB) to R,G,B,A (0xAABBGGRR).
+    const value = src32[p], alpha = value >>> 24;
+    if (alpha === 255) {
       dst32[p + delta] = (value & 0xff00ff00) | ((value & 0xff) << 16) | ((value >>> 16) & 0xff);
-    } else unpremultiply(src8, p * 4, dst8, (p + delta) * 4, value >>> 24);
+      continue;
+    }
+    unpremultiply(src8, p * 4, dst8, (p + delta) * 4, alpha);
   }
 }
 
