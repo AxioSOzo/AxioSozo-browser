@@ -5,9 +5,11 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -88,8 +90,8 @@ bool copyImage(const uint8_t*, size_t) { return false; }
 
 // Every live descendant of this process (Chromium zygote, renderers, GPU, utility),
 // found through /proc so that sandboxed processes in their own PID namespaces are
-// included. Returns how many were signalled.
-static int killDescendants() {
+// included. Zombies (exited, not yet reaped) are not counted.
+static std::vector<pid_t> descendants() {
   pid_t self = getpid();
   std::map<pid_t, std::vector<pid_t>> children;
   if (DIR* proc = opendir("/proc")) {
@@ -110,7 +112,7 @@ static int killDescendants() {
       if (!close) continue;
       char state = 0;
       long parent = 0;
-      if (sscanf(close + 1, " %c %ld", &state, &parent) != 2) continue;
+      if (sscanf(close + 1, " %c %ld", &state, &parent) != 2 || state == 'Z') continue;
       children[pid_t(parent)].push_back(pid_t(pid));
     }
     closedir(proc);
@@ -123,8 +125,25 @@ static int killDescendants() {
     for (pid_t child : children[next])
       if (seen.insert(child).second) { found.push_back(child); pending.push_back(child); }
   }
+  return found;
+}
+// Returns how many were signalled.
+static int killDescendants() {
   int killed = 0;
-  for (pid_t pid : found) if (kill(pid, SIGKILL) == 0) ++killed;
+  for (pid_t pid : descendants()) if (kill(pid, SIGKILL) == 0) ++killed;
+  return killed;
+}
+
+int reapHelpers(double seconds) {
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
+  for (;;) {
+    while (waitpid(-1, nullptr, WNOHANG) > 0) {}
+    if (descendants().empty()) return 0;
+    if (std::chrono::steady_clock::now() >= deadline) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  int killed = killDescendants();
+  while (waitpid(-1, nullptr, WNOHANG) > 0) {}
   return killed;
 }
 

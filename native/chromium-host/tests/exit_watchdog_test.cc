@@ -59,5 +59,31 @@ int main() {
   for (pid_t helper : helpers) assert(gone(helper, std::chrono::milliseconds(3000)));
   printf("PASS: stuck host exited %d after %.2fs and SIGKILLed its child and grandchild (killDescendants via /proc)\n",
          WEXITSTATUS(status), seconds);
+
+  // reapHelpers (normal shutdown): a helper that exits by itself is only reaped; one
+  // that does not exit within the grace period is killed, grandchildren included.
+  pid_t quick = fork();
+  assert(quick >= 0);
+  if (quick == 0) { usleep(100 * 1000); _exit(0); }
+  assert(axio::platform::reapHelpers(2) == 0);
+  assert(kill(quick, 0) != 0 && errno == ESRCH);
+  int stuck[2];
+  assert(pipe(stuck) == 0);
+  pid_t lingering = fork();
+  assert(lingering >= 0);
+  if (lingering == 0) {
+    pid_t grandchild = fork();
+    if (grandchild == 0) { for (;;) pause(); }
+    (void)!write(stuck[1], &grandchild, sizeof(grandchild));
+    for (;;) pause();
+  }
+  pid_t grandchild = 0;
+  assert(read(stuck[0], &grandchild, sizeof(pid_t)) == sizeof(pid_t));
+  started = std::chrono::steady_clock::now();
+  int killed = axio::platform::reapHelpers(0.3);
+  seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+  assert(killed == 2 && seconds >= 0.25 && seconds < 3);
+  assert(gone(lingering, std::chrono::milliseconds(3000)) && gone(grandchild, std::chrono::milliseconds(3000)));
+  printf("PASS: reapHelpers reaped a helper that exited and killed 2 lingering ones after %.2fs\n", seconds);
   return 0;
 }

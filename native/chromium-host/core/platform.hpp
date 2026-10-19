@@ -36,6 +36,10 @@ bool sameKeydown(const cef_key_event_t& report, int sentNativeKeyCode, int sentW
 // False when the platform layer has no clipboard path.
 bool copyImage(const uint8_t* png, size_t size);
 
+// After CEF shut down: waits up to `seconds` for this host's own helper processes
+// to exit, then SIGKILLs any that remain. Returns how many were killed.
+int reapHelpers(double seconds);
+
 // Guarantees process exit within `seconds` even when the UI thread is stuck:
 // kills this host's own Chromium helpers, then _exit(code).
 void armExitWatchdog(double seconds, int code, const char* reason);

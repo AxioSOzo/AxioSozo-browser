@@ -143,6 +143,8 @@ int main(int argc, char** argv) {
   config.switches.push_back("ozone-platform=" + ozonePlatform());
   fprintf(stderr, "AXIO_CEF_LINUX platform=%s ozone=%s\n", axio::platform::name(), ozonePlatform().c_str());
   int status = axio::host::runBrowser(argc, argv, config);
+  // Nothing of this host outlives it: helpers normally exit right after shutdown.
+  if (int killed = axio::platform::reapHelpers(3)) fprintf(stderr, "AXIO_CEF_HELPERS_KILLED count=%d\n", killed);
   if (!ownTemporary.empty()) removeTree(ownTemporary);
   return status;
 }
