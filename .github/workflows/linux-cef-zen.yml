@@ -1,0 +1,220 @@
+# Chromium (CEF) tabs inside the Linux Zen app, end to end (workstream cef-zen-feel).
+#
+# unit: Zen-side CEF/Chromium node suites and the Python syntax of the GUI pieces.
+# e2e:  the newest axiosozo-zen-linux-x86_64 artifact (linux-zen-build.yml) + the CEF host
+#       built here from the pinned CEF distribution (native/chromium-host/probe.py setup,
+#       SUID sandbox helper installed: the runner's AppArmor blocks unprivileged user
+#       namespaces). When the artifact predates this commit its AxioSozo chrome JS is
+#       overlaid from this checkout (TEST-ONLY, `chrome-overlay` in the evidence; compiled
+#       code is the artifact's). Under Xvfb:
+#         1. gui_test.py --engine chromium launch,chrome,fixture (fixture probe regression)
+#         2. cef_zen_e2e.py --mode fixture  (probe button, input, page 2/back, host kill → Gecko)
+#         3. cef_zen_e2e.py --mode web      (E1/E2 + native-feel matrix, 1x)
+#         4. cef_zen_e2e.py --mode web --scale 2 (HiDPI subset)
+#       Chromium's sandbox stays on; TLS and origin isolation are untouched.
+# Results: ci-results branch, <branch>/<run>-<attempt>-cef-zen-{unit,e2e}/.
+name: linux-cef-zen
+on:
+  push:
+    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel]
+    paths:
+      - apps/browser/chrome/CEF*.sys.mjs
+      - apps/browser/chrome/Chromium*.sys.mjs
+      - apps/browser/chrome/EngineProbeControls.sys.mjs
+      - apps/browser/chrome/EngineTabMenu.sys.mjs
+      - apps/browser/tests/cef-adapter.test.mjs
+      - apps/browser/tests/chromium-*.test.mjs
+      - native/chromium-host/**
+      - scripts/gui_engines/chromium.py
+      - scripts/gui_test.py
+      - scripts/cef_zen_e2e.py
+      - tests/fixtures/cef-zen-feel.html
+      - tests/fixtures/engine.html
+      - .github/workflows/linux-cef-zen.yml
+      - .github/actions/publish-ci-results/**
+
+concurrency:
+  group: linux-cef-zen-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ARTIFACT: axiosozo-zen-linux-x86_64
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # publish-ci-results
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-unit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json)
+        run: echo "$(python3 scripts/ci_tools.py node)" >> "$GITHUB_PATH"
+      - name: Node unit tests (CEF adapter/presenter, Chromium UI and a11y, engine UX)
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          set -o pipefail
+          node --test --test-reporter=spec \
+            apps/browser/tests/cef-adapter.test.mjs apps/browser/tests/chromium-tabs.test.mjs \
+            apps/browser/tests/chromium-browser-ui.test.mjs apps/browser/tests/chromium-accessibility.test.mjs \
+            apps/browser/tests/engine-probe-controls.test.mjs apps/browser/tests/engine-tabs.test.mjs \
+            apps/browser/tests/engine-registry.test.mjs apps/browser/tests/engine-surface.test.mjs 2>&1 \
+            | tee "$EVIDENCE_OUT/node-unit.log"
+      - name: Python (GUI plug-in tests, syntax)
+        run: |
+          set -o pipefail
+          python3 -m py_compile scripts/cef_zen_e2e.py scripts/gui_engines/chromium.py
+          python3 -m unittest tests/test_gui_engine_chromium.py 2>&1 | tee "$EVIDENCE_OUT/python-unit.log"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: cef-zen-unit
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write   # publish-ci-results
+      actions: read     # find and download the Zen build artifact of another run
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-e2e
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runner resources
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { uname -a; nproc; free -h; df -h /; head -4 /etc/os-release;
+            cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null; } | tee "$EVIDENCE_OUT/runner.txt"
+      - name: Newest Linux Zen build artifact
+        id: zen
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=20" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty
+                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
+            > "$EVIDENCE_OUT/zen-artifact.json" || true
+          cat "$EVIDENCE_OUT/zen-artifact.json"
+          run=$(python3 -c 'import json,sys; d=open(sys.argv[1]).read().strip(); print(json.loads(d)["run_id"] if d else "")' "$EVIDENCE_OUT/zen-artifact.json")
+          echo "run_id=$run" >> "$GITHUB_OUTPUT"
+          if [ -z "$run" ]; then
+            printf '{"status":"NOT_VERIFIED","reason":"no unexpired %s artifact"}\n' "$ARTIFACT" | tee "$EVIDENCE_OUT/result.json"
+          fi
+      - name: Packages (GUI harness, CEF runtime, xclip, setxkbmap)
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) cmake ninja-build g++ \
+            zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
+            libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
+            libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core \
+            fonts-liberation xclip x11-xkb-utils xkb-data > "$EVIDENCE_OUT/apt.log" 2>&1
+          dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool | tee "$EVIDENCE_OUT/tool-versions.tsv"
+      - name: Restore pinned CEF archive
+        if: steps.zen.outputs.run_id != ''
+        id: cef-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-gui
+      - name: CEF host (probe.py setup, install-sandbox, check)
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          set -o pipefail
+          python3 native/chromium-host/probe.py setup 2>&1 | tail -n 8 | tee "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py check 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log"
+      - name: Save pinned CEF archive
+        if: always() && steps.zen.outputs.run_id != '' && steps.cef-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-gui
+      - name: Download the Zen build artifact
+        if: steps.zen.outputs.run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ steps.zen.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Unpack (./dev fetch-build) and TEST-ONLY chrome overlay
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          set -o pipefail
+          ./dev fetch-build --from-dir "$GITHUB_WORKSPACE/../artifact" --run "${{ steps.zen.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+          app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$AXIOSOZO_BUILD_ROOT/linux-app/current.json")
+          python3 scripts/webkit_package.py overlay-chrome --app "$app" --out "$EVIDENCE_OUT/chrome-overlay.json" > "$EVIDENCE_OUT/chrome-overlay.log" 2>&1
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["label"], "replaced", len(d["replaced"]), "added", len(d["added"]))' "$EVIDENCE_OUT/chrome-overlay.json"
+      - name: 1. GUI harness, engine chromium (fixture probe regression)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 600 ./dev gui-test --app fetched --engine chromium --scenario launch,chrome,fixture \
+            --evidence-dir "$EVIDENCE_OUT/harness" 2>&1 | tail -n 40 | tee "$EVIDENCE_OUT/harness.log"
+      - name: 2. Fixture mode E1/E2 (probe button, input, history, host kill)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
+            | tail -n 60 | tee "$EVIDENCE_OUT/fixture.log"
+      - name: 3. Web mode E1/E2 + native-feel matrix (1x)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
+            | tail -n 80 | tee "$EVIDENCE_OUT/web.log"
+      - name: 4. Web mode at 2x (HiDPI subset)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
+            | tail -n 60 | tee "$EVIDENCE_OUT/web-2x.log"
+      - name: Leftover processes
+        if: always()
+        run: ps -eo pid,ppid,stat,etime,args | grep -E "AxioCEFProbe|chrome-sandbox|axiosozo-dev" | grep -v grep | tee "$EVIDENCE_OUT/leftover-processes.txt" || true
+      - name: Verdict
+        id: verdict
+        if: always() && steps.zen.outputs.run_id != ''
+        run: |
+          python3 - "$EVIDENCE_OUT" <<'PY'
+          import json, pathlib, sys
+          out = pathlib.Path(sys.argv[1])
+          runs = {}
+          for name in ('harness', 'fixture', 'web', 'web-2x'):
+              path = out / name / 'result.json'
+              runs[name] = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
+          summary = {name: {'status': r.get('status'), 'reason': r.get('reason'),
+                            'scenarios': {k: v.get('status') for k, v in r.get('scenarios', {}).items()},
+                            'matrix': {k: v.get('status') for k, v in r.get('matrix', {}).items()}} for name, r in runs.items()}
+          verdict = 'PASS' if all(r['status'] == 'PASS' for r in summary.values()) else 'FAIL'
+          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'runs': summary}, indent=2) + '\n')
+          print(json.dumps({'verdict': verdict, 'runs': summary}, indent=1))
+          PY
+          find "$EVIDENCE_OUT" -name '*.png' -size +4M -delete
+          chmod -R a+rX "$EVIDENCE_OUT"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: cef-zen-e2e
+      - name: Fail the job unless every run passed
+        if: always() && steps.zen.outputs.run_id != ''
+        run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); sys.exit(v['verdict']!='PASS')"
