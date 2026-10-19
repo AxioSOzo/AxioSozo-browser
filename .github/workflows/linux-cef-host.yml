@@ -77,24 +77,6 @@ jobs:
         with:
           path: ${{ github.workspace }}/.local/build/cef/*.tar.bz2
           key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal
-      # A fresh runner reads the 1.4 GB unstripped libcef.so from a cold disk: the first
-      # launch's GPU process then sat in uninterruptible I/O for >10 s (run 39295110390,
-      # E0 got no paint). Warm the runtime once and record how long that took.
-      - name: Warm the CEF runtime into the page cache (cold-start I/O, measured)
-        run: |
-          python3 - "$EVIDENCE_OUT/runtime-warm.json" <<'PY'
-          import json, pathlib, sys, time
-          runtime = pathlib.Path('.local/build/cef/linux').resolve()
-          files = [p for p in runtime.iterdir() if p.is_file() and p.suffix in ('.so', '.1', '.pak', '.dat', '.bin')]
-          start, total = time.monotonic(), 0
-          for path in files:
-              with path.open('rb') as stream:
-                  while chunk := stream.read(1 << 24):
-                      total += len(chunk)
-          result = dict(warm_seconds=round(time.monotonic() - start, 3), bytes=total, files=sorted(p.name for p in files))
-          pathlib.Path(sys.argv[1]).write_text(json.dumps(result, indent=2) + '\n')
-          print(json.dumps(result))
-          PY
       - name: probe.py install-sandbox (chrome-sandbox root:root 4755)
         run: python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee "$EVIDENCE_OUT/install-sandbox.log"
       - name: probe.py check
@@ -114,8 +96,9 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          # Diagnostics only: kernel stacks of any host process in uninterruptible sleep
-          # (runs 39295110390/39296540039: the GPU process sat in D state, no paint).
+          # Diagnostics only: kernel stacks of any host process in uninterruptible sleep.
+          # Run 39297085450: on a fresh runner the browser and GPU processes wait ~2-4 s on
+          # first-run file reads outside the CEF runtime, which delays the first paint.
           ( for i in $(seq 1 30); do sleep 0.5
               for p in $(ps -eo pid=,stat=,args= | awk '$2 ~ /^D/ && $3 ~ /AxioCEFProbe/ {print $1}'); do
                 echo "== pid $p $(date +%T.%N) $(ps -o args= -p $p | cut -c1-160)"; sudo cat /proc/$p/stack 2>&1; done

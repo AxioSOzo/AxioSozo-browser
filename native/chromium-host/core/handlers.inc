@@ -553,7 +553,10 @@ static void tick() {
   if (closed) { p_cef_quit_message_loop(); return; }
   auto now = std::chrono::steady_clock::now();
   double elapsed = std::chrono::duration<double>(now - startedAt).count();
-  if (!streaming && loaded && firstLoadAt < 0) firstLoadAt = elapsed;
+  // The E0 schedule starts at the loaded page's first paint, not at load: Chromium
+  // holds input until a document's first frame, and a cold first start (fontconfig,
+  // system libraries) delayed that paint by ~4 s on fresh CI runners.
+  if (!streaming && loaded && paintedAfterLoad && firstLoadAt < 0) firstLoadAt = elapsed;
   double exerciseElapsed = firstLoadAt < 0 ? -1 : elapsed - firstLoadAt;
   if (streaming) {
     pumpCommands();

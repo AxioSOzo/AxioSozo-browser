@@ -65,6 +65,7 @@ static std::u16string initialURL;
 static cef_browser_t* browser = nullptr;  // E0 probe browser
 static cef_request_context_t* isolatedContext = nullptr;
 static bool closed = false, loaded = false, inputObserved = false, navigated = false, e0Focused = false;
+static bool paintedAfterLoad = false;  // E0: the loaded fixture has painted
 static int width = 900, height = 650, frames = 0;
 static double deviceScale = 2.0;
 static bool streaming = false, streamReady = false, streamClosing = false;
@@ -966,6 +967,7 @@ static void configure() {
     HOLD(b);
     if (type != PET_VIEW) return;
     frames++;
+    if (loaded) paintedAfterLoad = true;
     if (deviceScale == 1.0 && w == width && h == height) scale1Frame = true;
     if (deviceScale == 2.0 && w == width * 2 && h == height * 2) scale2Frame = true;
     saveFrame(buffer, w, h);
