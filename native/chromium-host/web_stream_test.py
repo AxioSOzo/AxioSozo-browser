@@ -201,6 +201,11 @@ def run(interaction_timeout=15):
             result['tests'].append('navigation_cancels_open_javascript_dialog_without_hang')
             # Right-click off any link: CEF reports the empty link/source URLs as NULL
             # userfree strings (E1 2026-09-30: freeing them hung the host).
+            # Chromium dispatches input to a document only after its first frame (paint
+            # holding), so wait for a frame of the current document before clicking.
+            current = session.target['document_generation']
+            if not any(target['document_generation'] == current for target in session.frame_targets):
+                session.until(lambda kind, item: kind == 2 and item['target']['document_generation'] == current)
             mark = len(session.events)
             for kind in ('down', 'up'):
                 completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1, mouse_leave=False)

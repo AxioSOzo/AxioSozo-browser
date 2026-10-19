@@ -423,6 +423,81 @@ Every ref-counted CEF struct passed into a C callback carries one reference the
 callback releases; every struct the host passes into CEF carries one reference CEF
 releases. The host follows both rules so `cef_shutdown` finds no live objects.
 
+## Linux hosts (`linux64`, `linuxarm64`)
+
+These are backward-compatible additions. A macOS host and its adapter behave
+exactly as described above.
+
+**Platform.** `ready.platform` is `macosarm64`, `linux64` or `linuxarm64`. The
+adapter requires the label that matches its own Gecko build: `Services.appinfo.OS`
+plus the XPCOM ABI (`x86_64` → `linux64`, `aarch64` → `linuxarm64`).
+
+**Render path.** Linux has no engine-surface service. The render path is always
+`native-osr-bgra` with `capabilities.surface:false`. The host rejects any `surface_*`
+hello key as an unknown key (exit 64).
+
+**Runtime layout.** The runtime directory is `<cef root>/cef/<platform>/`, alias
+`<cef root>/cef/linux`. It holds `AxioCEFProbe`, `AxioCEFProbeHelper`, `libcef.so`,
+the resources and the root:root 4755 `chrome-sandbox`.
+- The build root is any absolute, normalized directory (`$AXIOSOZO_BUILD_ROOT`),
+  never under /proc, /sys or /dev.
+- The CEF root is the build root or its parent.
+
+**Environment.** The host environment is exactly `PATH`, `TMPDIR=<profile>`,
+`HOME=<profile>` and, when Zen has a well-formed X display, `DISPLAY`/`XAUTHORITY`.
+- The host uses the X11 ozone backend when `DISPLAY` is set (clipboard shared with
+  the desktop, also through XWayland). Otherwise it uses the headless backend.
+- When `TMPDIR` is too deep for Chromium's process-singleton socket (108-byte
+  `sun_path`), the host moves `TMPDIR` to its own 0700 `/tmp/axio-cef-XXXXXX` and
+  removes it on exit.
+- The host passes no D-Bus address, so Chromium uses its "basic" password store.
+  (Open decision for the persistent web profile.)
+
+**Sandbox.** The sandbox is never disabled.
+- Chromium uses the user-namespace sandbox when the kernel permits it.
+- Otherwise it uses the SUID `chrome-sandbox`. Ubuntu 24.04 restricts unprivileged
+  user namespaces through AppArmor.
+- Renderers then run with seccomp-bpf in their own PID namespace. The probe's E0
+  observes this in `/proc`.
+
+**Keys.** `native_key_code` is the XKB keycode (evdev + 8), from which CEF's Linux
+translator derives the DOM `code`. `windows_key_code` is Gecko's layout-aware
+`keyCode`, or the US-layout key when Gecko reports 0. Text always arrives as `char`
+events with the character. Linux presenters may add these modifier bits:
+
+| Bit | Flag | Meaning |
+| --- | --- | --- |
+| 256 | `EVENTFLAG_NUM_LOCK_ON` | NumLock is on |
+| 512 | `EVENTFLAG_IS_KEY_PAD` | the key is on the keypad |
+| 1024 | `EVENTFLAG_IS_LEFT` | the left-hand modifier key |
+| 2048 | `EVENTFLAG_IS_RIGHT` | the right-hand modifier key |
+| 4096 | `EVENTFLAG_ALTGR_DOWN` | AltGr is down |
+| 8192 | `EVENTFLAG_IS_REPEAT` | an auto-repeated key |
+
+Known limit (measured, run 39294505247): CEF derives the DOM `key` of
+`keydown`/`keypress` from `windows_key_code`. So AltGr+E inserts "€" but reports
+`key` "e". Text input is exact; only the reported key differs.
+
+**Wheel.** On Linux, `precise:true` adds `EVENTFLAG_PRECISION_SCROLLING_DELTA`. The
+delta then scrolls at once, as touchpad pixel deltas do (measured: one position).
+Notch deltas (`precise:false`) keep Chromium's smooth-scroll animation (measured:
+about 6–9 positions over 110–160 ms).
+
+**Frame damage** (opt-in, the same semantics as engine-stream-v1 §6.1). A hello
+`frame_damage:true` makes `ready.capabilities.frame_damage` true. Every frame then
+adds `damage: [[x, y, width, height]]` (one rectangle, physical px).
+- Pixels outside the rectangle are byte-identical to the previous frame delivered
+  for the same target and size. The payload is still the whole frame.
+- The first frame after creation, resize, navigation, showing a hidden target or a
+  dropped pending frame is whole.
+- A replaced pending frame's damage is merged into its replacement.
+- Popup composites are whole.
+- A paint that changes nothing visible sends no frame.
+- Without the hello key, frames are byte-identical to the frames described above,
+  and `capabilities.frame_damage` is false.
+- The adapter negotiates damage on Linux only. It presents the first frame after any
+  gap in delivery whole. The presenter converts and uploads only the rectangle.
+
 ## Engine-preference hook (F6)
 
 `installEngineProbeControls` returns `applyEnginePreference(tab, engine, { reason })`
