@@ -874,6 +874,13 @@ def package():
     # find-dupes, which rejects Zen's duplicated icons, and the mozharness zip.
     # Defined-but-empty values skip both for this development package.
     env.update({'RUN_FIND_DUPES': '', 'RUN_MOZHARNESS_ZIP': ''})
+    # The same flag makes `make-package` write buildhub/buildinfo metadata
+    # (informulate.py), which reads these two from the automation environment:
+    # the build's own id (obj/buildid.h, so nothing is rebuilt) and a tree name.
+    buildid = re.search(r'#define MOZ_BUILDID (\d{14})', (OBJECT / 'buildid.h').read_text())
+    if not buildid:
+        raise RuntimeError('BUILDID_MISSING: ' + str(OBJECT / 'buildid.h'))
+    env.update({'MOZ_BUILD_DATE': buildid.group(1), 'MH_BRANCH': 'axiosozo-dev'})
     run_command(['./mach', 'package'], engine, env)
     archives = sorted(dist.glob(LINUX_APP_NAME + '-*.tar.xz'))
     if len(archives) != 1:
