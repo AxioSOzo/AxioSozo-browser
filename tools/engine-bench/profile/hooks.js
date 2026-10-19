@@ -6,7 +6,7 @@
 // hooks wrap, at runtime and in that one window, the generic platform entry points the
 // engine adapters and presenters call, and only add timestamps:
 //
-//   Subprocess.call               spawn time of every child process (basename only) and,
+//   SubprocessImpl.call           spawn time of every child process (basename only) and,
 //                                 per spawned process, instance wrappers of
 //   process.stdin.write           the request `method` of each JSON line (nothing else of
 //                                 the line is read: it carries the host token)
@@ -38,11 +38,13 @@ if (!S) {
   };
   const bytes = buffer => { try { return buffer.byteLength; } catch { return -1; } };
 
-  // The shared-global instance the adapters import (a Marionette sandbox would otherwise get its own).
-  const url = "resource://gre/modules/Subprocess.sys.mjs";
-  let Subprocess;
-  try { ({ Subprocess } = ChromeUtils.importESModule(url, { global: "shared" })); S.module = "shared"; }
-  catch { ({ Subprocess } = ChromeUtils.importESModule(url)); S.module = "default"; }
+  // Subprocess.sys.mjs's `Subprocess` is Object.freeze()d; its call() delegates at call time to
+  // the platform SubprocessImpl (subprocess_unix.sys.mjs on Linux), which is a plain object.
+  const url = "resource://gre/modules/subprocess/subprocess_unix.sys.mjs";
+  let impl;
+  try { ({ SubprocessImpl: impl } = ChromeUtils.importESModule(url, { global: "shared" })); S.module = "shared"; }
+  catch { ({ SubprocessImpl: impl } = ChromeUtils.importESModule(url)); S.module = "default"; }
+  const Subprocess = impl;
   const originalCall = Subprocess.call;
   Subprocess.call = function (options, ...rest) {
     const t0 = now();
@@ -78,7 +80,7 @@ if (!S) {
     }, () => {});
     return promise;
   };
-  S.installed.push("Subprocess.call");
+  S.installed.push(Object.isFrozen(Subprocess) || Subprocess.call === originalCall ? "SubprocessImpl.call FAILED" : "SubprocessImpl.call");
 
   const OriginalImageData = win.ImageData;
   const WrappedImageData = new Proxy(OriginalImageData, {
