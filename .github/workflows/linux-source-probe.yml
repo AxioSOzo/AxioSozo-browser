@@ -1,0 +1,94 @@
+# Diagnostic: extract the pinned Firefox 156 / Zen sources on a runner (cloud
+# sessions cannot reach archive.mozilla.org) and publish small grep results for
+# the patterns in scripts/source_probe.txt to ci-results. No build, no binaries.
+name: Linux source probe
+
+on:
+  push:
+    branches: [cloud/linux-platform]
+    paths:
+      - .github/workflows/linux-source-probe.yml
+      - scripts/source_probe.txt
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write  # publish-ci-results
+    env:
+      OUT: ${{ github.workspace }}/../probe-out
+      SRC: ${{ github.workspace }}/../probe-src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore the pinned Firefox source archive
+        id: firefox-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.SRC }}/firefox-156.0.source.tar.xz
+          key: firefox-source-156.0-${{ hashFiles('upstreams.lock.json') }}
+
+      - name: Fetch and verify the pinned sources
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT" "$SRC"
+          url=$(jq -r .firefox.source_url upstreams.lock.json)
+          sha=$(jq -r .firefox.sha512 upstreams.lock.json)
+          tarball="$SRC/firefox-156.0.source.tar.xz"
+          [ -f "$tarball" ] || curl -fsSL --retry 3 -o "$tarball" "$url"
+          echo "$sha  $tarball" | sha512sum -c - | tee "$OUT/verify.txt"
+          mkdir -p "$SRC/ff"
+          tar -xJf "$tarball" -C "$SRC/ff" --strip-components=1 --wildcards \
+            '*/gfx/wr/*' '*/gfx/webrender_bindings/*' '*/modules/libpref/init/StaticPrefList.yaml' '*/widget/gtk/*' '*/gfx/thebes/gfxPlatform*'
+          zen_rev=$(jq -r .zen.revision upstreams.lock.json)
+          git init -q "$SRC/zen" && git -C "$SRC/zen" fetch -q --depth 1 https://github.com/zen-browser/desktop.git "$zen_rev"
+          git -C "$SRC/zen" checkout -q FETCH_HEAD
+          git -C "$SRC/zen" rev-parse HEAD >> "$OUT/verify.txt"
+          { echo "## Zen files touching gfx/ or widget/"; find "$SRC/zen/src" -path '*gfx*' -o -path '*widget/gtk*' | sed "s|$SRC/||"; } > "$OUT/zen-gfx-files.txt"
+
+      - name: Grep
+        run: |
+          set -uo pipefail
+          while IFS='|' read -r name tree pattern ctx; do
+            case "$name" in ''|'#'*|file|patched) continue ;; esac
+            grep -rnE -C "${ctx:-3}" "$pattern" "$SRC/$tree" | sed "s|$SRC/||" | head -c 400000 > "$OUT/$name.txt" || true
+          done < scripts/source_probe.txt
+          wc -l "$OUT"/*.txt
+
+      - name: Copy whole files
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT/files"
+          { grep '^file|' scripts/source_probe.txt || true; } | while IFS='|' read -r _ path; do
+            [ -f "$SRC/$path" ] && cp "$SRC/$path" "$OUT/files/$(echo "$path" | tr / _)" || echo "missing $path" >> "$OUT/files/missing.txt"
+          done
+
+      - name: Post-Zen-import copies (patched|path lines)
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT/patched"
+          grep '^patched|' scripts/source_probe.txt | cut -d'|' -f2 > "$SRC/wanted.txt"
+          [ -s "$SRC/wanted.txt" ] || exit 0
+          tar -xJf "$SRC/firefox-156.0.source.tar.xz" -C "$SRC/ff" --strip-components=1 --wildcards $(sed 's|^|*/|' "$SRC/wanted.txt")
+          includes=$(sed 's|^|--include=|' "$SRC/wanted.txt")
+          find "$SRC/zen/src" -name '*.patch' | sort | while read -r patch; do
+            git -C "$SRC/ff" apply --ignore-space-change --ignore-whitespace $includes "$patch" 2>>"$OUT/patched/apply-errors.txt" \
+              && grep -qF -f <(sed 's|^|+++ b/|' "$SRC/wanted.txt") "$patch" && echo "${patch#$SRC/}" >> "$OUT/patched/applied.txt" || true
+          done
+          while read -r path; do
+            sha256sum "$SRC/ff/$path" | sed "s|$SRC/ff/||" >> "$OUT/patched/sha256.txt"
+            cp "$SRC/ff/$path" "$OUT/patched/$(echo "$path" | tr / _)"
+          done < "$SRC/wanted.txt"
+          true
+
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.OUT }}
+          name: source-probe
