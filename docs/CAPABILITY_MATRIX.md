@@ -11,8 +11,8 @@
 | TLS, extensions, accessibility, devtools | Native Zen/Firefox inherited; this slice did not run the full regression matrix | Full safety matrix blocked | TLS errors fail closed in the host (no bypass, no TLS UI); no extensions, accessibility or devtools | No override | No override |
 | Dialogs, permissions, downloads, pop-ups, file pickers | Native Zen/Firefox | Delegated to Zen UI in web mode | Denied by the host with explicit codes; Zen shows a notice | No access | Off |
 | IME | Native | Proxy editor (macOS surface mode) | Text commit only (`ime_commit_text`); no composition | — | — |
-| Inside Zen on Linux (GUI E2E) | Harness launch/chrome/fixture PASS | Host E0/stream/input PASS (cloud/linux-cef); inside Zen: see three-engine row | PASS, EXPERIMENTAL (run 39325934205): Gecko → WebKit → Gecko via Zen's tab menu with real typing, click, link, toolbar Back, wheel scroll; host SIGKILL keeps the Gecko tab | — | — |
-| Three engines on one tab | Hub | Fixture page only, beside WebKit (three-engine controls) | Fixture page only | — | — |
+| Inside Zen on Linux (GUI E2E) | Harness launch/chrome/fixture PASS | Host E0/stream/input PASS (cloud/linux-cef); inside Zen: three-engine row | PASS, EXPERIMENTAL (runs 39325934205, 39337226571): Gecko → WebKit → Gecko via Zen's tab menu with real typing, click, link, toolbar Back, wheel scroll; host SIGKILL keeps the Gecko tab | — | — |
+| Three engines on one tab (Linux GUI E2E) | Hub; same content process across all switches | PASS, EXPERIMENTAL (run 39337226571): fixture page only, beside WebKit, via Zen's "Open in" submenu | PASS, EXPERIMENTAL (run 39337226571): fixture page only | — | — |
 
 The `enabled` provider setting is an explicit local policy preference, not a
 claim of authenticated or billed access. Disabled and unverified routes cannot
@@ -43,7 +43,7 @@ Failure handling: a failed start, a crash or exit (codes 70, 76), a protocol vio
 load failure or a Gecko navigation that raced the switch shows the tab's Gecko document again,
 unchanged.
 
-Linux evidence: `docs/evidence/linux/webkit-zen/STATUS.json` (Zen GUI E2E run 39325934205,
-curated screenshots in `run-39325934205-e2e/`). In the three-engine window (WebKit controls over
+Linux evidence: `docs/evidence/linux/webkit-zen/STATUS.json` (Zen GUI E2E runs 39325934205 and
+39337226571, curated screenshots in `run-39325934205-e2e/` and `run-39337226571-e2e/`). In the three-engine window (WebKit controls over
 the fixture-mode Chromium probe) Chromium is offered for the local test page only (EngineRegistry
 `CHROMIUM_FIXTURE_LINEUP`); the Chromium fixture probe alone stays toolbar-only.
