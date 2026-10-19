@@ -45,7 +45,9 @@ jobs:
             echo "## df -h"; df -h "$GITHUB_WORKSPACE" /tmp; echo "## os-release"; head -4 /etc/os-release;
             echo "## kernel sandbox knobs";
             for f in /proc/sys/kernel/apparmor_restrict_unprivileged_userns /proc/sys/kernel/unprivileged_userns_clone /proc/sys/user/max_user_namespaces; do
-              echo "$f=$(cat $f 2>/dev/null || echo absent)"; done; } | tee "$EVIDENCE_OUT/machine.txt"
+              echo "$f=$(cat $f 2>/dev/null || echo absent)"; done;
+            echo "## DRM devices"; ls -la /dev/dri 2>&1 || true; ls /sys/class/drm 2>&1 || true;
+            for d in /sys/class/drm/card*/device/driver; do echo "$d -> $(readlink -f $d 2>/dev/null)"; done; } | tee "$EVIDENCE_OUT/machine.txt"
       - name: Install apt packages (README "Linux")
         run: |
           sudo apt-get update -q
@@ -112,6 +114,12 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
+          # Diagnostics only: kernel stacks of any host process in uninterruptible sleep
+          # (runs 39295110390/39296540039: the GPU process sat in D state, no paint).
+          ( for i in $(seq 1 30); do sleep 0.5
+              for p in $(ps -eo pid=,stat=,args= | awk '$2 ~ /^D/ && $3 ~ /AxioCEFProbe/ {print $1}'); do
+                echo "== pid $p $(date +%T.%N) $(ps -o args= -p $p | cut -c1-160)"; sudo cat /proc/$p/stack 2>&1; done
+            done ) > "$EVIDENCE_OUT/e0-d-state-stacks.txt" 2>&1 &
           timeout 300 python3 native/chromium-host/probe.py run 2>&1 | tee "$EVIDENCE_OUT/e0.log"
       - name: Authenticated stream (stream_test.py)
         continue-on-error: true

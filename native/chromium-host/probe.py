@@ -841,6 +841,17 @@ def diagnose_unpainted(process, stop, output):
                                'pid=,ppid=,pgid=,stat=,etime=,command='],
                               capture_output=True, text=True, timeout=3)
         (EVIDENCE / 'cef-owned-helpers.txt').write_text(rows.stdout)
+        if IS_LINUX:
+            # Where each owned process waits in the kernel (no root needed for wchan;
+            # syscall/stack are read only where permitted).
+            lines = []
+            for pid in pids:
+                fields = {}
+                for name in ('wchan', 'syscall', 'stack'):
+                    with contextlib.suppress(OSError):
+                        fields[name] = Path(f'/proc/{pid}/{name}').read_text().strip().replace('\n', ' | ')[:400]
+                lines.append(json.dumps(dict(pid=pid, **fields)))
+            (EVIDENCE / 'cef-owned-helpers-wait.jsonl').write_text('\n'.join(lines) + '\n')
         for pid in ([] if IS_LINUX else pids[:5]):  # /usr/bin/sample is macOS-only
             if stop.is_set():
                 break

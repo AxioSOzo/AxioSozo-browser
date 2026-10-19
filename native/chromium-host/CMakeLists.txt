@@ -29,6 +29,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(AXIO_COPY_RUNTIME "Copy libcef.so and resources next to the executables (probe.py hard-links them instead)" OFF)
 
+# The distribution's cef_variables.cmake assumes x86_64 (-m64 -march=x86-64) unless told.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  set(PROJECT_ARCH "arm64")
+endif()
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 find_package(ZLIB REQUIRED)
