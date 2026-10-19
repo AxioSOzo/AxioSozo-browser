@@ -102,31 +102,6 @@ CLIPBOARD_WRITE = """
 Cc['@mozilla.org/widget/clipboardhelper;1'].getService(Ci.nsIClipboardHelper).copyString(arguments[0]);
 return true;
 """
-DIALOG_STATE = """
-const box = gBrowser.getTabDialogBox?.(gBrowser.selectedBrowser);
-const managers = box ? [box.getContentDialogManager?.(), box.getTabDialogManager?.()] : [];
-for (const manager of managers) {
-  const dialog = manager?._dialogs?.[0];
-  if (!dialog) continue;
-  const doc = dialog._frame?.contentDocument;
-  const root = doc?.getElementById('commonDialog');
-  return {open: true, text: doc?.getElementById('infoBody')?.textContent ?? null,
-    title: doc?.getElementById('infoTitle')?.textContent ?? null,
-    hasTextbox: !!doc?.getElementById('loginTextbox') && !doc.getElementById('loginContainer')?.hidden,
-    buttons: root ? ['accept', 'cancel'].map(name => root.getButton?.(name)).filter(b => b && !b.hidden).map(b => b.label) : [],
-    manager: manager === managers[0] ? 'content' : 'tab'};
-}
-return {open: false};
-"""
-DIALOG_ANSWER = """
-const [accept] = arguments;
-const box = gBrowser.getTabDialogBox(gBrowser.selectedBrowser);
-for (const manager of [box.getContentDialogManager?.(), box.getTabDialogManager?.()]) {
-  const root = manager?._dialogs?.[0]?._frame?.contentDocument?.getElementById('commonDialog');
-  if (root) { accept ? root.acceptDialog() : root.cancelDialog(); return true; }
-}
-return false;
-"""
 FINDBAR_STATE = """
 const tab = gBrowser.selectedTab;
 const bar = gBrowser.isFindBarInitialized(tab) ? gBrowser.getCachedFindBar(tab) : null;
@@ -706,24 +681,38 @@ class CEFZenHarness(gui_test.Harness):
                   selection_items=[i['label'] for i in menu['items']], page_items=[i['label'] for i in page_menu['items']])
         return {'selection_menu': menu, 'copied': copied, 'page_menu': page_menu, 'page_contextmenu_events': self.page()['cm']}
 
-    def dialog(self, button, key_sequence, expect, name, accept):
-        self.click_at(*AT[button])
-        opened = self.wait(lambda: (lambda d: d if d['open'] else None)(self.chrome_script(DIALOG_STATE)),
-                           f'Zen dialog for {button}', timeout=15)
-        self.screenshot(name)
-        via = 'keyboard'
+    def alert_text(self):
+        """Text of the user prompt Marionette sees on the test tab (Zen's own commonDialog), or None.
+        While it is open Marionette refuses scripts, so the prompt is read through WebDriver's alert API."""
+        try:
+            return self.marionette.call('WebDriver:GetAlertText')['value']
+        except gui_test.MarionetteError:
+            return None
+
+    def answer_prompt(self, key_sequence, accept, text=None):
+        """Answer Zen's dialog with real keys; WebDriver's accept/dismiss only if the keys did not reach it."""
         for item in key_sequence:
             if item.startswith('type:'):
                 self.type_text(item[5:])
             else:
                 self.key(item)
         try:
-            self.wait(lambda: not self.chrome_script(DIALOG_STATE)['open'], 'dialog closed by keyboard', timeout=6)
+            self.wait(lambda: self.alert_text() is None, 'dialog closed by the keyboard', timeout=6)
+            return 'keyboard'
         except AssertionError:
-            via = 'script (keyboard did not reach the dialog)'
-            self.chrome_script(DIALOG_ANSWER, [accept])
+            if text is not None:
+                self.marionette.call('WebDriver:SendAlertText', {'text': text})
+            self.marionette.call('WebDriver:AcceptAlert' if accept else 'WebDriver:DismissAlert')
+            return 'webdriver (keyboard did not reach the dialog)'
+
+    def dialog(self, button, key_sequence, expect, name, accept, text=None):
+        self.click_at(*AT[button])
+        shown = self.wait(lambda: self.alert_text(), f'Zen dialog for {button}', timeout=15)
+        time.sleep(0.6)
+        self.screenshot(name)
+        via = self.answer_prompt(key_sequence, accept, text)
         page = self.wait_page(lambda page: expect in page['d'], f'page saw {expect}')
-        return {'dialog': opened, 'via': via, 'result': page['d'][-1]}
+        return {'dialog_text': shown, 'via': via, 'result': page['d'][-1]}
 
     def scenario_dialogs(self):
         self.require_chromium()
@@ -731,7 +720,7 @@ class CEFZenHarness(gui_test.Harness):
         time.sleep(3.5)  # Firefox's successive-dialog window (dom.successive_dialog_time_limit)
         out['confirm'] = self.dialog('d-confirm', ['Escape'], 'confirm=false', '11-confirm', False)
         time.sleep(3.5)
-        out['prompt'] = self.dialog('d-prompt', ['ctrl+a', 'type:zen', 'Return'], 'prompt=zen', '11-prompt', True)
+        out['prompt'] = self.dialog('d-prompt', ['ctrl+a', 'type:zen', 'Return'], 'prompt=zen', '11-prompt', True, text='zen')
         keyboard = all(item['via'] == 'keyboard' for item in out.values())
         self.gate('js_dialogs', 'PASS' if keyboard else 'EXPERIMENTAL', screenshots=['11-alert.png', '11-confirm.png', '11-prompt.png'],
                   via={k: v['via'] for k, v in out.items()}, results=self.page()['d'])
@@ -974,16 +963,10 @@ class CEFZenHarness(gui_test.Harness):
         self.click_at(*AT['d-unload'])
         self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed (with a user gesture)')
         self.click_at(*AT['link'])
-        opened = self.wait(lambda: (lambda d: d if d['open'] else None)(self.chrome_script(DIALOG_STATE)),
-                           'Zen "leave page?" dialog', timeout=15)
+        opened = self.wait(lambda: self.alert_text(), 'Zen "leave page?" dialog', timeout=15)
+        time.sleep(0.6)
         self.screenshot('17-beforeunload')
-        self.key('Return')
-        via = 'keyboard'
-        try:
-            self.wait(lambda: not self.chrome_script(DIALOG_STATE)['open'], 'dialog closed', timeout=6)
-        except AssertionError:
-            via = 'script'
-            self.chrome_script(DIALOG_ANSWER, [True])
+        via = self.answer_prompt(['Return'], True)
         page = self.wait_page(lambda page: page['p'] == '2', 'leaving the page after confirming')
         self.chrome_script('BrowserCommands.back(); return true;')
         self.wait_page(lambda page: page['p'] == '1', 'back to page 1')
