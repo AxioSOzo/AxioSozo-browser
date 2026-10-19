@@ -109,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: &modes
+        mode:
           - { id: light-1x, args: '--theme light --scale 1 --wm auto' }
           - { id: dark-1x, args: '--theme dark --scale 1 --wm auto --scenario window,theme,strings' }
           - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
@@ -140,7 +140,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: *modes
+        mode:  # same list as before
+          - { id: light-1x, args: '--theme light --scale 1 --wm auto' }
+          - { id: dark-1x, args: '--theme dark --scale 1 --wm auto --scenario window,theme,strings' }
+          - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
+          - { id: firstrun-1x, args: '--theme light --scale 1 --wm auto --first-run --scenario firstrun,window,startup' }
+          - { id: bare-xvfb, args: '--theme light --scale 1 --wm none --scenario window,startup,tabs,scroll' }
     env:
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
       EVIDENCE_OUT: ${{ github.workspace }}/feel
