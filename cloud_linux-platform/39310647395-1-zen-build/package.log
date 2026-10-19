@@ -1,0 +1,36 @@
++ ./mach package
+Creating the 'common' site at /home/runner/axiosozo-build/zen/mozbuild/srcdirs/engine-58c8d4c7ff1f/_virtualenvs/common
+/usr/bin/gmake -C . -j4 -s -w package
+gmake: Entering directory '/home/runner/axiosozo-build/zen/obj'
+gmake[1]: Entering directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+gmake[2]: Entering directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+gmake[3]: Entering directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+BUILDSTATUS@browser/installer START_file_generate multilocale.txt
+BUILDSTATUS@browser/installer START_locale_manifest --output locale-manifest.in --base-path @RESPATH@ --locales  en-US --locale-entries @RESPATH@/browser/chrome/ @RESPATH@/chrome/
+BUILDSTATUS@browser/installer START_make_sourcestamp_file --output ../../dist//axiosozo-dev-0.1a1.en-US.linux-x86_64.txt --buildid-header ../../buildid.h --source-repo-header ../../source-repo.h
+BUILDSTATUS@browser/installer END_locale_manifest --output locale-manifest.in --base-path @RESPATH@ --locales  en-US --locale-entries @RESPATH@/browser/chrome/ @RESPATH@/chrome/
+BUILDSTATUS@browser/installer END_file_generate multilocale.txt
+BUILDSTATUS@browser/installer END_make_sourcestamp_file --output ../../dist//axiosozo-dev-0.1a1.en-US.linux-x86_64.txt --buildid-header ../../buildid.h --source-repo-header ../../source-repo.h
+Generating XPT artifacts archive (axiosozo-dev-0.1a1.en-US.linux-x86_64.xpt_artifacts.zip)
+BUILDSTATUS@browser/installer START_zip axiosozo-dev-0.1a1.en-US.linux-x86_64.xpt_artifacts.zip
+BUILDSTATUS@browser/installer END_zip axiosozo-dev-0.1a1.en-US.linux-x86_64.xpt_artifacts.zip
+Compressing...
+BUILDSTATUS@browser/installer START_package XZ
+BUILDSTATUS@browser/installer END_package XZ
+gmake[3]: Leaving directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+Traceback (most recent call last):
+  File "/home/runner/axiosozo-build/zen/source/engine/toolkit/mozapps/installer/informulate.py", line 128, in <module>
+    sys.exit(main(sys.argv[1:]))
+             ^^^^^^^^^^^^^^^^^^
+  File "/home/runner/axiosozo-build/zen/source/engine/toolkit/mozapps/installer/informulate.py", line 61, in main
+    build_id = os.environ["MOZ_BUILD_DATE"]
+               ~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "<frozen os>", line 679, in __getitem__
+KeyError: 'MOZ_BUILD_DATE'
+gmake[2]: *** [/home/runner/axiosozo-build/zen/source/engine/toolkit/mozapps/installer/packager.mk:146: make-package] Error 1
+gmake[2]: Leaving directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+gmake[1]: *** [/home/runner/axiosozo-build/zen/source/engine/config/rules.mk:345: default] Error 2
+gmake[1]: Leaving directory '/home/runner/axiosozo-build/zen/obj/browser/installer'
+gmake: *** [/home/runner/axiosozo-build/zen/source/engine/browser/build.mk:6: package] Error 2
+gmake: Leaving directory '/home/runner/axiosozo-build/zen/obj'
+{"status": "BLOCKED_ENV", "error": "Command '['/usr/bin/python3', '/home/runner/work/AxioSozo-browser/AxioSozo-browser/scripts/storage.py', 'exec', '--', './mach', 'package']' returned non-zero exit status 2."}
