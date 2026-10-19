@@ -36,6 +36,7 @@ Measurements: `.github/workflows/linux-perf.yml` (results on `ci-results` under
 | 3 | **rAF-paced presentation**: frames are accepted (and acked) at once; conversion + upload happen once per refresh tick for the union of damage since the last paint; superseded frames cost nothing | `EngineFrameSurface.accept/paint` | ack no longer waits for paint (host pipelines the next frame); ≤ 1 upload per vsync; `supersededFrames` in diagnostics |
 | 4 | **1 MiB stdout pipe** (`F_SETPIPE_SZ`, Linux, best effort ≤ `fs.pipe-max-size`) | `native/{chromium,webkit}-host/transport.hpp` | ~16× fewer Subprocess round trips per frame |
 | 5 | **`damage_payload`** (additive hello key, needs `frame_damage`): the payload is only the damage rectangle's rows; Zen rebuilds the whole frame per target (`DamagePayloadAssembler`) before the presenter | contracts engine-stream-v1 §6.2, cef-v1; hosts; `CEFEngineAdapter`/`EngineStreamClient` readers | pipe bytes ∝ damage (rAF pages: host damage share 0.21–0.24 → ~4× fewer bytes) |
+| 7 | **memfd frames** (EXPERIMENTAL, pref `axiosozo.engines.linux.memfd_frames`, default off): pixels in a sealed host memfd slot, read by Zen with one `IOUtils.read` of `/proc/<pid>/fd/<fd>` | contracts §6.3; host transports; adapters | no pixel bytes through the Subprocess pipe (see below) |
 | 6 | Bench support: `zen_bench.py --device-scale` (TEST-ONLY `layout.css.devPixelsPerPx`), `bench.py --damage-payload`, same-job base/cand A/B (`tools/pixel-path/`) | tools | 2× in Zen measurable; A/B immune to runner variance |
 
 Host-side coalescing was already in place and is kept: one frame in flight across the host,
@@ -54,39 +55,70 @@ never negotiates damage or payloads; no TLS, sandbox or isolation setting change
 
 (filled in from linux-perf runs; see "Runs")
 
-## Next step: Linux shared-memory frame transport (design)
+## memfd frames (implemented, EXPERIMENTAL, pref-gated)
 
-Goal: no pixel bytes through the pipe and **no JS pixel work**, the Linux analogue of the
-macOS IOSurface path. Reuses the platform-neutral Gecko hook the mac path already patches in
-(`HTMLCanvasElement::SetAxioExternalImageContainer`, patches/zen/firefox-native.json: frames
-reach WebRender through the ImageBridge without the main thread).
+engine-stream-v1 §6.3, pref `axiosozo.engines.linux.memfd_frames` (default **false**). No Gecko
+rebuild: chrome JS + both hosts.
 
-- **Receiver** (new, Linux-only XPCOM, `apps/browser/native/engine-view/linux/`,
-  `moz.build` branch `MOZ_WIDGET_TOOLKIT == "gtk"`, same IDL shape as
-  `nsIAxioEngineSurfaceService`): `createEndpoint()` returns a one-shot Unix socket path in the
-  session runtime directory (0700) plus a single-use token, `expectHostPid(pid)` (SO_PEERCRED
-  check), `bindCanvas(canvas, target)`.
-- **Hello** (additive, engine-stream-v1 §6.3 / cef-v1): `frame_transport:"shm"`,
-  `shm_socket`, `shm_token`. The host connects, authenticates with the token, and passes one
-  `memfd` (sealed `F_SEAL_SHRINK|F_SEAL_GROW`, sized 3 × max frame) with `SCM_RIGHTS`.
-- **Frames**: the host renders into ring slot *k*, then sends `{slot, frame_id, target,
-  width, height, damage}` over the socket (or the AXCF pipe as a kind-3 item); the receiver's
-  IO thread maps the slot read-only, wraps it as `gfx::DataSourceSurface` (B8G8R8A8 —
-  premultiplied BGRA is Gecko's native format, so **no swizzle at all**), sets it on the
-  canvas's `ImageContainer` and returns the slot (`release {slot}`) once the compositor has
-  uploaded it. Credit = free slots (2 in flight), so the host never blocks on a vsync.
-- **Fallback**: the pipe path above stays the default and the fallback (pref
-  `axiosozo.engines.linux.shm_frames`, default false until measured), exactly as the mac path
-  falls back to the pipe when the engine-view component is absent.
-- **Security**: the socket lives in the private session directory, accepts one connection from
-  the expected PID with the token, the memfd is sealed and mapped read-only in Zen; the host
-  sandboxes are unchanged.
-- **Cost model** (from the numbers above): removes the Subprocess transfer of 2.3 MB (1×) /
-  9.4 MB (2×) per frame and the JS conversion; leaves one ImageBridge upload per frame in
-  software WebRender (a `memcpy`-class copy off the main thread).
+- Host: one sealed `memfd` ring (2 slots × 32 MiB virtual; only touched pages are resident),
+  `MFD_CLOEXEC` so CEF/WPE helpers never inherit it. The writer thread copies each frame (or,
+  with `damage_payload`, the compacted damage rows) into the next slot and writes an AXCF frame
+  with **no payload**, metadata `+{slot, payload_bytes}`. `ready.capabilities.memfd = {fd,
+  slot_bytes, slots}`.
+- Zen: `IOUtils.read("/proc/<host pid>/fd/<fd>", {offset, maxBytes})` — one positioned read on
+  IOUtils' background thread, then the same `DamagePayloadAssembler` / `EngineFrameSurface`
+  path. The read completes before the frame's `frame_ack`; with one frame in flight the ack is
+  the slot's reuse barrier. The pid is Zen's own direct child (Subprocess), the fd number comes
+  only from the authenticated ready event; `/proc/<pid>/fd` needs ptrace-read access (same uid,
+  dumpable) — granted for a direct child under Yama scope 1.
+- Pipe bytes per frame: ~200 bytes of metadata instead of 2.3 MB (1×) / 9.4 MB (2×).
+- Fallback: the pipe path is the default; a host that cannot create the ring rejects the hello.
+- Verified: `native/chromium-host/tests/transport_memfd_test.cc` (parent reads slots through
+  /proc exactly like Zen), WebKit core `memfd` scenario (fake host, rebuilt frame byte-identical
+  to a forced whole frame), adapter tests (slot read before ack, refusal of hosts without the
+  ring, never on macOS). In-Zen: linux-perf A/B variant `memfd`.
 
-Status: design only (NOT_VERIFIED); needs a Zen rebuild (compiled Gecko code, ~20 min warm on
-Actions via `linux-zen-reusable.yml`).
+### Still open: no JS pixel work at all
+
+Two further steps, in order of cost:
+
+1. **Off-main-thread conversion (no Gecko rebuild)**: a ChromeWorker with
+   `IOUtils.openFileForSyncReading` + `SyncReadFile.readBytesInto` reads the slot into a persistent
+   buffer, converts the damage into a persistent `ImageData` and draws into the presenter canvas
+   through `transferControlToOffscreen()`; the main thread only validates metadata and acks.
+   Blocker to solve first: `captureFixtureFrame()` uses `canvas.toDataURL`, which an offscreen-
+   controlled canvas refuses (the GUI/E2E evidence harness depends on it) — it would move to
+   `OffscreenCanvas.convertToBlob` in the worker.
+2. **Native receiver (Gecko rebuild)**: a Linux-only XPCOM component under
+   `apps/browser/native/engine-view/linux/` (`moz.build` branch `MOZ_WIDGET_TOOLKIT == "gtk"`,
+   IDL shape of `nsIAxioEngineSurfaceService`) maps the memfd read-only and, on its own thread,
+   copies the slot into a `gfx::DataSourceSurface` (`SurfaceFormat::B8G8R8A8` — premultiplied
+   BGRA is Gecko's native format, **no swizzle**) wrapped in a `layers::SourceSurfaceImage` and
+   set on an async `ImageContainer` bound with the already patched, platform-neutral
+   `HTMLCanvasElement::SetAxioExternalImageContainer` (patches/zen/firefox-native.json). Frames
+   then reach WebRender through the ImageBridge without the main thread, like the macOS
+   IOSurface path's copy mode. Generation holding (frames of a newer document held until chrome
+   processed the navigation) must mirror `AxioEngineEndpoint::setTargetGenerations`.
+
+### Native prototype numbers (session machine, not a runner)
+
+`tools/pixel-path/shm_proto.cc`, evidence `docs/perf/evidence/shm_proto-session-20261019.jsonl`
+(Intel Xeon @ 2.80 GHz, 4 vCPU; receiver ends with the whole frame in its memory; the pipe
+receiver models Subprocess: one `read(2)` per wakeup into a fresh buffer, then one concatenation;
+it omits Subprocess's worker→main-thread message hop, so real Zen costs are higher):
+
+| 1800×1300 frame | receive ms (median) | receiver CPU ms/frame | wakeups/frame |
+| --- | --- | --- | --- |
+| pipe, 64 KiB (before) | 15.5 | 10.5 | 143 |
+| pipe, 1 MiB | 6.8 | 4.5 | 9 |
+| pipe, 64 KiB, damage payload 24 % | 2.5 | 1.5 | 36 |
+| pipe, 1 MiB, damage payload 24 % | 1.3 | 1.0 | 3 |
+| memfd ring, whole frame | 1.36 | 1.4 | 1 |
+| memfd ring, 24 % damage | 0.24 | 0.29 | 1 |
+
+At 900×650: 64 KiB pipe 2.7 ms / 36 wakeups → 1 MiB 1.2 ms / 3 → memfd 0.17 ms / 1. The 64 KiB
+2× figure (15.5 ms) matches the component bench's measured client read time (15.6 ms, run
+39330954155), which supports the model.
 
 ## Runs
 
