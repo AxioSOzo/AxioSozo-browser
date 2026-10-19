@@ -245,6 +245,9 @@ async function initialize() {
   const aboutRegistered = registerOverview();
   await window.gZenStartup.promiseInitialized;
   if (disposed) return;
+  // Linux: Firefox-on-Linux scrolling and visible window controls (default
+  // branch only, once per process; nothing happens on macOS).
+  guarded("linux desktop defaults", () => optionalModule("LinuxDesktop.sys.mjs")?.applyLinuxDesktopDefaults());
   const adapter = new GeckoEngineAdapter(window);
   // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
   // (`./dev engine-probe`) adds its own explicit toolbar action.

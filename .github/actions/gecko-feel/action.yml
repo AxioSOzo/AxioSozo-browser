@@ -1,0 +1,62 @@
+# One linux-gecko-feel matrix cell: install the GUI packages and window managers,
+# download + verify the app artifact of `run-id`, run scripts/gui_gecko_feel.py,
+# publish the evidence to ci-results. The calling job needs contents: write and
+# actions: read.
+name: Gecko feel cell
+description: Run scripts/gui_gecko_feel.py against one app artifact
+inputs:
+  run-id:
+    description: Run id whose axiosozo-zen-linux-x86_64 artifact is the app
+    required: true
+  side:
+    description: before | after (after runs with --strict)
+    required: true
+  mode-id:
+    description: Result folder suffix
+    required: true
+  args:
+    description: gui_gecko_feel.py mode arguments
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Runner and source
+      shell: bash
+      env:
+        RUN: ${{ inputs.run-id }}
+        SIDE: ${{ inputs.side }}
+      run: |
+        mkdir -p "$EVIDENCE_OUT"
+        { uname -a; nproc; free -h; echo "side=$SIDE artifact_run=$RUN"; } | tee "$EVIDENCE_OUT/runner.txt"
+    - name: GUI packages (+ window managers, desktop-file-utils)
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) \
+          metacity openbox desktop-file-utils fontconfig gnome-themes-extra
+        { dpkg-query -W metacity openbox; fc-match sans-serif; fc-match monospace; } | tee -a "$EVIDENCE_OUT/runner.txt" || true
+    - name: Download the app artifact
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: axiosozo-zen-linux-x86_64
+        path: artifact
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ github.token }}
+        repository: ${{ github.repository }}
+    - name: Verify and unpack (./dev fetch-build)
+      shell: bash
+      run: ./dev fetch-build --from-dir artifact --run "${{ inputs.run-id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+    - name: Feel harness
+      shell: bash
+      env:
+        ARGS: ${{ inputs.args }}
+        SIDE: ${{ inputs.side }}
+      run: |
+        strict=""; [ "$SIDE" = after ] && strict="--strict"
+        # shellcheck disable=SC2086
+        python3 scripts/gui_gecko_feel.py --app fetched --label "$SIDE" --evidence-dir "$EVIDENCE_OUT/evidence" $ARGS $strict
+    - if: always()
+      uses: ./.github/actions/publish-ci-results
+      with:
+        path: ${{ env.EVIDENCE_OUT }}
+        name: feel-${{ inputs.side }}-${{ inputs.mode-id }}
