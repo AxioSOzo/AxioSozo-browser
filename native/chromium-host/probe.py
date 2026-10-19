@@ -24,7 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # mounted project APFS volume. Both are overridable with AXIOSOZO_BUILD_ROOT.
 IS_LINUX = platform.system() == 'Linux'
 if IS_LINUX:
-    BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT') or ROOT / '.local' / 'build')
+    # The same default as scripts/storage.py (./dev): the gitignored <checkout>/.build.
+    BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT') or ROOT / '.build')
 else:
     BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', '/Volumes/AxioSozoBuild'))
 BASE = BUILD_ROOT / 'cef'

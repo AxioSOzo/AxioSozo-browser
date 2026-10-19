@@ -226,7 +226,7 @@ sudo apt-get install -y --no-install-recommends xvfb xauth cmake ninja-build g++
   util-linux libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 libgbm1 \
   libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
   libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core fonts-liberation
-export AXIOSOZO_BUILD_ROOT=$PWD/.local/build      # default; any absolute directory outside /proc, /sys, /dev
+# AXIOSOZO_BUILD_ROOT defaults to <checkout>/.build (as ./dev); any absolute directory outside /proc, /sys, /dev
 python3 native/chromium-host/probe.py setup            # download, sha256-verify, extract, CMake build
 python3 native/chromium-host/probe.py install-sandbox  # sudo: chrome-sandbox root:root 4755 (see Sandbox)
 python3 native/chromium-host/probe.py check            # build current + a usable sandbox, else BLOCKED_ENV
