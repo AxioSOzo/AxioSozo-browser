@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-19",
+  "component": "native/webkit-host (WPE WebKit 2.48.3, Debian 13 pins)",
+  "linux_runtime": "PASS (component evidence; never Zen E1/E2)",
+  "where": "GitHub Actions ubuntu-24.04 runner (4 vCPU, 16 GiB), pinned debian:trixie-20261005 container, workflow .github/workflows/linux-webkit-host.yml",
+  "green_run": {
+    "run_id": 39297810722,
+    "url": "https://github.com/AxioSOzo/AxioSozo-browser/actions/runs/39297810722",
+    "results": "ci-results:cloud_webkit-host/39297810722-1-wpe-debian13/ (curated copy in run-39297810722/)",
+    "container_wall_seconds": 76,
+    "host_build_seconds": 8.79,
+    "suites": {"test-native": "PASS", "stream_test.py": "PASS", "input_test.py": "PASS", "stream_security_test.py": "PASS"}
+  },
+  "verified": {
+    "pinned_install": "PASS: 14 pinned Debian .debs sha256-checked against upstreams.lock.json before install (apt also verifies the signed index)",
+    "real_frames": "PASS: 1800x1300 at 2x, 2000x1400 at 2x, 800x600 at 1x; PNGs in run-39297810722/frames inspected by the agent",
+    "typed_input": "PASS: 'WPE' via WebKit's input-method commit path visible in the field and title; down/char/up inserts once; ime_commit_text 'é'",
+    "navigation": "PASS: GET page 2, back, forward each advance both generations by exactly 1; stale targets rejected after navigation and after back; history boundary",
+    "paint_fence": "PASS: no previous-document pixels under a new generation (page-2 status line empty; fence opened by the document, not by timeout)",
+    "back_forward_cache": "PASS: back restores without a fetch (the stream session requested only /engine.html and /engine.html?page=2; the third /engine.html request belongs to the separate damage session)",
+    "damage": "PASS: computed damage, 0 pixels changed outside the rectangle; typing frame damage = 8.6% of the frame",
+    "input_fidelity": "PASS: left/right buttons, click-to-focus, drag with button held, XKB keycodes (Escape/ArrowLeft/Tab reach the DOM), wheel delta_y -400 -> DOM deltaY 400 and scrollY 400, cursor text/pointer from hit tests, devicePixelRatio 2 and 1, no frames while hidden",
+    "security": "PASS: 13 negative cases with exact exit codes (wrong token 64, duplicate/unknown ACK 64, replayed id 64, unknown key 64, malformed JSON 64, overlong line 64, denied URL 64 without a request, web/surface hello 64, EOF 0, shutdown 0, duplicate target rejected)",
+    "sandbox": "PASS: WPEWebProcess observed under bubblewrap (2 bwrap processes) with WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS never set",
+    "process_cleanup": "PASS: no orphan helper in any session (host and test runner are child subreapers); every private profile removed",
+    "heartbeat": "PASS: ~1.00 s gaps, none while SIGSTOPped"
+  },
+  "ci_environment_settings": {
+    "note": "CI environment only, not product changes. Each one alone is insufficient (sandbox-probe-run-39293842171.jsonl).",
+    "runner": "sysctl kernel.apparmor_restrict_unprivileged_userns=0",
+    "container": "--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined",
+    "tests_run_as": "unprivileged uid 1500 inside the container"
+  },
+  "not_claimed": [
+    "Zen E1/E2 with WebKit (no Zen-side adapter yet)",
+    "web browsing (fixture profile only; 2.48.3 lacks later security fixes)",
+    "IME composition/preedit (ime:false)",
+    "macOS product path"
+  ]
+}
