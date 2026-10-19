@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-19",
+  "workstream": "webkit-zen (branch cloud/webkit-zen, mirror claude/webkit-zen-engine-b4zzio, PR #4)",
+  "overall": "PARTIAL: Zen-side WebKit engine implemented; unit and live-host adapter evidence PASS; Zen GUI E2E NOT_VERIFIED (no Linux Zen build artifact exists yet)",
+  "workflow": ".github/workflows/linux-webkit-zen.yml (jobs unit, adapter, e2e)",
+  "results": {
+    "unit": {
+      "label": "PASS",
+      "runs": [39303310867, 39305854779],
+      "what": "node --test of webkit-engine (adapter/presenter/controls with a scripted host), engine-registry, engine-tabs, engine-preference, engine-probe-controls, chromium-tabs, cef-adapter, coordinator, console-errors-native: 0 failures; cargo test -p browser-core 11/11 (webkit enum)",
+      "note": "scripted host packets are protocol fixtures, never WebKit rendering"
+    },
+    "adapter_live_host": {
+      "label": "PASS (component evidence, not Zen E1/E2)",
+      "run": 39305854779,
+      "where": "GitHub Actions ubuntu-24.04, pinned debian:trixie-20261005 container, real AxioWebKitHost on WPE WebKit 2.48.3, bubblewrap sandbox on, pinned Node 24.14.0",
+      "test": "apps/browser/tests/webkit-host-live.test.mjs",
+      "verified": [
+        "ready identity equals the lockfile pins (webkit 2.48.3, libwpe 1.16.2, WPEBackend-fdo 1.16.0, linux-x86_64, bubblewrap, wpe-fdo-shm-bgra) through validateWebKitReady",
+        "create 900x650@2 -> first presented frame 1800x1300, whole (no damage key)",
+        "frame_damage negotiated; smallest damage rectangle 8.3% of the frame; credit released per frame",
+        "XKB keycode key down/char/up 'w' + ime_commit_text 'k' -> title and the field's pixels show 'wk' (run-39305854779-adapter/live-typed.png, inspected)",
+        "wheel delta_y -400 -> 77% of sampled pixels changed, page scrolled (live-scrolled.png, inspected)",
+        "navigate ?page=2 advances both generations by exactly 1; a command for the old target is refused by the host with stale_target",
+        "back -> load http_status 200 restored_from_history true (WebKit back/forward cache, accepted by the profile's 200/0 rule); second back -> history_boundary",
+        "resize 800x600@1 -> 800x600 frame; only 2 fixture requests (back did not refetch)",
+        "close -> shutdown, host exit 0"
+      ],
+      "curated": "run-39305854779-adapter/"
+    },
+    "zen_gui_e2e": {
+      "label": "NOT_VERIFIED",
+      "reason": "no unexpired axiosozo-zen-linux-x86_64 artifact; linux-zen-build run 39293018395 (cloud/linux-platform) was still building at 19:05Z",
+      "runs_recording_not_verified": [39303310867, 39305854779],
+      "pending_plan": "rerun linux-webkit-zen (push to cloud/webkit-zen) once the artifact exists: e2e job unpacks it in debian:13, overlays this commit's chrome JS (TEST-ONLY, labelled chrome-overlay), runs ./dev gui-test --engine webkit (launch, chrome, fixture, input) and scripts/webkit_zen_e2e.py (roundtrip)"
+    }
+  },
+  "not_claimed": [
+    "Zen E1/E2 with WebKit (no Zen run yet)",
+    "Chromium leg of Gecko -> WebKit -> Chromium -> Gecko on Linux (CEF on Linux is cloud/linux-cef; the facade switches via the Gecko tab, NOT_VERIFIED)",
+    "WebKit web browsing (fixture only by design)",
+    "macOS WebKit (unavailable by design)"
+  ]
+}

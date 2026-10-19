@@ -1,0 +1,197 @@
+# WebKit as the third engine inside Zen (workstream webkit-zen).
+#
+# unit: node tests of the Zen-side WebKit adapter/presenter/controls and the engine
+#       registry, tab glyph, tab menu, preference and Chromium suites they touch, plus
+#       the browser-core engine enum (cargo).
+# e2e:  the newest axiosozo-zen-linux-x86_64 artifact (built by linux-zen-build.yml on
+#       Ubuntu 24.04) + the WPE WebKit host, both inside the pinned debian:13 image (the
+#       host links the Debian WPE packages; Debian 13's glibc 2.41 runs the Ubuntu-built
+#       app). Xvfb + GUI harness: Gecko -> WebKit -> Gecko round trip with typing, click,
+#       wheel scroll, page 2 and back, screenshots. When the artifact is older than this
+#       commit its chrome JS is overlaid from this checkout (TEST-ONLY, labelled
+#       `chrome-overlay` in the evidence; compiled code is the artifact's).
+#       No artifact yet: the job records NOT_VERIFIED and stays green (pending, not passed).
+#
+# CI environment settings (not product changes), as linux-webkit-host.yml: the runner's
+# kernel.apparmor_restrict_unprivileged_userns=0 and the container's seccomp, apparmor and
+# systempaths unconfined, so WebKit's bubblewrap sandbox can run. It is never disabled.
+# Results: ci-results branch, <branch>/<run>-<attempt>-webkit-zen-{unit,e2e}/.
+name: linux-webkit-zen
+on:
+  push:
+    branches: [cloud/webkit-zen]   # the PR branch; its mirror claude/webkit-zen-engine-b4zzio does not run twice
+    paths:
+      - apps/browser/chrome/**
+      - apps/browser/tests/**
+      - crates/browser-core/**
+      - contracts/ipc-v1.schema.json
+      - contracts/engine-stream-v1.md
+      - native/webkit-host/**
+      - scripts/gui_engines/**
+      - scripts/gui_test.py
+      - scripts/webkit_package.py
+      - scripts/webkit_zen_e2e.py
+      - scripts/webkit_zen_container.sh
+      - upstreams.lock.json
+      - .github/workflows/linux-webkit-zen.yml
+      - .github/actions/publish-ci-results/**
+
+concurrency:
+  group: linux-webkit-zen-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # upstreams.lock.json webkit.ci_image
+  IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+  ARTIFACT: axiosozo-zen-linux-x86_64
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # publish-ci-results
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-unit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json)
+        run: echo "$(python3 scripts/ci_tools.py node)" >> "$GITHUB_PATH"
+      - name: Node unit tests (WebKit engine and the engine UX it changes)
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          node --version | tee "$EVIDENCE_OUT/node-version.txt"
+          set -o pipefail
+          node --test --test-reporter=spec \
+            apps/browser/tests/webkit-engine.test.mjs apps/browser/tests/engine-registry.test.mjs \
+            apps/browser/tests/engine-tabs.test.mjs apps/browser/tests/engine-preference.test.mjs \
+            apps/browser/tests/engine-probe-controls.test.mjs apps/browser/tests/chromium-tabs.test.mjs \
+            apps/browser/tests/cef-adapter.test.mjs apps/browser/tests/coordinator.test.mjs \
+            apps/browser/tests/console-errors-native.test.mjs 2>&1 | tee "$EVIDENCE_OUT/node-unit.log"
+      - name: Whole browser node suite (informational; pre-existing macOS-bound failures are listed)
+        run: |
+          node --test --test-reporter=tap apps/browser/tests/*.test.mjs > "$EVIDENCE_OUT/node-all.log" 2>&1 || true
+          grep -E "^# (tests|pass|fail)|^not ok" "$EVIDENCE_OUT/node-all.log" | tee "$EVIDENCE_OUT/node-all-summary.txt"
+      - name: browser-core engine enum (cargo test)
+        run: |
+          set -o pipefail
+          cargo test -p browser-core 2>&1 | tee "$EVIDENCE_OUT/cargo-test.log"
+      - name: Python syntax of the WebKit GUI pieces
+        run: python3 -m py_compile scripts/gui_engines/webkit.py scripts/webkit_zen_e2e.py scripts/webkit_package.py && sh -n scripts/webkit_zen_container.sh
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: webkit-zen-unit
+
+  adapter:
+    # Zen's WebKit client modules (no Zen build needed) against the real WPE host.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write   # publish-ci-results
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-adapter
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json)
+        id: node
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          bin=$(python3 scripts/ci_tools.py node)
+          echo "dir=$(dirname "$bin")" >> "$GITHUB_OUTPUT"
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Real WPE host + Zen's WebKit client in debian:13 (pinned)
+        run: |
+          docker pull -q "$IMAGE"
+          set +e
+          docker run --rm --shm-size=1g -e MODE=adapter \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "${{ steps.node.outputs.dir }}:/opt/node:ro" -v "$EVIDENCE_OUT:/out" \
+            "$IMAGE" sh /src/scripts/webkit_zen_container.sh
+          code=$?
+          echo "{\"container_exit\": $code}" > "$EVIDENCE_OUT/job.json"
+          tail -n 20 "$EVIDENCE_OUT/steps.log" 2>/dev/null
+          exit $code
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: webkit-zen-adapter
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write   # publish-ci-results
+      actions: read     # find and download the Zen build artifact of another run
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-e2e
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runner resources
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { uname -a; nproc; free -h; df -h /; } | tee "$EVIDENCE_OUT/runner.txt"
+      - name: Newest Linux Zen build artifact
+        id: zen
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=20" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty
+                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
+            > "$EVIDENCE_OUT/zen-artifact.json" || true
+          cat "$EVIDENCE_OUT/zen-artifact.json"
+          run=$(python3 -c 'import json,sys; d=open(sys.argv[1]).read().strip(); print(json.loads(d)["run_id"] if d else "")' "$EVIDENCE_OUT/zen-artifact.json")
+          echo "run_id=$run" >> "$GITHUB_OUTPUT"
+          if [ -z "$run" ]; then
+            printf '{"status":"NOT_VERIFIED","reason":"no unexpired %s artifact exists yet (linux-zen-build.yml has not produced a green build)"}\n' "$ARTIFACT" \
+              | tee "$EVIDENCE_OUT/result.json"
+          fi
+      - name: Download the Zen build artifact
+        if: steps.zen.outputs.run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ steps.zen.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        if: steps.zen.outputs.run_id != ''
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Zen + WebKit host + GUI harness in debian:13 (pinned)
+        if: steps.zen.outputs.run_id != ''
+        env:
+          ZEN_RUN_ID: ${{ steps.zen.outputs.run_id }}
+        run: |
+          docker pull -q "$IMAGE"
+          start=$(date +%s)
+          set +e
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
+            "$IMAGE" sh /src/scripts/webkit_zen_container.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start )), \"zen_run_id\": \"$ZEN_RUN_ID\"}" > "$EVIDENCE_OUT/job.json"
+          tail -n 40 "$EVIDENCE_OUT/steps.log" 2>/dev/null
+          for f in harness/result.json roundtrip/result.json; do
+            [ -f "$EVIDENCE_OUT/$f" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d.get("status"), {k: v.get("status") for k, v in d.get("scenarios", {}).items()}, d.get("reason", ""))' "$EVIDENCE_OUT/$f"
+          done
+          exit $code
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: webkit-zen-e2e
