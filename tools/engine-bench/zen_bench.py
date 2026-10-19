@@ -277,10 +277,12 @@ class ZenBench(gui_test.Harness):
         self.chrome_script(SAMPLER_START)
         usage = self.app_usage()
         start = usage.snapshot()
+        t0 = time.monotonic()
         if during:
             during()
         else:
             time.sleep(seconds)
+        input_wall_s = round(time.monotonic() - t0, 3)
         end = usage.snapshot(memory=True)
         data = self.chrome_script(SAMPLER_STOP)
         window_s = (data['t1'] - data['t0']) / 1000
@@ -289,7 +291,7 @@ class ZenBench(gui_test.Harness):
         frames = data['frames1'] - data['frames0']
         # Over the active part only (first to last new frame), as the in-page rAF window does.
         active = (times[-1] - times[0]) / 1000 if len(times) > 1 else 0
-        return dict(measured_in='zen-chrome (presenter frame counter, 2 ms sampler)', frames=frames,
+        return dict(measured_in='zen-chrome (presenter frame counter, 2 ms sampler)', frames=frames, input_wall_s=input_wall_s,
                     canvas_updates=len(times), fps=round((len(times) - 1) / active, 2) if active else None,
                     fps_whole_window=round(frames / window_s, 2) if window_s else None,
                     interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
@@ -303,14 +305,16 @@ class ZenBench(gui_test.Harness):
         self.content_script(RAF_START)
         usage = self.app_usage()
         start = usage.snapshot()
+        t0 = time.monotonic()
         if during:
             during()
         else:
             time.sleep(seconds)
+        input_wall_s = round(time.monotonic() - t0, 3)
         end = usage.snapshot(memory=True)
         data = self.content_script(RAF_STOP)
         iv = data['intervals']
-        out = dict(frames=data['frames'], fps=round((data['frames'] - 1) / data['seconds'], 2) if data['seconds'] else None,
+        out = dict(frames=data['frames'], input_wall_s=input_wall_s, fps=round((data['frames'] - 1) / data['seconds'], 2) if data['seconds'] else None,
                    interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
                    long_intervals_share=round(sum(1 for v in iv if v > 25) / len(iv), 4) if iv else None,
                    scrolled_css_px=data['scrolled'], usage=bench.Usage.window(start, end))
@@ -436,7 +440,8 @@ def summarize(reps):
             'static.idle_raf.fps', 'raf.window.fps', 'raf.window.interval_ms.median', 'raf.window.interval_p99_ms',
             'raf.window.long_intervals_share', 'raf.window.usage.cpu_percent',
             'scroll.window.fps', 'scroll.window.interval_p99_ms', 'scroll.window.long_intervals_share',
-            'scroll.window.scrolled_css_px', 'scroll.window.usage.cpu_percent',
+            'scroll.window.scrolled_css_px', 'scroll.window.usage.cpu_percent', 'scroll.window.input_wall_s',
+            'image_scroll.window.input_wall_s',
             'image_scroll.window.fps', 'image_scroll.window.interval_p99_ms', 'image_scroll.window.usage.cpu_percent',
             'key.keydown_to_second_raf_ms.median', 'key.keydown_to_second_raf_ms.p95', 'key.event_to_handler_ms.median',
             'memory_all_processes.rss_mb', 'memory_all_processes.pss_mb', 'memory_all_processes.processes',
