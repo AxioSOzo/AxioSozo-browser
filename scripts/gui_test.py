@@ -57,6 +57,7 @@ TEST_PREFS = {
     'startup.homepage_welcome_url': '',
     'browser.aboutwelcome.enabled': False,
     'zen.welcome-screen.seen': True,
+    'zen.updates.show-update-notification': False,
     'datareporting.policy.dataSubmissionEnabled': False,
     'toolkit.telemetry.reportingpolicy.firstRun': False,
     'browser.tabs.warnOnClose': False,
@@ -277,7 +278,21 @@ class Harness:
     def window_title(self):
         return self.xdotool('getwindowname', self.window)
 
-    def screenshot(self, name):
+    def settle(self):
+        """Let the selected page and the chrome paint before a capture: two
+        animation frames in content (when reachable) and in chrome, then a short
+        pause for the compositor to present them to X."""
+        frames = 'return new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));'
+        for run in (self.content_script, self.chrome_script):
+            try:
+                run(frames)
+            except (MarionetteError, OSError):
+                pass
+        time.sleep(0.5)
+
+    def screenshot(self, name, settle=True):
+        if settle and self.marionette and self.browser is not None and self.browser.poll() is None:
+            self.settle()
         path = self.evidence / f'{name}.png'
         dump = subprocess.run(['xwd', '-root', '-silent'], env=self.x_env, capture_output=True, timeout=60)
         if dump.returncode:
@@ -442,10 +457,19 @@ class Harness:
         self.xdotool('click', '1')
         clicked = self.wait(lambda: (lambda title: title if 'count=1' in title else None)(self.window_title()),
                             'button click reflected in the X11 window title')
-        # 3. Keyboard navigation through the address bar.
+        # 3. Keyboard navigation through the address bar. Each step is recorded
+        # so a crash or hang names the input that preceded it.
+        progress = self.result.setdefault('input_progress', ['typed', 'clicked'])
         self.xdotool('key', '--clearmodifiers', 'ctrl+l')
+        progress.append('ctrl+l')
         self.xdotool('type', '--delay', '20', self.fixture.url + '?page=2')
+        progress.append('typed url')
+        time.sleep(0.5)
+        if self.browser.poll() is not None:
+            raise AssertionError(f'browser exited ({self.browser.returncode}) after typing into the address bar')
+        progress.append('alive before Return')
         self.xdotool('key', 'Return')
+        progress.append('Return')
         navigated = self.wait(lambda: (lambda title: title if 'page=2' in title else None)(self.engine.content_title(self)),
                               'address-bar navigation to page=2')
         self.screenshot('input-' + self.engine.name)
@@ -471,7 +495,7 @@ class Harness:
         except (AssertionError, MarionetteError, subprocess.SubprocessError, OSError, KeyError, TypeError) as error:
             outcome = {'status': 'FAIL', 'reason': f'{type(error).__name__}: {error}'}
             try:
-                self.screenshot('failure-' + name)
+                self.screenshot('failure-' + name, settle=False)
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 pass
         outcome['seconds'] = round(time.monotonic() - started, 2)
