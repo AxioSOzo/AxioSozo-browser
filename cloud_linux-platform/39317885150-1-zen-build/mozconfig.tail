@@ -1,0 +1,15 @@
+# AxioSozo development configuration, MPL-2.0.
+mk_add_options MOZ_OBJDIR=/home/runner/axiosozo-build/zen/obj
+mk_add_options MOZ_MAKE_FLAGS="-j4"
+ac_add_options --disable-gtest-in-build
+ac_add_options --with-app-basename=AxioSozo
+ac_add_options --with-distribution-id=nl.axiosozo
+ac_add_options --disable-updater
+ac_add_options --disable-debug-symbols
+export MOZ_MACBUNDLE_ID=browser.dev
+export MOZ_APP_REMOTINGNAME=AxioSozoDev
+# Linux development build (scripts/zen.py, docs/LINUX.md).
+ac_add_options --enable-linker=lld
+ac_add_options --disable-warnings-as-errors
+ac_add_options --with-libclang-path=/usr/lib/llvm-19/lib
+ac_add_options --with-ccache=/home/runner/axiosozo-build/toolchains/zen/sccache/sccache
