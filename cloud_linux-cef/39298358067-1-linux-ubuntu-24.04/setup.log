@@ -1,0 +1,69 @@
++ tar -xjf /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal.tar.bz2 -C /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef
++ cmake -S /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host -B /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linux64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCEF_ROOT=/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal -DAXIO_OUT=/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linux64
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE - Success
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS - Success
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX - Success
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING - Success
+-- Found ZLIB: /usr/lib/x86_64-linux-gnu/libz.so (found version "1.3")
+-- Configuring done (0.8s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linux64
++ cmake --build /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cmake-linux64 --parallel 4
+[1/15] Building CXX object CMakeFiles/AxioCEFProbeHelper.dir/linux/helper_linux.cc.o
+[2/15] Building CXX object CMakeFiles/axio_host_core.dir/linux/platform_linux.cc.o
+[3/15] Building CXX object CMakeFiles/AxioCEFProbe.dir/linux/main_linux.cc.o
+[4/15] Building CXX object CMakeFiles/axio_core_test.dir/tests/core_test.cc.o
+[5/15] Building CXX object CMakeFiles/axio_transport_test.dir/test_transport.cc.o
+[6/15] Linking CXX executable tests/axio_core_test
+[7/15] Linking CXX executable tests/axio_transport_test
+[8/15] Building CXX object CMakeFiles/axio_transport_damage_test.dir/tests/transport_damage_test.cc.o
+[9/15] Linking CXX executable tests/axio_transport_damage_test
+[10/15] Building CXX object CMakeFiles/axio_a11y_core_test.dir/tests/a11y_core_test.cc.o
+/home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/a11y_core_test.cc:3:1: warning: multi-line comment [-Wcomment]
+    3 | //   clang++ -std=c++17 -Wall -Wextra -I native/chromium-host \
+      | ^
+[11/15] Linking CXX executable tests/axio_a11y_core_test
+[12/15] Building CXX object CMakeFiles/axio_host_core.dir/core/host_core.cc.o
+[13/15] Linking CXX static library libaxio_host_core.a
+[14/15] Linking CXX executable /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linux64/AxioCEFProbeHelper
+[15/15] Linking CXX executable /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linux64/AxioCEFProbe
+{"component": "cef", "status": "PASS", "action": "native_build", "binary": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/linux64/AxioCEFProbe", "platform": "linux64", "sandbox": {"suid_helper_installed": false, "apparmor_restrict_unprivileged_userns": 1, "unprivileged_userns_clone": 1, "max_user_namespaces": 63838, "unprivileged_userns": false, "expected": null, "usable": false}}
+	Command being timed: "python3 native/chromium-host/probe.py setup"
+	User time (seconds): 74.02
+	System time (seconds): 6.51
+	Percent of CPU this job got: 140%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:57.44
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 469496
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2164
+	Minor (reclaiming a frame) page faults: 181134
+	Voluntary context switches: 316710
+	Involuntary context switches: 3388
+	Swaps: 0
+	File system inputs: 427320
+	File system outputs: 3113896
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
