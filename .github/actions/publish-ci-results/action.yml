@@ -1,0 +1,69 @@
+# Publishes a directory of CI results (logs, JSON, small screenshots) to the
+# `ci-results` branch under <head-branch>/<run_id>-<attempt>-<name>/.
+#
+# Why: Claude Code cloud sessions can push and use the GitHub REST API, but cannot
+# download Actions logs or artifacts (their blob hosts are outside the session's
+# network allowlist). They can `git fetch origin ci-results` instead.
+#
+# The calling job needs `permissions: contents: write`. Keep published files small:
+# anything above `max-file-mb` is skipped, and every cloud clone pays for this branch.
+name: Publish CI results
+description: Commit a results directory to the ci-results branch for cloud sessions
+inputs:
+  path:
+    description: Directory to publish (missing directory = no-op)
+    required: true
+  name:
+    description: Result folder suffix (defaults to the job id)
+    required: false
+    default: ""
+  max-file-mb:
+    description: Skip files larger than this many MiB
+    required: false
+    default: "5"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SRC: ${{ inputs.path }}
+        NAME: ${{ inputs.name || github.job }}
+        MAXMB: ${{ inputs.max-file-mb }}
+        TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        REF: ${{ github.head_ref || github.ref_name }}
+        RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        SERVER: ${{ github.server_url }}
+      run: |
+        set -euo pipefail
+        if [ ! -d "$SRC" ]; then echo "publish-ci-results: nothing at $SRC"; exit 0; fi
+        work="$(mktemp -d)"
+        dest="${REF//\//_}/${RUN}-${NAME}"
+        git -C "$work" init -q
+        git -C "$work" remote add origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+        git -C "$work" config user.name "github-actions[bot]"
+        git -C "$work" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        if git -C "$work" fetch -q --depth 1 origin ci-results 2>/dev/null; then
+          git -C "$work" checkout -q -B ci-results FETCH_HEAD
+        else
+          git -C "$work" checkout -q --orphan ci-results
+        fi
+        mkdir -p "$work/$dest"
+        (cd "$SRC" && find . -type f -size -"$((MAXMB * 1024))"k -print0 | xargs -0 -r cp --parents -t "$work/$dest/")
+        printf '{"ref":"%s","sha":"%s","run":"%s","job":"%s","url":"%s/%s/actions/runs/%s","published_at":"%s"}\n' \
+          "$REF" "$SHA" "$RUN" "$NAME" "$SERVER" "$REPO" "${RUN%%-*}" "$(date -u +%FT%TZ)" > "$work/$dest/_run.json"
+        git -C "$work" add -A -- "$dest"
+        git -C "$work" commit -qm "ci-results: $dest"
+        for attempt in 1 2 3 4 5 6; do
+          if git -C "$work" push -q origin HEAD:ci-results; then
+            echo "publish-ci-results: published ci-results:$dest"
+            echo "Results: \`git fetch origin ci-results && git ls-tree -r --name-only origin/ci-results -- $dest\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          sleep $((attempt * 4))
+          git -C "$work" fetch -q --depth 1 origin ci-results
+          git -C "$work" rebase -q FETCH_HEAD
+        done
+        echo "publish-ci-results: push failed after retries" >&2
+        exit 1
