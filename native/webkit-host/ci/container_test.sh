@@ -59,7 +59,7 @@ dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort >"$OUT/dpkg-
   echo "}"
 } >"$OUT/machine.json"
 
-as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio "$@"; }
+as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio ${AXIOSOZO_WEBKIT_UPSTREAM_PREFIX:+AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=$AXIOSOZO_WEBKIT_UPSTREAM_PREFIX} "$@"; }
 
 status=0
 log "check (pins, build fingerprint, bubblewrap user namespaces)"

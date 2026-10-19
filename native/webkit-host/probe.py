@@ -50,6 +50,23 @@ def lock():
     return json.loads(LOCK.read_text())['webkit']
 
 
+# Evaluation mode (ADR 004): an upstream WPE WebKit built from the pinned wpewebkit.org
+# tarball and installed under this prefix replaces the Debian libwpewebkit packages.
+UPSTREAM_PREFIX = os.environ.get('AXIOSOZO_WEBKIT_UPSTREAM_PREFIX')
+UPSTREAM_REPLACES = {'libwpewebkit-2.0-1', 'libwpewebkit-2.0-dev'}
+
+
+def expected_webkit():
+    return lock()['upstream']['version'] if UPSTREAM_PREFIX else lock()['version']
+
+
+def pkg_config_env():
+    if not UPSTREAM_PREFIX:
+        return None
+    paths = [f'{UPSTREAM_PREFIX}/lib/x86_64-linux-gnu/pkgconfig', f'{UPSTREAM_PREFIX}/lib/pkgconfig']
+    return dict(os.environ, PKG_CONFIG_PATH=':'.join(paths + [os.environ.get('PKG_CONFIG_PATH', '')]))
+
+
 def run_command(args, timeout=None, **kwargs):
     command = [str(arg) for arg in args]
     print('+ ' + ' '.join(command), flush=True)
@@ -83,6 +100,8 @@ def package_report():
     report, missing = {}, []
     for kind in ('runtime', 'build'):
         for name, version in pinned_packages(kind).items():
+            if UPSTREAM_PREFIX and name in UPSTREAM_REPLACES:
+                continue
             actual = installed_version(name)
             report[name] = dict(pinned=version, installed=actual)
             if actual != version:
@@ -107,11 +126,14 @@ def fingerprint():
     h.update(json.dumps(lock(), sort_keys=True).encode())
     h.update(inspect.getsource(build).encode())
     h.update(subprocess.check_output(['g++', '--version']))
+    h.update(str(UPSTREAM_PREFIX).encode())
     return h.hexdigest()
 
 
 def build():
-    flags = subprocess.check_output(['pkg-config', '--cflags', '--libs'] + PKG_CONFIG, text=True).split()
+    flags = subprocess.check_output(['pkg-config', '--cflags', '--libs'] + PKG_CONFIG, text=True, env=pkg_config_env()).split()
+    if UPSTREAM_PREFIX:
+        flags += [f'-Wl,-rpath,{UPSTREAM_PREFIX}/lib/x86_64-linux-gnu', f'-Wl,-rpath,{UPSTREAM_PREFIX}/lib']
     BASE.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     run_command(['g++', '-std=c++20', '-O2', '-g', '-Wall', '-Wextra', '-fstack-protector-strong', '-D_FORTIFY_SOURCE=2',

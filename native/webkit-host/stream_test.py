@@ -268,7 +268,7 @@ def expect_ready(ready, engine, port='wpe'):
     elif engine == 'webkit':
         pinned = probe.lock()
         assert ready['webkit_port'] == 'wpe' and ready['render_path'] == 'wpe-fdo-shm-bgra', ready
-        assert ready['webkit'] == pinned['version'] and ready['runtime_webkit'] == pinned['version'], ready
+        assert ready['webkit'] == probe.expected_webkit() and ready['runtime_webkit'] == probe.expected_webkit(), ready
         assert ready['libwpe'] == pinned['libwpe']['version'] and ready['wpebackend_fdo'] == pinned['wpebackend_fdo']['version'], ready
         assert ready['sandbox_configured'] is True and ready['sandbox'] == 'bubblewrap', ready
 

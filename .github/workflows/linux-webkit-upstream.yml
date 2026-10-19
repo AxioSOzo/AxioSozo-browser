@@ -28,3 +28,51 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        key: [upstream, upstream.previous_stable]
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
+      CCACHE_HOST: ${{ github.workspace }}/../ccache
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_HOST }}
+          key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
+          restore-keys: |
+            wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-
+            wpe-ccache-${{ matrix.key }}-
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build upstream WPE and run the host suites
+        timeout-minutes: 330
+        run: |
+          mkdir -p "$EVIDENCE_OUT" "$CCACHE_HOST"
+          start=$(date +%s); set +e
+          docker run --rm --shm-size=1g \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$EVIDENCE_OUT:/out" -v "$CCACHE_HOST:/ccache" "$IMAGE" sh /src/native/webkit-host/upstream/build.sh "${{ matrix.key }}"
+          code=$?
+          echo "{\"key\": \"${{ matrix.key }}\", \"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/job.json"
+          sudo chown -R "$(id -u)" "$CCACHE_HOST"
+          exit $code
+      - if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_HOST }}
+          key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: build-${{ matrix.key }}
