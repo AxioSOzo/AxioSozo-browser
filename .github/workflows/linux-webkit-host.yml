@@ -25,7 +25,7 @@ on:
 
 concurrency:
   group: linux-webkit-host-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false   # queue: every pushed head keeps its evidence
 
 env:
   # upstreams.lock.json webkit.ci_image
