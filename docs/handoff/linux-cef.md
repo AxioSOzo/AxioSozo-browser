@@ -216,7 +216,7 @@ Read the results with:
 ## Blockers and known limits
 
 - **No `linux-zen-build` run has produced the `axiosozo-zen-linux-x86_64` artifact
-  yet.** At 18:36 UTC, 39293018395 was in progress and 39297942600 was pending. When
+  yet.** 39293018395 finished with **failure** at 18:58 UTC and uploaded no app artifact. 39297942600 started at about 19:00 UTC; it is linux-platform's build. When
   one succeeds, push any change under the workflow's paths, or re-run job
   `zen-gui-chromium` of the newest `linux-cef-host` run, to get Chromium-in-Zen
   evidence on Linux.
