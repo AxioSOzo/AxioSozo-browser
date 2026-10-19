@@ -129,9 +129,12 @@ jobs:
           key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal
       - name: probe.py install-sandbox and check
         run: |
-          set -o pipefail
+          # Judged by the last JSON status line: at CEF_REF `probe.py check` prints PASS on Linux but
+          # exits 1 (it returns a dict to sys.exit), which linux-cef-host.yml tolerates the same way.
           python3 cef-src/native/chromium-host/probe.py install-sandbox 2>&1 | tee "$EVIDENCE_OUT/install-sandbox.log"
           python3 cef-src/native/chromium-host/probe.py check 2>&1 | tee "$EVIDENCE_OUT/check.log"
+          grep -q '"status": "PASS"' "$EVIDENCE_OUT/install-sandbox.log"
+          grep -q '"status": "PASS", "action": "native_build_check"' "$EVIDENCE_OUT/check.log"
       - name: Start Xvfb
         run: |
           Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp > "$EVIDENCE_OUT/xvfb.log" 2>&1 &
