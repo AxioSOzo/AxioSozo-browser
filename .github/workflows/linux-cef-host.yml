@@ -16,6 +16,7 @@ on:
       - .github/actions/publish-ci-results/**
       - apps/browser/chrome/CEF*.sys.mjs
       - apps/browser/tests/cef-adapter.test.mjs
+      - scripts/gui_engines/chromium.py
 permissions:
   contents: read
 concurrency:
@@ -193,6 +194,99 @@ jobs:
       - name: Fail the job unless every gate passed
         if: always()
         run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); print(v); sys.exit(v['verdict']!='PASS')"
+
+  # Chromium inside Zen on Linux: the GUI harness (scripts/gui_test.py) drives a
+  # prebuilt Linux AxioSozo app (newest linux-zen-build artifact) and switches the
+  # fixture tab to the CEF host built here, sandbox on. Without an app artifact the
+  # job records BLOCKED_ENV and does not fail.
+  zen-gui-chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write          # publish-ci-results
+      actions: read            # find and download the Zen app artifact of another run
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/../gui-evidence
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Newest Linux Zen app artifact
+        id: zen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          run=""
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/linux-zen-build.yml/runs?per_page=30" \
+                        --jq '.workflow_runs[] | select(.status=="completed") | .id'); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
+                 --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not)) | .id' | grep -q .; then
+              run=$id; break
+            fi
+          done
+          echo "run_id=$run" >> "$GITHUB_OUTPUT"
+          if [ -z "$run" ]; then
+            echo '{"status": "BLOCKED_ENV", "reason": "no linux-zen-build run has an axiosozo-zen-linux-x86_64 artifact yet"}' \
+              | tee "$EVIDENCE_OUT/gui-chromium.json"
+          else
+            echo "{\"zen_build_run\": $run}" | tee "$EVIDENCE_OUT/zen-artifact.json"
+          fi
+      - name: Packages (GUI harness + CEF runtime)
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) cmake ninja-build g++ \
+            zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
+            libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
+            libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core \
+            fonts-liberation
+      - name: Restore pinned CEF archive
+        if: steps.zen.outputs.run_id != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-gui
+      - name: CEF host (probe.py setup, install-sandbox, check)
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          set -o pipefail
+          python3 native/chromium-host/probe.py setup 2>&1 | tail -n 5 | tee "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py check 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log"
+      - name: Save pinned CEF archive
+        if: always() && steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-gui
+      - name: Download the Zen app artifact
+        if: steps.zen.outputs.run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: artifact
+          run-id: ${{ steps.zen.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Verify and unpack (./dev fetch-build)
+        if: steps.zen.outputs.run_id != ''
+        run: ./dev fetch-build --from-dir artifact --run "${{ steps.zen.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+      - name: GUI harness, engine chromium (launch, chrome, fixture)
+        if: steps.zen.outputs.run_id != ''
+        run: |
+          set -o pipefail
+          ./dev gui-test --app fetched --engine chromium --scenario launch,chrome,fixture \
+            --screenshot "$EVIDENCE_OUT/linux-chromium-fixture.png" --evidence-dir "$EVIDENCE_OUT/evidence" 2>&1 \
+            | tee "$EVIDENCE_OUT/gui-test.log"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: zen-gui-chromium
 
   macos-compile:
     runs-on: macos-15
