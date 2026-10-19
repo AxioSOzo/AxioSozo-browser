@@ -1,0 +1,648 @@
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-46-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-47-  virtual void UnmapPlanes() = 0;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-48-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-49-  // Lock this texture host as an attached external image for a SWGL compositor
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h:50:  // surface. See swgl_bindings.rs for a description of the resulting
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-51-  // WrSWGLCompositeSurfaceInfo. This is paired with a call to UnlockSWGL when
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-52-  // composition is done.
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-53-  bool LockSWGLCompositeSurface(void* aContext,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.h-54-                                wr::SWGLCompositeSurfaceInfo* aInfo) override;
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-21-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-22-/* static */
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-23-UniquePtr<RenderCompositor> RenderCompositorSWGL::Create(
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-24-    const RefPtr<widget::CompositorWidget>& aWidget, nsACString& aError) {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:25:  void* ctx = wr_swgl_create_context();
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-26-  if (!ctx) {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-27-    gfxCriticalNote << "Failed SWGL context creation for WebRender";
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-28-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-29-  }
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-39-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-40-RenderCompositorSWGL::~RenderCompositorSWGL() {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-41-  LOG("RenderCompositorSWGL::~RenderCompositorSWGL()");
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-42-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:43:  wr_swgl_destroy_context(mContext);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-44-}
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-45-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-46-void RenderCompositorSWGL::ClearMappedBuffer() {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-47-  mMappedData = nullptr;
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-49-  mDT = nullptr;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-50-}
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-51-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-52-bool RenderCompositorSWGL::MakeCurrent() {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:53:  wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-54-  return true;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-55-}
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-56-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-57-bool RenderCompositorSWGL::BeginFrame() {
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-65-  // Set up a temporary region representing the entire window surface in case a
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-66-  // dirty region is not supplied.
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-67-  ClearMappedBuffer();
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-68-  mDirtyRegion = LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetBufferSize());
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:69:  wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-70-  return true;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-71-}
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-72-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-73-bool RenderCompositorSWGL::AllocateMappedBuffer(
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-137-    mMappedData = map.mData;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-138-    mMappedStride = map.mStride;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-139-  }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-140-  MOZ_ASSERT(mMappedData != nullptr && mMappedStride > 0);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:141:  wr_swgl_init_default_framebuffer(mContext, bounds.x, bounds.y, bounds.width,
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-142-                                   bounds.height, mMappedStride, mMappedData);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-143-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-144-  LayoutDeviceIntRegion opaque;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-145-  for (size_t i = 0; i < aNumOpaqueRects; i++) {
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-152-  clear.AndWith(mDirtyRegion);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-153-  clear.SubOut(opaque);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-154-  for (auto iter = clear.RectIter(); !iter.Done(); iter.Next()) {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-155-    const auto& rect = iter.Get();
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:156:    wr_swgl_clear_color_rect(mContext, 0, rect.x, rect.y, rect.width,
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-157-                             rect.height, 0, 0, 0, 0);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-158-  }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-159-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-160-  return true;
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-192-    // still proceed.
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-193-    auto bounds = mDirtyRegion.GetBounds();
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-194-    bounds.width = std::max(bounds.width, 2);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-195-    bounds.height = std::max(bounds.height, 2);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:196:    wr_swgl_init_default_framebuffer(mContext, bounds.x, bounds.y, bounds.width,
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-197-                                     bounds.height, 0, nullptr);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-198-  }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-199-}
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-200-
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-204-    return;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-205-  }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-206-  // Force any delayed clears to resolve.
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-207-  if (aDirty) {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:208:    wr_swgl_resolve_framebuffer(mContext, 0);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-209-  }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-210-  // Clear out the old framebuffer in case something tries to access it after
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-211-  // the frame.
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp:212:  wr_swgl_init_default_framebuffer(mContext, 0, 0, 0, 0, 0, nullptr);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-213-  // If we have a draw target at this point, mapping must have succeeded.
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-214-  MOZ_ASSERT(mMappedData != nullptr);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-215-  if (mSurface) {
+ff/gfx/webrender_bindings/RenderCompositorSWGL.cpp-216-    // If we're using a data surface, unmap it and draw it to the DT if there
+--
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-246-        const int picTileWidth =
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-247-            StaticPrefs::gfx_webrender_picture_tile_width();
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-248-        const int picTileHeight =
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-249-            StaticPrefs::gfx_webrender_picture_tile_height();
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:250:        auto* const swgl = compositor->swgl();
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-251-        auto* const gl =
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:252:            (compositor->gl() && !swgl) ? compositor->gl() : nullptr;
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-253-        RenderThread* const renderThread = RenderThread::Get();
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:254:        auto* const progCache = (renderThread->GetProgramCache() && !swgl)
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-255-                                    ? renderThread->GetProgramCache()->Raw()
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-256-                                    : nullptr;
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:257:        auto* const shaders = (renderThread->GetShaders() && !swgl)
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-258-                                  ? renderThread->GetShaders()->RawShaders()
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-259-                                  : nullptr;
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-260-
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-261-        // Check That if we are not using SWGL, we have at least a GL or
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-262-        // GLES 3.0 context.
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:263:        if (gl && !swgl) {
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-264-          bool versionCheck =
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-265-              gl->IsAtLeast(gl::ContextProfile::OpenGLCore, 300) ||
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-266-              gl->IsAtLeast(gl::ContextProfile::OpenGLCompatibility, 300) ||
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-267-              gl->IsAtLeast(gl::ContextProfile::OpenGLES, 300);
+--
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-282-        if (!wr_window_new(
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-283-                aWindowId, aSize.width, aSize.height,
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-284-                aWindowKind == WindowKind::MAIN, supportLowPriorityTransactions,
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-285-                supportLowPriorityThreadpool, gfx::gfxVars::UseGLSwizzle(),
+ff/gfx/webrender_bindings/WebRenderAPI.cpp:286:                gfx::gfxVars::UseWebRenderScissoredCacheClears(), swgl, gl,
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-287-                compositor->SurfaceOriginIsTopLeft(), progCache, shaders,
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-288-                renderThread->ThreadPool().Raw(),
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-289-                renderThread->ThreadPoolLP().Raw(),
+ff/gfx/webrender_bindings/WebRenderAPI.cpp-290-                renderThread->MemoryChunkPool(),
+--
+ff/gfx/webrender_bindings/RenderCompositor.h-76-  // Called when WR rendering is skipped
+ff/gfx/webrender_bindings/RenderCompositor.h-77-  virtual void Update() {}
+ff/gfx/webrender_bindings/RenderCompositor.h-78-
+ff/gfx/webrender_bindings/RenderCompositor.h-79-  virtual gl::GLContext* gl() const { return nullptr; }
+ff/gfx/webrender_bindings/RenderCompositor.h:80:  virtual void* swgl() const { return nullptr; }
+ff/gfx/webrender_bindings/RenderCompositor.h-81-
+ff/gfx/webrender_bindings/RenderCompositor.h-82-  virtual bool MakeCurrent();
+ff/gfx/webrender_bindings/RenderCompositor.h-83-
+ff/gfx/webrender_bindings/RenderCompositor.h-84-  virtual bool UseANGLE() const { return false; }
+--
+ff/gfx/webrender_bindings/RenderThread.cpp-170-  if (stackSize && !gfx::gfxVars::SupportsThreadsafeGL()) {
+ff/gfx/webrender_bindings/RenderThread.cpp-171-    stackSize = std::max(stackSize, 4096U << 10);
+ff/gfx/webrender_bindings/RenderThread.cpp-172-  }
+ff/gfx/webrender_bindings/RenderThread.cpp-173-#if !defined(__OPTIMIZE__)
+ff/gfx/webrender_bindings/RenderThread.cpp:174:  // swgl's draw_quad_spans will allocate ~1.5MB in no-opt builds
+ff/gfx/webrender_bindings/RenderThread.cpp-175-  // and the default thread stack size on macOS is 512KB
+ff/gfx/webrender_bindings/RenderThread.cpp-176-  stackSize = std::max(stackSize, 4 * 1024 * 1024U);
+ff/gfx/webrender_bindings/RenderThread.cpp-177-#endif
+ff/gfx/webrender_bindings/RenderThread.cpp-178-
+--
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-235-  return mTextureHost->GetTextureHostUsageInfo(aProofOfMapLock);
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-236-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-237-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-238-size_t RenderTextureHostWrapper::GetPlaneCount() const {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:239:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:240:    return swglHost->GetPlaneCount();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-241-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-242-  return 0;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-243-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-244-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-245-gfx::SurfaceFormat RenderTextureHostWrapper::GetFormat() const {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:246:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:247:    return swglHost->GetFormat();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-248-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-249-  return gfx::SurfaceFormat::UNKNOWN;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-250-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-251-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-252-gfx::ColorDepth RenderTextureHostWrapper::GetColorDepth() const {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:253:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:254:    return swglHost->GetColorDepth();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-255-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-256-  return gfx::ColorDepth::COLOR_8;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-257-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-258-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-259-gfx::YUVRangedColorSpace RenderTextureHostWrapper::GetYUVColorSpace() const {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:260:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:261:    return swglHost->GetYUVColorSpace();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-262-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-263-  return gfx::YUVRangedColorSpace::Default;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-264-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-265-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-266-gfx::TransferFunction RenderTextureHostWrapper::GetTransferFunction() const {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:267:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:268:    return swglHost->GetTransferFunction();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-269-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-270-  return gfx::TransferFunction::BT709;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-271-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-272-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-273-bool RenderTextureHostWrapper::MapPlane(RenderCompositor* aCompositor,
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-274-                                        uint8_t aChannelIndex,
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-275-                                        PlaneInfo& aPlaneInfo) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:276:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:277:    return swglHost->MapPlane(aCompositor, aChannelIndex, aPlaneInfo);
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-278-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-279-  return false;
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-280-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-281-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-282-void RenderTextureHostWrapper::UnmapPlanes() {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:283:  if (RenderTextureHostSWGL* swglHost = EnsureRenderTextureHostSWGL()) {
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp:284:    swglHost->UnmapPlanes();
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-285-  }
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-286-}
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-287-
+ff/gfx/webrender_bindings/RenderTextureHostWrapper.cpp-288-}  // namespace wr
+--
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-635-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-636-/* static */
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-637-UniquePtr<RenderCompositor> RenderCompositorNativeSWGL::Create(
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-638-    const RefPtr<widget::CompositorWidget>& aWidget, nsACString& aError) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:639:  void* ctx = wr_swgl_create_context();
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-640-  if (!ctx) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-641-    gfxCriticalNote << "Failed SWGL context creation for WebRender";
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-642-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-643-  }
+--
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-650-  MOZ_ASSERT(mContext);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-651-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-652-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-653-RenderCompositorNativeSWGL::~RenderCompositorNativeSWGL() {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:654:  wr_swgl_destroy_context(mContext);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-655-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-656-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-657-bool RenderCompositorNativeSWGL::MakeCurrent() {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:658:  wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-659-  return true;
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-660-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-661-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-662-bool RenderCompositorNativeSWGL::InitDefaultFramebuffer(
+--
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-664-  if (mNativeLayerForEntireWindow) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-665-    if (!MapNativeLayer(mNativeLayerForEntireWindow, aBounds, aBounds)) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-666-      return false;
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-667-    }
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:668:    wr_swgl_init_default_framebuffer(mContext, aBounds.x, aBounds.y,
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-669-                                     aBounds.width, aBounds.height,
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-670-                                     mLayerStride, mLayerValidRectData);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-671-  }
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-672-  return true;
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-673-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-674-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-675-void RenderCompositorNativeSWGL::CancelFrame() {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-676-  if (mNativeLayerForEntireWindow && mLayerTarget) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:677:    wr_swgl_init_default_framebuffer(mContext, 0, 0, 0, 0, 0, nullptr);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-678-    UnmapNativeLayer();
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-679-  }
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-680-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-681-
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-682-void RenderCompositorNativeSWGL::DoSwap() {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-683-  if (mNativeLayerForEntireWindow && mLayerTarget) {
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp:684:    wr_swgl_init_default_framebuffer(mContext, 0, 0, 0, 0, 0, nullptr);
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-685-    UnmapNativeLayer();
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-686-  }
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-687-}
+ff/gfx/webrender_bindings/RenderCompositorNative.cpp-688-
+--
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-11-namespace mozilla {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-12-namespace wr {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-13-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-14-bool RenderTextureHostSWGL::UpdatePlanes(RenderCompositor* aCompositor) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:15:  wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-16-  size_t planeCount = GetPlaneCount();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-17-  bool texInit = false;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-18-  if (mPlanes.size() < planeCount) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-19-    mPlanes.reserve(planeCount);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-20-    while (mPlanes.size() < planeCount) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:21:      mPlanes.push_back(PlaneInfo(wr_swgl_gen_texture(mContext)));
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-22-    }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-23-    texInit = true;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-24-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-25-  gfx::SurfaceFormat format = GetFormat();
+--
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-78-      default:
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-79-        MOZ_RELEASE_ASSERT(false, "Unhandled external image format");
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-80-        break;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-81-    }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:82:    wr_swgl_set_texture_buffer(mContext, plane.mTexture, internalFormat,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-83-                               plane.mSize.width, plane.mSize.height,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-84-                               plane.mStride, plane.mData, 0, 0);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-85-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-86-  if (texInit) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-87-    // Initialize the mip filters to linear by default.
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-88-    for (const auto& plane : mPlanes) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:89:      wr_swgl_set_texture_parameter(mContext, plane.mTexture,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-90-                                    LOCAL_GL_TEXTURE_MIN_FILTER,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-91-                                    LOCAL_GL_LINEAR);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:92:      wr_swgl_set_texture_parameter(mContext, plane.mTexture,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-93-                                    LOCAL_GL_TEXTURE_MAG_FILTER,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-94-                                    LOCAL_GL_LINEAR);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-95-    }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-96-  }
+--
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-100-bool RenderTextureHostSWGL::SetContext(void* aContext) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-101-  if (mContext != aContext) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-102-    CleanupPlanes();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-103-    mContext = aContext;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:104:    wr_swgl_reference_context(mContext);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-105-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-106-  return mContext != nullptr;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-107-}
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-108-
+--
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-146-  if (!mContext) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-147-    return;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-148-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-149-  if (!mPlanes.empty()) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:150:    wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-151-    for (const auto& plane : mPlanes) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:152:      wr_swgl_delete_texture(mContext, plane.mTexture);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-153-    }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-154-    mPlanes.clear();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-155-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:156:  wr_swgl_destroy_context(mContext);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-157-  mContext = nullptr;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-158-}
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-159-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-160-RenderTextureHostSWGL::~RenderTextureHostSWGL() { CleanupPlanes(); }
+--
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-206-    UnmapPlanes();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-207-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-208-}
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-209-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:210:bool wr_swgl_lock_composite_surface(void* aContext, wr::ExternalImageId aId,
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-211-                                    wr::SWGLCompositeSurfaceInfo* aInfo) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-212-  RenderTextureHost* texture = RenderThread::Get()->GetRenderTexture(aId);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-213-  if (!texture) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-214-    return false;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-215-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:216:  RenderTextureHostSWGL* swglTex = texture->AsRenderTextureHostSWGL();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:217:  if (!swglTex) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-218-    return false;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-219-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:220:  return swglTex->LockSWGLCompositeSurface(aContext, aInfo);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-221-}
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-222-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:223:void wr_swgl_unlock_composite_surface(void* aContext, wr::ExternalImageId aId) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-224-  RenderTextureHost* texture = RenderThread::Get()->GetRenderTexture(aId);
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-225-  if (!texture) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-226-    return;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-227-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:228:  RenderTextureHostSWGL* swglTex = texture->AsRenderTextureHostSWGL();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:229:  if (!swglTex) {
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-230-    return;
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-231-  }
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp:232:  swglTex->UnlockSWGLCompositeSurface();
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-233-}
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-234-
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-235-}  // namespace wr
+ff/gfx/webrender_bindings/RenderTextureHostSWGL.cpp-236-}  // namespace mozilla
+--
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-46-  MOZ_ASSERT(mContext);
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-47-}
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-48-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-49-RenderCompositorLayersSWGL::~RenderCompositorLayersSWGL() {
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp:50:  wr_swgl_destroy_context(mContext);
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-51-}
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-52-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-53-bool RenderCompositorLayersSWGL::MakeCurrent() {
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp:54:  wr_swgl_make_current(mContext);
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-55-  return true;
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-56-}
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-57-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.cpp-58-bool RenderCompositorLayersSWGL::BeginFrame() {
+--
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-28-                             const RefPtr<widget::CompositorWidget>& aWidget,
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-29-                             void* aContext);
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-30-  virtual ~RenderCompositorLayersSWGL();
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-31-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h:32:  void* swgl() const override { return mContext; }
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-33-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-34-  bool MakeCurrent() override;
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-35-
+ff/gfx/webrender_bindings/RenderCompositorLayersSWGL.h-36-  bool BeginFrame() override;
+--
+ff/gfx/webrender_bindings/Cargo.toml-17-bincode = "1.0"
+ff/gfx/webrender_bindings/Cargo.toml-18-uuid = { version = "1.0", features = ["v4"] }
+ff/gfx/webrender_bindings/Cargo.toml-19-rustc-hash = "2.1.1"
+ff/gfx/webrender_bindings/Cargo.toml-20-thin-vec = { version = "0.2.1", features = ["gecko-ffi"] }
+ff/gfx/webrender_bindings/Cargo.toml:21:swgl = { path = "../wr/swgl" }
+ff/gfx/webrender_bindings/Cargo.toml-22-wr_malloc_size_of = { path = "../wr/wr_malloc_size_of" }
+ff/gfx/webrender_bindings/Cargo.toml-23-gecko-profiler = { path = "../../tools/profiler/rust-api" }
+ff/gfx/webrender_bindings/Cargo.toml-24-static_prefs = { path = "../../modules/libpref/init/static_prefs" }
+ff/gfx/webrender_bindings/Cargo.toml-25-mozbuild = "0.1"
+--
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-20-  RenderCompositorSWGL(const RefPtr<widget::CompositorWidget>& aWidget,
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-21-                       void* aContext);
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-22-  virtual ~RenderCompositorSWGL();
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-23-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h:24:  void* swgl() const override { return mContext; }
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-25-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-26-  bool MakeCurrent() override;
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-27-
+ff/gfx/webrender_bindings/RenderCompositorSWGL.h-28-  bool BeginFrame() override;
+--
+ff/gfx/webrender_bindings/RendererOGL.h-143-  wr::Renderer* GetRenderer() { return mRenderer; }
+ff/gfx/webrender_bindings/RendererOGL.h-144-
+ff/gfx/webrender_bindings/RendererOGL.h-145-  gl::GLContext* gl() const;
+ff/gfx/webrender_bindings/RendererOGL.h-146-
+ff/gfx/webrender_bindings/RendererOGL.h:147:  void* swgl() const;
+ff/gfx/webrender_bindings/RendererOGL.h-148-
+ff/gfx/webrender_bindings/RendererOGL.h-149-  bool EnsureAsyncScreenshot();
+ff/gfx/webrender_bindings/RendererOGL.h-150-
+ff/gfx/webrender_bindings/RendererOGL.h-151- protected:
+--
+ff/gfx/webrender_bindings/src/bindings.rs-812-#[no_mangle]
+ff/gfx/webrender_bindings/src/bindings.rs-813-pub unsafe extern "C" fn wr_renderer_accumulate_memory_report(
+ff/gfx/webrender_bindings/src/bindings.rs-814-    renderer: &mut Renderer,
+ff/gfx/webrender_bindings/src/bindings.rs-815-    report: &mut MemoryReport,
+ff/gfx/webrender_bindings/src/bindings.rs:816:    swgl: *mut c_void,
+ff/gfx/webrender_bindings/src/bindings.rs-817-) {
+ff/gfx/webrender_bindings/src/bindings.rs:818:    *report += renderer.report_memory(swgl);
+ff/gfx/webrender_bindings/src/bindings.rs-819-}
+ff/gfx/webrender_bindings/src/bindings.rs-820-
+ff/gfx/webrender_bindings/src/bindings.rs-821-// cbindgen doesn't support tuples, so we have a little struct instead, with
+ff/gfx/webrender_bindings/src/bindings.rs-822-// an Into implementation to convert from the tuple to the struct.
+--
+ff/gfx/webrender_bindings/src/bindings.rs-2008-    }
+ff/gfx/webrender_bindings/src/bindings.rs-2009-}
+ff/gfx/webrender_bindings/src/bindings.rs-2010-
+ff/gfx/webrender_bindings/src/bindings.rs-2011-extern "C" {
+ff/gfx/webrender_bindings/src/bindings.rs:2012:    fn wr_swgl_lock_composite_surface(
+ff/gfx/webrender_bindings/src/bindings.rs-2013-        ctx: *mut c_void,
+ff/gfx/webrender_bindings/src/bindings.rs-2014-        external_image_id: ExternalImageId,
+ff/gfx/webrender_bindings/src/bindings.rs-2015-        composite_info: *mut SWGLCompositeSurfaceInfo,
+ff/gfx/webrender_bindings/src/bindings.rs-2016-    ) -> bool;
+ff/gfx/webrender_bindings/src/bindings.rs:2017:    fn wr_swgl_unlock_composite_surface(ctx: *mut c_void, external_image_id: ExternalImageId);
+ff/gfx/webrender_bindings/src/bindings.rs-2018-}
+ff/gfx/webrender_bindings/src/bindings.rs-2019-
+ff/gfx/webrender_bindings/src/bindings.rs-2020-impl MappableCompositor for WrCompositor {
+ff/gfx/webrender_bindings/src/bindings.rs-2021-    /// Map a tile's underlying buffer so it can be used as the backing for
+--
+ff/gfx/webrender_bindings/src/bindings.rs-2066-        ctx: *mut c_void,
+ff/gfx/webrender_bindings/src/bindings.rs-2067-        external_image_id: ExternalImageId,
+ff/gfx/webrender_bindings/src/bindings.rs-2068-        composite_info: *mut SWGLCompositeSurfaceInfo,
+ff/gfx/webrender_bindings/src/bindings.rs-2069-    ) -> bool {
+ff/gfx/webrender_bindings/src/bindings.rs:2070:        unsafe { wr_swgl_lock_composite_surface(ctx, external_image_id, composite_info) }
+ff/gfx/webrender_bindings/src/bindings.rs-2071-    }
+ff/gfx/webrender_bindings/src/bindings.rs-2072-    fn unlock_composite_surface(&mut self, _device: &mut Device, ctx: *mut c_void, external_image_id: ExternalImageId) {
+ff/gfx/webrender_bindings/src/bindings.rs:2073:        unsafe { wr_swgl_unlock_composite_surface(ctx, external_image_id) }
+ff/gfx/webrender_bindings/src/bindings.rs-2074-    }
+ff/gfx/webrender_bindings/src/bindings.rs-2075-}
+ff/gfx/webrender_bindings/src/bindings.rs-2076-
+ff/gfx/webrender_bindings/src/bindings.rs-2077-pub struct WrPartialPresentCompositor(*mut c_void);
+--
+ff/gfx/webrender_bindings/src/bindings.rs-2133-    support_low_priority_transactions: bool,
+ff/gfx/webrender_bindings/src/bindings.rs-2134-    support_low_priority_threadpool: bool,
+ff/gfx/webrender_bindings/src/bindings.rs-2135-    allow_texture_swizzling: bool,
+ff/gfx/webrender_bindings/src/bindings.rs-2136-    allow_scissored_cache_clears: bool,
+ff/gfx/webrender_bindings/src/bindings.rs:2137:    swgl_context: *mut c_void,
+ff/gfx/webrender_bindings/src/bindings.rs-2138-    gl_context: *mut c_void,
+ff/gfx/webrender_bindings/src/bindings.rs-2139-    surface_origin_is_top_left: bool,
+ff/gfx/webrender_bindings/src/bindings.rs-2140-    program_cache: Option<&mut WrProgramCache>,
+ff/gfx/webrender_bindings/src/bindings.rs-2141-    shaders: Option<&mut WrShaders>,
+--
+ff/gfx/webrender_bindings/src/bindings.rs-2170-
+ff/gfx/webrender_bindings/src/bindings.rs-2171-    // Ensure the WR profiler callbacks are hooked up to the Gecko profiler.
+ff/gfx/webrender_bindings/src/bindings.rs-2172-    set_profiler_hooks(Some(&PROFILER_HOOKS));
+ff/gfx/webrender_bindings/src/bindings.rs-2173-
+ff/gfx/webrender_bindings/src/bindings.rs:2174:    let software = !swgl_context.is_null();
+ff/gfx/webrender_bindings/src/bindings.rs-2175-    let (gl, sw_gl) = if software {
+ff/gfx/webrender_bindings/src/bindings.rs:2176:        let ctx = swgl::Context::from(swgl_context);
+ff/gfx/webrender_bindings/src/bindings.rs-2177-        ctx.make_current();
+ff/gfx/webrender_bindings/src/bindings.rs-2178-        (Rc::new(ctx) as Rc<dyn gl::Gl>, Some(ctx))
+ff/gfx/webrender_bindings/src/bindings.rs-2179-    } else {
+ff/gfx/webrender_bindings/src/bindings.rs-2180-        let gl = unsafe {
+--
+ff/gfx/webrender_bindings/src/lib.rs-13-extern crate nsstring;
+ff/gfx/webrender_bindings/src/lib.rs-14-extern crate num_cpus;
+ff/gfx/webrender_bindings/src/lib.rs-15-extern crate rayon;
+ff/gfx/webrender_bindings/src/lib.rs-16-extern crate rustc_hash;
+ff/gfx/webrender_bindings/src/lib.rs:17:extern crate swgl;
+ff/gfx/webrender_bindings/src/lib.rs-18-extern crate thin_vec;
+ff/gfx/webrender_bindings/src/lib.rs-19-extern crate tracy_rs;
+ff/gfx/webrender_bindings/src/lib.rs-20-extern crate uuid;
+ff/gfx/webrender_bindings/src/lib.rs-21-extern crate webrender;
+--
+ff/gfx/webrender_bindings/src/lib.rs-40-
+ff/gfx/webrender_bindings/src/lib.rs-41-#[allow(non_snake_case)]
+ff/gfx/webrender_bindings/src/lib.rs-42-pub mod bindings;
+ff/gfx/webrender_bindings/src/lib.rs-43-pub mod moz2d_renderer;
+ff/gfx/webrender_bindings/src/lib.rs:44:mod swgl_bindings;
+--
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-6-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-7-use std::os::raw::c_void;
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-8-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-9-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:10:pub extern "C" fn wr_swgl_create_context() -> *mut c_void {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:11:    swgl::Context::create().into()
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-12-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-13-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-14-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:15:pub extern "C" fn wr_swgl_reference_context(ctx: *mut c_void) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:16:    swgl::Context::from(ctx).reference();
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-17-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-18-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-19-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:20:pub extern "C" fn wr_swgl_destroy_context(ctx: *mut c_void) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:21:    swgl::Context::from(ctx).destroy();
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-22-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-23-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-24-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:25:pub extern "C" fn wr_swgl_make_current(ctx: *mut c_void) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:26:    swgl::Context::from(ctx).make_current();
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-27-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-28-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-29-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:30:pub extern "C" fn wr_swgl_init_default_framebuffer(
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-31-    ctx: *mut c_void,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-32-    x: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-33-    y: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-34-    width: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-35-    height: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-36-    stride: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-37-    buf: *mut c_void,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-38-) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:39:    swgl::Context::from(ctx).init_default_framebuffer(x, y, width, height, stride, buf);
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-40-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-41-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-42-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:43:pub extern "C" fn wr_swgl_resolve_framebuffer(ctx: *mut c_void, fbo: u32) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:44:    swgl::Context::from(ctx).resolve_framebuffer(fbo);
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-45-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-46-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-47-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:48:pub extern "C" fn wr_swgl_gen_texture(ctx: *mut c_void) -> u32 {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:49:    swgl::Context::from(ctx).gen_textures(1)[0]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-50-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-51-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-52-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:53:pub extern "C" fn wr_swgl_delete_texture(ctx: *mut c_void, tex: u32) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:54:    swgl::Context::from(ctx).delete_textures(&[tex]);
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-55-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-56-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-57-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:58:pub extern "C" fn wr_swgl_set_texture_parameter(ctx: *mut c_void, tex: u32, pname: u32, param: i32) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:59:    swgl::Context::from(ctx).set_texture_parameter(tex, pname, param);
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-60-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-61-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-62-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:63:pub extern "C" fn wr_swgl_set_texture_buffer(
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-64-    ctx: *mut c_void,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-65-    tex: u32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-66-    internal_format: u32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-67-    width: i32,
+--
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-70-    buf: *mut c_void,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-71-    min_width: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-72-    min_height: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-73-) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:74:    swgl::Context::from(ctx).set_texture_buffer(
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-75-        tex,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-76-        internal_format,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-77-        width,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-78-        height,
+--
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-84-}
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-85-
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-86-#[no_mangle]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-87-#[allow(clippy::many_single_char_names)]
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:88:pub extern "C" fn wr_swgl_clear_color_rect(
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-89-    ctx: *mut c_void,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-90-    fbo: u32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-91-    x: i32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-92-    y: i32,
+--
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-96-    g: f32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-97-    b: f32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-98-    a: f32,
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-99-) {
+ff/gfx/webrender_bindings/src/swgl_bindings.rs:100:    swgl::Context::from(ctx).clear_color_rect(fbo, x, y, width, height, r, g, b, a);
+ff/gfx/webrender_bindings/src/swgl_bindings.rs-101-}
+--
+ff/gfx/webrender_bindings/RenderCompositorNative.h-209-  RenderCompositorNativeSWGL(const RefPtr<widget::CompositorWidget>& aWidget,
+ff/gfx/webrender_bindings/RenderCompositorNative.h-210-                             void* aContext);
+ff/gfx/webrender_bindings/RenderCompositorNative.h-211-  virtual ~RenderCompositorNativeSWGL();
+ff/gfx/webrender_bindings/RenderCompositorNative.h-212-
+ff/gfx/webrender_bindings/RenderCompositorNative.h:213:  void* swgl() const override { return mContext; }
+ff/gfx/webrender_bindings/RenderCompositorNative.h-214-
+ff/gfx/webrender_bindings/RenderCompositorNative.h-215-  bool MakeCurrent() override;
+ff/gfx/webrender_bindings/RenderCompositorNative.h-216-
+ff/gfx/webrender_bindings/RenderCompositorNative.h-217-  void CancelFrame() override;
+--
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-90-  if (!compositor) {
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-91-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-92-  }
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-93-
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp:94:  void* ctx = wr_swgl_create_context();
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-95-  if (!ctx) {
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-96-    gfxCriticalNote << "Failed SWGL context creation for WebRender";
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-97-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorOGLSWGL.cpp-98-  }
+--
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-190-  }
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-191-
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-192-  // Allocate resulting image surface.
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-193-  // Use GetFormat() rather than mFormat for the DataSourceSurface. eg BGRA
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp:194:  // rather than RGBA, as the latter is not supported by swgl.
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-195-  // ReadTexImageHelper will take care of converting the data for us.
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-196-  const gfx::SurfaceFormat surfFormat = GetFormat();
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-197-  int32_t stride = mSize.width * BytesPerPixel(surfFormat);
+ff/gfx/webrender_bindings/RenderEGLImageTextureHost.cpp-198-  RefPtr<gfx::DataSourceSurface> surf =
+--
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-46-      !gfx::gfxConfig::IsEnabled(gfx::Feature::D3D11_COMPOSITING)) {
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-47-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-48-  }
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-49-
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp:50:  void* ctx = wr_swgl_create_context();
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-51-  if (!ctx) {
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-52-    gfxCriticalNote << "Failed SWGL context creation for WebRender";
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-53-    return nullptr;
+ff/gfx/webrender_bindings/RenderCompositorD3D11SWGL.cpp-54-  }
+--
+ff/gfx/webrender_bindings/RendererOGL.cpp-87-#endif
+ff/gfx/webrender_bindings/RendererOGL.cpp-88-
+ff/gfx/webrender_bindings/RendererOGL.cpp-89-  if (auto* gl = renderer->gl()) {
+ff/gfx/webrender_bindings/RendererOGL.cpp-90-    return texture->Lock(aChannelIndex, gl);
+ff/gfx/webrender_bindings/RendererOGL.cpp:91:  } else if (auto* swgl = renderer->swgl()) {
+ff/gfx/webrender_bindings/RendererOGL.cpp:92:    return texture->LockSWGL(aChannelIndex, swgl, renderer->GetCompositor());
+ff/gfx/webrender_bindings/RendererOGL.cpp-93-  } else {
+ff/gfx/webrender_bindings/RendererOGL.cpp-94-    gfxCriticalNoteOnce
+ff/gfx/webrender_bindings/RendererOGL.cpp-95-        << "No GL or SWGL context available to lock ExternalImage for extId:"
+ff/gfx/webrender_bindings/RendererOGL.cpp-96-        << AsUint64(aId);
+--
+ff/gfx/webrender_bindings/RendererOGL.cpp-107-    return;
+ff/gfx/webrender_bindings/RendererOGL.cpp-108-  }
+ff/gfx/webrender_bindings/RendererOGL.cpp-109-  if (renderer->gl()) {
+ff/gfx/webrender_bindings/RendererOGL.cpp-110-    texture->Unlock();
+ff/gfx/webrender_bindings/RendererOGL.cpp:111:  } else if (renderer->swgl()) {
+ff/gfx/webrender_bindings/RendererOGL.cpp-112-    texture->UnlockSWGL();
+ff/gfx/webrender_bindings/RendererOGL.cpp-113-  }
+ff/gfx/webrender_bindings/RendererOGL.cpp-114-}
+ff/gfx/webrender_bindings/RendererOGL.cpp-115-
+--
+ff/gfx/webrender_bindings/RendererOGL.cpp-396-}
+ff/gfx/webrender_bindings/RendererOGL.cpp-397-
+ff/gfx/webrender_bindings/RendererOGL.cpp-398-gl::GLContext* RendererOGL::gl() const { return mCompositor->gl(); }
+ff/gfx/webrender_bindings/RendererOGL.cpp-399-
+ff/gfx/webrender_bindings/RendererOGL.cpp:400:void* RendererOGL::swgl() const { return mCompositor->swgl(); }
+ff/gfx/webrender_bindings/RendererOGL.cpp-401-
+ff/gfx/webrender_bindings/RendererOGL.cpp-402-void RendererOGL::SetFrameStartTime(const TimeStamp& aTime) {
+ff/gfx/webrender_bindings/RendererOGL.cpp-403-  if (mFrameStartTime) {
+ff/gfx/webrender_bindings/RendererOGL.cpp-404-    // frame start time is already set. This could happen when multiple
+--
+ff/gfx/webrender_bindings/RendererOGL.cpp-578-  return mThread->GetRenderTexture(aExternalImageId);
+ff/gfx/webrender_bindings/RendererOGL.cpp-579-}
+ff/gfx/webrender_bindings/RendererOGL.cpp-580-
+ff/gfx/webrender_bindings/RendererOGL.cpp-581-void RendererOGL::AccumulateMemoryReport(MemoryReport* aReport) {
+ff/gfx/webrender_bindings/RendererOGL.cpp:582:  wr_renderer_accumulate_memory_report(GetRenderer(), aReport, swgl());
+ff/gfx/webrender_bindings/RendererOGL.cpp-583-
+ff/gfx/webrender_bindings/RendererOGL.cpp-584-  LayoutDeviceIntSize size = mCompositor->GetBufferSize();
+ff/gfx/webrender_bindings/RendererOGL.cpp-585-
+ff/gfx/webrender_bindings/RendererOGL.cpp-586-  // Assume BGRA8 for the format since it's not exposed anywhere,
