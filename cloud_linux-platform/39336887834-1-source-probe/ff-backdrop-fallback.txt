@@ -1,0 +1,14 @@
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-459-        // the native surface next time this tile becomes visible.
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-460-        let clipped_rect = self.cached_surface.current_descriptor.local_valid_rect
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-461-            .intersection(&ctx.local_clip_rect)
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-462-            .unwrap_or_else(PictureRect::zero);
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-463-
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-464-        let has_opaque_bg_color = self.cached_surface.background_color.map_or(false, |c| c.a >= 1.0);
+ff/gfx/wr/webrender/src/tile_cache/mod.rs:465:        let has_opaque_backdrop = ctx.backdrop.map_or(false, |b| b.opaque_rect.contains_box(&clipped_rect));
+ff/gfx/wr/webrender/src/tile_cache/mod.rs:466:        let mut is_opaque = has_opaque_bg_color || has_opaque_backdrop;
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-467-
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-468-        // If this tile intersects with any underlay surfaces, we need to consider it
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-469-        // translucent, since it will contain an alpha cutout
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-470-        for underlay in ctx.underlays {
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-471-            if clipped_rect.intersects(&underlay.local_rect) {
+ff/gfx/wr/webrender/src/tile_cache/mod.rs-472-                is_opaque = false;

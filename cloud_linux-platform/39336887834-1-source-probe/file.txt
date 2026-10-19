@@ -1,0 +1,173 @@
+1:diff --git a/gfx/webrender_bindings/WebRenderAPI.cpp b/gfx/webrender_bindings/WebRenderAPI.cpp
+2:--- a/gfx/webrender_bindings/WebRenderAPI.cpp
+3:+++ b/gfx/webrender_bindings/WebRenderAPI.cpp
+4:@@ -298,11 +298,13 @@
+5:                 panic_on_gl_error, picTileWidth, picTileHeight,
+6:                 gfx::gfxVars::WebRenderRequiresHardwareDriver(),
+7:                 StaticPrefs::gfx_webrender_low_quality_pinch_zoom_AtStartup(),
+8:                 StaticPrefs::gfx_webrender_max_shared_surface_size_AtStartup(),
+9:                 StaticPrefs::gfx_webrender_enable_subpixel_aa_AtStartup(),
+10:-                compositor->ShouldUseLayerCompositor())) {
+11:+                compositor->ShouldUseLayerCompositor(),
+12:+                StaticPrefs::
+13:+                    gfx_webrender_opaque_backdrop_fallback_AtStartup())) {
+14:           // wr_window_new puts a message into gfxCriticalNote if it returns
+15:           // false
+16:           MOZ_ASSERT(errorMessage);
+17:           error.AssignASCII(errorMessage);
+18:           wr_api_free_error_msg(errorMessage);
+19:diff --git a/gfx/webrender_bindings/src/bindings.rs b/gfx/webrender_bindings/src/bindings.rs
+20:--- a/gfx/webrender_bindings/src/bindings.rs
+21:+++ b/gfx/webrender_bindings/src/bindings.rs
+22:@@ -1998,10 +1998,11 @@
+23:     reject_software_rasterizer: bool,
+24:     low_quality_pinch_zoom: bool,
+25:     max_shared_surface_size: i32,
+26:     enable_subpixel_aa: bool,
+27:     use_layer_compositor: bool,
+28:+    opaque_backdrop_fallback: bool,
+29: ) -> bool {
+30:     assert!(unsafe { is_in_render_thread() });
+31: 
+32:     // Ensure the WR profiler callbacks are hooked up to the Gecko profiler.
+33:     set_profiler_hooks(Some(&PROFILER_HOOKS));
+34:@@ -2164,11 +2165,12 @@
+35:         texture_cache_config,
+36:         reject_software_rasterizer,
+37:         low_quality_pinch_zoom,
+38:         max_shared_surface_size,
+39:         enable_dithering,
+40:         enable_shared_instance_buffer,
+41:+        opaque_backdrop_fallback,
+42:         ..Default::default()
+43:     };
+44: 
+45:     let window_size = DeviceIntSize::new(window_width, window_height);
+46:     let notifier = Box::new(CppNotifier { window_id });
+47:diff --git a/gfx/wr/webrender/src/device/gl.rs b/gfx/wr/webrender/src/device/gl.rs
+48:--- a/gfx/wr/webrender/src/device/gl.rs
+49:+++ b/gfx/wr/webrender/src/device/gl.rs
+50:@@ -3982,10 +3982,14 @@
+51: 
+52:     pub fn disable_color_write(&self) {
+53:         self.gl.color_mask(false, false, false, false);
+54:     }
+55: 
+56:+    pub fn set_color_mask(&self, r: bool, g: bool, b: bool, a: bool) {
+57:+        self.gl.color_mask(r, g, b, a);
+58:+    }
+59:+
+60:     pub fn set_blend(&mut self, enable: bool) {
+61:         if enable {
+62:             self.gl.enable(gl::BLEND);
+63:         } else {
+64:             self.gl.disable(gl::BLEND);
+65:diff --git a/gfx/wr/webrender/src/renderer/init.rs b/gfx/wr/webrender/src/renderer/init.rs
+66:--- a/gfx/wr/webrender/src/renderer/init.rs
+67:+++ b/gfx/wr/webrender/src/renderer/init.rs
+68:@@ -204,6 +204,8 @@
+69:     pub low_quality_pinch_zoom: bool,
+70:     pub max_shared_surface_size: i32,
+71:     /// If true, open a debug socket to listen for remote debugger.
+72:     /// Relies on `debugger` cargo feature being enabled.
+73:     pub enable_debugger: bool,
+74:+    /// See explanation of `gfx.webrender.opaque-backdrop-fallback`.
+75:+    pub opaque_backdrop_fallback: bool,
+76: }
+77:@@ -277,10 +279,11 @@
+78:             enable_instancing: true,
+79:             enable_shared_instance_buffer: false,
+80:             reject_software_rasterizer: false,
+81:             low_quality_pinch_zoom: false,
+82:             max_shared_surface_size: 2048,
+83:             enable_debugger: true,
+84:+            opaque_backdrop_fallback: false,
+85:         }
+86:     }
+87: }
+88: 
+89:@@ -802,11 +805,12 @@
+90:         allocated_native_surfaces: FastHashSet::default(),
+91:         debug_overlay_state: DebugOverlayState::new(),
+92:         buffer_damage_tracker: BufferDamageTracker::default(),
+93:         max_primitive_instance_count,
+94:         enable_instancing: options.enable_instancing,
+95:         use_shared_instance_buffer,
+96:+        opaque_backdrop_fallback: options.opaque_backdrop_fallback,
+97:         consecutive_oom_frames: 0,
+98:         target_frame_publish_id: None,
+99:         pending_result_msg: None,
+100:         layer_compositor_frame_state_in_prev_frame: None,
+101:         external_composite_debug_items: Vec::new(),
+102:diff --git a/gfx/wr/webrender/src/renderer/mod.rs b/gfx/wr/webrender/src/renderer/mod.rs
+103:--- a/gfx/wr/webrender/src/renderer/mod.rs
+104:+++ b/gfx/wr/webrender/src/renderer/mod.rs
+105:@@ -867,13 +867,15 @@
+106:     buffer_damage_tracker: BufferDamageTracker,
+107: 
+108:     max_primitive_instance_count: usize,
+109:     enable_instancing: bool,
+110:     /// If true, stream instance data into large buffers shared by multiple
+111:     /// draws, rather than allocating a new instance buffer for each draw.
+112:     use_shared_instance_buffer: bool,
+113: 
+114:+    opaque_backdrop_fallback: bool,
+115:+
+116:     /// Count consecutive oom frames to detectif we are stuck unable to render
+117:     /// in a loop.
+118:     consecutive_oom_frames: u32,
+119: 
+120:     /// update() defers processing of ResultMsg, if frame_publish_id of
+121:@@ -2787,18 +2789,29 @@
+122:                 let read_target = ReadTarget::from_texture(cache_texture);
+123: 
+124:                 // Should always be drawing to picture cache tiles or off-screen surface!
+125:                 debug_assert!(!draw_target.is_default());
+126:                 let device_to_framebuffer = Scale::new(1i32);
+127:+                let dest_fb_rect = dest * device_to_framebuffer;
+128: 
+129:                 self.device.blit_render_target(
+130:                     read_target,
+131:                     src * device_to_framebuffer,
+132:                     draw_target,
+133:-                    dest * device_to_framebuffer,
+134:+                    dest_fb_rect,
+135:                     TextureFilter::Linear,
+136:                 );
+137:+
+138:+                if self.opaque_backdrop_fallback {
+139:+                    self.device.set_color_mask(false, false, false, true);
+140:+                    self.device.clear_target(
+141:+                        Some([0.0, 0.0, 0.0, 1.0]),
+142:+                        None,
+143:+                        Some(dest_fb_rect),
+144:+                    );
+145:+                    self.device.set_color_mask(true, true, true, true);
+146:+                }
+147:             }
+148:         }
+149:     }
+150: 
+151:     fn draw_picture_cache_target(
+152:diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
+153:--- a/modules/libpref/init/StaticPrefList.yaml
+154:+++ b/modules/libpref/init/StaticPrefList.yaml
+155:@@ -8439,10 +8439,17 @@
+156: #else
+157:   value: false
+158: #endif
+159:   mirror: once
+160: 
+161:+# Make backdrop-filter treat its captured backdrop as if it had been
+162:+# composited over an opaque-black background. (See bug 2036640)
+163:+- name: gfx.webrender.opaque-backdrop-fallback
+164:+  type: bool
+165:+  value: true
+166:+  mirror: once
+167:+
+168: # Disable wait of GPU execution completion
+169: - name: gfx.webrender.wait-gpu-finished.disabled
+170:   type: bool
+171:   value: false
+172:   mirror: once
+173:

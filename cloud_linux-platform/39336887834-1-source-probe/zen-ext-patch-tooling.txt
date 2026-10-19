@@ -1,0 +1,20 @@
+--
+zen/.github/workflows/sync-external-patches.yml-68-          GIT_CURL_VERBOSE: 1
+zen/.github/workflows/sync-external-patches.yml-69-        with:
+zen/.github/workflows/sync-external-patches.yml-70-          token: ${{ secrets.DEPLOY_KEY }}
+zen/.github/workflows/sync-external-patches.yml-71-          commit-message: "chore: Sync external patches"
+zen/.github/workflows/sync-external-patches.yml:72:          branch: "chore/sync-external-patches-${{ github.run_id }}"
+zen/.github/workflows/sync-external-patches.yml-73-          title: "Sync external patches"
+zen/.github/workflows/sync-external-patches.yml-74-          body: |
+zen/.github/workflows/sync-external-patches.yml-75-            This PR syncs the external patches automatically.
+zen/.github/workflows/sync-external-patches.yml-76-
+--
+zen/scripts/update_external_patches.py-8-import requests
+zen/scripts/update_external_patches.py-9-from json_with_comments import JSONWithCommentsDecoder
+zen/scripts/update_external_patches.py-10-
+zen/scripts/update_external_patches.py-11-BASE_URI = "https://phabricator.services.mozilla.com"
+zen/scripts/update_external_patches.py:12:OUTPUT_DIR = os.path.join(os.getcwd(), "src", "external-patches")
+zen/scripts/update_external_patches.py-13-
+zen/scripts/update_external_patches.py-14-
+zen/scripts/update_external_patches.py-15-def die(message):
+zen/scripts/update_external_patches.py-16-  print(f"Error: {message}")
