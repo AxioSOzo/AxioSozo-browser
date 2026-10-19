@@ -20,17 +20,44 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', '/Volumes/AxioSozoBuild'))
+# Linux (cloud) hosts build under a gitignored project build root; macOS keeps the
+# mounted project APFS volume. Both are overridable with AXIOSOZO_BUILD_ROOT.
+IS_LINUX = platform.system() == 'Linux'
+if IS_LINUX:
+    BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT') or ROOT / '.local' / 'build')
+else:
+    BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', '/Volumes/AxioSozoBuild'))
 BASE = BUILD_ROOT / 'cef'
 LEGACY_ARCHIVE = Path('/Volumes/DevStorage/builds/axiosozo-cef-handoff1/cef-minimal.tar.bz2')
 VERSION = '154.0.23+g062ebe4+chromium-154.0.8037.17'
-ARCHIVE_NAME = f'cef_binary_{VERSION}_macosarm64_minimal.tar.bz2'
-CEF = BASE / ARCHIVE_NAME.removesuffix('.tar.bz2')
-ARCHIVE = BASE / 'cef-minimal.tar.bz2'
-URL = 'https://cef-builds.spotifycdn.com/' + ARCHIVE_NAME.replace('+', '%2B')
-SHA256 = '5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777'
-APP = BASE / 'AxioCEFProbe.app'
-BINARY = APP / 'Contents/MacOS/AxioCEFProbe'
+# Official CEF minimal distributions of the same pinned version (upstreams.lock.json
+# cef.platforms). sha1 is the value published in cef-builds.spotifycdn.com/index.json;
+# sha256 was computed from the downloaded archive whose sha1 matched it.
+LINUX_ARCHES = {'x86_64': 'linux64', 'aarch64': 'linuxarm64'}
+LINUX_PINS = {
+    'linux64': dict(sha256='8beed3410b79aa4ae964bb7f955f08ac550eb2a377a6d12090be8bdb7de1369d',
+                    sha1='01c4df39ce79c441950cd8bf2f385c0b886bd5d3', bytes=326915001),
+    'linuxarm64': dict(sha256='0d52ceed3ec40244ad2d330a370968cd1fa1442191edb762cd8e3f2dd20e045f',
+                       sha1='08c08229946992685b90b50ee08e7a59e192b601', bytes=424499168),
+}
+LINUX_ARCH = LINUX_ARCHES.get(platform.machine()) if IS_LINUX else None
+if IS_LINUX:
+    ARCHIVE_NAME = f'cef_binary_{VERSION}_{LINUX_ARCH or "linux64"}_minimal.tar.bz2'
+    CEF = BASE / ARCHIVE_NAME.removesuffix('.tar.bz2')
+    ARCHIVE = BASE / ARCHIVE_NAME
+    URL = 'https://cef-builds.spotifycdn.com/' + ARCHIVE_NAME.replace('+', '%2B')
+    SHA256 = LINUX_PINS[LINUX_ARCH or 'linux64']['sha256']
+    # One runtime directory: both host executables, libcef.so, resources, chrome-sandbox.
+    APP = BASE / (LINUX_ARCH or 'linux64')
+    BINARY = APP / 'AxioCEFProbe'
+else:
+    ARCHIVE_NAME = f'cef_binary_{VERSION}_macosarm64_minimal.tar.bz2'
+    CEF = BASE / ARCHIVE_NAME.removesuffix('.tar.bz2')
+    ARCHIVE = BASE / 'cef-minimal.tar.bz2'
+    URL = 'https://cef-builds.spotifycdn.com/' + ARCHIVE_NAME.replace('+', '%2B')
+    SHA256 = '5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777'
+    APP = BASE / 'AxioCEFProbe.app'
+    BINARY = APP / 'Contents/MacOS/AxioCEFProbe'
 EVIDENCE = ROOT / 'docs/evidence'
 EXTERNAL = '/Users/wout/.local/bin/dev-external'
 MOUNT = '/Users/wout/.local/bin/mount-dev-storage'
@@ -50,7 +77,7 @@ def run_command(args, **kwargs):
     print('+ ' + ' '.join(command), flush=True)
     # CEF is a small prebuilt component: a compiler/signer stalled for ten
     # minutes is an environment blocker, not permission to weaken protections.
-    bounded = any(Path(arg).name in {'clang++', 'codesign'} for arg in command)
+    bounded = any(Path(arg).name in {'clang++', 'codesign', 'c++', 'g++', 'cmake'} for arg in command)
     limit = kwargs.pop('timeout_seconds', 600 if bounded else None)
     process = None
     previous_term = signal.getsignal(signal.SIGTERM)
@@ -308,6 +335,8 @@ def setup():
 
 
 def check():
+    if IS_LINUX:
+        return linux_check()
     host_check()
     if not BINARY.exists():
         raise RuntimeError('BLOCKED_ENV: CEF native component is not built; run ./dev setup')
@@ -329,6 +358,8 @@ def check():
 
 def native_test():
     """Exercise actual native framing/credit threads, without pretending to run CEF."""
+    if IS_LINUX:
+        return linux_native_test()
     host_check()
     BASE.mkdir(parents=True, exist_ok=True)
     for directory in [BASE / 'tmp', BASE / 'clang-cache']:
@@ -355,6 +386,293 @@ def native_test():
                  '-I', ROOT / 'native/chromium-host',
                  ROOT / 'native/chromium-host/tests/a11y_core_test.cc', '-o', a11y])
     run_command([a11y], timeout_seconds=30)
+
+
+# ---- Linux (cloud) host ---------------------------------------------------------------------
+# Portable C++ core (core/) + Linux platform layer (linux/), built with CMake against the
+# pinned minimal distribution. Runtime layout: BASE/<linux64|linuxarm64>/ holds
+# AxioCEFProbe, AxioCEFProbeHelper, libcef.so, resources and chrome-sandbox.
+LINUX_SOURCES = ['CMakeLists.txt', 'transport.hpp', 'a11y_core.hpp', 'core/json.hpp', 'core/url.hpp',
+                 'core/cef_util.hpp', 'core/platform.hpp', 'core/png.hpp', 'core/host_core.hpp',
+                 'core/host_core.cc', 'core/delegation.inc', 'core/input.inc', 'core/a11y_bridge.inc',
+                 'core/handlers.inc', 'linux/main_linux.cc', 'linux/helper_linux.cc', 'linux/platform_linux.cc']
+LINUX_RUNTIME = ['libcef.so', 'libEGL.so', 'libGLESv2.so', 'libvk_swiftshader.so', 'libvulkan.so.1',
+                 'v8_context_snapshot.bin', 'vk_swiftshader_icd.json']
+LINUX_RESOURCES = ['chrome_100_percent.pak', 'chrome_200_percent.pak', 'resources.pak', 'icudtl.dat']
+
+
+def linux_compiler():
+    return os.environ.get('CXX') or shutil.which('g++') or shutil.which('clang++') or shutil.which('c++')
+
+
+def linux_host_check():
+    if not IS_LINUX or LINUX_ARCH is None:
+        raise RuntimeError('BLOCKED_ENV: the pinned Linux CEF distributions need x86_64 or aarch64 Linux')
+    if os.geteuid() == 0:
+        raise RuntimeError('BLOCKED_ENV: run as an unprivileged user; Chromium refuses to sandbox a root '
+                           'browser process and this host never passes --no-sandbox')
+    for tool in ['cmake', 'tar', 'bzip2', 'curl']:
+        if not shutil.which(tool):
+            raise RuntimeError(f'BLOCKED_ENV: {tool} is missing (README "Linux": apt packages)')
+    if not linux_compiler():
+        raise RuntimeError('BLOCKED_ENV: no C++20 compiler (g++ or clang++)')
+    BUILD_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def linux_fingerprint():
+    h = hashlib.sha256()
+    h.update(SHA256.encode())
+    for name in LINUX_SOURCES:
+        h.update(name.encode() + b'\0' + (ROOT / 'native/chromium-host' / name).read_bytes())
+    h.update(inspect.getsource(linux_setup).encode())
+    h.update(subprocess.check_output([linux_compiler(), '--version']))
+    h.update(subprocess.check_output(['cmake', '--version']))
+    return h.hexdigest()
+
+
+def link_or_copy(source, target):
+    """Hard-link an unchanged upstream runtime file into the runtime directory."""
+    if target.exists() or target.is_symlink():
+        if not target.is_symlink() and target.stat().st_ino == source.stat().st_ino:
+            return
+        target.unlink()
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def linux_setup():
+    linux_host_check()
+    BASE.mkdir(parents=True, exist_ok=True)
+    pin = LINUX_PINS[LINUX_ARCH]
+    if not ARCHIVE.exists() or ARCHIVE.stat().st_size != pin['bytes']:
+        run_command(['curl', '--fail', '--location', '--max-time', '1800', '--speed-time', '30',
+                     '--speed-limit', '1024', '--continue-at', '-', URL, '--output', ARCHIVE])
+    if digest(ARCHIVE) != SHA256:
+        raise RuntimeError('FAIL: CEF archive SHA256 differs; never extracting it')
+    # The verified upstream archive is immutable. Extraction has no lifecycle hooks.
+    if not (CEF / 'cmake/FindCEF.cmake').exists():
+        run_command(['tar', '-xjf', ARCHIVE, '-C', BASE])
+    stamp = BASE / f'build-{LINUX_ARCH}.json'
+    identity = linux_fingerprint()
+    helper = APP / 'AxioCEFProbeHelper'
+    if BINARY.exists() and helper.exists() and stamp.exists() and json.loads(stamp.read_text()).get('fingerprint') == identity:
+        emit('PASS', action='reused_build', binary=str(BINARY), platform=LINUX_ARCH, sandbox=linux_sandbox_status())
+        return
+    APP.mkdir(parents=True, exist_ok=True)
+    build = BASE / f'cmake-{LINUX_ARCH}'
+    generator = ['-G', 'Ninja'] if shutil.which('ninja') else ['-G', 'Unix Makefiles']
+    run_command(['cmake', '-S', ROOT / 'native/chromium-host', '-B', build, *generator, '-DCMAKE_BUILD_TYPE=Release',
+                 '-DCMAKE_CXX_COMPILER=' + linux_compiler(), '-DCEF_ROOT=' + str(CEF), '-DAXIO_OUT=' + str(APP)])
+    run_command(['cmake', '--build', build, '--parallel', str(max(1, os.cpu_count() or 1))])
+    for name in LINUX_RUNTIME:
+        link_or_copy(CEF / 'Release' / name, APP / name)
+    for name in LINUX_RESOURCES:
+        link_or_copy(CEF / 'Resources' / name, APP / name)
+    # The distribution README permits shipping only the configured locale (en-US).
+    (APP / 'locales').mkdir(exist_ok=True)
+    link_or_copy(CEF / 'Resources/locales/en-US.pak', APP / 'locales/en-US.pak')
+    # chrome-sandbox is copied (never hard-linked) so that `install-sandbox` changes only
+    # this copy; an already installed identical root:root 4755 helper is kept.
+    sandbox_source, sandbox_target = CEF / 'Release/chrome-sandbox', APP / 'chrome-sandbox'
+    if not sandbox_target.exists() or digest(sandbox_target) != digest(sandbox_source):
+        if sandbox_target.exists():
+            sandbox_target.unlink()
+        shutil.copy2(sandbox_source, sandbox_target)
+    for notice in ['LICENSE.txt', 'CREDITS.html']:
+        shutil.copy2(CEF / notice, APP / notice)
+    stamp.write_text(json.dumps(dict(fingerprint=identity, cef=VERSION, platform=LINUX_ARCH, archive_sha256=SHA256,
+                                     built_at=time.time()), indent=2) + '\n')
+    emit('PASS', action='native_build', binary=str(BINARY), platform=LINUX_ARCH, sandbox=linux_sandbox_status())
+
+
+def read_int(path):
+    try:
+        return int(Path(path).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def linux_sandbox_status():
+    """Which Chromium layer-1 sandbox this machine can provide. Read-only."""
+    helper = APP / 'chrome-sandbox'
+    suid = False
+    if helper.exists():
+        info = helper.stat()
+        suid = info.st_uid == 0 and info.st_gid == 0 and (info.st_mode & 0o7777) == 0o4755
+    status = dict(suid_helper_installed=suid,
+                  apparmor_restrict_unprivileged_userns=read_int('/proc/sys/kernel/apparmor_restrict_unprivileged_userns'),
+                  unprivileged_userns_clone=read_int('/proc/sys/kernel/unprivileged_userns_clone'),
+                  max_user_namespaces=read_int('/proc/sys/user/max_user_namespaces'))
+    userns = False
+    if shutil.which('unshare'):
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            userns = subprocess.run(['unshare', '--user', '--map-root-user', '--pid', '--net', '--fork', 'true'],
+                                    capture_output=True, timeout=10).returncode == 0
+    status['unprivileged_userns'] = userns
+    namespace = (userns and status['apparmor_restrict_unprivileged_userns'] != 1
+                 and status['unprivileged_userns_clone'] != 0 and (status['max_user_namespaces'] or 0) > 0)
+    status['expected'] = 'namespace' if namespace else ('suid' if suid else None)
+    status['usable'] = status['expected'] is not None
+    return status
+
+
+def install_sandbox():
+    """Explicit privileged step: the unchanged pinned chrome-sandbox becomes root:root 4755."""
+    linux_host_check()
+    helper = APP / 'chrome-sandbox'
+    if not helper.is_file() or digest(helper) != digest(CEF / 'Release/chrome-sandbox'):
+        raise RuntimeError('BLOCKED_ENV: run `probe.py setup` first; chrome-sandbox must equal the pinned file')
+    print('Installing the pinned Chromium SUID sandbox helper (sudo chown root:root, chmod 4755): ' + str(helper),
+          flush=True)
+    for command in (['sudo', 'chown', 'root:root', str(helper)], ['sudo', 'chmod', '4755', str(helper)]):
+        subprocess.run(command, check=True, timeout=300)
+    status = linux_sandbox_status()
+    emit('PASS' if status['suid_helper_installed'] else 'FAIL', action='install_sandbox', sandbox=status)
+    return 0 if status['suid_helper_installed'] else 1
+
+
+def linux_check():
+    linux_host_check()
+    if not BINARY.exists() or not (APP / 'AxioCEFProbeHelper').exists():
+        raise RuntimeError('BLOCKED_ENV: CEF native component is not built; run probe.py setup')
+    stamp = BASE / f'build-{LINUX_ARCH}.json'
+    if not stamp.exists() or json.loads(stamp.read_text()).get('fingerprint') != linux_fingerprint():
+        raise RuntimeError('BLOCKED_ENV: native CEF rebuild required; run probe.py setup')
+    status = linux_sandbox_status()
+    if not status['usable']:
+        raise RuntimeError('BLOCKED_ENV: no usable Chromium sandbox (unprivileged user namespaces are unavailable '
+                           'and chrome-sandbox is not root:root 4755). Run `python3 native/chromium-host/probe.py '
+                           'install-sandbox` (sudo). The host never runs without its sandbox.')
+    emit('PASS', action='native_build_check', version=VERSION, platform=LINUX_ARCH, sandbox=status)
+    return status
+
+
+def linux_native_test():
+    if not IS_LINUX or LINUX_ARCH is None:
+        raise RuntimeError('BLOCKED_ENV: Linux native tests need x86_64 or aarch64 Linux')
+    compiler = linux_compiler()
+    if not compiler:
+        raise RuntimeError('BLOCKED_ENV: no C++20 compiler (g++ or clang++)')
+    here = ROOT / 'native/chromium-host'
+    out = BASE / 'tests'
+    out.mkdir(parents=True, exist_ok=True)
+    tests = [('transport-test', [here / 'test_transport.cc'], [], 15),
+             ('a11y-core-test', [here / 'tests/a11y_core_test.cc'], ['-I', here], 30),
+             ('core-test', [here / 'tests/core_test.cc'], ['-I', here], 15)]
+    if (CEF / 'include').is_dir():
+        # Bounded exit of a stuck host: kills every descendant, then exits (no CEF runtime).
+        tests.append(('exit-watchdog-test', [here / 'tests/exit_watchdog_test.cc', here / 'linux/platform_linux.cc'],
+                      ['-I', here, '-I', CEF, '-DCEF_API_VERSION=15400'], 30))
+    else:
+        emit('SKIPPED', test='exit_watchdog_test', reason='needs the pinned CEF headers; run probe.py setup first')
+    for name, sources, flags, limit in tests:
+        run_command([compiler, '-std=c++20', '-Wall', '-Wextra', '-pthread', *flags, *sources, '-o', out / name])
+        run_command([out / name], timeout_seconds=limit)
+    emit('SKIPPED', test='crash_guard_test', reason='macOS only: inherited Mach exception ports (Breakpad); '
+         'the Linux bounded exit is covered by exit_watchdog_test')
+    emit('PASS', action='native_tests', platform=LINUX_ARCH, tests=[name for name, *_ in tests])
+
+
+def host_environment(profile):
+    """The only environment an owned host process receives (no secrets, no personal paths).
+
+    macOS: unchanged PATH/TMPDIR. Linux adds HOME=profile (Chromium's NSS database,
+    font and cache paths stay inside the owned profile, never the user's ~/.pki) and the
+    X display variables when present (X11 ozone backend for the shared clipboard).
+    """
+    env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'TMPDIR': str(profile)}
+    if IS_LINUX:
+        env['HOME'] = str(profile)
+        for name in ('DISPLAY', 'XAUTHORITY'):
+            if os.environ.get(name):
+                env[name] = os.environ[name]
+    return env
+
+
+def linux_proc_stat(pid):
+    try:
+        text = Path(f'/proc/{pid}/stat').read_text()
+    except OSError:
+        return None
+    fields = text[text.rfind(')') + 2:].split()
+    return dict(state=fields[0], ppid=int(fields[1]), pgrp=int(fields[2]))
+
+
+def linux_descendants(root):
+    children = {}
+    for entry in os.listdir('/proc'):
+        if entry.isdigit():
+            stat = linux_proc_stat(int(entry))
+            if stat:
+                children.setdefault(stat['ppid'], []).append(int(entry))
+    found, pending = [], [root]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            if child not in found:
+                found.append(child)
+                pending.append(child)
+    return found
+
+
+def linux_process_snapshot(root):
+    """Sandbox state of this host's own processes (process type and kernel status only)."""
+    own_user_ns = os.readlink('/proc/self/ns/user')
+    rows = []
+    for pid in [root] + linux_descendants(root):
+        try:
+            argv = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
+            status = Path(f'/proc/{pid}/status').read_text()
+        except OSError:
+            continue
+        kind = 'browser' if pid == root else next((arg[7:].decode() for arg in argv if arg.startswith(b'--type=')),
+                                                  Path(argv[0].decode(errors='replace')).name)
+        fields = dict(line.split(':', 1) for line in status.splitlines() if ':' in line)
+        user_ns = None
+        with contextlib.suppress(OSError):
+            user_ns = os.readlink(f'/proc/{pid}/ns/user')
+        rows.append(dict(pid=pid, type=kind, seccomp=read_int_value(fields.get('Seccomp')),
+                         pid_namespace_depth=len(fields.get('NSpid', '').split()),
+                         user_namespace='same' if user_ns == own_user_ns else ('new' if user_ns else 'unreadable')))
+    renderers = [row for row in rows if row['type'] == 'renderer']
+    observation = dict(processes=rows,
+                       renderers=len(renderers),
+                       renderer_seccomp_bpf=bool(renderers) and all(row['seccomp'] == 2 for row in renderers),
+                       renderer_pid_namespace=bool(renderers) and all(row['pid_namespace_depth'] >= 2 for row in renderers),
+                       suid_helper_process=any(row['type'] == 'chrome-sandbox' for row in rows))
+    # Layer 1 (Chromium docs/linux/sandboxing.md): the namespace sandbox puts renderers in a
+    # new user namespace; the SUID helper keeps our user namespace but a new PID namespace.
+    if any(row['user_namespace'] == 'new' for row in renderers):
+        observation['layer1'] = 'namespace'
+    elif observation['suid_helper_process'] or (observation['renderer_pid_namespace']
+                                                and all(row['user_namespace'] == 'same' for row in renderers)):
+        observation['layer1'] = 'suid'
+    else:
+        observation['layer1'] = 'unknown' if observation['renderer_pid_namespace'] else 'none'
+    return observation
+
+
+def read_int_value(text):
+    try:
+        return int((text or '').strip())
+    except ValueError:
+        return None
+
+
+def linux_orphans():
+    """Live processes started from this host's runtime directory (after it should be gone)."""
+    marker = str(APP).encode() + b'/'
+    orphans = []
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        with contextlib.suppress(OSError):
+            argv0 = Path(f'/proc/{entry}/cmdline').read_bytes().split(b'\0')[0]
+            stat = linux_proc_stat(int(entry))
+            if argv0.startswith(marker) and stat and stat['state'] != 'Z':
+                orphans.append(dict(pid=int(entry), program=Path(argv0.decode(errors='replace')).name))
+    return orphans
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
@@ -490,7 +808,7 @@ def diagnose_unpainted(process, stop, output):
                                'pid=,ppid=,pgid=,stat=,etime=,command='],
                               capture_output=True, text=True, timeout=3)
         (EVIDENCE / 'cef-owned-helpers.txt').write_text(rows.stdout)
-        for pid in pids[:5]:
+        for pid in ([] if IS_LINUX else pids[:5]):  # /usr/bin/sample is macOS-only
             if stop.is_set():
                 break
             with contextlib.suppress(subprocess.TimeoutExpired):
@@ -499,6 +817,18 @@ def diagnose_unpainted(process, stop, output):
                                capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         (EVIDENCE / 'cef-helper-diagnostic-error.txt').write_text(type(error).__name__ + '\n')
+
+
+def observe_linux_sandbox(process, stop, holder):
+    """Linux: once the fixture painted, record the kernel sandbox state of the owned processes."""
+    deadline = time.monotonic() + 20
+    while not stop.wait(.5) and process.poll() is None and time.monotonic() < deadline:
+        with contextlib.suppress(OSError):
+            if 'native_frame' in (EVIDENCE / 'cef-e0.jsonl').read_text():
+                break
+    if process.poll() is None:
+        with contextlib.suppress(OSError, ValueError, IndexError):
+            holder['sandbox_observation'] = linux_process_snapshot(process.pid)
 
 
 def run():
@@ -520,6 +850,7 @@ def run():
     timed_out = False
     diagnostic_stop = threading.Event()
     diagnostic = None
+    observer, observed = None, {}
     def interrupted(_signum, _frame):
         raise KeyboardInterrupt
     previous_int = signal.getsignal(signal.SIGINT)
@@ -529,21 +860,25 @@ def run():
         with (EVIDENCE / 'cef-e0.jsonl').open('w') as out, (EVIDENCE / 'cef-stderr.log').open('w') as err:
             process = subprocess.Popen([str(BINARY), url, str(profile), str(EVIDENCE)],
                                        stdout=out, stderr=err, start_new_session=True,
-                                       env={'PATH':'/usr/bin:/bin:/usr/sbin:/sbin',
-                                            'TMPDIR':str(profile)})
+                                       env=host_environment(profile))
             emit('RUNNING', native_pid=process.pid, profile=str(profile))
             diagnostic = threading.Thread(target=diagnose_unpainted,
                                           args=(process, diagnostic_stop, out), daemon=True)
             diagnostic.start()
+            if IS_LINUX:
+                observer = threading.Thread(target=observe_linux_sandbox, args=(process, diagnostic_stop, observed),
+                                            daemon=True)
+                observer.start()
             try:
                 code = process.wait(timeout=95)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 code = 75
-                with contextlib.suppress(subprocess.TimeoutExpired, OSError):
-                    subprocess.run(['/usr/bin/sample', str(process.pid), '1', '1',
-                                    '-file', str(EVIDENCE / 'cef-launch-sample.txt')],
-                                   timeout=5, capture_output=True)
+                if not IS_LINUX:  # /usr/bin/sample is macOS-only
+                    with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+                        subprocess.run(['/usr/bin/sample', str(process.pid), '1', '1',
+                                        '-file', str(EVIDENCE / 'cef-launch-sample.txt')],
+                                       timeout=5, capture_output=True)
     except KeyboardInterrupt:
         code = 130
     finally:
@@ -553,6 +888,8 @@ def run():
         diagnostic_stop.set()
         if diagnostic:
             diagnostic.join(timeout=8)
+        if observer:
+            observer.join(timeout=8)
         group_cleanup_required = cleanup_group(process)
         server.shutdown()
         server.server_close()
@@ -580,6 +917,19 @@ def run():
                   reason='Native launch timed out before any host event' if timed_out and not records else
                          'Native fixture rendering/input failed; inspect load events and fixture requests' if status != 'PASS' else
                          'CEF component only; Zen embedding and user switching are separate unverified gates')
+    if IS_LINUX:
+        # Clean shutdown: nothing of this host may outlive it, and its renderers ran sandboxed.
+        orphans = linux_orphans()
+        sandbox = observed.get('sandbox_observation')
+        result.update(linux_arch=LINUX_ARCH, orphan_processes=orphans, sandbox_observation=sandbox,
+                      sandbox_status=linux_sandbox_status())
+        if result['E0'] == 'PASS' and (orphans or group_cleanup_required or not sandbox
+                                       or not sandbox['renderer_seccomp_bpf'] or not sandbox['renderer_pid_namespace']):
+            result.update(E0='FAIL', reason='Rendering passed, but helpers outlived the host or a renderer was not '
+                                            'observed inside the seccomp-bpf + PID-namespace sandbox')
+            status = 'FAIL'
+            code = code or 1
+            result['exit_code'] = code
     (EVIDENCE / 'cef-probe-result.json').write_text(json.dumps(result, indent=2)+'\n')
     emit(status, **result)
     return code
@@ -587,10 +937,14 @@ def run():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['setup', 'check', 'run', 'test-native'])
+    parser.add_argument('command', choices=['setup', 'check', 'run', 'test-native', 'install-sandbox'])
     args = parser.parse_args()
     try:
-        sys.exit({'setup':setup, 'check':check, 'run':run, 'test-native':native_test}[args.command]() or 0)
+        if args.command == 'install-sandbox' and not IS_LINUX:
+            raise RuntimeError('BLOCKED_ENV: install-sandbox is the Linux SUID sandbox step; macOS uses its own seatbelt')
+        commands = {'setup': linux_setup if IS_LINUX else setup, 'check': check, 'run': run,
+                    'test-native': native_test, 'install-sandbox': install_sandbox}
+        sys.exit(commands[args.command]() or 0)
     except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
         emit('BLOCKED_ENV' if 'BLOCKED_ENV' in str(exc) else 'FAIL', message=str(exc))
         sys.exit(2)

@@ -93,6 +93,7 @@ else:
     def test_cleanup_has_no_global_process_lookup(self):
         self.assertFalse(probe.cleanup_group(None))
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS recipe fingerprint queries xcrun clang++')
     def test_runner_changes_do_not_invalidate_native_recipe(self):
         first = probe.fingerprint()
         original = probe.run
@@ -202,6 +203,7 @@ class SigningIdentityTests(unittest.TestCase):
         self.assertEqual(probe.sign_command('/lib.dylib', identity),
                          ['codesign', '--force', '--sign', HASH, '--timestamp=none', '/lib.dylib'])
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS recipe fingerprint queries xcrun clang++')
     def test_fingerprint_changes_with_identity_only(self):
         adhoc = dict(mode='adhoc', identity=None, name=None)
         one = dict(mode='identity', identity=HASH, name='n')
@@ -235,6 +237,43 @@ class HostCheckTests(unittest.TestCase):
                                  ('/Volumes/T9/Dev.sparsebundle', dict(good, MountPoint='/Volumes/Other'))):
             with self.assertRaisesRegex(RuntimeError, 'BLOCKED_ENV'):
                 self.check(image_path, disk)
+
+
+class LinuxPortTests(unittest.TestCase):
+    """Platform-independent checks of the Linux additions (no download, no CEF run)."""
+    def test_linux_pins_match_lockfile(self):
+        import json
+        platforms = json.loads((probe.ROOT / 'upstreams.lock.json').read_text())['cef']['platforms']
+        for arch, pin in probe.LINUX_PINS.items():
+            entry = platforms[arch]
+            self.assertEqual((entry['sha256'], entry['sha1'], entry['bytes']), (pin['sha256'], pin['sha1'], pin['bytes']))
+            self.assertEqual(entry['distribution'], arch + '_minimal')
+            self.assertTrue(entry['url'].endswith(f'cef_binary_{probe.VERSION.replace("+", "%2B")}_{arch}_minimal.tar.bz2'))
+        # The macOS pin keeps its historical top-level fields; the platform table repeats them.
+        lock = json.loads((probe.ROOT / 'upstreams.lock.json').read_text())['cef']
+        self.assertEqual(platforms['macosarm64']['sha256'], lock['sha256'])
+
+    def test_host_environment_is_minimal(self):
+        base = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'TMPDIR': '/owned/profile'}
+        noisy = {'DISPLAY': ':99', 'XAUTHORITY': '/tmp/x', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/bus',
+                 'HOME': '/home/someone', 'SSH_AUTH_SOCK': '/tmp/agent', 'WAYLAND_DISPLAY': 'wayland-0'}
+        with patch.object(probe, 'IS_LINUX', False), patch.dict(os.environ, noisy):
+            self.assertEqual(probe.host_environment('/owned/profile'), base)
+        with patch.object(probe, 'IS_LINUX', True), patch.dict(os.environ, noisy):
+            self.assertEqual(probe.host_environment('/owned/profile'),
+                             dict(base, HOME='/owned/profile', DISPLAY=':99', XAUTHORITY='/tmp/x'))
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'reads /proc')
+    def test_process_snapshot_of_a_plain_process(self):
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            snapshot = probe.linux_process_snapshot(child.pid)
+            self.assertEqual(snapshot['processes'][0]['type'], 'browser')
+            self.assertEqual(snapshot['renderers'], 0)
+            self.assertEqual(snapshot['layer1'], 'none')
+        finally:
+            child.kill()
+            child.wait()
 
 
 if __name__ == '__main__':

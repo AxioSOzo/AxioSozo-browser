@@ -34,7 +34,7 @@ input{position:absolute;left:40px;width:300px;height:30px;font:16px system-ui}#t
 const t=document.querySelector('#t'),s={kd:[],kp:[],v:'',p:0,c:[],w:0,sy:0,pt:0,tt:0,vv:1,f:''};
 function out(){s.v=t.value;s.p=document.querySelector('#p').value.length;s.sy=Math.round(scrollY);
   s.vv=Math.round(visualViewport.scale*100)/100;document.title=JSON.stringify(s).slice(0,1000);}
-addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':''));if(e.key==='b')e.preventDefault();out();},true);
+addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':'')+(e.ctrlKey?'+ctrl':''));if(e.key==='b')e.preventDefault();out();},true);
 addEventListener('keypress',e=>{s.kp.push(e.key);out();},true);
 for(const [n,k] of [['compositionstart','s'],['compositionupdate','u'],['compositionend','e']])
   addEventListener(n,e=>{s.c.push(k+':'+e.data);out();},true);
@@ -47,9 +47,17 @@ addEventListener('focusin',e=>{s.f=e.target.id||e.target.tagName;out();});
 addEventListener('input',out);addEventListener('load',out);
 </script></html>'''
 
-# macOS virtual key codes (Carbon kVK_*) and CEF modifier flags.
-KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = 0x00, 0x0B, 0x25, 0x7B, 0x35
-COMMAND = 1 << 7
+# (native_key_code, windows_key_code) as the presenter sends them, and CEF modifier flags.
+# macOS: Carbon kVK_* codes (CEF's macOS translator derives the key from them; the
+# windows code stays 0 as before). Linux: X11 keycodes (evdev + 8) plus the DOM/Windows
+# keyCode, from which CEF's Linux translator derives the keydown key. The browser
+# shortcut chord is Command+L on macOS and Ctrl+L on Linux.
+if probe.IS_LINUX:
+    KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (38, 65), (56, 66), (46, 76), (113, 37), (9, 27)
+    SHORTCUT, SHORTCUT_MARK = 1 << 2, '+ctrl'
+else:
+    KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (0x00, 0), (0x0B, 0), (0x25, 0), (0x7B, 0), (0x35, 0)
+    SHORTCUT, SHORTCUT_MARK = 1 << 7, '+meta'
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
@@ -98,15 +106,16 @@ class InputSession(stream.Session):
                 return item
         return self.until(lambda kind, item: kind == 1 and item.get('event') == 'text_input' and check(item), seconds)
 
-    def key(self, code, text='', modifiers=0, char=True):
+    def key(self, codes, text='', modifiers=0, char=True):
         """One keystroke as the presenter sends it; returns (down completion, ms)."""
+        code, windows = codes
         started = time.monotonic()
-        down = self.command('key', type='down', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+        down = self.command('key', type='down', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         if char and text:
-            self.command('key', type='char', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+            self.command('key', type='char', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         verdict = self.done(down)
         elapsed = round((time.monotonic() - started) * 1000, 1)
-        up = self.command('key', type='up', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+        up = self.command('key', type='up', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         self.done(up)
         return verdict, elapsed
 
@@ -162,7 +171,7 @@ def run():
         check(checks, 'key_consumed_prevent_default', verdict_b.get('reason') == 'key_consumed'
               and state['v'] == 'a' and 'b' not in state['kp'],
               dict(reason=verdict_b.get('reason'), ms=ms_b, value=state['v'], keypress=state['kp']))
-        verdict_meta, ms_meta = session.key(KEY_L, 'l', modifiers=COMMAND, char=False)
+        verdict_meta, ms_meta = session.key(KEY_L, 'l', modifiers=SHORTCUT, char=False)
         check(checks, 'key_not_consumed_shortcut', verdict_meta.get('reason') == 'key_not_consumed',
               dict(reason=verdict_meta.get('reason'), ms=ms_meta))
         verdict_left, ms_left = session.key(KEY_LEFT, char=False)
@@ -171,7 +180,7 @@ def run():
         checks['key_escape_info'] = dict(passed=True, detail=dict(reason=verdict_escape.get('reason'), ms=ms_escape))
         state = session.state
         # The inert probes never reach the page: only the keys sent above appear.
-        check(checks, 'probe_invisible_to_page', state['kd'] == ['a', 'b', 'l+meta', 'ArrowLeft', 'Escape']
+        check(checks, 'probe_invisible_to_page', state['kd'] == ['a', 'b', 'l' + SHORTCUT_MARK, 'ArrowLeft', 'Escape']
               and state['kp'] == ['a'], dict(keydown=state['kd'], keypress=state['kp']))
 
         # IME: composition, commit, optional fields, cancel. ArrowLeft left the caret at 0.
@@ -236,12 +245,13 @@ def run():
         except subprocess.TimeoutExpired:
             result['native_exit_code'] = None
             result['teardown'] = 'host still running 15 s after close (Keychain gate suspected; see README)'
-            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
-                subprocess.run(['/usr/bin/sample', str(session.process.pid), '1', '1', '-file',
-                                str(directory / 'host-teardown.sample.txt')], capture_output=True, timeout=5)
+            if not probe.IS_LINUX:  # /usr/bin/sample is macOS-only
+                with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+                    subprocess.run(['/usr/bin/sample', str(session.process.pid), '1', '1', '-file',
+                                    str(directory / 'host-teardown.sample.txt')], capture_output=True, timeout=5)
         result['status'] = result['functional'] if result.get('native_exit_code') == 0 else (
             'PASS_TEARDOWN_BLOCKED' if result['functional'] == 'PASS' else 'FAIL')
-        result.update(cef=ready['cef'], chromium=ready['chromium'], frames=session.frames)
+        result.update(cef=ready['cef'], chromium=ready['chromium'], frames=session.frames, platform=ready['platform'])
     except (Exception, KeyboardInterrupt) as exc:
         result['error'] = type(exc).__name__ + ': ' + str(exc)
         result['page_state'] = session.state if session else None
