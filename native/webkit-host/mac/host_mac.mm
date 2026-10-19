@@ -1,6 +1,6 @@
 // SCAFFOLD (EXPERIMENTAL / NOT_VERIFIED as a product path). macOS WebKit host behind the
 // same engine-neutral core (stream_core.hpp) as the Linux WPE host. See
-// docs/adr/003-webkit-engine.md "macOS plan".
+// docs/adr/004-webkit-engine.md "macOS plan".
 //
 // This scaffold renders a WKWebView in an offscreen, never-shown, borderless window of
 // this helper process and delivers CPU snapshots (takeSnapshotWithConfiguration) as AXCF

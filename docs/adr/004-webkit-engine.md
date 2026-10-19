@@ -1,4 +1,4 @@
-# ADR 003 (WebKit): WebKit as the third out-of-process engine
+# ADR 004: WebKit as the third out-of-process engine
 
 Status: **accepted for the fixture profile; Linux runtime NOT_VERIFIED (BLOCKED_ENV)**.
 Date: 2026-10-19. Workstream: `cloud/webkit-host`.

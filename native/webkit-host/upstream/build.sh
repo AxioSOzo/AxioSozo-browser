@@ -15,6 +15,14 @@ apt-get update >"$OUT/build-apt-update.log" 2>&1
 apt-get install -y --no-install-recommends python3 ca-certificates curl xz-utils ccache cmake ninja-build clang lld unifdef >"$OUT/build-apt.log" 2>&1
 log "build-dep wpewebkit (Debian 13 source package deps)"
 apt-get build-dep -y wpewebkit >>"$OUT/build-apt.log" 2>&1
+# Newer releases default-enable features 2.48's build-deps do not cover (2.52: libhyphen).
+for pkg in libhyphen-dev libwoff-dev libmanette-0.2-dev libgbm-dev libdrm-dev libinput-dev libudev-dev \
+           libxkbcommon-dev libepoxy-dev libsystemd-dev libgudev-1.0-dev libjxl-dev libavif-dev liblcms2-dev \
+           libseccomp-dev libgstreamer-plugins-bad1.0-dev libsysprof-capture-4-dev libwebp-dev libopenjp2-7-dev \
+           libtasn1-6-dev libgcrypt20-dev libxslt1-dev libsqlite3-dev libharfbuzz-dev libicu-dev libjpeg-dev \
+           libegl-dev libgles-dev gperf ruby unifdef libatk1.0-dev libatk-bridge2.0-dev libenchant-2-dev; do
+  if apt-get install -y --no-install-recommends "$pkg" >>"$OUT/build-apt.log" 2>&1; then echo "$pkg ok"; else echo "$pkg MISSING"; fi
+done >"$OUT/build-extra-deps.txt"
 read VERSION URL SHA <<V
 $(python3 -I -c 'import json,sys; u=json.load(open(sys.argv[1]))["webkit"]
 for k in sys.argv[2].split("."): u=u[k]

@@ -4,7 +4,7 @@ Standalone out-of-process WebKit host for AxioSozo. Zen/Gecko stays the applicat
 this process owns no visible window and draws nothing itself. It speaks the AXCF pipe
 protocol of `native/chromium-host` ([contracts/engine-stream-v1.md](../../contracts/engine-stream-v1.md),
 WebKit fixture profile; deltas vs cef-v1 in §8.1) so the existing Zen adapter/presenter
-can drive it with small, listed changes. Design: [ADR 003 WebKit engine](../../docs/adr/003-webkit-engine.md).
+can drive it with small, listed changes. Design: [ADR 004 WebKit engine](../../docs/adr/004-webkit-engine.md).
 
 | Part | File | Status (2026-10-19) |
 | --- | --- | --- |
