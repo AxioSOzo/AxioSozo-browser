@@ -42,9 +42,10 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push supersedes an older build; cancelled runs still save sccache.
+  # Builds queue (one pending at most, newest wins) instead of cancelling a
+  # running build: a finished build saves sccache for the next one.
   group: linux-zen-build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 jobs:
   zen:
