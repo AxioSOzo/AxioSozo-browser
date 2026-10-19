@@ -1,0 +1,4411 @@
+{
+ "schema": "axiosozo-zen-profile-report-v1",
+ "label": "gecko-debian",
+ "engine": "gecko",
+ "status": "PASS",
+ "passes": [
+  {
+   "pass_": "plain",
+   "status": "PASS",
+   "reason": null
+  },
+  {
+   "pass_": "trace",
+   "status": "PASS",
+   "reason": null
+  },
+  {
+   "pass_": "profile",
+   "status": "PASS",
+   "reason": null
+  }
+ ],
+ "machine": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.41",
+  "machine": "x86_64",
+  "nproc": 4,
+  "python": "3.13.5",
+  "cpu_model": "AMD EPYC 7763 64-Core Processor",
+  "mem_total_mb": 15989,
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "gpu_dri": [],
+  "pipe_max_size": 1048576,
+  "loadavg_start": [
+   "1.52",
+   "0.95",
+   "0.42"
+  ]
+ },
+ "chrome_overlay": {
+  "label": "chrome-overlay (TEST-ONLY: prebuilt Zen app, chrome JS from this checkout)",
+  "overlay_commit": "2088189ce3cf2672123c999941a6208473ef145f",
+  "app_build_commit": "832ac3e3d2a68eb742f11a0345962983076e4c0e",
+  "replaced": 8,
+  "added": 5
+ },
+ "hooks": {
+  "enabled": false,
+  "installed": [
+   "Subprocess.call",
+   "ImageData",
+   "putImageData",
+   "MozAfterPaint",
+   "keydown"
+  ],
+  "module": "shared",
+  "spawns": 0,
+  "profiler": true,
+  "now": 2550.977904,
+  "value": null
+ },
+ "windows": [
+  {
+   "pass_": "plain",
+   "window": "idle",
+   "metrics": {
+    "pass_": "plain",
+    "window": "idle",
+    "fps": 59.09,
+    "interval_p99_ms": 17.160000000000082,
+    "input_wall_s": 2.0,
+    "cpu_by_process": {
+     "zen-parent": 5.4,
+     "Web Content": 3.4,
+     "Isolated Web Co": 0.5
+    },
+    "zen_parent_top_threads": {
+     "main": 2.4,
+     "Renderer": 1.0,
+     "DOM Worker": 1.0,
+     "IPC I/O Parent": 0.5,
+     "IPDL Background": 0.5
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "raf",
+   "metrics": {
+    "pass_": "plain",
+    "window": "raf",
+    "fps": 59.0,
+    "interval_p99_ms": 17.159999999999968,
+    "input_wall_s": 3.0,
+    "cpu_by_process": {
+     "zen-parent": 28.8,
+     "Isolated Web Co": 4.6,
+     "WebExtensions": 0.7,
+     "Privileged Cont": 0.3
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 17.1,
+     "WRRende~ckend#": 2.3,
+     "glean.dispatche": 2.0,
+     "main": 1.6,
+     "TaskCon~ller #": 1.6,
+     "Compositor": 1.6,
+     "WRScene~ilder#": 1.3,
+     "SwComposite": 0.7
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "scroll",
+   "metrics": {
+    "pass_": "plain",
+    "window": "scroll",
+    "fps": 58.99,
+    "interval_p99_ms": 17.1400000000001,
+    "input_wall_s": 1.958,
+    "cpu_by_process": {
+     "zen-parent": 48.4,
+     "Isolated Web Co": 4.5,
+     "Web Content": 0.5
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 30.4,
+     "main": 6.0,
+     "WRRende~ckend#": 3.0,
+     "glean.dispatche": 2.0,
+     "WRScene~ilder#": 1.5,
+     "Compositor": 1.5,
+     "SwComposite": 1.5,
+     "TaskCon~ller #": 1.0
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "key",
+   "metrics": {
+    "pass_": "plain",
+    "window": "key",
+    "fps": null,
+    "interval_p99_ms": null,
+    "input_wall_s": null,
+    "cpu_by_process": {
+     "zen-parent": 7.1,
+     "Isolated Web Co": 1.9,
+     "WebExtensions": 0.6,
+     "Privileged Cont": 0.3
+    },
+    "zen_parent_top_threads": {
+     "main": 3.7,
+     "Renderer": 1.1,
+     "Compositor": 0.5,
+     "glean.dispatche": 0.3,
+     "IPDL Background": 0.3,
+     "Softwar~cThread": 0.3,
+     "WRScene~ilder#": 0.3,
+     "WRRende~ckend#": 0.3
+    },
+    "presenter_draw_ms": null,
+    "keydown_to_second_raf_ms": 9.0
+   }
+  },
+  {
+   "pass_": "trace",
+   "window": "idle",
+   "metrics": {
+    "pass_": "trace",
+    "window": "idle",
+    "fps": 59.41,
+    "interval_p99_ms": 17.159999999999968,
+    "input_wall_s": 2.0,
+    "cpu_by_process": {
+     "zen-parent": 5.9,
+     "Isolated Web Co": 1.5
+    },
+    "zen_parent_top_threads": {
+     "main": 2.9,
+     "TaskCon~ller #": 1.0,
+     "IPDL Background": 0.5,
+     "Renderer": 0.5,
+     "WRRende~ckend#": 0.5,
+     "SwComposite": 0.5
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "trace",
+   "window": "raf",
+   "metrics": {
+    "pass_": "trace",
+    "window": "raf",
+    "fps": 59.0,
+    "interval_p99_ms": 17.139999999999873,
+    "input_wall_s": 3.0,
+    "cpu_by_process": {
+     "zen-parent": 25.7,
+     "Isolated Web Co": 4.3
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 13.5,
+     "WRRende~ckend#": 2.3,
+     "glean.dispatche": 2.0,
+     "main": 1.6,
+     "WRScene~ilder#": 1.6,
+     "Compositor": 1.6,
+     "IPC I/O Parent": 0.7,
+     "TaskCon~ller #": 0.7
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "trace",
+   "window": "scroll",
+   "metrics": {
+    "pass_": "trace",
+    "window": "scroll",
+    "fps": 59.0,
+    "interval_p99_ms": 17.12000000000012,
+    "input_wall_s": 1.959,
+    "cpu_by_process": {
+     "zen-parent": 43.8,
+     "Isolated Web Co": 4.5
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 30.8,
+     "main": 4.0,
+     "WRRende~ckend#": 3.0,
+     "SwComposite": 2.0,
+     "glean.dispatche": 1.5,
+     "Compositor": 1.5,
+     "IPDL Background": 0.5,
+     "WRScene~ilder#": 0.5
+    },
+    "presenter_draw_ms": null
+   }
+  },
+  {
+   "pass_": "trace",
+   "window": "key",
+   "metrics": {
+    "pass_": "trace",
+    "window": "key",
+    "fps": null,
+    "interval_p99_ms": null,
+    "input_wall_s": null,
+    "cpu_by_process": {
+     "zen-parent": 8.1,
+     "Isolated Web Co": 1.3
+    },
+    "zen_parent_top_threads": {
+     "main": 4.3,
+     "Renderer": 1.1,
+     "glean.dispatche": 0.5,
+     "TaskCon~ller #": 0.5,
+     "WRRende~ckend#": 0.5,
+     "Softwar~cThread": 0.3,
+     "WRScene~ilder#": 0.3,
+     "Compositor": 0.3
+    },
+    "presenter_draw_ms": null,
+    "keydown_to_second_raf_ms": 10.0,
+    "key_breakdown_median": {
+     "chrome_handler_ms": 0.172,
+     "keydown_to_send_ms": null,
+     "send_to_frame_header_ms": null,
+     "pixel_transport_ms": null,
+     "convert_ms": null,
+     "put_ms": null,
+     "put_to_chrome_paint_ms": null,
+     "keydown_to_put_end_ms": null,
+     "keydown_to_chrome_paint_ms": null
+    }
+   }
+  },
+  {
+   "pass_": "profile",
+   "window": "idle",
+   "profile": {
+    "parent": {
+     "cpu_ms": 658.78,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 324.8,
+       "threads": 1
+      },
+      "DOM Worker": {
+       "cpu_ms": 316.0,
+       "threads": 3
+      },
+      "Socket": {
+       "cpu_ms": 10.6,
+       "threads": 1
+      },
+      "Compositor": {
+       "cpu_ms": 2.5,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 1.9,
+       "threads": 3
+      },
+      "IPC I/O": {
+       "cpu_ms": 1.3,
+       "threads": 1
+      },
+      "Renderer": {
+       "cpu_ms": 0.5,
+       "threads": 1
+      },
+      "WRSceneBuilder": {
+       "cpu_ms": 0.3,
+       "threads": 4
+      },
+      "WRRenderBackend": {
+       "cpu_ms": 0.3,
+       "threads": 2
+      },
+      "SwComposite": {
+       "cpu_ms": 0.3,
+       "threads": 1
+      },
+      "WRWorker": {
+       "cpu_ms": 0.0,
+       "threads": 8
+      },
+      "Canvas": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 324.78,
+      "span_ms": 2087.0,
+      "cpu_percent_of_span": 15.6,
+      "categories": {
+       "JavaScript": 124.76,
+       "DOM": 96.1,
+       "Idle": 43.65,
+       "Other": 40.9,
+       "Network": 8.48,
+       "GC / CC": 6.06,
+       "Profiler": 3.9,
+       "Graphics": 0.93
+      },
+      "js_split": {
+       "js_leaf": 20.91,
+       "native_under_js": 179.66,
+       "native_no_js": 124.2,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 60.33,
+       "memcpy_memset": 16.42,
+       "array_buffer_copy": 13.45,
+       "gc_cc": 6.06,
+       "worker_messaging": 0.94,
+       "paint_layout": 0.93
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 166.18,
+        "share": 0.5117
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 59.02,
+        "share": 0.1817
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 20.31,
+        "share": 0.0625
+       },
+       {
+        "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+        "ms": 14.53,
+        "share": 0.0447
+       },
+       {
+        "frame": "validate (chrome://global/content/third_party/cfworker/json-schema.js:351:18)[67]",
+        "ms": 9.33,
+        "share": 0.0287
+       },
+       {
+        "frame": "mprotect [libc.so.6]",
+        "ms": 8.44,
+        "share": 0.026
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 7.15,
+        "share": 0.022
+       },
+       {
+        "frame": "syscall [libc.so.6]",
+        "ms": 5.41,
+        "share": 0.0167
+       },
+       {
+        "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+        "ms": 3.46,
+        "share": 0.0107
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 3.24,
+        "share": 0.01
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 2.99,
+        "share": 0.0092
+       },
+       {
+        "frame": "__memcmp_avx2_movbe [libc.so.6]",
+        "ms": 2.8,
+        "share": 0.0086
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XREMain::XRE_main",
+        "ms": 324.78,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 324.78,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 321.54,
+        "share": 0.99
+       },
+       {
+        "frame": "__libc_start_call_main [libc.so.6]",
+        "ms": 320.59,
+        "share": 0.9871
+       },
+       {
+        "frame": "_start [axiosozo-dev]",
+        "ms": 320.59,
+        "share": 0.9871
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 320.59,
+        "share": 0.9871
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 320.59,
+        "share": 0.9871
+       },
+       {
+        "frame": "__libc_start_main_impl [libc.so.6]",
+        "ms": 320.59,
+        "share": 0.9871
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 202.91,
+        "share": 0.6248
+       },
+       {
+        "frame": "promise callback",
+        "ms": 185.9,
+        "share": 0.5724
+       },
+       {
+        "frame": "#updateImpl (resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs:431:20)[68]",
+        "ms": 96.57,
+        "share": 0.2973
+       },
+       {
+        "frame": "checkRecipe (resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs:1043:20)[68]",
+        "ms": 85.43,
+        "share": 0.263
+       },
+       {
+        "frame": "validate (resource://gre/modules/JsonSchema.sys.mjs:82:11)[40]",
+        "ms": 79.92,
+        "share": 0.2461
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 59.02,
+        "share": 0.1817
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 59.02,
+        "share": 0.1817
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 59.02,
+        "share": 0.1817
+       },
+       {
+        "frame": "EventDispatcher::Dispatch",
+        "ms": 58.62,
+        "share": 0.1805
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 55.95,
+        "share": 0.1723
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 55.95,
+        "share": 0.1723
+       },
+       {
+        "frame": "validate (chrome://global/content/third_party/cfworker/json-schema.js:1156:13)[67]",
+        "ms": 54.74,
+        "share": 0.1685
+       }
+      ],
+      "markers": {
+       "GCMinor": {
+        "count": 5,
+        "total_ms": 7.06,
+        "max_ms": 3.73
+       }
+      }
+     },
+     "busiest_worker": {
+      "cpu_ms": 315.34,
+      "cpu_percent_of_span": 15.1,
+      "categories": {
+       "JavaScript": 155.71,
+       "Idle": 59.95,
+       "DOM": 39.02,
+       "GC / CC": 36.07,
+       "Other": 19.18,
+       "Profiler": 5.41
+      },
+      "js_split": {
+       "js_leaf": 48.24,
+       "native_under_js": 170.64,
+       "native_no_js": 96.45,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "worker_messaging": 157.83,
+       "poll_wait": 64.15,
+       "gc_cc": 36.07,
+       "memcpy_memset": 13.88,
+       "array_buffer_copy": 1.87
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 119.82,
+        "share": 0.38
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 56.97,
+        "share": 0.1807
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 45.82,
+        "share": 0.1453
+       },
+       {
+        "frame": "jsesc (resource://gre/modules/third_party/jsesc/jsesc.mjs:116:22)",
+        "ms": 17.26,
+        "share": 0.0547
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 9.13,
+        "share": 0.029
+       },
+       {
+        "frame": "stringify (resource://gre/modules/CanonicalJSON.sys.mjs:20:32)",
+        "ms": 8.73,
+        "share": 0.0277
+       },
+       {
+        "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+        "ms": 7.42,
+        "share": 0.0235
+       },
+       {
+        "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+        "ms": 7.18,
+        "share": 0.0228
+       },
+       {
+        "frame": "test (self-hosted:3931:20)",
+        "ms": 6.53,
+        "share": 0.0207
+       },
+       {
+        "frame": "mprotect [libc.so.6]",
+        "ms": 4.62,
+        "share": 0.0146
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "WorkerThreadPrimaryRunnable::Run resource://services-settings/RemoteSettings.worker.mjs",
+        "ms": 315.34,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 315.34,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 311.45,
+        "share": 0.9877
+       },
+       {
+        "frame": "[libnspr4.so]",
+        "ms": 309.54,
+        "share": 0.9816
+       },
+       {
+        "frame": "start_thread [libc.so.6]",
+        "ms": 309.54,
+        "share": 0.9816
+       },
+       {
+        "frame": "__clone3 [libc.so.6]",
+        "ms": 309.54,
+        "share": 0.9816
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 309.54,
+        "share": 0.9816
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 309.54,
+        "share": 0.9816
+       },
+       {
+        "frame": "EventDispatcher::Dispatch",
+        "ms": 221.38,
+        "share": 0.702
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 218.88,
+        "share": 0.6941
+       },
+       {
+        "frame": "EventHandlerNonNull",
+        "ms": 204.18,
+        "share": 0.6475
+       },
+       {
+        "frame": "Worker runnable",
+        "ms": 191.78,
+        "share": 0.6082
+       },
+       {
+        "frame": "EventDispatcher::Dispatch message",
+        "ms": 168.0,
+        "share": 0.5328
+       },
+       {
+        "frame": "canonicalStringify (resource://services-settings/RemoteSettings.worker.mjs:32:27)",
+        "ms": 165.19,
+        "share": 0.5238
+       },
+       {
+        "frame": "stringify/< (resource://gre/modules/CanonicalJSON.sys.mjs:51:25)",
+        "ms": 163.07,
+        "share": 0.5171
+       }
+      ]
+     },
+     "webrender": {
+      "Renderer": {
+       "cpu_ms": 0.54,
+       "top_self": [
+        {
+         "frame": "__syscall_cancel_arch [libc.so.6]",
+         "ms": 0.54,
+         "share": 1.0
+        }
+       ]
+      },
+      "WRSceneBuilder#0": {
+       "cpu_ms": 0.35,
+       "top_self": [
+        {
+         "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+         "ms": 0.32,
+         "share": 0.9117
+        },
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.03,
+         "share": 0.0883
+        }
+       ]
+      },
+      "WRRenderBackend#0": {
+       "cpu_ms": 0.34,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.34,
+         "share": 1.0
+        }
+       ]
+      },
+      "SwComposite": {
+       "cpu_ms": 0.32,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.32,
+         "share": 1.0
+        }
+       ]
+      },
+      "WRSceneBuilderLP#0": {
+       "cpu_ms": 0.0,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.0,
+         "share": null
+        }
+       ]
+      },
+      "WRSceneBuilder#1": {
+       "cpu_ms": 0.0,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.0,
+         "share": null
+        }
+       ]
+      }
+     }
+    },
+    "tab:8342": {
+     "cpu_ms": 36.36,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 30.7,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 5.3,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.4,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 30.67,
+      "span_ms": 2086.0,
+      "cpu_percent_of_span": 1.5,
+      "categories": {
+       "Idle": 17.58,
+       "GC / CC": 7.03,
+       "JavaScript": 2.46,
+       "Profiler": 1.46,
+       "Other": 1.2,
+       "DOM": 0.95
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 5.39,
+       "native_no_js": 25.28,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 17.84,
+       "gc_cc": 7.03,
+       "memcpy_memset": 0.06
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 18.63,
+        "share": 0.6075
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 10.69,
+        "share": 0.3485
+       },
+       {
+        "frame": "getcontext [libc.so.6]",
+        "ms": 0.94,
+        "share": 0.0305
+       },
+       {
+        "frame": "[]",
+        "ms": 0.3,
+        "share": 0.0099
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 0.06,
+        "share": 0.002
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 0.05,
+        "share": 0.0017
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 30.67,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 30.67,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 30.67,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 30.32,
+        "share": 0.9885
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 18.63,
+        "share": 0.6075
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 18.63,
+        "share": 0.6075
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 18.63,
+        "share": 0.6075
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 17.84,
+        "share": 0.5816
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 17.84,
+        "share": 0.5816
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 17.73,
+        "share": 0.5781
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 17.58,
+        "share": 0.5731
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 5.39,
+        "share": 0.1757
+       },
+       {
+        "frame": "Incremental CC",
+        "ms": 3.88,
+        "share": 0.1266
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 3.63,
+        "share": 0.1185
+       },
+       {
+        "frame": "receiveMessage (chrome://remote/content/marionette/actors/MarionetteCommandsChild.sys.mjs:163:23)[0]",
+        "ms": 3.2,
+        "share": 0.1044
+       },
+       {
+        "frame": "Incremental GC",
+        "ms": 3.14,
+        "share": 0.1025
+       },
+       {
+        "frame": "Major GC",
+        "ms": 3.14,
+        "share": 0.1025
+       },
+       {
+        "frame": "nsJSContext::GarbageCollectNow INTER_SLICE_GC",
+        "ms": 3.14,
+        "share": 0.1025
+       },
+       {
+        "frame": "PWindowGlobal::Msg_RawMessage",
+        "ms": 3.14,
+        "share": 0.1023
+       },
+       {
+        "frame": "JSActor message handler",
+        "ms": 3.14,
+        "share": 0.1023
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 20.85,
+        "max_ms": 20.85
+       },
+       "GCSlice": {
+        "count": 4,
+        "total_ms": 3.77,
+        "max_ms": 3.64
+       },
+       "CCSlice": {
+        "count": 1,
+        "total_ms": 2.94,
+        "max_ms": 2.94
+       },
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 0.47,
+        "max_ms": 0.47
+       },
+       "CC": {
+        "count": 1,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+       }
+      }
+     }
+    },
+    "tab:8286": {
+     "cpu_ms": 2.47,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 1.6,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 0.7,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.2,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 1.56,
+      "span_ms": 2086.1,
+      "cpu_percent_of_span": 0.1,
+      "categories": {
+       "Idle": 1.56
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 1.56,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 1.56
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 1.56,
+        "share": 1.0
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "PollWrapper",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 1.56,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 1.56,
+        "share": 1.0
+       }
+      ],
+      "markers": {}
+     }
+    },
+    "tab:8180": {
+     "cpu_ms": 2.11,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 1.3,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 0.6,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.2,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 1.34,
+      "span_ms": 2087.0,
+      "cpu_percent_of_span": 0.1,
+      "categories": {
+       "Idle": 1.31,
+       "Other": 0.03
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 1.34,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 1.31
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.03,
+        "share": 0.0221
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 1.34,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 1.34,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 1.34,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 1.34,
+        "share": 1.0
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 1.31,
+        "share": 0.9779
+       },
+       {
+        "frame": "PContent::Msg_PreferenceUpdate",
+        "ms": 0.03,
+        "share": 0.0221
+       }
+      ],
+      "markers": {}
+     }
+    }
+   },
+   "profile_files": {
+    "summary": "profiles/gecko-debian-idle.summary.json",
+    "trimmed": "profiles/gecko-debian-idle.trimmed.json.gz"
+   },
+   "metrics": {
+    "pass_": "profile",
+    "window": "idle",
+    "fps": 59.5,
+    "interval_p99_ms": 17.139999999999873,
+    "input_wall_s": 2.0,
+    "cpu_by_process": {
+     "zen-parent": 66.2,
+     "Web Content": 10.6,
+     "Isolated Web Co": 4.3,
+     "Privileged Cont": 2.4,
+     "WebExtensions": 1.9,
+     "Socket Process": 1.4,
+     "RDD Process": 1.4,
+     "Utility Process": 1.4
+    },
+    "zen_parent_top_threads": {
+     "main": 16.4,
+     "DOM Worker": 15.5,
+     "IndexedDB IO #": 14.0,
+     "SamplerThread": 6.3,
+     "IPDL Background": 5.3,
+     "TaskCon~ller #": 1.9,
+     "glean.dispatche": 1.4,
+     "StreamTrans #": 1.4
+    },
+    "presenter_draw_ms": null,
+    "profile": "profiles/gecko-debian-idle.json"
+   }
+  },
+  {
+   "pass_": "profile",
+   "window": "raf",
+   "profile": {
+    "parent": {
+     "cpu_ms": 1575.04,
+     "thread_groups": {
+      "Renderer": {
+       "cpu_ms": 461.6,
+       "threads": 1
+      },
+      "DOM Worker": {
+       "cpu_ms": 461.4,
+       "threads": 3
+      },
+      "main": {
+       "cpu_ms": 431.0,
+       "threads": 1
+      },
+      "WRRenderBackend": {
+       "cpu_ms": 71.6,
+       "threads": 2
+      },
+      "WRSceneBuilder": {
+       "cpu_ms": 53.6,
+       "threads": 4
+      },
+      "Compositor": {
+       "cpu_ms": 45.0,
+       "threads": 1
+      },
+      "SwComposite": {
+       "cpu_ms": 18.8,
+       "threads": 1
+      },
+      "Socket": {
+       "cpu_ms": 14.2,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 10.4,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 7.4,
+       "threads": 3
+      },
+      "WRWorker": {
+       "cpu_ms": 0.0,
+       "threads": 8
+      },
+      "Canvas": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 431.03,
+      "span_ms": 3079.9,
+      "cpu_percent_of_span": 14.0,
+      "categories": {
+       "Idle": 97.17,
+       "DOM": 81.22,
+       "JavaScript": 79.55,
+       "Other": 76.78,
+       "GC / CC": 70.29,
+       "Profiler": 11.29,
+       "Network": 10.51,
+       "Graphics": 2.27,
+       "Layout": 1.95
+      },
+      "js_split": {
+       "js_leaf": 7.51,
+       "native_under_js": 126.46,
+       "native_no_js": 297.05,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 135.53,
+       "gc_cc": 70.29,
+       "memcpy_memset": 19.4,
+       "array_buffer_copy": 6.17,
+       "paint_layout": 3.15,
+       "subprocess_pipe_io": 0.24
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 216.36,
+        "share": 0.502
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 128.99,
+        "share": 0.2993
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 10.78,
+        "share": 0.025
+       },
+       {
+        "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+        "ms": 10.55,
+        "share": 0.0245
+       },
+       {
+        "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+        "ms": 7.14,
+        "share": 0.0166
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 6.31,
+        "share": 0.0146
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 5.86,
+        "share": 0.0136
+       },
+       {
+        "frame": "syscall [libc.so.6]",
+        "ms": 4.03,
+        "share": 0.0094
+       },
+       {
+        "frame": "mprotect [libc.so.6]",
+        "ms": 3.69,
+        "share": 0.0086
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 3.5,
+        "share": 0.0081
+       },
+       {
+        "frame": "__pthread_mutex_unlock_usercnt [libc.so.6]",
+        "ms": 2.91,
+        "share": 0.0067
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 2.85,
+        "share": 0.0066
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XREMain::XRE_main",
+        "ms": 431.03,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 431.03,
+        "share": 1.0
+       },
+       {
+        "frame": "__libc_start_call_main [libc.so.6]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "_start [axiosozo-dev]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "__libc_start_main_impl [libc.so.6]",
+        "ms": 428.56,
+        "share": 0.9943
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 136.34,
+        "share": 0.3163
+       },
+       {
+        "frame": "promise callback",
+        "ms": 129.54,
+        "share": 0.3005
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 128.99,
+        "share": 0.2993
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 128.99,
+        "share": 0.2993
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 125.7,
+        "share": 0.2916
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 124.81,
+        "share": 0.2896
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 124.22,
+        "share": 0.2882
+       },
+       {
+        "frame": "EventDispatcher::Dispatch",
+        "ms": 111.74,
+        "share": 0.2592
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 102.23,
+        "share": 0.2372
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 97.17,
+        "share": 0.2254
+       },
+       {
+        "frame": "PBackgroundIDBTransaction::Msg_Complete",
+        "ms": 88.84,
+        "share": 0.2061
+       },
+       {
+        "frame": "EventDispatcher::Dispatch complete",
+        "ms": 86.7,
+        "share": 0.2012
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 92.07,
+        "max_ms": 92.07
+       },
+       "GCSlice": {
+        "count": 12,
+        "total_ms": 37.01,
+        "max_ms": 13.69
+       },
+       "CCSlice": {
+        "count": 2,
+        "total_ms": 26.26,
+        "max_ms": 16.03
+       },
+       "GCMinor": {
+        "count": 3,
+        "total_ms": 7.1,
+        "max_ms": 3.21
+       },
+       "CC": {
+        "count": 1,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+       }
+      }
+     },
+     "busiest_worker": {
+      "cpu_ms": 459.13,
+      "cpu_percent_of_span": 14.9,
+      "categories": {
+       "JavaScript": 164.41,
+       "Idle": 105.03,
+       "GC / CC": 91.69,
+       "DOM": 65.59,
+       "Other": 23.67,
+       "Profiler": 8.75
+      },
+      "js_split": {
+       "js_leaf": 39.12,
+       "native_under_js": 230.65,
+       "native_no_js": 189.36,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "worker_messaging": 303.07,
+       "poll_wait": 105.42,
+       "gc_cc": 91.69,
+       "memcpy_memset": 32.15,
+       "array_buffer_copy": 2.43
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 193.41,
+        "share": 0.4213
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 101.15,
+        "share": 0.2203
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 53.93,
+        "share": 0.1175
+       },
+       {
+        "frame": "jsesc (resource://gre/modules/third_party/jsesc/jsesc.mjs:116:22)",
+        "ms": 24.32,
+        "share": 0.053
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 12.98,
+        "share": 0.0283
+       },
+       {
+        "frame": "madvise [libc.so.6]",
+        "ms": 10.41,
+        "share": 0.0227
+       },
+       {
+        "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+        "ms": 8.4,
+        "share": 0.0183
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 7.56,
+        "share": 0.0165
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 6.5,
+        "share": 0.0142
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 5.0,
+        "share": 0.0109
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "WorkerThreadPrimaryRunnable::Run resource://services-settings/RemoteSettings.worker.mjs",
+        "ms": 459.13,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 459.13,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 454.13,
+        "share": 0.9891
+       },
+       {
+        "frame": "[libnspr4.so]",
+        "ms": 450.2,
+        "share": 0.9805
+       },
+       {
+        "frame": "start_thread [libc.so.6]",
+        "ms": 450.2,
+        "share": 0.9805
+       },
+       {
+        "frame": "__clone3 [libc.so.6]",
+        "ms": 450.2,
+        "share": 0.9805
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 450.2,
+        "share": 0.9805
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 450.2,
+        "share": 0.9805
+       },
+       {
+        "frame": "EventDispatcher::Dispatch",
+        "ms": 275.08,
+        "share": 0.5991
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 269.77,
+        "share": 0.5876
+       },
+       {
+        "frame": "EventHandlerNonNull",
+        "ms": 248.94,
+        "share": 0.5422
+       },
+       {
+        "frame": "Worker runnable",
+        "ms": 202.83,
+        "share": 0.4418
+       },
+       {
+        "frame": "EventDispatcher::Dispatch message",
+        "ms": 197.17,
+        "share": 0.4294
+       },
+       {
+        "frame": "self.onmessage (resource://services-settings/RemoteSettings.worker.mjs:128:18)",
+        "ms": 194.89,
+        "share": 0.4245
+       },
+       {
+        "frame": "canonicalStringify (resource://services-settings/RemoteSettings.worker.mjs:32:27)",
+        "ms": 194.78,
+        "share": 0.4242
+       }
+      ]
+     },
+     "webrender": {
+      "Renderer": {
+       "cpu_ms": 461.55,
+       "top_self": [
+        {
+         "frame": "[libxul.so]",
+         "ms": 283.73,
+         "share": 0.6147
+        },
+        {
+         "frame": "__syscall_cancel_arch [libc.so.6]",
+         "ms": 135.6,
+         "share": 0.2938
+        },
+        {
+         "frame": "hypotf@@GLIBC_2.35 [libm.so.6]",
+         "ms": 23.63,
+         "share": 0.0512
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 5.9,
+         "share": 0.0128
+        },
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 4.02,
+         "share": 0.0087
+        }
+       ]
+      },
+      "WRRenderBackend#0": {
+       "cpu_ms": 71.64,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 55.48,
+         "share": 0.7745
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 8.67,
+         "share": 0.121
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 6.95,
+         "share": 0.097
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 0.34,
+         "share": 0.0048
+        },
+        {
+         "frame": "[axiosozo-dev]",
+         "ms": 0.16,
+         "share": 0.0023
+        }
+       ]
+      },
+      "WRSceneBuilder#0": {
+       "cpu_ms": 47.47,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 41.21,
+         "share": 0.8681
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 3.0,
+         "share": 0.0631
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 2.11,
+         "share": 0.0444
+        },
+        {
+         "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+         "ms": 0.4,
+         "share": 0.0084
+        },
+        {
+         "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+         "ms": 0.39,
+         "share": 0.0082
+        }
+       ]
+      },
+      "SwComposite": {
+       "cpu_ms": 18.83,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 18.47,
+         "share": 0.9807
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 0.36,
+         "share": 0.0193
+        }
+       ]
+      },
+      "WRSceneBuilderLP#0": {
+       "cpu_ms": 6.06,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 5.6,
+         "share": 0.9247
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 0.46,
+         "share": 0.0753
+        }
+       ]
+      },
+      "WRSceneBuilder#1": {
+       "cpu_ms": 0.0,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.0,
+         "share": null
+        }
+       ]
+      }
+     }
+    },
+    "tab:8342": {
+     "cpu_ms": 186.1,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 167.4,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 17.1,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 1.6,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 167.43,
+      "span_ms": 3080.1,
+      "cpu_percent_of_span": 5.4,
+      "categories": {
+       "Idle": 100.43,
+       "Graphics": 23.47,
+       "Layout": 12.84,
+       "Other": 11.56,
+       "Profiler": 7.04,
+       "GC / CC": 6.83,
+       "JavaScript": 3.45,
+       "DOM": 1.83
+      },
+      "js_split": {
+       "js_leaf": 0.09,
+       "native_under_js": 7.66,
+       "native_no_js": 159.69,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 100.14,
+       "paint_layout": 35.71,
+       "gc_cc": 7.66,
+       "memcpy_memset": 3.22,
+       "webrender_render": 0.09,
+       "mozafterpaint_events": 0.04
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 104.29,
+        "share": 0.6229
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 45.21,
+        "share": 0.27
+       },
+       {
+        "frame": "[]",
+        "ms": 3.22,
+        "share": 0.0192
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 2.97,
+        "share": 0.0177
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 2.12,
+        "share": 0.0127
+       },
+       {
+        "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+        "ms": 1.44,
+        "share": 0.0086
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 1.16,
+        "share": 0.007
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 1.07,
+        "share": 0.0064
+       },
+       {
+        "frame": "__pthread_mutex_unlock_usercnt [libc.so.6]",
+        "ms": 0.98,
+        "share": 0.0058
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 0.96,
+        "share": 0.0057
+       },
+       {
+        "frame": "__sincos_fma [libm.so.6]",
+        "ms": 0.88,
+        "share": 0.0052
+       },
+       {
+        "frame": "[libgcc_s.so.1]",
+        "ms": 0.83,
+        "share": 0.005
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 167.43,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 167.43,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 164.47,
+        "share": 0.9823
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 155.25,
+        "share": 0.9272
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 104.29,
+        "share": 0.6229
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 104.29,
+        "share": 0.6229
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 104.29,
+        "share": 0.6229
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 100.43,
+        "share": 0.5998
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 100.14,
+        "share": 0.5981
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 100.14,
+        "share": 0.5981
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 98.99,
+        "share": 0.5912
+       },
+       {
+        "frame": "PVsync::Msg_Notify",
+        "ms": 52.38,
+        "share": 0.3128
+       },
+       {
+        "frame": "RefreshDriver tick",
+        "ms": 52.38,
+        "share": 0.3128
+       },
+       {
+        "frame": "Paint ",
+        "ms": 30.82,
+        "share": 0.1841
+       },
+       {
+        "frame": "Update the rendering Paint",
+        "ms": 30.82,
+        "share": 0.1841
+       },
+       {
+        "frame": "nsLayoutUtils::PaintFrame",
+        "ms": 30.4,
+        "share": 0.1816
+       },
+       {
+        "frame": "nsDisplayList::PaintRoot",
+        "ms": 18.72,
+        "share": 0.1118
+       },
+       {
+        "frame": "Update the rendering Layout, content-visibility and resize observers",
+        "ms": 11.19,
+        "share": 0.0668
+       },
+       {
+        "frame": "PresShell::DoFlushPendingNotifications InterruptibleLayout",
+        "ms": 10.48,
+        "share": 0.0626
+       },
+       {
+        "frame": "WebRender display list",
+        "ms": 9.09,
+        "share": 0.0543
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 16.37,
+        "max_ms": 16.37
+       },
+       "CCSlice": {
+        "count": 1,
+        "total_ms": 3.25,
+        "max_ms": 3.25
+       },
+       "GCSlice": {
+        "count": 5,
+        "total_ms": 3.21,
+        "max_ms": 1.7
+       },
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 0.37,
+        "max_ms": 0.37
+       },
+       "CC": {
+        "count": 1,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+       }
+      }
+     }
+    },
+    "tab:8286": {
+     "cpu_ms": 6.32,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 3.7,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 2.3,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.3,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 3.7,
+      "span_ms": 3080.5,
+      "cpu_percent_of_span": 0.1,
+      "categories": {
+       "Idle": 3.59,
+       "Other": 0.08,
+       "Profiler": 0.02
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 3.7,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 3.65
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.05,
+        "share": 0.0139
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 3.7,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 3.7,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 3.7,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 3.7,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 3.65,
+        "share": 0.9861
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 3.59,
+        "share": 0.9712
+       },
+       {
+        "frame": "PContent::Msg_PreferenceUpdate",
+        "ms": 0.03,
+        "share": 0.0078
+       },
+       {
+        "frame": "profiler_add_marker",
+        "ms": 0.02,
+        "share": 0.0061
+       },
+       {
+        "frame": "AddMarkerToBuffer",
+        "ms": 0.02,
+        "share": 0.0061
+       }
+      ],
+      "markers": {}
+     }
+    },
+    "utility:8334": {
+     "cpu_ms": 4.43,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 2.2,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 2.2,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 2.22,
+      "span_ms": 3080.5,
+      "cpu_percent_of_span": 0.1,
+      "categories": {
+       "Idle": 2.21,
+       "Profiler": 0.01
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 2.22,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 2.18
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 0.03,
+        "share": 0.0148
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.01,
+        "share": 0.0033
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 2.22,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 2.22,
+        "share": 1.0
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 2.21,
+        "share": 0.9967
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 2.19,
+        "share": 0.9852
+       },
+       {
+        "frame": "[]",
+        "ms": 2.19,
+        "share": 0.9852
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 2.18,
+        "share": 0.9819
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 0.03,
+        "share": 0.0148
+       },
+       {
+        "frame": "profiler_add_marker",
+        "ms": 0.01,
+        "share": 0.0033
+       },
+       {
+        "frame": "AddMarkerToBuffer",
+        "ms": 0.01,
+        "share": 0.0033
+       }
+      ],
+      "markers": {}
+     }
+    }
+   },
+   "profile_files": {
+    "summary": "profiles/gecko-debian-raf.summary.json",
+    "trimmed": "profiles/gecko-debian-raf.trimmed.json.gz"
+   },
+   "metrics": {
+    "pass_": "profile",
+    "window": "raf",
+    "fps": 59.02,
+    "interval_p99_ms": 17.279999999999973,
+    "input_wall_s": 3.0,
+    "cpu_by_process": {
+     "zen-parent": 86.2,
+     "Isolated Web Co": 10.1,
+     "Web Content": 9.4,
+     "WebExtensions": 2.3,
+     "RDD Process": 1.9,
+     "Privileged Cont": 1.9,
+     "Utility Process": 1.9,
+     "Socket Process": 1.6
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 16.0,
+     "DOM Worker": 15.7,
+     "main": 15.0,
+     "Indexed~ IO #": 10.1,
+     "SamplerThread": 8.2,
+     "IPDL Background": 6.2,
+     "TaskCon~ller #": 2.6,
+     "WRRende~ckend#": 2.6
+    },
+    "presenter_draw_ms": null,
+    "profile": "profiles/gecko-debian-raf.json"
+   }
+  },
+  {
+   "pass_": "profile",
+   "window": "scroll",
+   "profile": {
+    "parent": {
+     "cpu_ms": 1030.17,
+     "thread_groups": {
+      "Renderer": {
+       "cpu_ms": 683.6,
+       "threads": 1
+      },
+      "main": {
+       "cpu_ms": 141.8,
+       "threads": 1
+      },
+      "WRRenderBackend": {
+       "cpu_ms": 74.3,
+       "threads": 2
+      },
+      "SwComposite": {
+       "cpu_ms": 33.6,
+       "threads": 1
+      },
+      "DOM Worker": {
+       "cpu_ms": 33.3,
+       "threads": 3
+      },
+      "Compositor": {
+       "cpu_ms": 30.1,
+       "threads": 1
+      },
+      "WRSceneBuilder": {
+       "cpu_ms": 22.3,
+       "threads": 4
+      },
+      "IPC I/O": {
+       "cpu_ms": 8.9,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 1.3,
+       "threads": 3
+      },
+      "Socket": {
+       "cpu_ms": 0.9,
+       "threads": 1
+      },
+      "WRWorker": {
+       "cpu_ms": 0.0,
+       "threads": 8
+      },
+      "Canvas": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 141.75,
+      "span_ms": 2038.1,
+      "cpu_percent_of_span": 7.0,
+      "categories": {
+       "Idle": 67.83,
+       "GC / CC": 42.04,
+       "Other": 12.64,
+       "Graphics": 6.09,
+       "JavaScript": 5.39,
+       "Layout": 4.76,
+       "DOM": 2.53,
+       "Profiler": 0.47
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 6.58,
+       "native_no_js": 135.17,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 81.67,
+       "gc_cc": 42.04,
+       "paint_layout": 7.82,
+       "memcpy_memset": 2.29,
+       "subprocess_pipe_io": 0.55
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 74.44,
+        "share": 0.5252
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 56.13,
+        "share": 0.396
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 2.59,
+        "share": 0.0183
+       },
+       {
+        "frame": "mprotect [libc.so.6]",
+        "ms": 1.85,
+        "share": 0.013
+       },
+       {
+        "frame": "syscall [libc.so.6]",
+        "ms": 1.01,
+        "share": 0.0071
+       },
+       {
+        "frame": "__memcmp_avx2_movbe [libc.so.6]",
+        "ms": 0.93,
+        "share": 0.0066
+       },
+       {
+        "frame": "gdk_threads_enter [libgdk-3.so.0]",
+        "ms": 0.83,
+        "share": 0.0058
+       },
+       {
+        "frame": "[libgobject-2.0.so.0]",
+        "ms": 0.74,
+        "share": 0.0052
+       },
+       {
+        "frame": "madvise [libc.so.6]",
+        "ms": 0.6,
+        "share": 0.0043
+       },
+       {
+        "frame": "gdk_display_get_type [libgdk-3.so.0]",
+        "ms": 0.49,
+        "share": 0.0034
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 0.45,
+        "share": 0.0032
+       },
+       {
+        "frame": "g_value_get_object [libgobject-2.0.so.0]",
+        "ms": 0.33,
+        "share": 0.0023
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XREMain::XRE_main",
+        "ms": 141.75,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 141.75,
+        "share": 1.0
+       },
+       {
+        "frame": "__libc_start_call_main [libc.so.6]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "_start [axiosozo-dev]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "__libc_start_main_impl [libc.so.6]",
+        "ms": 141.3,
+        "share": 0.9968
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 80.64,
+        "share": 0.5689
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 80.64,
+        "share": 0.5689
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 74.44,
+        "share": 0.5252
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 74.44,
+        "share": 0.5252
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 73.41,
+        "share": 0.5179
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 68.14,
+        "share": 0.4807
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 67.83,
+        "share": 0.4785
+       },
+       {
+        "frame": "Incremental GC",
+        "ms": 26.26,
+        "share": 0.1852
+       },
+       {
+        "frame": "nsJSContext::GarbageCollectNow INTER_SLICE_GC",
+        "ms": 26.26,
+        "share": 0.1852
+       },
+       {
+        "frame": "Major GC",
+        "ms": 26.18,
+        "share": 0.1847
+       },
+       {
+        "frame": "js::GCRuntime::markUntilBudgetExhausted",
+        "ms": 16.94,
+        "share": 0.1195
+       },
+       {
+        "frame": "Incremental CC",
+        "ms": 15.79,
+        "share": 0.1114
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 79.07,
+        "max_ms": 79.07
+       },
+       "GCSlice": {
+        "count": 8,
+        "total_ms": 28.59,
+        "max_ms": 14.35
+       },
+       "CCSlice": {
+        "count": 1,
+        "total_ms": 8.38,
+        "max_ms": 8.38
+       },
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 1.38,
+        "max_ms": 1.38
+       },
+       "CC": {
+        "count": 1,
+        "total_ms": 0.0,
+        "max_ms": 0.0
+       }
+      }
+     },
+     "busiest_worker": {
+      "cpu_ms": 33.33,
+      "cpu_percent_of_span": 1.6,
+      "categories": {
+       "GC / CC": 33.04,
+       "Idle": 0.29
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 33.33,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "gc_cc": 33.04,
+       "memcpy_memset": 19.36,
+       "poll_wait": 1.1,
+       "worker_messaging": 0.29
+      },
+      "top_self": [
+       {
+        "frame": "madvise [libc.so.6]",
+        "ms": 17.13,
+        "share": 0.514
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 10.59,
+        "share": 0.3176
+       },
+       {
+        "frame": "__pthread_mutex_unlock_usercnt [libc.so.6]",
+        "ms": 1.71,
+        "share": 0.0512
+       },
+       {
+        "frame": "munmap [libc.so.6]",
+        "ms": 1.54,
+        "share": 0.0463
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 1.1,
+        "share": 0.033
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 0.68,
+        "share": 0.0205
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 0.58,
+        "share": 0.0174
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "[libnspr4.so]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "start_thread [libc.so.6]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "__clone3 [libc.so.6]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "WorkerThreadPrimaryRunnable::Run resource://services-settings/RemoteSettings.worker.mjs",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 33.33,
+        "share": 1.0
+       },
+       {
+        "frame": "nsTimerImpl::Fire",
+        "ms": 33.04,
+        "share": 0.9913
+       },
+       {
+        "frame": "Worker runnable",
+        "ms": 33.04,
+        "share": 0.9913
+       },
+       {
+        "frame": "Major GC",
+        "ms": 27.39,
+        "share": 0.8216
+       },
+       {
+        "frame": "madvise [libc.so.6]",
+        "ms": 17.13,
+        "share": 0.514
+       },
+       {
+        "frame": "js::GCRuntime::sweepPhase",
+        "ms": 7.33,
+        "share": 0.22
+       },
+       {
+        "frame": "nsCycleCollector_collect",
+        "ms": 5.66,
+        "share": 0.1697
+       },
+       {
+        "frame": "Incremental CC",
+        "ms": 5.66,
+        "share": 0.1697
+       }
+      ]
+     },
+     "webrender": {
+      "Renderer": {
+       "cpu_ms": 683.63,
+       "top_self": [
+        {
+         "frame": "[libxul.so]",
+         "ms": 553.25,
+         "share": 0.8093
+        },
+        {
+         "frame": "__syscall_cancel_arch [libc.so.6]",
+         "ms": 67.47,
+         "share": 0.0987
+        },
+        {
+         "frame": "hypotf@@GLIBC_2.35 [libm.so.6]",
+         "ms": 45.02,
+         "share": 0.0659
+        },
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 7.31,
+         "share": 0.0107
+        },
+        {
+         "frame": "__exp2f_fma [libm.so.6]",
+         "ms": 5.88,
+         "share": 0.0086
+        }
+       ]
+      },
+      "WRRenderBackend#0": {
+       "cpu_ms": 74.31,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 52.84,
+         "share": 0.7111
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 15.21,
+         "share": 0.2047
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 3.61,
+         "share": 0.0486
+        },
+        {
+         "frame": "[axiosozo-dev]",
+         "ms": 1.76,
+         "share": 0.0237
+        },
+        {
+         "frame": "[linux-vdso.so.1]",
+         "ms": 0.47,
+         "share": 0.0064
+        }
+       ]
+      },
+      "SwComposite": {
+       "cpu_ms": 33.6,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 32.41,
+         "share": 0.9646
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 1.19,
+         "share": 0.0354
+        }
+       ]
+      },
+      "WRSceneBuilder#0": {
+       "cpu_ms": 20.89,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 14.71,
+         "share": 0.7039
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 2.45,
+         "share": 0.1174
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 1.53,
+         "share": 0.073
+        },
+        {
+         "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+         "ms": 1.11,
+         "share": 0.0531
+        },
+        {
+         "frame": "__syscall_cancel_arch [libc.so.6]",
+         "ms": 0.43,
+         "share": 0.0206
+        }
+       ]
+      },
+      "WRSceneBuilderLP#0": {
+       "cpu_ms": 1.37,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 1.32,
+         "share": 0.9627
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 0.05,
+         "share": 0.0373
+        }
+       ]
+      },
+      "WRSceneBuilder#1": {
+       "cpu_ms": 0.0,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.0,
+         "share": null
+        }
+       ]
+      }
+     }
+    },
+    "tab:8342": {
+     "cpu_ms": 105.75,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 89.3,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 15.0,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 1.5,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 89.28,
+      "span_ms": 2038.3,
+      "cpu_percent_of_span": 4.4,
+      "categories": {
+       "Idle": 64.87,
+       "Graphics": 11.98,
+       "Other": 4.72,
+       "JavaScript": 2.43,
+       "Profiler": 2.22,
+       "Layout": 2.22,
+       "DOM": 0.86
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 3.1,
+       "native_no_js": 86.17,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 65.07,
+       "paint_layout": 13.53,
+       "memcpy_memset": 0.23,
+       "webrender_render": 0.06
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 66.34,
+        "share": 0.7431
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 19.21,
+        "share": 0.2152
+       },
+       {
+        "frame": "[]",
+        "ms": 2.14,
+        "share": 0.024
+       },
+       {
+        "frame": "syscall [libc.so.6]",
+        "ms": 0.41,
+        "share": 0.0045
+       },
+       {
+        "frame": "getcontext [libc.so.6]",
+        "ms": 0.38,
+        "share": 0.0043
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 0.23,
+        "share": 0.0026
+       },
+       {
+        "frame": "clock_gettime@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 0.13,
+        "share": 0.0015
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 0.12,
+        "share": 0.0014
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 0.12,
+        "share": 0.0013
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 0.07,
+        "share": 0.0008
+       },
+       {
+        "frame": "__pthread_mutex_unlock_usercnt [libc.so.6]",
+        "ms": 0.06,
+        "share": 0.0007
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 0.05,
+        "share": 0.0006
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 89.28,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 89.28,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 89.16,
+        "share": 0.9987
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 86.22,
+        "share": 0.9658
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 66.34,
+        "share": 0.7431
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 66.34,
+        "share": 0.7431
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 66.34,
+        "share": 0.7431
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 65.07,
+        "share": 0.7289
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 65.07,
+        "share": 0.7289
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 64.87,
+        "share": 0.7266
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 64.87,
+        "share": 0.7266
+       },
+       {
+        "frame": "PVsync::Msg_Notify",
+        "ms": 16.86,
+        "share": 0.1889
+       },
+       {
+        "frame": "RefreshDriver tick",
+        "ms": 16.78,
+        "share": 0.188
+       },
+       {
+        "frame": "Paint ",
+        "ms": 13.44,
+        "share": 0.1506
+       },
+       {
+        "frame": "Update the rendering Paint",
+        "ms": 13.44,
+        "share": 0.1506
+       },
+       {
+        "frame": "nsLayoutUtils::PaintFrame",
+        "ms": 13.44,
+        "share": 0.1506
+       },
+       {
+        "frame": "nsDisplayList::PaintRoot",
+        "ms": 8.8,
+        "share": 0.0986
+       },
+       {
+        "frame": "WebRender display list",
+        "ms": 7.25,
+        "share": 0.0812
+       },
+       {
+        "frame": "DisplayList building",
+        "ms": 4.64,
+        "share": 0.0519
+       },
+       {
+        "frame": "ViewportFrame::BuildDisplayList",
+        "ms": 4.19,
+        "share": 0.047
+       }
+      ],
+      "markers": {}
+     }
+    },
+    "tab:8245": {
+     "cpu_ms": 0.94,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 0.5,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.3,
+       "threads": 2
+      },
+      "IPC I/O": {
+       "cpu_ms": 0.2,
+       "threads": 1
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 0.46,
+      "span_ms": 2038.6,
+      "cpu_percent_of_span": 0.0,
+      "categories": {
+       "Idle": 0.46
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 0.46,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 0.46
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "PollWrapper",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 0.46,
+        "share": 1.0
+       }
+      ],
+      "markers": {}
+     }
+    },
+    "tab:8345": {
+     "cpu_ms": 0.79,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 0.5,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.3,
+       "threads": 2
+      },
+      "IPC I/O": {
+       "cpu_ms": 0.1,
+       "threads": 1
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 0.46,
+      "span_ms": 2038.0,
+      "cpu_percent_of_span": 0.0,
+      "categories": {
+       "Idle": 0.46
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 0.46,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 0.46
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "PollWrapper",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.46,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 0.46,
+        "share": 1.0
+       }
+      ],
+      "markers": {}
+     }
+    }
+   },
+   "profile_files": {
+    "summary": "profiles/gecko-debian-scroll.summary.json",
+    "trimmed": "profiles/gecko-debian-scroll.trimmed.json.gz"
+   },
+   "metrics": {
+    "pass_": "profile",
+    "window": "scroll",
+    "fps": 58.99,
+    "interval_p99_ms": 17.140000000000327,
+    "input_wall_s": 1.958,
+    "cpu_by_process": {
+     "zen-parent": 67.4,
+     "Web Content": 8.9,
+     "Isolated Web Co": 8.4,
+     "Socket Process": 2.0,
+     "WebExtensions": 2.0,
+     "Privileged Cont": 1.5,
+     "Utility Process": 1.5,
+     "RDD Process": 1.0
+    },
+    "zen_parent_top_threads": {
+     "Renderer": 35.1,
+     "main": 8.4,
+     "SamplerThread": 7.9,
+     "WRRende~ckend#": 4.0,
+     "TaskCon~ller #": 2.0,
+     "Compositor": 2.0,
+     "DOM Worker": 2.0,
+     "SwComposite": 2.0
+    },
+    "presenter_draw_ms": null,
+    "profile": "profiles/gecko-debian-scroll.json"
+   }
+  },
+  {
+   "pass_": "profile",
+   "window": "key",
+   "profile": {
+    "parent": {
+     "cpu_ms": 295.19,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 192.2,
+       "threads": 1
+      },
+      "Renderer": {
+       "cpu_ms": 34.4,
+       "threads": 1
+      },
+      "Compositor": {
+       "cpu_ms": 18.4,
+       "threads": 1
+      },
+      "WRRenderBackend": {
+       "cpu_ms": 17.3,
+       "threads": 2
+      },
+      "WRSceneBuilder": {
+       "cpu_ms": 13.8,
+       "threads": 4
+      },
+      "IPC I/O": {
+       "cpu_ms": 9.6,
+       "threads": 1
+      },
+      "SwComposite": {
+       "cpu_ms": 4.0,
+       "threads": 1
+      },
+      "DOM Worker": {
+       "cpu_ms": 2.8,
+       "threads": 3
+      },
+      "other": {
+       "cpu_ms": 1.9,
+       "threads": 3
+      },
+      "Socket": {
+       "cpu_ms": 1.0,
+       "threads": 1
+      },
+      "WRWorker": {
+       "cpu_ms": 0.0,
+       "threads": 8
+      },
+      "Canvas": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 192.24,
+      "span_ms": 3763.6,
+      "cpu_percent_of_span": 5.1,
+      "categories": {
+       "Idle": 43.02,
+       "Layout": 40.14,
+       "GC / CC": 27.83,
+       "Graphics": 24.32,
+       "JavaScript": 24.12,
+       "Other": 23.8,
+       "Profiler": 4.83,
+       "DOM": 4.18
+      },
+      "js_split": {
+       "js_leaf": 2.75,
+       "native_under_js": 24.29,
+       "native_no_js": 165.2,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 59.57,
+       "paint_layout": 56.51,
+       "gc_cc": 27.83,
+       "memcpy_memset": 0.88,
+       "subprocess_pipe_io": 0.84,
+       "mozafterpaint_events": 0.42
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 120.36,
+        "share": 0.6261
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 51.76,
+        "share": 0.2693
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 1.96,
+        "share": 0.0102
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 1.85,
+        "share": 0.0096
+       },
+       {
+        "frame": "__lll_lock_wake [libc.so.6]",
+        "ms": 1.46,
+        "share": 0.0076
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 1.4,
+        "share": 0.0073
+       },
+       {
+        "frame": "[linux-vdso.so.1]",
+        "ms": 1.28,
+        "share": 0.0067
+       },
+       {
+        "frame": "mprotect [libc.so.6]",
+        "ms": 1.2,
+        "share": 0.0063
+       },
+       {
+        "frame": "__memcmp_avx2_movbe [libc.so.6]",
+        "ms": 1.12,
+        "share": 0.0058
+       },
+       {
+        "frame": "[libgdk-3.so.0]",
+        "ms": 0.95,
+        "share": 0.0049
+       },
+       {
+        "frame": "listener (resource://gre/modules/ExtensionParent.sys.mjs:1339:26)[42]",
+        "ms": 0.9,
+        "share": 0.0047
+       },
+       {
+        "frame": "[libX11.so.6]",
+        "ms": 0.89,
+        "share": 0.0046
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XREMain::XRE_main",
+        "ms": 192.24,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 192.24,
+        "share": 1.0
+       },
+       {
+        "frame": "__libc_start_call_main [libc.so.6]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "_start [axiosozo-dev]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "__libc_start_main_impl [libc.so.6]",
+        "ms": 190.95,
+        "share": 0.9933
+       },
+       {
+        "frame": "RefreshDriver tick",
+        "ms": 67.22,
+        "share": 0.3497
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 58.82,
+        "share": 0.306
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 58.82,
+        "share": 0.306
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 51.76,
+        "share": 0.2693
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 51.76,
+        "share": 0.2693
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 51.01,
+        "share": 0.2653
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 44.21,
+        "share": 0.23
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 43.02,
+        "share": 0.2238
+       },
+       {
+        "frame": "Update the rendering Layout, content-visibility and resize observers",
+        "ms": 34.04,
+        "share": 0.1771
+       },
+       {
+        "frame": "PresShell::DoFlushPendingNotifications Layout",
+        "ms": 33.0,
+        "share": 0.1717
+       },
+       {
+        "frame": "Styles",
+        "ms": 33.0,
+        "share": 0.1717
+       },
+       {
+        "frame": "Container Query Styles Update",
+        "ms": 32.12,
+        "share": 0.1671
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 57.77,
+        "max_ms": 57.77
+       },
+       "GCSlice": {
+        "count": 6,
+        "total_ms": 24.32,
+        "max_ms": 15.99
+       },
+       "CCSlice": {
+        "count": 1,
+        "total_ms": 4.35,
+        "max_ms": 4.35
+       },
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 0.5,
+        "max_ms": 0.5
+       }
+      }
+     },
+     "busiest_worker": {
+      "cpu_ms": 1.85,
+      "cpu_percent_of_span": 0.0,
+      "categories": {
+       "GC / CC": 1.23,
+       "Idle": 0.62
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 1.85,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "gc_cc": 1.23,
+       "worker_messaging": 0.62,
+       "poll_wait": 0.62
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 1.23,
+        "share": 0.6645
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.62,
+        "share": 0.3355
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "[libnspr4.so]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "start_thread [libc.so.6]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "__clone3 [libc.so.6]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "[unknown]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "[axiosozo-dev]",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "WorkerThreadPrimaryRunnable::Run resource://services-settings/RemoteSettings.worker.mjs",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 1.85,
+        "share": 1.0
+       },
+       {
+        "frame": "nsTimerImpl::Fire",
+        "ms": 1.23,
+        "share": 0.6645
+       },
+       {
+        "frame": "Major GC",
+        "ms": 1.23,
+        "share": 0.6645
+       },
+       {
+        "frame": "Worker runnable",
+        "ms": 1.23,
+        "share": 0.6645
+       },
+       {
+        "frame": "js::GCRuntime::sweepPhase",
+        "ms": 0.77,
+        "share": 0.4169
+       },
+       {
+        "frame": "WorkerPrivate::WaitForWorkerEvents",
+        "ms": 0.62,
+        "share": 0.3355
+       },
+       {
+        "frame": "mozilla::detail::ConditionVariableImpl::wait(mozilla::detail::MutexImpl&) [axiosozo-dev]",
+        "ms": 0.62,
+        "share": 0.3355
+       },
+       {
+        "frame": "pthread_cond_wait@@GLIBC_2.3.2 [libc.so.6]",
+        "ms": 0.62,
+        "share": 0.3355
+       }
+      ]
+     },
+     "webrender": {
+      "Renderer": {
+       "cpu_ms": 34.39,
+       "top_self": [
+        {
+         "frame": "__syscall_cancel_arch [libc.so.6]",
+         "ms": 21.64,
+         "share": 0.6293
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 11.76,
+         "share": 0.3418
+        },
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.66,
+         "share": 0.0193
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 0.31,
+         "share": 0.0091
+        },
+        {
+         "frame": "pthread_cond_signal@@GLIBC_2.3.2 [libc.so.6]",
+         "ms": 0.02,
+         "share": 0.0005
+        }
+       ]
+      },
+      "WRRenderBackend#0": {
+       "cpu_ms": 17.28,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 15.22,
+         "share": 0.8807
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 0.9,
+         "share": 0.0522
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 0.63,
+         "share": 0.0367
+        },
+        {
+         "frame": "[axiosozo-dev]",
+         "ms": 0.52,
+         "share": 0.0304
+        }
+       ]
+      },
+      "WRSceneBuilder#0": {
+       "cpu_ms": 12.98,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 11.18,
+         "share": 0.8611
+        },
+        {
+         "frame": "[libxul.so]",
+         "ms": 1.04,
+         "share": 0.0801
+        },
+        {
+         "frame": "[axiosozo-dev]",
+         "ms": 0.53,
+         "share": 0.0407
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 0.24,
+         "share": 0.0182
+        }
+       ]
+      },
+      "SwComposite": {
+       "cpu_ms": 3.98,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 3.97,
+         "share": 0.9977
+        },
+        {
+         "frame": "__memmove_avx_unaligned_erms [libc.so.6]",
+         "ms": 0.01,
+         "share": 0.0023
+        }
+       ]
+      },
+      "WRSceneBuilderLP#0": {
+       "cpu_ms": 0.79,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.76,
+         "share": 0.9585
+        },
+        {
+         "frame": "sched_yield [libc.so.6]",
+         "ms": 0.03,
+         "share": 0.0415
+        }
+       ]
+      },
+      "WRSceneBuilder#1": {
+       "cpu_ms": 0.0,
+       "top_self": [
+        {
+         "frame": "syscall [libc.so.6]",
+         "ms": 0.0,
+         "share": null
+        }
+       ]
+      }
+     }
+    },
+    "tab:8342": {
+     "cpu_ms": 72.38,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 65.4,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 6.5,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.5,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 65.43,
+      "span_ms": 3764.0,
+      "cpu_percent_of_span": 1.7,
+      "categories": {
+       "Idle": 23.74,
+       "GC / CC": 9.47,
+       "DOM": 6.58,
+       "JavaScript": 5.71,
+       "Layout": 5.37,
+       "Other": 5.23,
+       "Profiler": 4.79,
+       "Graphics": 4.53
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 6.4,
+       "native_no_js": 59.02,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 24.2,
+       "gc_cc": 9.47,
+       "paint_layout": 7.27,
+       "memcpy_memset": 1.23,
+       "webrender_render": 0.04
+      },
+      "top_self": [
+       {
+        "frame": "[libxul.so]",
+        "ms": 31.79,
+        "share": 0.4859
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 25.2,
+        "share": 0.3852
+       },
+       {
+        "frame": "pthread_mutex_lock@@GLIBC_2.2.5 [libc.so.6]",
+        "ms": 2.13,
+        "share": 0.0326
+       },
+       {
+        "frame": "[]",
+        "ms": 1.82,
+        "share": 0.0278
+       },
+       {
+        "frame": "__lll_lock_wait [libc.so.6]",
+        "ms": 1.58,
+        "share": 0.0241
+       },
+       {
+        "frame": "__memset_avx2_unaligned_erms [libc.so.6]",
+        "ms": 1.23,
+        "share": 0.0188
+       },
+       {
+        "frame": "getcontext [libc.so.6]",
+        "ms": 0.79,
+        "share": 0.0121
+       },
+       {
+        "frame": "__pthread_mutex_unlock_usercnt [libc.so.6]",
+        "ms": 0.49,
+        "share": 0.0075
+       },
+       {
+        "frame": "g_poll [libglib-2.0.so.0]",
+        "ms": 0.4,
+        "share": 0.0061
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 65.43,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 65.43,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 65.43,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 58.48,
+        "share": 0.8938
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 25.2,
+        "share": 0.3852
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 25.2,
+        "share": 0.3852
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 25.2,
+        "share": 0.3852
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 24.2,
+        "share": 0.3699
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 24.2,
+        "share": 0.3699
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 23.8,
+        "share": 0.3638
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 23.74,
+        "share": 0.3629
+       },
+       {
+        "frame": "RefreshDriver tick",
+        "ms": 17.98,
+        "share": 0.2748
+       },
+       {
+        "frame": "Incremental CC",
+        "ms": 7.05,
+        "share": 0.1078
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 6.74,
+        "share": 0.1031
+       },
+       {
+        "frame": "EventDispatcher::Dispatch",
+        "ms": 5.94,
+        "share": 0.0908
+       },
+       {
+        "frame": "PBrowser::Msg_RealKeyEvent",
+        "ms": 5.8,
+        "share": 0.0886
+       },
+       {
+        "frame": "EventStateManager::PreHandleEvent",
+        "ms": 5.28,
+        "share": 0.0807
+       },
+       {
+        "frame": "PresShell::DoFlushPendingNotifications Layout",
+        "ms": 4.45,
+        "share": 0.068
+       },
+       {
+        "frame": "profiler_capture_backtrace",
+        "ms": 4.06,
+        "share": 0.0621
+       },
+       {
+        "frame": "receiveMessage (chrome://remote/content/marionette/actors/MarionetteCommandsChild.sys.mjs:163:23)[2]",
+        "ms": 3.79,
+        "share": 0.058
+       }
+      ],
+      "markers": {
+       "GCMajor": {
+        "count": 1,
+        "total_ms": 18.54,
+        "max_ms": 18.54
+       },
+       "CCSlice": {
+        "count": 1,
+        "total_ms": 4.19,
+        "max_ms": 4.19
+       },
+       "GCSlice": {
+        "count": 4,
+        "total_ms": 3.61,
+        "max_ms": 3.42
+       },
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 0.85,
+        "max_ms": 0.85
+       }
+      }
+     }
+    },
+    "tab:8180": {
+     "cpu_ms": 8.39,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 7.0,
+       "threads": 1
+      },
+      "IPC I/O": {
+       "cpu_ms": 1.1,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.3,
+       "threads": 2
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 7.0,
+      "span_ms": 3762.8,
+      "cpu_percent_of_span": 0.2,
+      "categories": {
+       "Idle": 6.57,
+       "JavaScript": 0.37,
+       "Other": 0.05
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.22,
+       "native_no_js": 6.78,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 6.57
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "__strlen_avx2 [libc.so.6]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.14,
+        "share": 0.0204
+       },
+       {
+        "frame": "[]",
+        "ms": 0.07,
+        "share": 0.01
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 7.0,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 7.0,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 7.0,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 6.93,
+        "share": 0.99
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 6.57,
+        "share": 0.9388
+       },
+       {
+        "frame": "PWindowGlobal::Msg_RawMessage",
+        "ms": 0.43,
+        "share": 0.0612
+       },
+       {
+        "frame": "JSActor message handler",
+        "ms": 0.37,
+        "share": 0.0534
+       },
+       {
+        "frame": "apply (self-hosted:2805:23)[0]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "__strlen_avx2 [libc.so.6]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "applySafeWithoutClone/< (resource://gre/modules/ExtensionCommon.sys.mjs:688:73)[2]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "ChromeUtils.callFunctionAndLogException",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "_recv (resource://gre/modules/ConduitsChild.sys.mjs:84:14)[8]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "receiveMessage (resource://gre/modules/ConduitsChild.sys.mjs:192:17)[8]",
+        "ms": 0.22,
+        "share": 0.0308
+       },
+       {
+        "frame": "js::RunScript",
+        "ms": 0.22,
+        "share": 0.0308
+       }
+      ],
+      "markers": {
+       "GCMinor": {
+        "count": 1,
+        "total_ms": 0.14,
+        "max_ms": 0.14
+       }
+      }
+     }
+    },
+    "tab:8267": {
+     "cpu_ms": 1.16,
+     "thread_groups": {
+      "main": {
+       "cpu_ms": 0.6,
+       "threads": 1
+      },
+      "other": {
+       "cpu_ms": 0.4,
+       "threads": 2
+      },
+      "IPC I/O": {
+       "cpu_ms": 0.1,
+       "threads": 1
+      },
+      "Socket": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      },
+      "ImageIO": {
+       "cpu_ms": 0.0,
+       "threads": 1
+      }
+     },
+     "main": {
+      "cpu_ms": 0.64,
+      "span_ms": 3763.0,
+      "cpu_percent_of_span": 0.0,
+      "categories": {
+       "Idle": 0.55,
+       "Other": 0.09
+      },
+      "js_split": {
+       "js_leaf": 0.0,
+       "native_under_js": 0.0,
+       "native_no_js": 0.64,
+       "no_stack": 0.0
+      },
+      "buckets_inclusive_ms": {
+       "poll_wait": 0.55
+      },
+      "top_self": [
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.64,
+        "share": 1.0
+       }
+      ],
+      "top_total": [
+       {
+        "frame": "XRE_InitChildProcess",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel [libc.so.6]",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "__internal_syscall_cancel [libc.so.6]",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "[libxul.so]",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "[]",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "__syscall_cancel_arch [libc.so.6]",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "(root)",
+        "ms": 0.64,
+        "share": 1.0
+       },
+       {
+        "frame": "PollWrapper",
+        "ms": 0.55,
+        "share": 0.8594
+       },
+       {
+        "frame": "[libglib-2.0.so.0]",
+        "ms": 0.55,
+        "share": 0.8594
+       },
+       {
+        "frame": "poll [libc.so.6]",
+        "ms": 0.55,
+        "share": 0.8594
+       },
+       {
+        "frame": "g_main_context_iteration [libglib-2.0.so.0]",
+        "ms": 0.55,
+        "share": 0.8594
+       },
+       {
+        "frame": "write [libc.so.6]",
+        "ms": 0.09,
+        "share": 0.1406
+       }
+      ],
+      "markers": {}
+     }
+    }
+   },
+   "profile_files": {
+    "summary": "profiles/gecko-debian-key.summary.json",
+    "trimmed": "profiles/gecko-debian-key.trimmed.json.gz"
+   },
+   "metrics": {
+    "pass_": "profile",
+    "window": "key",
+    "fps": null,
+    "interval_p99_ms": null,
+    "input_wall_s": null,
+    "cpu_by_process": {
+     "zen-parent": 14.8,
+     "Web Content": 8.0,
+     "Isolated Web Co": 4.1,
+     "WebExtensions": 2.4,
+     "Privileged Cont": 1.6,
+     "Socket Process": 1.3,
+     "RDD Process": 1.3,
+     "Utility Process": 1.1
+    },
+    "zen_parent_top_threads": {
+     "main": 5.3,
+     "SamplerThread": 4.3,
+     "Renderer": 1.1,
+     "TaskCon~ller #": 0.8,
+     "WRRende~ckend#": 0.8,
+     "Compositor": 0.8,
+     "sqldb:p~lite #": 0.5,
+     "glean.dispatche": 0.3
+    },
+    "presenter_draw_ms": null,
+    "keydown_to_second_raf_ms": 9.0,
+    "key_breakdown_median": {
+     "chrome_handler_ms": 0.2,
+     "keydown_to_send_ms": null,
+     "send_to_frame_header_ms": null,
+     "pixel_transport_ms": null,
+     "convert_ms": null,
+     "put_ms": null,
+     "put_to_chrome_paint_ms": null,
+     "keydown_to_put_end_ms": null,
+     "keydown_to_chrome_paint_ms": null
+    },
+    "profile": "profiles/gecko-debian-key.json"
+   }
+  }
+ ]
+}
