@@ -1,0 +1,111 @@
+{
+ "schema": "axiosozo-presenter-node-v1",
+ "engine": "v8 v22.23.3",
+ "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+ "nproc": 4,
+ "iterations": 30,
+ "source": "apps/browser/chrome/CEFPresenter.sys.mjs bgraToRGBA (imported)",
+ "baseline_presenter": null,
+ "results": [
+  {
+   "width": 900,
+   "height": 650,
+   "translucent_share": 0,
+   "bytes": 2340000,
+   "copy_ms": {
+    "n": 30,
+    "median": 0.313,
+    "p95": 0.975,
+    "min": 0.25
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 2.13,
+    "p95": 2.244,
+    "min": 1.953
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 1.471,
+    "p95": 1.501,
+    "min": 1.302
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 900,
+   "height": 650,
+   "translucent_share": 0.1,
+   "bytes": 2340000,
+   "copy_ms": {
+    "n": 30,
+    "median": 0.335,
+    "p95": 1.044,
+    "min": 0.262
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 3.026,
+    "p95": 3.113,
+    "min": 2.989
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 1.183,
+    "p95": 1.2,
+    "min": 1.179
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 1800,
+   "height": 1300,
+   "translucent_share": 0,
+   "bytes": 9360000,
+   "copy_ms": {
+    "n": 30,
+    "median": 1.544,
+    "p95": 2.481,
+    "min": 1.227
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 11.282,
+    "p95": 11.541,
+    "min": 11.226
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 3.414,
+    "p95": 3.476,
+    "min": 3.387
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 1800,
+   "height": 1300,
+   "translucent_share": 0.1,
+   "bytes": 9360000,
+   "copy_ms": {
+    "n": 30,
+    "median": 1.528,
+    "p95": 2.524,
+    "min": 1.173
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 12.166,
+    "p95": 12.404,
+    "min": 12.03
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 4.775,
+    "p95": 4.84,
+    "min": 4.746
+   },
+   "candidate_identical_output": true
+  }
+ ]
+}
