@@ -22,7 +22,7 @@ import { isContextEngine, toContextEngine } from "./EngineRegistry.sys.mjs";
 import { createProjectDetection } from "./ProjectDetection.sys.mjs";
 import { createProjectRecords } from "./ProjectRecords.sys.mjs";
 import { readProjectIcon } from "./ProjectIcon.sys.mjs";
-import { approvalsOver, createProjectRunner, EMPTY_APPROVALS, runEnvironment, runTargets, validateApprovals } from "./ProjectRunner.sys.mjs";
+import { approvalsOver, createProjectRunner, EMPTY_APPROVALS, runEnvironment, runTargets, supervisorShell, validateApprovals } from "./ProjectRunner.sys.mjs";
 import { createStoreMigrationValidator } from "./ProjectStoreMigration.sys.mjs";
 import { createProjectArrival } from "./ProjectArrival.sys.mjs";
 import { createNativeProjectReader, projectReaderPaths } from "./ProjectReaderConfig.sys.mjs";
@@ -3655,7 +3655,8 @@ function chromeDependencies() {
     createRunner: ({ approvals, onChange }) => {
       const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
       return createProjectRunner({ spawn: options => Subprocess.call(options), timers: { setTimeout, clearTimeout }, approvals, onChange,
-        environment: runEnvironment({ get: name => (Services.env.exists(name) ? Services.env.get(name) : null), home: directory("Home") }) });
+        environment: runEnvironment({ get: name => (Services.env.exists(name) ? Services.env.get(name) : null), home: directory("Home") }),
+        shell: supervisorShell(Services.appinfo.OS) });
     },
     onShutdown(flush, label = "AxioSozo: flush usage ledger") {
       const { AsyncShutdown } = ChromeUtils.importESModule("resource://gre/modules/AsyncShutdown.sys.mjs");

@@ -1,0 +1,59 @@
+# Full Linux build of the AxioSozo Zen app, then the GUI harness against it.
+# The jobs live in linux-zen-reusable.yml (other branches call that file too).
+#
+# Triggers:
+# - push to cloud/linux-platform touching build inputs (cloud sessions cannot
+#   use workflow_dispatch: it needs the file on the default branch);
+# - adding the `linux-build` label to a pull request against cloud/integration;
+# - manual dispatch once this file reaches the default branch.
+# Results: ci-results branch, <branch>/<run>-<attempt>-zen-{build,gui-gecko}/.
+name: Linux Zen build
+
+on:
+  push:
+    branches: [cloud/linux-platform]
+    paths:
+      - .github/workflows/linux-zen-build.yml
+      - .github/workflows/linux-zen-reusable.yml
+      - apps/browser/**
+      - '!apps/browser/tests/**'
+      - patches/zen/**
+      - upstreams.lock.json
+      - scripts/zen.py
+      - scripts/zen_import.py
+      - scripts/zen_toolchain.py
+      - scripts/storage.py
+      - scripts/upstreams.py
+      - scripts/linux_packages.py
+  workflow_dispatch:
+    inputs:
+      sccache:
+        description: Use the sccache compiler cache
+        type: boolean
+        default: true
+      engine:
+        description: GUI engine plug-in
+        default: gecko
+  pull_request:
+    types: [labeled]
+    branches: [cloud/integration]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Builds queue (one pending at most, newest wins) instead of cancelling a
+  # running build: a finished build saves sccache for the next one.
+  group: linux-zen-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  zen:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'linux-build'
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/linux-zen-reusable.yml
+    with:
+      sccache: ${{ github.event_name != 'workflow_dispatch' || inputs.sccache }}
+      engine: ${{ inputs.engine || 'gecko' }}

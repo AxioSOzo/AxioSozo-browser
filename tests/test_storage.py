@@ -56,8 +56,10 @@ class StorageTestCase(unittest.TestCase):
         self.lock.parent.mkdir()
         self.log = self.base / 'helper.log'
         self.clock = Clock()
+        # The macOS volume logic is exercised on every host, Linux CI included.
         for name, value in {'MOUNT_LOCK': self.lock, 'MOUNT_SHARED': self.helper('shared', 0),
-                            'MOUNT_HELPER': self.helper('helper', 0), 'time': self.clock}.items():
+                            'MOUNT_HELPER': self.helper('helper', 0), 'time': self.clock,
+                            'LINUX': False}.items():
             active = patch.object(storage, name, value)
             active.start()
             self.addCleanup(active.stop)
@@ -226,7 +228,7 @@ class Preflight(unittest.TestCase):
         base = Path(temporary.name)
         self.volume, self.image = base / 'AxioSozoBuild', base / 'Dev.sparsebundle'
         self.image.mkdir()
-        for name, value in (('VOLUME', self.volume), ('IMAGE', self.image)):
+        for name, value in (('VOLUME', self.volume), ('IMAGE', self.image), ('LINUX', False)):
             active = patch.object(storage, name, value)
             active.start()
             self.addCleanup(active.stop)
@@ -273,6 +275,56 @@ class AttachAndMount(unittest.TestCase):
             storage.attach_and_mount()
         self.assertEqual(calls, [['/usr/bin/hdiutil', 'attach', '-nomount', str(storage.IMAGE)],
                                  ['/usr/sbin/diskutil', 'mount', 'nobrowse', '/dev/disk9s3']])
+
+
+class LinuxBuildRoot(unittest.TestCase):
+    """Linux: a plain user-owned directory; no helper, image or mount is involved."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='storage-linux-')
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        active = patch.object(storage, 'LINUX', True)
+        active.start()
+        self.addCleanup(active.stop)
+
+    def test_default_is_the_gitignored_checkout_directory(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('AXIOSOZO_BUILD_ROOT', None)
+            self.assertEqual(storage.build_root(), storage.ROOT / '.build')
+        ignored = (storage.ROOT / '.gitignore').read_text().splitlines()
+        self.assertIn('/.build/', ignored)
+
+    def test_explicit_absolute_directory_outside_the_checkout(self):
+        self.assertEqual(storage.build_root(str(self.base / 'build')), self.base / 'build')
+
+    def test_unsafe_roots_are_refused(self):
+        for value in ['relative/build', str(self.base / 'a/../b'), '/', '/proc/build', '/sys', '/dev/shm/x',
+                      str(storage.ROOT), str(storage.ROOT / 'scripts/build'), str(storage.ROOT.parent)]:
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, 'INVALID_AXIOSOZO_BUILD_ROOT'):
+                storage.build_root(value)
+
+    def test_ensure_creates_a_private_directory_and_reports_linux(self):
+        root = self.base / 'nested' / 'build'
+        with patch.object(storage, 'BUILD_ROOT', root), \
+             patch.object(storage, 'mount_shared', side_effect=AssertionError('no macOS helper on Linux')):
+            self.assertFalse(storage.mounted())
+            report = storage.ensure()
+            self.assertTrue(storage.mounted())
+        self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
+        self.assertEqual(report['platform'], 'linux')
+        self.assertTrue(report['mounted'])
+        self.assertEqual(report['build_root'], str(root))
+
+    def test_symlinked_root_is_refused(self):
+        target = self.base / 'elsewhere'
+        target.mkdir()
+        link = self.base / 'link'
+        link.symlink_to(target)
+        with patch.object(storage, 'BUILD_ROOT', link):
+            self.assertFalse(storage.mounted())
+            with self.assertRaisesRegex(RuntimeError, 'UNSAFE_AXIOSOZO_BUILD_ROOT'):
+                storage.ensure()
 
 
 if __name__ == '__main__':

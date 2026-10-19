@@ -10,11 +10,14 @@ import signal
 import shutil
 import subprocess
 import sys
+import threading
 
 from session import OwnedSession, SessionBusy, private_directory
 import storage
 
 ROOT = Path(__file__).resolve().parents[1]
+# Linux uses storage.py's plain build root and never calls a macOS helper.
+LINUX = storage.LINUX
 EXTERNAL = Path("/Volumes/DevStorage")
 MOUNT = "/Users/wout/.local/bin/mount-dev-storage"
 WRAPPER = "/Users/wout/.local/bin/dev-external"
@@ -35,12 +38,64 @@ ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
 AGENT_SOCKET_INSTALL = ROOT / "scripts" / "agent_socket_install.py"
 AGENT_NOTIFY_INSTALL = ROOT / "scripts" / "agent_notify_install.py"
 AGENT_BRIDGE_INSTALL = ROOT / "scripts" / "agent_bridge_install.py"
-AGENT_BRIDGE_NODE = Path("/Volumes/AxioSozoBuild/toolchains/zen/node/bin/node")
+AGENT_BRIDGE_NODE = storage.VOLUME / "toolchains/zen/node/bin/node"
 MANIFEST_ACCEPT = ROOT / "scripts" / "manifest_accept.py"
-AGENT_SOCKET_PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
+AGENT_SOCKET_PYTHON = storage.VOLUME / "toolchains/zen/python/bin/python3.11"
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
 RELEASE = ROOT / "scripts" / "release" / "preview.py"
+GUI_TEST = ROOT / "scripts" / "gui_test.py"
+LINUX_BUILD = ROOT / "scripts" / "linux_build.py"
+# Setup components, in order; `./dev setup --only a,b` selects a subset.
+SETUP_COMPONENTS = ("upstreams", "cargo", "core", "provider", "cef", "zen", "tools")
+# Per-gate results of this invocation: (label, PASS | FAIL | BLOCKED_ENV, exit code).
+RESULTS = []
+# Linux gates that are blocked by design, with the reason. Only these may report
+# BLOCKED_ENV without failing a Linux run; any other BLOCKED_ENV report on Linux
+# (for example a missing setup step) is a failure like on macOS.
+LINUX_EXPECTED_BLOCKED = {
+    "native/chromium-host/probe.py": "macOS CEF probe; the Linux CEF host is the cloud/linux-cef workstream",
+    "native/chromium-host/test_probe.py": "depends on the CEF probe above (cloud/linux-cef)",
+    "native/chromium-host/stream_test.py": "depends on the CEF probe above (cloud/linux-cef)",
+    "packages/provider-host/cli.mjs keychain-positive-setup": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
+    "packages/provider-host/cli.mjs keychain-positive-test": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
+}
+
+
+def cef_blocked_here():
+    """True when this run's CEF probe gate reported BLOCKED_ENV (not FAIL)."""
+    cef = str(CEF.relative_to(ROOT))
+    return any(label.startswith(cef) and status == "BLOCKED_ENV" for label, status, _ in RESULTS)
+
+
+def expected_block(label):
+    return next((reason for prefix, reason in LINUX_EXPECTED_BLOCKED.items() if label.startswith(prefix)), None)
+
+
+def gate_summary(title):
+    """Print every gate result. On Linux a component in LINUX_EXPECTED_BLOCKED that
+    reports BLOCKED_ENV is listed with its reason, never counted as a pass, and does
+    not fail the run unless AXIOSOZO_STRICT=1. macOS exit codes are unchanged."""
+    if not RESULTS:
+        return
+    print(f"{title} gate summary ({platform.system()} {platform.machine()}):", flush=True)
+    for label, status, code in RESULTS:
+        reason = expected_block(label) if status == "BLOCKED_ENV" and LINUX else None
+        print(f"  {status:<11} exit={code:<3} {label}" + (f"  [{reason}]" if reason else ""), flush=True)
+    counts = {name: sum(1 for _, status, _ in RESULTS if status == name) for name in ("PASS", "FAIL", "BLOCKED_ENV")}
+    print(f"{title}: {counts['PASS']} PASS, {counts['FAIL']} FAIL, {counts['BLOCKED_ENV']} BLOCKED_ENV", flush=True)
+
+
+def outcome(codes):
+    """Combined exit status. macOS: any nonzero gate fails (unchanged). Linux:
+    BLOCKED_ENV gates are reported but tolerated unless AXIOSOZO_STRICT=1."""
+    if not LINUX or os.environ.get("AXIOSOZO_STRICT") == "1":
+        return any(codes)
+    failed = any(status == "FAIL" or status == "BLOCKED_ENV" and not expected_block(label)
+                 for label, status, _ in RESULTS)
+    blocked = sum(1 for label, status, _ in RESULTS if status == "BLOCKED_ENV" and expected_block(label))
+    # A nonzero result without a matching BLOCKED_ENV record is always a failure.
+    return failed or sum(1 for code in codes if code) > blocked
 
 
 def provider_node():
@@ -82,10 +137,23 @@ def core_ready():
         return False
 
 
-def run(argv, build=False, env=None):
+def record(label, code, blocked=False):
+    RESULTS.append((label, "PASS" if code == 0 else "BLOCKED_ENV" if blocked else "FAIL", code))
+    return code
+
+
+def run(argv, build=False, env=None, label=None):
     if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
         raise RuntimeError("DEFAULT_SIGCHLD_REQUIRED")
-    if build:
+    label = label or " ".join(Path(str(item)).name if index == 0 else str(item)
+                              for index, item in enumerate(argv[:4]))
+    if build and LINUX:
+        # No mount helper or dev-external on Linux: storage.py creates the
+        # build root and routes temporary/cache/Cargo output into it.
+        storage.ensure()
+        CARGO_HOME_DIR.mkdir(parents=True, exist_ok=True)
+        argv = [sys.executable, ROOT / "scripts/storage.py", "exec", "--", *argv]
+    elif build:
         mounted = subprocess.run([MOUNT], cwd=ROOT)
         if mounted.returncode:
             return mounted.returncode
@@ -97,9 +165,29 @@ def run(argv, build=False, env=None):
         argv = [WRAPPER, sys.executable, ROOT / "scripts/storage.py", "exec", "--", *argv]
     if CARGO_HOME_DIR.is_dir():
         env = {**(os.environ if env is None else env), "CARGO_HOME": str(CARGO_HOME_DIR)}
-    process = subprocess.Popen([str(item) for item in argv], cwd=ROOT, env=env, start_new_session=True)
+    # Linux reads the child's output to classify a BLOCKED_ENV report; it is
+    # copied through unchanged. macOS keeps inherited stdio.
+    classify = LINUX
+    process = subprocess.Popen([str(item) for item in argv], cwd=ROOT, env=env, start_new_session=True,
+                               **({"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT} if classify else {}))
+    blocked = []
+    reader = None
+    if classify:
+        def copy():
+            for raw in iter(process.stdout.readline, b""):
+                sys.stdout.buffer.write(raw)
+                sys.stdout.flush()
+                line = raw.decode("utf-8", "replace")
+                if line.startswith("BLOCKED_ENV") or '"status": "BLOCKED_ENV"' in line or '"status":"BLOCKED_ENV"' in line:
+                    blocked.append(line)
+        reader = threading.Thread(target=copy, daemon=True)
+        reader.start()
     try:
-        return process.wait()
+        code = process.wait()
+        if reader:
+            # Output of descendants that outlive the leader is not waited for.
+            reader.join(timeout=5)
+        return record(label, code, blocked=bool(blocked))
     finally:
         # This function is the sole waiter. Default SIGCHLD and an unreaped
         # original leader reserve its PID and prevent reuse of its group ID.
@@ -125,20 +213,54 @@ def run(argv, build=False, env=None):
 
 
 def component(script, *args):
+    label = f"{script.relative_to(ROOT)} {' '.join(args)}".strip()
     if SUBROOT and script == CEF:
         print(f"SKIPPED_ENGINE_WORKSTREAM: CEF {' '.join(args)} is not run in sub build root {storage.BUILD_ROOT}", flush=True)
         return 0
     if not script.is_file():
         print("BLOCKED_ENV: component entrypoint missing:", script.relative_to(ROOT), flush=True)
-        return 2
+        return record(label, 2, blocked=True)
     command = provider_node() if script.suffix == ".mjs" else sys.executable
-    return run([command, script, *args])
+    return run([command, script, *args], label=label)
+
+
+def total_memory_gib():
+    if LINUX:
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemTotal:"):
+                    return round(int(line.split()[1]) / 2**20, 1)
+        except (OSError, ValueError, IndexError):
+            pass
+        return "unavailable"
+    try:
+        memory = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
+        return round(int(memory.stdout) / 2**30) if memory.returncode == 0 else "unavailable under current permissions"
+    except (OSError, ValueError):
+        return "unavailable"
+
+
+def linux_host():
+    """Read-only Linux facts for doctor: distribution, CPUs, GUI test tools."""
+    release = {}
+    try:
+        for line in Path("/etc/os-release").read_text().splitlines():
+            key, _, value = line.partition("=")
+            release[key] = value.strip('"')
+    except OSError:
+        pass
+    tools = {name: shutil.which(name) for name in ("Xvfb", "xdotool", "xwininfo", "xwd", "xauth", "dbus-run-session",
+                                                   "bwrap", "secret-tool", "node", "cargo", "clang", "gh")}
+    return {"distribution": release.get("PRETTY_NAME", "unknown"), "kernel": platform.release(),
+            "cpus": os.cpu_count(), "display": os.environ.get("DISPLAY") or None,
+            "wayland_display": os.environ.get("WAYLAND_DISPLAY") or None, "tools": tools}
 
 
 def doctor():
     # No mkdir, mount, dependency bootstrap, provider execution, auth reads, or login.
-    usage = os.statvfs(EXTERNAL) if EXTERNAL.is_dir() else None
+    usage = os.statvfs(EXTERNAL) if EXTERNAL.is_dir() and not LINUX else None
     data = {
+        "os": "linux" if LINUX else "macos" if platform.system() == "Darwin" else platform.system().lower(),
         "platform": platform.platform(), "architecture": platform.machine(),
         "devstorage_free_gib": round(usage.f_bavail * usage.f_frsize / 2**30, 2) if usage else None,
         "coordinator_built": CORE.is_file(), "coordinator_build_current": core_ready(),
@@ -147,48 +269,55 @@ def doctor():
         "overall": "PARTIAL_ENGINE_BLOCKED",
         "project_storage": storage.report(),
     }
-    try:
-        memory = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
-        data["ram_gib"] = round(int(memory.stdout) / 2**30) if memory.returncode == 0 else "unavailable under current permissions"
-    except (OSError, ValueError):
-        data["ram_gib"] = "unavailable"
+    data["ram_gib"] = total_memory_gib()
+    if LINUX:
+        data["linux"] = linux_host()
     print(json.dumps(data, indent=2), flush=True)
     results = [component(ZEN, "doctor"), component(PROVIDER, "discover")]
     return 2 if any(results) or data["overall"] != "READY" else 0
 
 
-def setup_components():
+def setup_components(only=SETUP_COMPONENTS):
     results = []
     # Source retrieval is separate from installing or executing upstream packages.
-    results.append(run([sys.executable, ROOT / "scripts" / "upstreams.py"]))
+    if "upstreams" in only:
+        results.append(run([sys.executable, ROOT / "scripts" / "upstreams.py"]))
     # Reuse existing cached crates read-only. On a clean machine fetch the exact lock
     # into a task-specific external Cargo home, never ~/.cargo's registry cache.
-    if run(["cargo", "fetch", "--locked", "--offline"], build=True):
+    if "cargo" in only and run(["cargo", "fetch", "--locked", "--offline"], build=True, label="cargo fetch --offline (cache probe)"):
+        RESULTS.pop()  # an empty cache is expected on a clean machine; the online fetch decides
         CARGO_HOME_DIR.mkdir(parents=True, exist_ok=True)
         results.append(run(["cargo", "fetch", "--locked"], build=True))
     # Each component completes independently; do not make CEF/core depend on Gecko build.
-    results.append(build_core())
-    results.append(component(PROVIDER, "setup"))
-    results.append(component(PROVIDER, "keychain-positive-setup"))
-    results.append(component(CEF, "setup"))
-    results.append(component(ZEN, "setup"))
-    results.append(component(PROJECT_READER, "setup"))
-    results.append(component(ARRIVAL_SUBPROCESS, "setup"))
-    results.append(component(AGENT_SOCKET_INSTALL, "setup"))
-    results.append(component(AGENT_NOTIFY_INSTALL, "setup"))
-    results.append(component(AGENT_BRIDGE_INSTALL, "setup"))
-    results.append(component(MANIFEST_ACCEPT, "setup"))
-    print("SETUP: " + ("completed" if not any(results) else "incomplete; see component results"), flush=True)
-    return 2 if any(results) else 0
+    if "core" in only:
+        results.append(build_core())
+    if "provider" in only:
+        results.append(component(PROVIDER, "setup"))
+        results.append(component(PROVIDER, "keychain-positive-setup"))
+    if "cef" in only:
+        results.append(component(CEF, "setup"))
+    if "zen" in only:
+        results.append(component(ZEN, "setup"))
+    if "tools" in only:
+        results.append(component(PROJECT_READER, "setup"))
+        results.append(component(ARRIVAL_SUBPROCESS, "setup"))
+        results.append(component(AGENT_SOCKET_INSTALL, "setup"))
+        results.append(component(AGENT_NOTIFY_INSTALL, "setup"))
+        results.append(component(AGENT_BRIDGE_INSTALL, "setup"))
+        results.append(component(MANIFEST_ACCEPT, "setup"))
+    gate_summary("SETUP")
+    failed = outcome(results)
+    print("SETUP: " + ("completed" if not failed else "incomplete; see component results"), flush=True)
+    return 2 if failed else 0
 
 
-def setup():
+def setup(only=SETUP_COMPONENTS):
     # The whole native bootstrap has one owner; concurrent setup never modifies
     # another process's extraction, package install or bundle signature.
     storage.ensure()
     try:
         with OwnedSession(SESSION_ROOT / "setup"):
-            return setup_components()
+            return setup_components(only)
     except SessionBusy:
         print("BLOCKED_ENV: an AxioSozo setup already owns this build session", flush=True)
         return 2
@@ -206,7 +335,8 @@ def check():
         if path.name.startswith("._"):
             continue
         compile(path.read_bytes(), str(path), "exec")
-    return 1 if any(results) else 0
+    gate_summary("CHECK")
+    return 1 if outcome(results) else 0
 
 
 def test():
@@ -218,9 +348,12 @@ def test():
                component(PROVIDER, "keychain-negative-test"),
                component(PROVIDER, "keychain-positive-test"),
                component(ZEN, "check"),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True),
-               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-manifest/manifest_accept_test.py"], build=True),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-project-reader/project_reader_test.py"], build=True,
+                   label="tools/axiosozo-project-reader/project_reader_test.py"),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-arrival/arrival_lsof_test.py"], build=True,
+                   label="tools/axiosozo-arrival/arrival_lsof_test.py"),
+               run([sys.executable, "-I", "-S", "-B", ROOT / "tools/axiosozo-manifest/manifest_accept_test.py"], build=True,
+                   label="tools/axiosozo-manifest/manifest_accept_test.py"),
                run(["node", "--test", ROOT / "apps/browser/tests/cef-adapter.test.mjs"]),
                run(["node", "--test", ROOT / "apps/browser/tests/saved-pages.test.mjs"]),
                # Handoff 3 contexts core: DOM-free logic and fixture repositories.
@@ -253,15 +386,27 @@ def test():
         results.append(run(["node", "--test", ROOT / "apps/browser/tests/coordinator.test.mjs"], build=True, env=env))
     else:
         print("FAIL: current coordinator build unavailable; lifecycle tests were not run against a stale executable")
-        results.append(1)
-    results.append(run([sys.executable, ROOT / "native/chromium-host/test_probe.py"], build=True))
+        results.append(record("coordinator lifecycle tests (stale or missing build)", 1))
+    if LINUX and cef_blocked_here():
+        # The probe itself reported that its pinned binary does not run on this
+        # host (macOS-only CEF probe); its unit/stream tests depend on it. They
+        # run here as soon as the probe supports Linux (cloud/linux-cef).
+        for name in ("test_probe.py", "stream_test.py"):
+            print(f"BLOCKED_ENV: native/chromium-host/{name} needs the CEF probe, which reported BLOCKED_ENV on this host", flush=True)
+            results.append(record(f"native/chromium-host/{name}", 2, blocked=True))
+        gate_summary("TEST")
+        return 1 if outcome(results) else 0
+    results.append(run([sys.executable, ROOT / "native/chromium-host/test_probe.py"], build=True,
+                       label="native/chromium-host/test_probe.py"))
     # Real CEF OSR fixture/input/lifecycle coverage is a component gate. A PASS
     # here still does not establish E1 in the Zen content area.
     if SUBROOT:
         print("SKIPPED_ENGINE_WORKSTREAM: native/chromium-host/stream_test.py (needs the volume-root CEF build)", flush=True)
     else:
-        results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True))
-    return 1 if any(results) else 0
+        results.append(run([sys.executable, ROOT / "native/chromium-host/stream_test.py"], build=True,
+                           label="native/chromium-host/stream_test.py"))
+    gate_summary("TEST")
+    return 1 if outcome(results) else 0
 
 
 def browser_environment():
@@ -277,8 +422,17 @@ def browser_environment():
             "AXIOSOZO_ENGINE_SWITCHING": "0",
             # The CEF component is built only at the volume root; sub build roots share it.
             "AXIOSOZO_CEF_ROOT": str(storage.VOLUME),
-            "AXIOSOZO_CEF_BINARY": str(storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"),
+            "AXIOSOZO_CEF_BINARY": cef_binary(),
             "AXIOSOZO_PYTHON": sys.executable}
+
+
+def cef_binary():
+    """macOS: the signed probe bundle at the volume root. Linux: the CEF host of the
+    cloud/linux-cef workstream, `<build root>/cef/linux/AxioCEFProbe` unless that
+    workstream's launcher exports AXIOSOZO_CEF_BINARY."""
+    if LINUX:
+        return os.environ.get("AXIOSOZO_CEF_BINARY") or str(storage.VOLUME / "cef/linux/AxioCEFProbe")
+    return str(storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe")
 
 
 def browser_probe(kind):
@@ -332,13 +486,31 @@ def daily(profile):
         return 130
 
 
+def passthrough(script, argv):
+    """GUI harness and Linux build helpers own their own arguments."""
+    return run([sys.executable, script, *argv], label=script.name)
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    if sys.argv[1:2] == ["gui-test"]:
+        return passthrough(GUI_TEST, sys.argv[2:])
+    if sys.argv[1:2] == ["fetch-build"]:
+        return passthrough(LINUX_BUILD, sys.argv[1:])
+    if sys.argv[1:] == ["package"]:
+        # Linux: relocatable tar.xz of the verified build plus axiosozo-build-info.json.
+        return component(ZEN, "package")
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Also: ./dev gui-test --help, ./dev fetch-build --help, ./dev package (Linux)")
     parser.add_argument("command", nargs="?", default="run", choices=["run", "doctor", "setup", "check", "test", "smoke", "engine-probe", "web-probe", "provider-test", "jev-test", "release-check"])
     parser.add_argument("provider", nargs="?", choices=["codex", "claude-code", "antigravity"])
     parser.add_argument("--profile", default="development")
     parser.add_argument("--authorized", action="store_true", help="explicit operator authorization for a synthetic live diagnostic; never used by setup/test")
+    parser.add_argument("--only", help="setup only these components (comma separated): " + ",".join(SETUP_COMPONENTS))
     args = parser.parse_args()
+    only = SETUP_COMPONENTS
+    if args.only is not None:
+        only = tuple(item for item in args.only.split(",") if item)
+        if args.command != "setup" or not only or any(item not in SETUP_COMPONENTS for item in only):
+            parser.error("--only applies to setup and takes: " + ",".join(SETUP_COMPONENTS))
     if not args.profile or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for c in args.profile) or len(args.profile) > 48:
         parser.error("profile must be a short safe name")
     if args.command == "provider-test":
@@ -349,7 +521,7 @@ def main():
         parser.error("--authorized only applies to explicit live diagnostics")
     if args.provider:
         parser.error("provider argument is only valid with provider-test")
-    commands = {"doctor": doctor, "setup": setup, "check": check, "test": test,
+    commands = {"doctor": doctor, "setup": lambda: setup(only), "check": check, "test": test,
                 "engine-probe": lambda: browser_probe("engine-probe"),
                 "web-probe": lambda: browser_probe("web-probe"),
                 "jev-test": lambda: component(PROVIDER, "jev-test", *(["--authorized"] if args.authorized else [])),

@@ -204,7 +204,7 @@ class InstallTest(unittest.TestCase):
         self.io.put(CONFIG, content=("export const MANIFEST_ACCEPT_SHA256 = '" + installer.EXPECTED_DIGEST + "';\n").encode())
         self.io.put(str(installer.PYTHON), content=b'invented-python-binary-not-executed', mode=0o755)
         self.io.put(str(BUILD_ROOT), kind='directory', mode=0o755)
-        self.store = SimpleNamespace(BUILD_ROOT=BUILD_ROOT, build_root=installer.storage.build_root, mounted=lambda: True)
+        self.store = SimpleNamespace(BUILD_ROOT=BUILD_ROOT, build_root=installer.storage.darwin_build_root, mounted=lambda: True)
         self.output = []
 
     def tearDown(self):
