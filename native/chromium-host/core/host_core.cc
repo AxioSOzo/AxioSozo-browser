@@ -71,6 +71,9 @@ static bool streaming = false, streamReady = false, streamClosing = false;
 static axio::Transport transport;
 static std::string streamToken, streamInstance, fixtureOrigin;
 static bool webBrowsing = false;
+// Optional frame damage (hello `frame_damage:true`): every frame names the one
+// physical-pixel rectangle that changed since the previous frame delivered for its target.
+static bool frameDamage = false;
 static std::unordered_set<std::string> requestIds;
 static std::string shutdownRequest;
 static uint64_t frameId = 0;
@@ -247,6 +250,7 @@ struct Tab {
   int width = 900, height = 650;
   double scale = 2;
   bool paintAllowed = false, closing = false;
+  bool fullDamage = true;  // the next delivered frame must name the whole view
   std::string createRequest, closeRequest, navigationRequest;
   bool historyNavigation = false, commandNavigationInvalidated = false, sameDocumentNavigation = false;
   std::string historyURL, committedDocumentURL;
@@ -384,6 +388,7 @@ bool streamHandshake() {
       // Optional fields are all-or-nothing per feature and still exact-key checked.
       // This platform has no Mach surface service: surface_* keys are not admitted.
       if (hello.has("frame_rate")) fields.push_back("frame_rate");
+      if (hello.has("frame_damage")) fields.push_back("frame_damage");
       if (!keys(&hello, fields) || !integer(hello.get("version"), 1) || hello.num("version") != 1 ||
           hello.str("method") != "hello" || !hello.get("method")->isString() || !tokenValue(hello.get("token")) ||
           !identifier(hello.get("engine_instance")) || !textValue(hello.get("fixture_origin"), web ? 4096 : 128))
@@ -397,6 +402,8 @@ bool streamHandshake() {
                                       (hello.num("frame_rate") != 60 && hello.num("frame_rate") != 120)))
         return false;
       if (hello.has("frame_rate")) frameRate = int(hello.num("frame_rate"));
+      if (hello.has("frame_damage") && !boolean(hello.get("frame_damage"))) return false;
+      frameDamage = hello.has("frame_damage") && hello.flag("frame_damage");
       streamToken = hello.str("token");
       streamInstance = hello.str("engine_instance");
       fixtureOrigin = claimed;
@@ -425,7 +432,8 @@ static void streamReadyEvent() {
       {"permissions", webBrowsing}, {"downloads", webBrowsing}, {"popups", false}, {"accessibility", true},
       {"ax_actions", axActionNames()}, {"file_dialogs", webBrowsing}, {"javascript_dialogs", webBrowsing},
       {"heartbeat_interval_ms", HeartbeatIntervalMs}, {"context_menu", webBrowsing}, {"http_auth", webBrowsing},
-      {"find", webBrowsing}, {"zoom", webBrowsing}, {"popup_blocked", webBrowsing}, {"media_capture", false}});
+      {"find", webBrowsing}, {"zoom", webBrowsing}, {"popup_blocked", webBrowsing}, {"media_capture", false},
+      {"frame_damage", frameDamage}});
   event("ready", json::object({{"cef", CEF_VERSION}, {"chromium", runtimeChromium}, {"runtime_cef", runtimeCEF},
                                {"runtime_chromium", runtimeChromium}, {"platform", platform::name()},
                                {"sandbox_configured", true}, {"engine_instance", streamInstance},
@@ -442,19 +450,52 @@ static bool fitsSurface(const Value* w, const Value* h, const Value* scale) {
   double pw = std::ceil(w->number * scale->number), ph = std::ceil(h->number * scale->number);
   return pw <= 4096 && ph <= 4096 && pw * ph * 4 <= double(axio::MaxFrame);
 }
-static void streamFrame(Tab* tab, const void* pixels, int w, int h) {
-  if (!tab->live() || !tab->paintAllowed || tab->closing || streamClosing) return;
+// `dirty` is the bounding box of the paint's dirty rectangles; null means the whole view.
+static void streamFrame(Tab* tab, const void* pixels, int w, int h, const cef_rect_t* dirty = nullptr) {
+  // Any paint that is not delivered leaves the presenter's copy behind: the next is full.
+  if (!tab->live() || !tab->paintAllowed || tab->closing || streamClosing) { tab->fullDamage = true; return; }
   if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || uint64_t(w) * uint64_t(h) * 4 > axio::MaxFrame) {
     tabEvent(tab, "error", json::object({{"code", "unsupported_surface"}}));
     tab->paintAllowed = false;
+    tab->fullDamage = true;
     return;
   }
   // A queued old-size paint can arrive after WasResized; do not relabel it.
-  if (w != int(std::ceil(tab->width * tab->scale)) || h != int(std::ceil(tab->height * tab->scale))) return;
+  if (w != int(std::ceil(tab->width * tab->scale)) || h != int(std::ceil(tab->height * tab->scale))) {
+    tab->fullDamage = true;
+    return;
+  }
+  uint32_t damage[4] = {0, 0, uint32_t(w), uint32_t(h)};
+  if (frameDamage && dirty && !tab->fullDamage) {
+    int left = std::clamp(dirty->x, 0, w), top = std::clamp(dirty->y, 0, h);
+    int right = std::clamp(dirty->x + dirty->width, 0, w), bottom = std::clamp(dirty->y + dirty->height, 0, h);
+    if (right <= left || bottom <= top) return;  // nothing visible changed: no frame
+    damage[0] = uint32_t(left); damage[1] = uint32_t(top);
+    damage[2] = uint32_t(right - left); damage[3] = uint32_t(bottom - top);
+  }
   if (frameId == MaxGeneration) { failProtocol(); return; }
   Value metadata = json::object({{"version", 1}, {"target", tab->target}, {"frame_id", ++frameId}, {"width", w},
                                  {"height", h}, {"stride", w * 4}, {"device_scale", tab->scale}, {"format", "BGRA8"}});
-  transport.frame(tab->key, json::write(metadata), json::write(tab->target), frameId, pixels, size_t(w) * size_t(h) * 4);
+  if (!frameDamage) {
+    transport.frame(tab->key, json::write(metadata), json::write(tab->target), frameId, pixels, size_t(w) * size_t(h) * 4);
+    return;
+  }
+  if (transport.frameWithDamage(tab->key, json::write(metadata), json::write(tab->target), frameId, pixels, uint32_t(w),
+                                uint32_t(h), damage))
+    tab->fullDamage = false;
+}
+// Bounding box of CEF's dirty rectangles (view pixels); false when there are none.
+static bool dirtyBounds(size_t count, const cef_rect_t* rects, cef_rect_t& bounds) {
+  if (!count || !rects) return false;
+  int left = INT_MAX, top = INT_MAX, right = INT_MIN, bottom = INT_MIN;
+  for (size_t i = 0; i < count; ++i) {
+    if (rects[i].width <= 0 || rects[i].height <= 0) continue;
+    left = std::min(left, rects[i].x); top = std::min(top, rects[i].y);
+    right = std::max(right, rects[i].x + rects[i].width); bottom = std::max(bottom, rects[i].y + rects[i].height);
+  }
+  if (right <= left || bottom <= top) return false;
+  bounds = {left, top, right - left, bottom - top};
+  return true;
 }
 static void compositePopup(Tab* tab) {
   if (tab->cachedView.empty() || tab->popupPixels.empty() || !tab->popupVisible) return;
@@ -468,10 +509,19 @@ static void compositePopup(Tab* tab) {
              tab->popupPixels.data() + (size_t(y) * size_t(tab->popupWidth) + size_t(startX)) * 4, size_t(endX - startX) * 4);
   streamFrame(tab, composite.data(), tab->cachedWidth, tab->cachedHeight);
 }
-static void streamPaint(Tab* tab, cef_paint_element_type_t type, const void* pixels, int w, int h) {
+static void streamPaint(Tab* tab, cef_paint_element_type_t type, const void* pixels, int w, int h, size_t dirtyCount,
+                        const cef_rect_t* dirtyRects) {
   if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || uint64_t(w) * uint64_t(h) * 4 > axio::MaxFrame) return;
   if (type == PET_VIEW) {
-    if (!tab->popupVisible) { streamFrame(tab, pixels, w, h); return; }
+    if (!tab->popupVisible) {
+      cef_rect_t bounds{};
+      // CEF always reports the changed area; an empty report means nothing to send.
+      if (frameDamage && !dirtyBounds(dirtyCount, dirtyRects, bounds) && !tab->fullDamage) return;
+      streamFrame(tab, pixels, w, h, frameDamage ? &bounds : nullptr);
+      return;
+    }
+    // Popup composites (<select> menus) are sent whole.
+    tab->fullDamage = true;
     tab->cachedWidth = w; tab->cachedHeight = h;
     tab->cachedView.assign(static_cast<const uint8_t*>(pixels), static_cast<const uint8_t*>(pixels) + size_t(w) * size_t(h) * 4);
     if (tab->popupPixels.empty()) streamFrame(tab, pixels, w, h);
@@ -502,6 +552,7 @@ static void invalidateNavigation(Tab* tab) {
   tab->target["navigation_generation"] = navigation + 1;
   tab->hasDocumentFrame = false; tab->documentFrame.clear();
   tab->paintAllowed = false;
+  tab->fullDamage = true;
   clearPopup(tab);
   transport.invalidatePendingFrame(tab->key);
   tabEvent(tab, "navigation");
@@ -763,6 +814,7 @@ static void streamCommand(const std::string& line) {
   else if (method == "resize") {
     tab->width = int(command.num("width")); tab->height = int(command.num("height"));
     tab->scale = command.num("device_scale");
+    tab->fullDamage = true;
     transport.invalidatePendingFrame(tab->key);
     host->notify_screen_info_changed(host);
     host->was_resized(host);
@@ -771,7 +823,7 @@ static void streamCommand(const std::string& line) {
     bool visible = command.flag("visible");
     if (!visible) cancelPinch(tab);
     host->was_hidden(host, !visible);
-    if (visible) host->invalidate(host, PET_VIEW);
+    if (visible) { tab->fullDamage = true; host->invalidate(host, PET_VIEW); }
     else transport.invalidatePendingFrame(tab->key);
   } else if (method == "edit") {
     auto* frame = current->get_focused_frame(current);

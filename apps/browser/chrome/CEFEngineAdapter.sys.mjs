@@ -267,7 +267,19 @@ function bufferLength(value) {
 }
 
 /** Subprocess.InputPipe.read(length) is exact, unlike readUint32's native endianness. */
-export async function readAXCF(pipe) {
+/**
+ * Optional frame damage (hello `frame_damage:true`, Linux pipe): `[[x, y, width,
+ * height]]` in physical pixels, inside the frame. Pixels outside it equal the previous
+ * frame delivered for the same target and size; the payload is still the whole frame.
+ */
+function validDamage(damage, width, height) {
+  if (!Array.isArray(damage) || damage.length !== 1 || !Array.isArray(damage[0]) || damage[0].length !== 4) return false;
+  const [x, y, w, h] = damage[0];
+  return [x, y, w, h].every(value => Number.isInteger(value) && value >= 0) && w > 0 && h > 0
+    && x + w <= width && y + h <= height;
+}
+
+export async function readAXCF(pipe, { damage = false } = {}) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -281,12 +293,14 @@ export async function readAXCF(pipe) {
   const metadata = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
   if (!isObject(metadata) || metadata.version !== 1) throw new Error("INVALID_AXCF_METADATA");
   if (kind === 2) {
-    if (!hasKeys(metadata, ["version", "target", "frame_id", "width", "height", "stride", "device_scale", "format"])
+    const frameKeys = ["version", "target", "frame_id", "width", "height", "stride", "device_scale", "format"];
+    if (!hasKeys(metadata, damage ? [...frameKeys, "damage"] : frameKeys)
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= 4096)
         || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
-        || metadata.format !== "BGRA8") throw new Error("INVALID_AXCF_FRAME");
+        || metadata.format !== "BGRA8"
+        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))) throw new Error("INVALID_AXCF_FRAME");
     validateCEFTarget(metadata.target, { browsingMode: "web" });
   }
   // Allocate/read large pixels only after both framing and metadata are checked.
@@ -402,6 +416,8 @@ export class CEFHostConnection {
     if (!id(instance) || !(browsingMode === "web" ? validWebOrigin(identity) : validFixtureOrigin(identity))) throw new Error("INVALID_CEF_BOOTSTRAP");
     this.browsingMode = browsingMode; this.shared = shared; this.instance = instance; this.identity = identity;
     this.platform = platform;
+    // Linux pipe frames name their changed rectangle so chrome uploads only that.
+    this.frameDamage = platform !== "macosarm64" && !surface;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
@@ -447,7 +463,8 @@ export class CEFHostConnection {
     }, () => this.fail("CEF_PROCESS_FAILURE"));
     const hello = { version: 1, method: "hello", token: this.#token,
       engine_instance: this.instance, fixture_origin: this.identity,
-      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}) };
+      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}),
+      ...(this.frameDamage ? { frame_damage: true } : {}) };
     if (this.#endpoint) {
       const endpoint = this.#endpoint;
       try {
@@ -603,7 +620,7 @@ export class CEFHostConnection {
   async #read() {
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout);
+      const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout, { damage: this.frameDamage });
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -691,6 +708,8 @@ export class CEFHostConnection {
         || (this.shared && (capabilities?.multi_target !== true || capabilities?.stop !== true
           || capabilities?.cursor !== true || capabilities?.persistent_profile !== web || capabilities?.open_in_tab !== web))
         || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean"
+        // Frame damage is exactly what the hello asked for.
+        || (capabilities?.frame_damage ?? false) !== this.frameDamage
         // Optional liveness announcement; a value that could never fit the 5 s rule is not trusted.
         || (capabilities?.heartbeat_interval_ms !== undefined && !(Number.isInteger(capabilities.heartbeat_interval_ms)
           && capabilities.heartbeat_interval_ms >= 100 && capabilities.heartbeat_interval_ms <= 2000))) throw new Error("UNVERIFIED_CEF_RUNTIME");
@@ -796,6 +815,9 @@ export class CEFEngineAdapter {
   // Surface mode: the bound canvas, its endpoint target id, the generations chrome
   // confirmed to the endpoint, and whether the endpoint presented a first frame.
   #surfaceElement; #surfaceId = null; #confirmed = null; #surfacePresented = false;
+  // Frame damage: true until a frame reached onFrame, and after any frame of this
+  // target that did not (stale, old size, not yet loaded); the next one is then whole.
+  #damageGap = true;
   constructor(processOrHost, { token, pendingTarget, timers, deadline = 15000, browsingMode = "fixture",
     onEvent = () => {}, onFrame = () => {}, onFailure = () => {}, element = null, onGeometry = () => {} }) {
     this.#owned = processOrHost?.[HOST_BRAND] !== true;
@@ -901,10 +923,14 @@ export class CEFEngineAdapter {
     const sizeMatches = this.surface && value.width === Math.ceil(this.surface.width * this.surface.device_scale)
       && value.height === Math.ceil(this.surface.height * this.surface.device_scale)
       && value.device_scale === this.surface.device_scale;
-    if (!same || !sizeMatches || !this.#loaded || this.#closing || this.#ended) return;
+    if (!same || !sizeMatches || !this.#loaded || this.#closing || this.#ended) { this.#damageGap = true; return; }
     this.#host.readPhase = "frame_present"; this.#host.lastFrameBytes = pixels.byteLength;
-    try { await this.onFrame(value, pixels); }
+    let frame = value;
+    if (this.#damageGap && "damage" in value) { frame = { ...value }; delete frame.damage; }
+    this.#damageGap = true;
+    try { await this.onFrame(frame, pixels); }
     catch { throw targetError("CEF_FRAME_PRESENTATION_FAILED"); }
+    this.#damageGap = false;
     this.#frameWait?.resolve(this.target);
   }
   /** onTargetGeometry from the endpoint: the first frame arrived, or its size/scale changed. */

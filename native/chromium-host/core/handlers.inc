@@ -19,10 +19,10 @@ static void configureStream() {
     i->available_rect = i->rect;
     return 1;
   };
-  render.api.on_paint = [](cef_render_handler_t*, cef_browser_t* value, cef_paint_element_type_t type, size_t,
-                           const cef_rect_t*, const void* pixels, int w, int h) {
+  render.api.on_paint = [](cef_render_handler_t*, cef_browser_t* value, cef_paint_element_type_t type, size_t dirtyCount,
+                           const cef_rect_t* dirtyRects, const void* pixels, int w, int h) {
     HOLD(value);
-    if (Tab* tab = tabFor(value)) streamPaint(tab, type, pixels, w, h);
+    if (Tab* tab = tabFor(value)) streamPaint(tab, type, pixels, w, h, dirtyCount, dirtyRects);
   };
   render.api.on_popup_size = [](cef_render_handler_t*, cef_browser_t* value, const cef_rect_t* rect) {
     HOLD(value);

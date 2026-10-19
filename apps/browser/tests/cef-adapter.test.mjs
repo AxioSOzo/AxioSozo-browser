@@ -5,7 +5,7 @@ import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, rea
   validateCEFTarget, validateSurface, fitCEFRenderSurface, validCEFSessionRuntime, validCEFRoot,
   validateCEFInput, allowedFixtureURL, allowedWebURL, expectedCEFPlatform, cefBinaryPaths,
   cefHostEnvironment } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, bgraToRGBA, keyboardRoute, cefKey, cefModifiers, keyboardPlatform, linuxWindowsKeyCode,
+import { CEFPresenter, bgraToRGBA, bgraRegionToRGBA, keyboardRoute, cefKey, cefModifiers, keyboardPlatform, linuxWindowsKeyCode,
   transferableGeckoURL } from '../chrome/CEFPresenter.sys.mjs';
 
 // All packets in this file are visibly controlled protocol fixtures. They never
@@ -40,19 +40,19 @@ class Pipe {
 }
 function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRace=false,nativeInputError=null,
   nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200,
-  platform=null}={}) {
+  platform=null,capabilities={},frameFields={}}={}) {
   const pipe = new Pipe(), writes=[], rendered=[], failures=[], events=[];
   let finished, current=full, frameID=1;
   const exit = new Promise(resolve => { finished=resolve; });
   const event = value => { if(value.event==='navigation')current=value.target;pipe.push(packet(1,{version:1,...value})); };
-  const sendFrame = (target=current,id=frameID++) => pipe.push(packet(2,frame(target,id),new Uint8Array(16)));
+  const sendFrame = (target=current,id=frameID++,fields=frameFields) => pipe.push(packet(2,{...frame(target,id),...fields},new Uint8Array(16)));
   const process = { stdout:{read:async count=>transformRead(await pipe.read(count))}, wait:()=>exit,
     kill:async()=>{pipe.close();finished({exitCode:-15});},
     stdin:{close:async()=>{pipe.close();finished({exitCode:0});},write:async text=>{
       const command=JSON.parse(text);writes.push(command);
       if(command.method==='hello') event({event:'ready',cef:CEF_VERSION,chromium:CHROMIUM_VERSION,
         runtime_cef:CEF_VERSION.split('+')[0],runtime_chromium:CHROMIUM_VERSION,platform:'macosarm64',sandbox_configured:true,
-        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{fixture_only:browsingMode==='fixture',devtools:false,private_mode:false,ime:false,accessibility:false,
+        engine_instance:pending.engine_instance,render_path:'native-osr-bgra',capabilities:{...capabilities,fixture_only:browsingMode==='fixture',devtools:false,private_mode:false,ime:false,accessibility:false,
           ...(browsingMode==='web'?{edit:true,visibility:true,permissions:false,downloads:false,popups:false,accessibility:false}:{})},...overrideReady});
       else if(command.method==='frame_ack'||command.method==='ax_ack') return;
       else if(command.method==='create') {
@@ -719,12 +719,16 @@ test('host environment: macOS exactly PATH/TMPDIR; Linux adds HOME=profile and o
 });
 
 test('a Linux host must announce its own platform label; surface mode is macOS only',async()=>{
-  const linux=fixture({platform:'linux64',overrideReady:{platform:'linux64'}});
+  const linux=fixture({platform:'linux64',overrideReady:{platform:'linux64'},capabilities:{frame_damage:true}});
   await linux.host.connect();await linux.adapter.connect();
   assert.equal(linux.failures.length,0);assert.equal(linux.host.platform,'linux64');
+  assert.equal(linux.writes[0].frame_damage,true,'Linux pipe hellos ask for frame damage');
+  const noDamage=fixture({platform:'linux64',overrideReady:{platform:'linux64'}});
+  await assert.rejects(noDamage.host.connect(),'a host that ignores frame_damage is refused');
 
   const mismatch=fixture({platform:'linux64'}); // host says macosarm64
   await assert.rejects(mismatch.host.connect());
+  const mac=fixture();await mac.adapter.connect();assert.equal('frame_damage' in mac.writes[0],false);
   const macOnly=fixture({overrideReady:{platform:'linux64'}});
   await assert.rejects(macOnly.adapter.connect());
   const arm=fixture({platform:'linuxarm64',overrideReady:{platform:'linux64'}});
@@ -839,5 +843,44 @@ test('Linux presenter with host IME: keys and composition run through the proxy 
   await tick();
   assert.equal(prevented,false);
   assert.deepEqual(f.inputCalls.map(call=>[call.method,call.fields.type,call.fields.native_key_code]),[['key','down',38],['key','char',38]]);
+  await presenter.dispose();
+});
+
+test('Linux frame damage: validated, delivered to the presenter, dropped after a gap',async()=>{
+  const linux=(options={})=>fixture({platform:'linux64',overrideReady:{platform:'linux64'},capabilities:{frame_damage:true},...options});
+  const f=linux({frameFields:{damage:[[0,0,2,2]]}});
+  await f.host.connect();await f.adapter.connect();await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  // The first frame of a target is presented whole whatever its damage says.
+  assert.equal('damage' in f.rendered[0].meta,false);
+  f.sendFrame(undefined,undefined,{damage:[[1,0,1,1]]});await tick();await tick();
+  assert.deepEqual(f.rendered.at(-1).meta.damage,[[1,0,1,1]]);
+  for(const damage of [[[1,1,2,1]],[[0,0,0,1]],[[0,0,1,1],[0,0,1,1]],[[-1,0,1,1]],[[0,0,1.5,1]],'all'])
+    await assert.rejects(readAXCF((()=>{const pipe=new Pipe();pipe.push(packet(2,{...frame(),damage},new Uint8Array(16)));return pipe;})(),{damage:true}),
+      /INVALID_AXCF_FRAME/,JSON.stringify(damage));
+  // Without negotiation a damage member is an unknown key.
+  const pipe=new Pipe();pipe.push(packet(2,{...frame(),damage:[[0,0,1,1]]},new Uint8Array(16)));
+  await assert.rejects(readAXCF(pipe),/INVALID_AXCF_FRAME/);
+});
+
+test('presenter uploads only the damaged rectangle once its canvas is current',async()=>{
+  // 2x2 BGRA: blue, green / red, half-transparent white.
+  const bgra=Uint8Array.of(255,0,0,255, 0,255,0,255, 0,0,255,255, 128,128,128,128).buffer;
+  assert.deepEqual([...bgraRegionToRGBA(bgra,2,1,1,1,1)],[255,255,255,128]);
+  assert.deepEqual([...bgraRegionToRGBA(bgra,2,0,1,2,1)],[255,0,0,255,255,255,255,128]);
+  assert.deepEqual([...new Uint8Array(bgra)].slice(0,4),[255,0,0,255],'the frame buffer is not converted in place');
+  const f=presenterFixture(),puts=[];
+  const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch});
+  const switching=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await switching;
+  const record=presenter.record;
+  record.canvas.getContext=()=>({putImageData:(image,x,y)=>puts.push([image.width,image.height,x,y])});
+  const draw=meta=>f.launchCalls[0].onFrame({...frame(),...meta},new ArrayBuffer(16));
+  await draw({frame_id:2,damage:[[1,0,1,1]]});
+  await draw({frame_id:3,damage:[[0,1,2,1]]});
+  assert.deepEqual(puts,[[1,1,1,0],[2,1,0,1]]);
+  assert.ok(presenter.diagnostics().uploadedPixelShare<1);
+  // A frame that was not drawn (hidden window) makes the next one whole.
+  f.win.document.hidden=true;await draw({frame_id:4,damage:[[0,0,1,1]]});
+  f.win.document.hidden=false;await draw({frame_id:5,damage:[[0,0,1,1]]});
+  assert.deepEqual(puts.at(-1),[2,2,0,0]);
   await presenter.dispose();
 });

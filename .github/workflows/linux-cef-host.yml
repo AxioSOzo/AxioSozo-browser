@@ -75,6 +75,24 @@ jobs:
         with:
           path: ${{ github.workspace }}/.local/build/cef/*.tar.bz2
           key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal
+      # A fresh runner reads the 1.4 GB unstripped libcef.so from a cold disk: the first
+      # launch's GPU process then sat in uninterruptible I/O for >10 s (run 39295110390,
+      # E0 got no paint). Warm the runtime once and record how long that took.
+      - name: Warm the CEF runtime into the page cache (cold-start I/O, measured)
+        run: |
+          python3 - "$EVIDENCE_OUT/runtime-warm.json" <<'PY'
+          import json, pathlib, sys, time
+          runtime = pathlib.Path('.local/build/cef/linux').resolve()
+          files = [p for p in runtime.iterdir() if p.is_file() and p.suffix in ('.so', '.1', '.pak', '.dat', '.bin')]
+          start, total = time.monotonic(), 0
+          for path in files:
+              with path.open('rb') as stream:
+                  while chunk := stream.read(1 << 24):
+                      total += len(chunk)
+          result = dict(warm_seconds=round(time.monotonic() - start, 3), bytes=total, files=sorted(p.name for p in files))
+          pathlib.Path(sys.argv[1]).write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result))
+          PY
       - name: probe.py install-sandbox (chrome-sandbox root:root 4755)
         run: python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee "$EVIDENCE_OUT/install-sandbox.log"
       - name: probe.py check
@@ -115,6 +133,11 @@ jobs:
         run: |
           set -o pipefail
           timeout 600 python3 native/chromium-host/web_stream_test.py 2>&1 | tee "$EVIDENCE_OUT/web.log"
+      - name: Frame damage (damage_test.py)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 300 python3 native/chromium-host/damage_test.py 2>&1 | tee "$EVIDENCE_OUT/damage.log"
       - name: Zen-side adapter/presenter node tests
         continue-on-error: true
         run: |
@@ -149,7 +172,7 @@ jobs:
                   if isinstance(value, dict) and 'status' in value:
                       return value['status']
               return 'NO_RESULT'
-          gates = {name: last_status(name + '.log') for name in ('check', 'test-native', 'e0', 'stream', 'security', 'input', 'web')}
+          gates = {name: last_status(name + '.log') for name in ('check', 'test-native', 'e0', 'stream', 'security', 'input', 'web', 'damage')}
           node = (out / 'node-tests.log').read_text(errors='replace') if (out / 'node-tests.log').exists() else ''
           gates['node-tests'] = 'PASS' if '# fail 0' in node else 'FAIL'
           probe_tests = (out / 'test-probe.log').read_text(errors='replace') if (out / 'test-probe.log').exists() else ''

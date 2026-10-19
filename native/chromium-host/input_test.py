@@ -215,20 +215,24 @@ def run():
 
         if probe.IS_LINUX:
             # Cursor changes are forwarded as CSS keywords (the presenter sets them on its canvas).
+            def cursor_now():
+                found = [item['cursor'] for item in session.events if item.get('event') == 'cursor']
+                return found[-1] if found else None
+
             def cursor_after(x, y, expected):
-                mark = len(session.events)
+                # CEF reports cursor changes only; compare the latest reported state.
                 session.done(session.command('mouse', type='move', x=x, y=y, modifiers=0, button='left',
                                              click_count=1, mouse_leave=False))
-                if any(item.get('event') == 'cursor' and item.get('cursor') == expected for item in session.events[mark:]):
-                    return expected
-                with contextlib.suppress(TimeoutError):
-                    session.until(lambda kind, item: kind == 1 and item.get('event') == 'cursor'
-                                  and item.get('cursor') == expected, 5)
-                    return expected
-                return [item.get('cursor') for item in session.events[mark:] if item.get('event') == 'cursor']
-            over_input, over_blank = cursor_after(100, 55, 'text'), cursor_after(600, 350, 'pointer')
-            check(checks, 'linux_cursor_forwarding', over_input == 'text' and over_blank == 'pointer',
-                  dict(over_input=over_input, over_pointer_area=over_blank))
+                deadline = time.monotonic() + 3
+                while cursor_now() != expected and time.monotonic() < deadline:
+                    with contextlib.suppress(TimeoutError):
+                        session.until(lambda kind, item: kind == 1 and item.get('event') == 'cursor',
+                                      max(0.1, deadline - time.monotonic()))
+                return cursor_now()
+            sequence = [(600, 350, 'pointer'), (100, 55, 'text'), (450, 600, 'default'), (600, 350, 'pointer')]
+            seen = [cursor_after(x, y, expected) for x, y, expected in sequence]
+            check(checks, 'linux_cursor_forwarding', seen == [expected for *_, expected in sequence],
+                  dict(expected=[expected for *_, expected in sequence], seen=seen))
 
             # AltGr (EVENTFLAG_ALTGR_DOWN) on KeyE as the presenter sends it for a layout's
             # euro sign: XKB keycode 26, keyCode 69, text from Gecko's event.key.

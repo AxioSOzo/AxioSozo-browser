@@ -173,6 +173,23 @@ export function bgraToRGBA(buffer) {
   return rgba;
 }
 
+/**
+ * One damaged rectangle of a BGRA frame as a new unpremultiplied RGBA array (the
+ * frame buffer is left untouched): the work is proportional to the damage, not the frame.
+ */
+export function bgraRegionToRGBA(buffer, frameWidth, x, y, width, height) {
+  const source = new Uint8Array(buffer), rgba = new Uint8ClampedArray(width * height * 4);
+  for (let row = 0; row < height; row++) {
+    let from = ((y + row) * frameWidth + x) * 4, to = row * width * 4;
+    for (let column = 0; column < width; column++, from += 4, to += 4) {
+      const blue = source[from], green = source[from + 1], red = source[from + 2], alpha = source[from + 3];
+      const scale = alpha && alpha !== 255 ? 255 / alpha : 1;
+      rgba[to] = red * scale; rgba[to + 1] = green * scale; rgba[to + 2] = blue * scale; rgba[to + 3] = alpha;
+    }
+  }
+  return rgba;
+}
+
 // Component phase names (NSEventPhase) as cef-v1 wheel/pinch phase values.
 export function wheelPhase(name) {
   if (name === "mayBegin") return "may_begin";
@@ -654,6 +671,7 @@ export class CEFPresenter {
       priorVisibility:browser.style.visibility, priorPosition:stack.style.position, originalLabel:tab.label,
       priorDocShellIsActive:browser.docShellIsActive, pendingURL:this.browsingMode === "web" ? url : null,
       latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
+      framePixels:0, uploadedPixels:0, canvasCurrent:false,
       firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 },
       surfaceMode:false, native:null, hostByteCap:false, keyVerdicts:new Map(), keyDowns:new Map(),
       wheelRemainder:{ x:0, y:0 }, ime:null, title:this.browsingMode === "web" ? this.restoreTitles.get(tab) ?? "" : "",
@@ -771,13 +789,29 @@ export class CEFPresenter {
   }
   /** Pipe fallback only (no engine-view component): CPU BGRA frames drawn with putImageData. */
   #draw(record, metadata, pixels) {
-    if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
+    if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) {
+      record.canvasCurrent = false; // a skipped frame: the next one is drawn whole
+      return;
+    }
     const started = this.window.performance.now();
+    const sized = record.canvas.width === metadata.width && record.canvas.height === metadata.height;
     if (record.canvas.width !== metadata.width) record.canvas.width = metadata.width;
     if (record.canvas.height !== metadata.height) record.canvas.height = metadata.height;
     const context = record.canvas.getContext("2d", { alpha:false });
     if (!context) throw new Error("CEF_CANVAS_UNAVAILABLE");
-    context.putImageData(new this.window.ImageData(bgraToRGBA(pixels), metadata.width, metadata.height), 0, 0);
+    const damage = metadata.damage?.[0];
+    if (damage && sized && record.canvasCurrent) {
+      // Linux frame damage: convert and upload only the changed rectangle.
+      const [x, y, width, height] = damage;
+      context.putImageData(new this.window.ImageData(bgraRegionToRGBA(pixels, metadata.width, x, y, width, height),
+        width, height), x, y);
+      record.uploadedPixels += width * height;
+    } else {
+      context.putImageData(new this.window.ImageData(bgraToRGBA(pixels), metadata.width, metadata.height), 0, 0);
+      record.uploadedPixels += metadata.width * metadata.height;
+    }
+    record.canvasCurrent = true;
+    record.framePixels += metadata.width * metadata.height;
     record.displayedFrames++;
     record.drawMilliseconds += this.window.performance.now() - started;
     record.firstFrameAt ??= this.window.performance.now();
@@ -1518,6 +1552,8 @@ export class CEFPresenter {
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
+      // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).
+      uploadedPixelShare:record.surfaceMode || !record.framePixels ? null : record.uploadedPixels / record.framePixels,
       firstFrameMilliseconds:record.firstFrameAt - record.startedAt, lastFrameId:record.lastFrameId,
       surface:record.adapter.surface, surfaceGeometry:record.surfaceGeometry ?? null, surfaceStats:stats,
       renderScaleLimited:!!record.renderScaleLimited, inputFeatures:record.adapter.inputFeatures ?? null,

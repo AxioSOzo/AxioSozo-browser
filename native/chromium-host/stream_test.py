@@ -73,7 +73,7 @@ def png(path, width, height, bgra):
 
 
 class Session:
-    def __init__(self, origin, directory, browsing_mode=None, timeout=15):
+    def __init__(self, origin, directory, browsing_mode=None, timeout=15, hello_fields=None):
         self.origin, self.directory = origin, directory
         self.profile = Path(tempfile.mkdtemp(prefix='cef-profile-stream-', dir=probe.BASE))
         os.chmod(self.profile, 0o700)
@@ -95,6 +95,7 @@ class Session:
                      fixture_origin=origin)
         if browsing_mode:
             hello['browsing_mode'] = browsing_mode
+        hello.update(hello_fields or {})
         self.write(hello)
 
     def write(self, item):
