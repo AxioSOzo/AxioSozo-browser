@@ -1,0 +1,52 @@
++ curl --fail --location --max-time 1800 --speed-time 30 --speed-limit 1024 --continue-at - https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_linux64_minimal.tar.bz2 --output /home/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal.tar.bz2
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  1  311M    1 6145k    0     0  26.2M      0  0:00:11 --:--:--  0:00:11 26.2M 26  311M   26 82.0M    0     0  66.6M      0  0:00:04  0:00:01  0:00:03 66.6M 50  311M   50  158M    0     0  70.9M      0  0:00:04  0:00:02  0:00:02 70.9M 74  311M   74  232M    0     0  72.0M      0  0:00:04  0:00:03  0:00:01 72.0M 97  311M   97  304M    0     0  72.0M      0  0:00:04  0:00:04 --:--:-- 72.0M100  311M  100  311M    0     0  72.1M      0  0:00:04  0:00:04 --:--:-- 74.7M
++ tar -xjf /home/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal.tar.bz2 -C /home/runner/axiosozo-build/cef
++ cmake -S /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host -B /home/runner/axiosozo-build/cef/cmake-linux64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCEF_ROOT=/home/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_minimal -DAXIO_OUT=/home/runner/axiosozo-build/cef/linux64
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE
+-- Performing Test COMPILER_SUPPORTS_NO_UNDEFINED_VAR_TEMPLATE - Success
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS
+-- Performing Test COMPILER_SUPPORTS_NO_UNUSED_LOCAL_TYPEDEFS - Success
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX
+-- Performing Test COMPILER_SUPPORTS_NO_LITERAL_SUFFIX - Success
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING
+-- Performing Test COMPILER_SUPPORTS_NO_NARROWING - Success
+-- Found ZLIB: /usr/lib/x86_64-linux-gnu/libz.so (found version "1.3")
+-- Configuring done (2.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/runner/axiosozo-build/cef/cmake-linux64
++ cmake --build /home/runner/axiosozo-build/cef/cmake-linux64 --parallel 4
+[1/17] Building CXX object CMakeFiles/AxioCEFProbeHelper.dir/linux/helper_linux.cc.o
+[2/17] Building CXX object CMakeFiles/axio_host_core.dir/linux/platform_linux.cc.o
+[3/17] Building CXX object CMakeFiles/AxioCEFProbe.dir/linux/main_linux.cc.o
+[4/17] Building CXX object CMakeFiles/axio_core_test.dir/tests/core_test.cc.o
+[5/17] Building CXX object CMakeFiles/axio_transport_test.dir/test_transport.cc.o
+[6/17] Building CXX object CMakeFiles/axio_transport_damage_test.dir/tests/transport_damage_test.cc.o
+[7/17] Linking CXX executable tests/axio_core_test
+[8/17] Linking CXX executable tests/axio_transport_test
+[9/17] Linking CXX executable tests/axio_transport_damage_test
+[10/17] Building CXX object CMakeFiles/axio_transport_damage_payload_test.dir/tests/transport_damage_payload_test.cc.o
+[11/17] Linking CXX executable tests/axio_transport_damage_payload_test
+[12/17] Building CXX object CMakeFiles/axio_a11y_core_test.dir/tests/a11y_core_test.cc.o
+/home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/a11y_core_test.cc:3:1: warning: multi-line comment [-Wcomment]
+    3 | //   clang++ -std=c++17 -Wall -Wextra -I native/chromium-host \
+      | ^
+[13/17] Linking CXX executable tests/axio_a11y_core_test
+[14/17] Building CXX object CMakeFiles/axio_host_core.dir/core/host_core.cc.o
+[15/17] Linking CXX static library libaxio_host_core.a
+[16/17] Linking CXX executable /home/runner/axiosozo-build/cef/linux64/AxioCEFProbeHelper
+[17/17] Linking CXX executable /home/runner/axiosozo-build/cef/linux64/AxioCEFProbe
+{"component": "cef", "status": "PASS", "action": "native_build", "binary": "/home/runner/axiosozo-build/cef/linux64/AxioCEFProbe", "platform": "linux64", "sandbox": {"suid_helper_installed": false, "apparmor_restrict_unprivileged_userns": 1, "unprivileged_userns_clone": 1, "max_user_namespaces": 63795, "unprivileged_userns": false, "expected": null, "usable": false}}
