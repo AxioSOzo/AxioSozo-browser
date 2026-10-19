@@ -178,20 +178,24 @@ editable element is focused, else as key presses.
 | 3 | Browsing modes | fixture and `browsing_mode:"web"` | fixture only; `browsing_mode` in hello → exit 64 |
 | 4 | Surface mode | `surface_service`/`surface_token` (Mach) | absent on Linux; those keys → exit 64 |
 | 5 | Key verdicts | `down` completes with `key_consumed`/`key_not_consumed` | `key_verdict:false`: `down` completes `success` without `reason`; Zen must apply its own shortcuts without a verdict |
-| 6 | Key codes | `native_key_code` is a macOS virtual key code | on Linux it is passed to WebKit as the XKB hardware keycode; the keysym comes from `text`, else from `windows_key_code` |
+| 6 | Key codes | `native_key_code` is a macOS virtual key code | on Linux it is passed to WebKit as the XKB hardware keycode (e.g. 9 Escape, 113 Left, 23 Tab); the keysym comes from `text`, else from `windows_key_code`. Verified on WPE 2.48.3: the page sees `Escape`, `ArrowLeft`, `Tab` |
 | 7 | Text | `char` sends CEF char events | `char` text goes through WebKit's input-method `committed` path; a `char` equal to the text its preceding `down` already inserted is dropped (no double insertion) |
 | 8 | IME | `ime_set_composition`, `ime_commit_text` (+ optional ranges), `ime_finish_composing`, `ime_cancel_composition`, `text_input` events | `ime:false`; only `ime_commit_text {text}` (no optional fields); no `text_input` events |
 | 9 | Pinch | `pinch` (synthesized touches) | `pinch:false`; method absent (exit 64 if sent) |
 | 10 | Unannounced methods | UI-delegation replies answer `unsupported fixture_only` in fixtures | every method other than §4 and `ime_commit_text` is a protocol error (exit 64) |
 | 11 | Cursor | from CEF cursor callback (full CSS set) | derived from WebKit hit tests: `pointer` (link), `text` (editable), `default` |
 | 12 | History restore | `load {http_status:0, restored_from_history:true}` | `http_status` is 200 (WebKit reports the cached response) or 0; the same restore rule decides `restored_from_history` |
-| 13 | Frame damage | none (surface mode has dirty rects) | optional `hello.frame_damage` adds computed `damage` (§6.1) |
+| 13 | Frame damage | none (surface mode has dirty rects) | optional `hello.frame_damage` adds `damage` (§6.1), computed by the host by diffing against the last delivered frame (WPEBackend-fdo SHM export carries no damage) |
 | 14 | Pixel source | CEF `OnPaint` BGRA | WPEBackend-fdo SHM buffer (ARGB8888/XRGB8888 little-endian = BGRA memory order, X forced to 0xFF), copied then released |
 | 15 | Accessibility | `accessibility`, `ax_action`, `ax_ack`, `ax_*` events | `accessibility:false`; methods absent |
 | 16 | Favicon, find, zoom, downloads, prompts | web mode features | absent (`false`) |
 | 17 | Exit codes | 64, 75, 76, 77 | 64, 70 (engine init failed, or `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS` set), 76 (also: helpers survived); parent death is handled by `PR_SET_PDEATHSIG` |
 | 18 | Mouse | `click_count` forwarded | `click_count` validated but WebKit derives clicks itself; `mouse_leave` has no WPE equivalent |
 | 19 | Visibility/focus | `was_hidden`, `set_focus` | libwpe activity states `visible`/`focused` |
+| 20 | Pointer/wheel coordinates | CSS px | same on the wire (CSS px); the host multiplies by `device_scale` because WebKit's WPE event factory divides libwpe coordinates by it |
+| 21 | Wheel | pixel deltas, cef sign | `delta_x/delta_y` CSS px as a smooth 2-D libwpe axis event; verified: `delta_y:-400` at 2x gives one DOM `wheel` with `deltaY:400` and scrolls 400 CSS px |
+| 22 | First frame of a document | CEF paints the new document | WebKit re-renders the previous document's frozen layer tree for a few frames after commit. The host holds buffers after every commit until the committed document (asked from an isolated script world) has rendered three animation frames; a 2 s fallback covers pages where that script cannot run. No wire change: Zen simply never receives old-document pixels under a new generation |
+| 23 | Back/forward | CEF back/forward cache | WebKit's back/forward cache (cache model `web-browser`, in the private profile): `back` restores without a fetch; `load.http_status` is then 200; WebKit clears `autocomplete=off` fields on restore |
 
 ## 9. Versioning
 

@@ -1,13 +1,12 @@
 # ADR 004: WebKit as the third out-of-process engine
 
-Status: **accepted for the fixture profile; Linux runtime NOT_VERIFIED (BLOCKED_ENV)**.
-Date: 2026-10-19. Workstream: `cloud/webkit-host`.
+Status: **accepted for the fixture profile; Linux runtime PASS as component evidence**
+(Actions run 39297810722; never Zen E1/E2). Date: 2026-10-19. Workstream: `cloud/webkit-host`.
 
-Numbering: the file name was set by the program brief. It shares the number 003 with
-[003-native-multi-engine](003-native-multi-engine.md), which already anticipated WebKit
-("Blink now, WebKit later"; its §6 Q3 and phase 5). This ADR refines that plan for Linux
-and for the macOS host; the integration lead may renumber it (e.g. 004) without changing
-its content.
+Numbering: renumbered from 003 to 004 because
+[003-native-multi-engine](003-native-multi-engine.md) already holds 003; that ADR
+anticipated WebKit ("Blink now, WebKit later"; its §6 Q3 and phase 5) and this one
+refines the plan for Linux and the macOS host.
 
 ## Context
 
@@ -64,6 +63,23 @@ closed, the engine's own sandbox enabled, clean exit without orphan helpers.
    namespaces, the result is `BLOCKED_ENV`, never a weaker sandbox. The host is a child
    subreaper with parent-death signal and proves at exit that no helper survived.
 
+6. **Linux findings that shaped the host** (each measured in CI, see the verification table):
+   - libwpe drops dispatches made before WebKit registers its backend client, so device
+     scale and size are dispatched again once the WebView owns the backend.
+   - libwpe pointer and axis coordinates are device pixels (WebKit divides them by the
+     scale) and the smooth-axis sign is the opposite of libinput's; the host converts
+     cef-v1 CSS-pixel coordinates and deltas.
+   - **Paint fence.** After a commit WebKit keeps re-rendering the previous document's
+     frozen layer tree: the first buffer after page 2 committed and finished was
+     byte-identical to page 1. Presenting it would label old pixels with the new
+     generation. The host holds buffers after each commit until the committed document,
+     asked through `webkit_web_view_call_async_javascript_function` in an isolated world
+     the page cannot see, has rendered three animation frames (2 s fallback for pages
+     where that cannot run). A user-script/message-handler variant never delivered in
+     WPE 2.48.3 and was replaced.
+   - Cache model `web-browser` (in the private profile) keeps WebKit's back/forward cache;
+     `document-viewer` disabled it and made `back` re-fetch.
+
 ## Alternatives considered
 
 | Option | Why not (now) |
@@ -73,7 +89,7 @@ closed, the engine's own sandbox enabled, clean exit without orphan helpers.
 | WPEBackend-fdo DMA-BUF export | The future zero-copy path on Linux GPUs (counterpart of IOSurface); needs a Gecko-side DMA-BUF importer that does not exist yet. |
 | WebKitGTK 6.0 offscreen (`webkit_web_view_get_snapshot`) | Needs a GTK display (Xvfb/Wayland), snapshot API is slow and has no damage; GTK would also own input/IM. Kept as fallback only. |
 | Cog (`cog-platform-headless`) | Same fdo SHM technique wrapped in another launcher with its own CLI/D-Bus surface; we need the exact AXCF control surface instead. |
-| Build WPE WebKit 2.48.3 (or newer) from the pinned tarball | Required before any web mode (security updates) but hours of build per machine; not measured here because no Linux machine was available. Pinned so it can be done reproducibly. |
+| Build WPE WebKit (newer) from the pinned tarball | Required before any web mode (security updates). Evaluated in CI, see "Security posture and upstream pin" below. |
 | Ubuntu 24.04 packages | Ubuntu does not ship WPE WebKit in 24.04; Debian 13 (or a `debian:13` container) is the reference platform. |
 | In-process WebKit inside Gecko | Breaks process isolation and Gecko's own sandbox; rejected like in-process CEF. |
 
@@ -117,12 +133,31 @@ stage the design above. It is not engine-surface-v1 evidence and not a product p
   performance workstream can move to DMA-BUF (Linux) and IOSurface (macOS).
 - The trixie pin is fixture-only until a supported WebKit release is pinned.
 
+## Security posture and upstream pin
+
+Debian 13 ships WPE WebKit 2.48.3 without later security releases. That is acceptable only
+for the loopback fixture profile (one synthetic page on 127.0.0.1, every other URL and
+subresource denied). The current upstream stable releases, read from the official
+wpewebkit.org index and `.sums` files by the `discover` job (run 39295390702), are
+**2.54.1** (2026-10-06, sha256 `0de8bdfb…3fe9`) and the previous series' **2.52.6**; both are
+pinned in `upstreams.lock.json` `webkit.upstream`. `linux-webkit-upstream.yml` builds them
+in the same pinned Debian 13 image (clang, lld, ninja, ccache in the Actions cache) and
+runs the full host suite against the result (`AXIOSOZO_WEBKIT_UPSTREAM_PREFIX`).
+
+UPSTREAM_RESULTS_PLACEHOLDER
+
 ## Verification status (2026-10-19)
 
 | Claim | Label | Evidence |
 | --- | --- | --- |
-| Core: strict JSON, AXCF transport, stream/security harness | PASS (macOS arm64; engine-free and scripted engine) | `probe.py test-native` |
-| `host_wpe.cpp` uses the pinned WPE 2.48.3 / libwpe 1.16.2 / fdo 1.16.0 / glib 2.84 API correctly | PASS (compile-only, `-Wall -Wextra`, zero diagnostics) | `probe.py syntax-check` against the extracted pinned headers |
-| Real WebKit frames, input, navigation/back with exact generations, negative tests through the shared core | EXPERIMENTAL PASS on macOS 27 via the WKWebView scaffold | `docs/evidence/macos/webkit-scaffold/` |
-| WPE host builds, renders, sandboxes and cleans up on Linux | **NOT_VERIFIED — BLOCKED_ENV** | No Linux machine was available to this workstream (the session ran on the owner's macOS laptop; the remote-agent environment also resolved to it). Run `probe.py setup --apt && probe.py test` on Debian 13. |
+| Core: strict JSON, AXCF transport, stream/security harness | PASS (Linux x86_64 and macOS arm64; engine-free and scripted engine) | `probe.py test-native`; CI run 39297810722 |
+| Pinned Debian 13 packages install with matching sha256 | PASS (14 `.deb` checked against the lockfile) | run 39297810722 `setup.log` |
+| WPE host builds and links on Linux | PASS (`g++ 14`, hardened flags, 8.8 s) | run 39297810722 `build.json` |
+| Real frames at 2x/1x, resize, typed text visible, page 2, back (bfcache), forward with exact generations, stale-target rejection, history boundary, heartbeat | PASS | `stream_test.py`, frame PNGs inspected, [STATUS.json](../evidence/linux/webkit/STATUS.json) |
+| No previous-document pixels under a new generation | PASS (paint fence) | stream test region check on page 2; host trace |
+| Damage rectangles exact | PASS (computed; 0 violations; typing frame 8.6 % of the area) | damage scenario |
+| Input fidelity: buttons, click focus, drag, XKB keycodes, wheel pixel delta (400 CSS px), cursor text/pointer, dpr 2/1, hidden = no frames | PASS | `input_test.py` |
+| 13 negative protocol cases with exact exit codes | PASS | `stream_security_test.py` |
+| Web process under bubblewrap; no orphan helpers; private profiles removed | PASS (CI-environment settings recorded; sandbox never disabled) | `sandbox-probe` job, run 39293842171; stream result |
+| Real WebKit through the shared core on macOS | EXPERIMENTAL PASS (WKWebView scaffold, earlier session) | `docs/evidence/macos/webkit-scaffold/` |
 | Zen E1/E2 with WebKit | NOT_TESTED | No Zen-side integration yet |

@@ -8,8 +8,8 @@ can drive it with small, listed changes. Design: [ADR 004 WebKit engine](../../d
 
 | Part | File | Status (2026-10-19) |
 | --- | --- | --- |
-| Engine-neutral core (hello, envelope, targets, generations, credit, heartbeat, damage) | `stream_core.hpp`, `json.hpp`, `transport.hpp` | PASS (unit + harness on macOS arm64 against a scripted engine and against real WKWebView) |
-| Linux WPE WebKit host | `host_wpe.cpp` | COMPILE-CHECKED against the pinned Debian 13 headers; **runtime NOT_VERIFIED (BLOCKED_ENV: no Linux machine was available to this workstream)** |
+| Engine-neutral core (hello, envelope, targets, generations, credit, heartbeat, damage) | `stream_core.hpp`, `json.hpp`, `transport.hpp` | PASS (unit + harness on Linux x86_64 and macOS arm64) |
+| Linux WPE WebKit host | `host_wpe.cpp` | **PASS on Linux** (Debian 13 container, real WPE 2.48.3 frames, full `probe.py test`; Actions run 39297810722, [evidence](../../docs/evidence/linux/webkit/STATUS.json)). Component evidence only, never Zen E1/E2 |
 | macOS WKWebView host | `mac/host_mac.mm` | SCAFFOLD, EXPERIMENTAL: real system WebKit, snapshot frames; passed stream + security suites on macOS 27 |
 | TEST-ONLY scripted engine | `tests/fake_host.cc` | never a product binary; never WebKit evidence |
 
@@ -52,6 +52,25 @@ needs unprivileged user namespaces; `probe.py check` probes this and reports
 `BLOCKED_ENV` (never a workaround) where a container forbids them, e.g. Docker's default
 seccomp profile or `kernel.apparmor_restrict_unprivileged_userns=1` on Ubuntu hosts.
 
+## CI (`.github/workflows/linux-webkit-host.yml`)
+
+Every push to `cloud/webkit-host` touching this directory runs `ci/container_test.sh` in the
+pinned `debian:13` image (digest in `upstreams.lock.json` `webkit.ci_image`): pinned,
+sha256-checked packages, host build, then `probe.py test` as an unprivileged user, and
+publishes logs, result JSON and frame PNGs to the `ci-results` branch. bubblewrap needs
+three CI-environment settings (runner `kernel.apparmor_restrict_unprivileged_userns=0`;
+container `seccomp`, `apparmor` and `systempaths` unconfined); the `sandbox-probe` job
+shows that each one alone is insufficient. They are runner/container settings, never a
+product change; WebKit's sandbox stays on.
+
+`.github/workflows/linux-webkit-upstream.yml` evaluates current upstream WPE releases
+(`webkit.upstream` pins, from the official `.sums`): `upstream/build.sh` builds the pinned
+tarball with a cached ccache and reruns the suites against it with
+`AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=/usr/local/wpe-upstream` (evaluation mode of `probe.py`).
+
+Diagnostics: `AXIOSOZO_WEBKIT_TRACE=1` makes the host log buffer exports, load events and
+paint-fence decisions to stderr (the tests set it; the log is evidence, not protocol).
+
 ## Commands for `./dev`
 
 Build output, profiles and run evidence default to `<repo>/.local/build/webkit` and
@@ -71,10 +90,11 @@ Each step prints one JSON line `{"component":"webkit-host","status":...}` and ex
 on PASS (2 on BLOCKED_ENV/FAIL). Test scripts write `result.json`, `events.json`,
 `stderr.log`, fixture request logs and lossless PNGs of actual engine frames.
 
-What the tests prove (real host): AXCF framing; `ready` identity equals the lockfile pin;
-first frame 1800×1300 at 2×; typed text via the text-commit path in title and pixels;
+What the tests prove (real host, all PASS on Linux in run 39297810722): AXCF framing; `ready` identity equals the lockfile pin;
+first frame 1800×1300 at 2×; typed text via the text-commit path in title and in the field's pixels;
 down/char/up inserts once; `ime_commit_text`; resize at 2× and 1×; GET navigation, back
-and forward each advance both generations by exactly one; stale targets rejected after
+and forward each advance both generations by exactly one; the page-2 frame never shows
+the previous document (paint fence); back restores from the back/forward cache without a fetch; stale targets rejected after
 navigation and back; `restored_from_history` on back; history boundary; heartbeat cadence
 and silence while SIGSTOPped; computed damage rectangles exact (no changed pixel outside
 the rectangle); mouse buttons, click-to-focus, drag, wheel pixel deltas and direction,

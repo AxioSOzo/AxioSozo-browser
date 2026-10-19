@@ -1,76 +1,40 @@
 {
   "date": "2026-10-19",
   "component": "native/webkit-host (WPE WebKit 2.48.3, Debian 13 pins)",
-  "linux_runtime": "BLOCKED_ENV",
-  "reason": "No Linux machine was available to this workstream: the session ran on the owner's macOS arm64 laptop and the remote-agent environment resolved to the same Mac. No WPE frame was rendered on Linux.",
-  "not_claimed": [
-    "Linux build/link",
-    "Linux real frames",
-    "bubblewrap sandbox observed",
-    "Linux orphan check",
-    "Linux build time"
-  ],
-  "verified": {
-    "syntax_check": {
-      "status": "PASS",
-      "what": "host_wpe.cpp compiled with clang --target=x86_64-linux-gnu -fsyntax-only -Wall -Wextra, zero diagnostics, against headers extracted from pinned Debian trixie -dev packages (sha256 verified against the signed index)",
-      "command": "python3 native/webkit-host/probe.py syntax-check --sysroot <extracted-sysroot>",
-      "ran_on": "macOS arm64",
-      "sysroot_packages": {
-        "libwpewebkit-2.0-dev": {
-          "version": "2.48.3-1",
-          "sha256": "831cf433370316ecc393fd090c1b27d37f596dd1b92921a6797b0dd4e43a597a"
-        },
-        "libwpe-1.0-dev": {
-          "version": "1.16.2-1",
-          "sha256": "4824dbf3829160c1531cf8ac9c31b6aa5dbc1da899cdb3496dfb7f4ed5f7344a"
-        },
-        "libwpebackend-fdo-1.0-dev": {
-          "version": "1.16.0-1",
-          "sha256": "46aae973004753682464d170666d16150fae6175303d2b8bf6bfb6108c02d7cf"
-        },
-        "libglib2.0-dev": {
-          "version": "2.84.4-3~deb13u5",
-          "sha256": "ad98b1a769da55a8007ea9953306b0deb6092205d4fac8d915e2bd83d4ecc8a5"
-        },
-        "libsoup-3.0-dev": {
-          "version": "3.6.5-3",
-          "sha256": "e2d2cdbf850786e7c0ad943ba3c19e6c3da5d35ad6aaae40d7f9cd1f2f66d5df"
-        },
-        "libwayland-dev": {
-          "version": "1.23.1-3",
-          "sha256": "66055b7df9a6c4b15fe0b52a42a76680bb4d0f4d1083800e7cd7ba26e59e68ed"
-        },
-        "libxkbcommon-dev": {
-          "version": "1.7.0-2",
-          "sha256": "b62327152ae59bec442c0d7ae893520a3a3a2381100c83332e4a3497157ce5ec"
-        },
-        "libc6-dev": {
-          "version": "2.41-12+deb13u4",
-          "sha256": "1fda734dabcd80b77266a09ab62b0f1e3e16d8091db62899890b2200745632a2"
-        },
-        "linux-libc-dev": {
-          "version": "6.12.107-1",
-          "sha256": "dc68dd53c7356598d005866da0d19d7bd33af2a62971aced624cdf04492902b4"
-        },
-        "libstdc++-14-dev": {
-          "version": "14.2.0-19",
-          "sha256": "4b962fac5f1af0bd8b1b3f97e0f47b9d8e9a79e88802143f00ebfbd78ad87a7b"
-        },
-        "libsysprof-capture-4-dev": {
-          "version": "48.0-2",
-          "sha256": "3cb76e124187700f5977a0acb914b3f82b2bd28105fce6f1cf2a34497b234af2"
-        },
-        "libgio-2.0-dev": {
-          "version": "2.84.4-3~deb13u5",
-          "sha256": "a9bbd748ddd40a08b336e8d6b1755e698957ac640d081ddc4c330b716c6b89c3"
-        }
-      },
-      "debian_index": {
-        "url": "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
-        "sha256": "7778d3e3f303b7ddb8ce0fe7c8d57473a076c6bf2e8f241f75421d2396352498"
-      }
-    }
+  "linux_runtime": "PASS (component evidence; never Zen E1/E2)",
+  "where": "GitHub Actions ubuntu-24.04 runner (4 vCPU, 16 GiB), pinned debian:trixie-20261005 container, workflow .github/workflows/linux-webkit-host.yml",
+  "green_run": {
+    "run_id": 39297810722,
+    "url": "https://github.com/AxioSOzo/AxioSozo-browser/actions/runs/39297810722",
+    "results": "ci-results:cloud_webkit-host/39297810722-1-wpe-debian13/ (curated copy in run-39297810722/)",
+    "container_wall_seconds": 76,
+    "host_build_seconds": 8.79,
+    "suites": {"test-native": "PASS", "stream_test.py": "PASS", "input_test.py": "PASS", "stream_security_test.py": "PASS"}
   },
-  "next_command": "python3 native/webkit-host/probe.py setup --apt && python3 native/webkit-host/probe.py test   # on Debian 13 or a debian:13 container"
+  "verified": {
+    "pinned_install": "PASS: 14 pinned Debian .debs sha256-checked against upstreams.lock.json before install (apt also verifies the signed index)",
+    "real_frames": "PASS: 1800x1300 at 2x, 2000x1400 at 2x, 800x600 at 1x; PNGs in run-39297810722/frames inspected by the agent",
+    "typed_input": "PASS: 'WPE' via WebKit's input-method commit path visible in the field and title; down/char/up inserts once; ime_commit_text 'é'",
+    "navigation": "PASS: GET page 2, back, forward each advance both generations by exactly 1; stale targets rejected after navigation and after back; history boundary",
+    "paint_fence": "PASS: no previous-document pixels under a new generation (page-2 status line empty; fence opened by the document, not by timeout)",
+    "back_forward_cache": "PASS: back restores without a fetch (the stream session requested only /engine.html and /engine.html?page=2; the third /engine.html request belongs to the separate damage session)",
+    "damage": "PASS: computed damage, 0 pixels changed outside the rectangle; typing frame damage = 8.6% of the frame",
+    "input_fidelity": "PASS: left/right buttons, click-to-focus, drag with button held, XKB keycodes (Escape/ArrowLeft/Tab reach the DOM), wheel delta_y -400 -> DOM deltaY 400 and scrollY 400, cursor text/pointer from hit tests, devicePixelRatio 2 and 1, no frames while hidden",
+    "security": "PASS: 13 negative cases with exact exit codes (wrong token 64, duplicate/unknown ACK 64, replayed id 64, unknown key 64, malformed JSON 64, overlong line 64, denied URL 64 without a request, web/surface hello 64, EOF 0, shutdown 0, duplicate target rejected)",
+    "sandbox": "PASS: WPEWebProcess observed under bubblewrap (2 bwrap processes) with WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS never set",
+    "process_cleanup": "PASS: no orphan helper in any session (host and test runner are child subreapers); every private profile removed",
+    "heartbeat": "PASS: ~1.00 s gaps, none while SIGSTOPped"
+  },
+  "ci_environment_settings": {
+    "note": "CI environment only, not product changes. Each one alone is insufficient (sandbox-probe-run-39293842171.jsonl).",
+    "runner": "sysctl kernel.apparmor_restrict_unprivileged_userns=0",
+    "container": "--security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined",
+    "tests_run_as": "unprivileged uid 1500 inside the container"
+  },
+  "not_claimed": [
+    "Zen E1/E2 with WebKit (no Zen-side adapter yet)",
+    "web browsing (fixture profile only; 2.48.3 lacks later security fixes)",
+    "IME composition/preedit (ime:false)",
+    "macOS product path"
+  ]
 }
