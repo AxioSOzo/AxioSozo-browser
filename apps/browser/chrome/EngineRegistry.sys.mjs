@@ -68,7 +68,7 @@ const ENGINES = Object.freeze([
     // Not in context-v1 (its readers reject unknown engines): storing it needs a contract version.
     experimental: true, contractValue: null,
     // Linux x86_64, `axiosozo.engines.webkit.enabled`, the pinned host installed, fixture page only.
-    // macOS and other platforms say why it is unavailable (WebKitEngineAdapter.webkitAvailability).
+    // Platforms without a WebKit host say why it is unavailable (WebKitEngineAdapter.webkitAvailability).
     available: window => webkitAvailabilityFor(window),
   }),
 ]);

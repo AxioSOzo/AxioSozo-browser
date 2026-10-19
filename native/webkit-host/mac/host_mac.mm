@@ -53,6 +53,12 @@ void noteSPI(const char* name) { if (std::find(usedSPI.begin(), usedSPI.end(), n
 // something changes or input/navigation arrives (WKWebView has no damage callback).
 constexpr int IdleAfterIdenticalFrames = 30;
 constexpr double IdlePollSeconds = 0.25;
+constexpr int MaxSnapshotsInFlight = 2;
+uint64_t directFrames = 0, convertedFrames = 0;  // snapshot conversion paths (stderr summary at exit)
+uint64_t ticks(double seconds) {
+  static mach_timebase_info_data_t timebase = [] { mach_timebase_info_data_t t; mach_timebase_info(&t); return t; }();
+  return uint64_t(seconds * 1e9) * timebase.denom / timebase.numer;
+}
 }  // namespace
 
 @interface AXWebKitDelegate : NSObject <WKNavigationDelegate, WKUIDelegate>
@@ -265,15 +271,16 @@ private:
   AXWebKitDelegate* delegate_ = nil;
   wksurface::Ring* ring_ = nullptr;
   int width_ = 900, height_ = 650, status_ = 0, pendingStatus_ = 0; double scale_ = 2;
-  bool visible_ = true, pressed_ = false, snapshotting_ = false, detached_ = false, idle_ = false, freshAfterCommit_ = false;
-  uint64_t epoch_ = 0, lastSequence_ = 0, pendingSequence_ = 0, appliedSequence_ = 0, nextIdlePoll_ = 0;
-  int identical_ = 0;
+  bool visible_ = true, pressed_ = false, detached_ = false, idle_ = false, freshAfterCommit_ = false, missedTick_ = false;
+  uint64_t epoch_ = 0, lastSequence_ = 0, pendingSequence_ = 0, appliedSequence_ = 0, nextIdlePoll_ = 0, requested_ = 0, delivered_ = 0;
+  int identical_ = 0, inFlight_ = 0;
   std::vector<uint8_t> pixels_, previous_;
 
   void applyScale() {
     // The page's devicePixelRatio must be the requested scale, not the (unknown,
     // offscreen) window's backing scale; frames are then 1:1 physical pixels.
-    if (window_.backingScaleFactor != scale_) callSPI<CGFloat>(web_, "_setOverrideDeviceScaleFactor:", CGFloat(scale_));
+    // Always set (also back to 1x): once overridden, the backing scale no longer applies.
+    callSPI<CGFloat>(web_, "_setOverrideDeviceScaleFactor:", CGFloat(scale_));
   }
   void wake() { idle_ = false; identical_ = 0; }
   void detach() {
@@ -289,42 +296,80 @@ private:
     web_ = nil; window_ = nil;
     if (ring_) { wksurface::destroyRing(ring_); ring_ = nullptr; }
   }
-  // One snapshot in flight per view; ticks during it are dropped (the clock retries).
+  // Up to two snapshots in flight per view (a 2x snapshot takes about one frame interval,
+  // capture bench run 39342162006); a tick that finds both busy is remembered and served
+  // when one completes, so pacing does not halve. Results are delivered in request order.
   void capture() {
-    if (snapshotting_) return;
-    snapshotting_ = true;
+    if (inFlight_ >= MaxSnapshotsInFlight) { missedTick_ = true; return; }
+    inFlight_++;
+    missedTick_ = false;
     WKSnapshotConfiguration* config = [WKSnapshotConfiguration new];
     config.snapshotWidth = @(width_);
     // The first frame of a new document waits for WebKit's next presentation update.
     config.afterScreenUpdates = freshAfterCommit_;
     freshAfterCommit_ = false;
     MacView* self = this; std::string key = tab_.key;
-    uint64_t epoch = epoch_, sequence = pendingSequence_, started = mach_absolute_time();
+    uint64_t epoch = epoch_, sequence = pendingSequence_, serial = ++requested_;
     int w = int(std::ceil(width_ * scale_)), h = int(std::ceil(height_ * scale_));
     [web_ takeSnapshotWithConfiguration:config completionHandler:^(NSImage* image, NSError*) {
       if (!currentHost || currentHost->tabByKey(key) != &self->tab_ || self->detached_) return;
-      self->snapshotting_ = false;
-      if (epoch != self->epoch_) return;  // navigation, resize or scale change while in flight
-      CGImageRef cg = image ? [image CGImageForProposedRect:nullptr context:nil hints:nil] : nullptr;
-      if (!cg) return;
-      self->pixels_.assign(size_t(w) * size_t(h) * 4, 0);
-      CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-      CGContextRef context = CGBitmapContextCreate(self->pixels_.data(), size_t(w), size_t(h), 8, size_t(w) * 4, space,
-                                                   uint32_t(kCGImageAlphaPremultipliedFirst) | uint32_t(kCGBitmapByteOrder32Little));
-      CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
-      CGContextDrawImage(context, CGRectMake(0, 0, w, h), cg);
-      CGContextRelease(context); CGColorSpaceRelease(space);
-      bool same = self->previous_.size() == self->pixels_.size() && !memcmp(self->previous_.data(), self->pixels_.data(), self->pixels_.size());
-      if (same) {
-        if (++self->identical_ >= IdleAfterIdenticalFrames) self->idle_ = true;
-        if (self->idle_) self->nextIdlePoll_ = mach_absolute_time() + uint64_t(IdlePollSeconds * 1e9) * 3 / 125;  // arm64 timebase 125/3
-      } else self->wake();
-      self->previous_.swap(self->pixels_);
-      self->appliedSequence_ = sequence;
-      (void)started;
-      // The core computes damage, drops identical frames and applies generations.
-      currentHost->frame(&self->tab_, self->previous_.data(), w, h, size_t(w) * 4, PixelFormat::BGRA8Premultiplied);
+      self->inFlight_--;
+      // Navigation, resize or scale change while in flight, or a newer snapshot already shown.
+      bool current = epoch == self->epoch_ && serial > self->delivered_;
+      CGImageRef cg = current && image ? [image CGImageForProposedRect:nullptr context:nil hints:nil] : nullptr;
+      if (cg && self->convert(cg, w, h)) {
+        self->delivered_ = serial;
+        bool same = self->previous_.size() == self->pixels_.size() && !memcmp(self->previous_.data(), self->pixels_.data(), self->pixels_.size());
+        if (same) {
+          if (++self->identical_ >= IdleAfterIdenticalFrames) self->idle_ = true;
+          if (self->idle_) self->nextIdlePoll_ = mach_absolute_time() + ticks(IdlePollSeconds);
+        } else self->wake();
+        self->previous_.swap(self->pixels_);
+        self->appliedSequence_ = sequence;
+        // The core computes damage, drops identical frames and applies generations.
+        currentHost->frame(&self->tab_, self->previous_.data(), w, h, size_t(w) * 4, PixelFormat::BGRA8Premultiplied);
+      }
+      if (self->missedTick_ && !self->detached_ && self->visible_) self->capture();
     }];
+  }
+  // Snapshot -> tight sRGB BGRA8 premultiplied at exactly w x h. When WebKit already
+  // produced that format (sRGB, 32 bpp, premultiplied-first, little-endian, same size)
+  // the rows are copied; otherwise Core Graphics converts and resamples.
+  bool convert(CGImageRef cg, int w, int h) {
+    pixels_.resize(size_t(w) * size_t(h) * 4);
+    CGColorSpaceRef imageSpace = CGImageGetColorSpace(cg);
+    CFStringRef name = imageSpace ? CGColorSpaceCopyName(imageSpace) : nullptr;
+    bool srgb = name && CFEqual(name, kCGColorSpaceSRGB);
+    if (name) CFRelease(name);
+    CGBitmapInfo info = CGImageGetBitmapInfo(cg);
+    CGImageAlphaInfo alpha = CGImageGetAlphaInfo(cg);
+    bool direct = srgb && int(CGImageGetWidth(cg)) == w && int(CGImageGetHeight(cg)) == h && CGImageGetBitsPerPixel(cg) == 32
+                  && CGImageGetBitsPerComponent(cg) == 8 && (info & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Little
+                  && (alpha == kCGImageAlphaPremultipliedFirst || alpha == kCGImageAlphaNoneSkipFirst);
+    if (direct) {
+      CFDataRef data = CGDataProviderCopyData(CGImageGetDataProvider(cg));
+      size_t stride = CGImageGetBytesPerRow(cg), row = size_t(w) * 4;
+      if (data && size_t(CFDataGetLength(data)) >= stride * size_t(h - 1) + row) {
+        const uint8_t* bytes = CFDataGetBytePtr(data);
+        for (int y = 0; y < h; ++y) memcpy(pixels_.data() + row * size_t(y), bytes + stride * size_t(y), row);
+        if (alpha == kCGImageAlphaNoneSkipFirst) for (size_t i = 3; i < pixels_.size(); i += 4) pixels_[i] = 0xFF;
+        CFRelease(data);
+        directFrames++;
+        return true;
+      }
+      if (data) CFRelease(data);
+    }
+    std::fill(pixels_.begin(), pixels_.end(), 0);
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef context = CGBitmapContextCreate(pixels_.data(), size_t(w), size_t(h), 8, size_t(w) * 4, space,
+                                                 uint32_t(kCGImageAlphaPremultipliedFirst) | uint32_t(kCGBitmapByteOrder32Little));
+    CGColorSpaceRelease(space);
+    if (!context) return false;
+    CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+    CGContextDrawImage(context, CGRectMake(0, 0, w, h), cg);
+    CGContextRelease(context);
+    convertedFrames++;
+    return true;
   }
 };
 
@@ -563,6 +608,7 @@ int main(int argc, char** argv) {
     NSDate* drain = [NSDate dateWithTimeIntervalSinceNow:0.3];
     while ([drain timeIntervalSinceNow] > 0) [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     int code = hostPointer->finish();
+    fprintf(stderr, "AXIO_WEBKIT capture: direct_frames=%llu converted_frames=%llu\n", (unsigned long long)directFrames, (unsigned long long)convertedFrames);
     if (surfaceMode) wksurface::shutdown();
     currentHost = nullptr;
     return code;

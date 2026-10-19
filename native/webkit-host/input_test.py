@@ -41,7 +41,9 @@ def key(session, kind, native, windows, text=''):
 
 
 # Steps the macOS snapshot scaffold cannot model are recorded, never failed, for that port only.
-SOFT = {'wpe': set(), 'wkwebview': {'page_scale', 'drag', 'keys', 'wheel'}}
+# WKWebView derives DOM `buttons` from the global [NSEvent pressedMouseButtons], so synthetic
+# drags are not seen as drags by the page (ADR 004 macOS "Input"); recorded, never failed.
+SOFT = {'wpe': set(), 'wkwebview': {'drag'}}
 
 
 def scenario(session, origin, directory, port='wpe'):
@@ -118,18 +120,23 @@ def scenario(session, origin, directory, port='wpe'):
         count = session.frames
         session.command('wheel', x=450, y=300, modifiers=0, delta_x=0, delta_y=-400)
         scrolled = wait_state(session, lambda s: int(s.get('sy', '0')) > before, seconds=4)
-        assert int(scrolled['w']) == 400, scrolled  # CSS-pixel delta preserved at 2x
+        if port == 'wkwebview':
+            # WKWebView scrolls a synthetic pixel wheel event exactly (400 CSS px at 2x) on its
+            # async scrolling path but does not deliver it to a passive DOM listener (run 39342825769).
+            assert int(scrolled['sy']) - before == 400, scrolled
+        else:
+            assert int(scrolled['w']) == 400, scrolled  # CSS-pixel delta preserved at 2x
         session.frame_after(count, capture=directory / 'input-scrolled.png')
         return dict(delta_y=-400, scroll_y=int(scrolled['sy']), dom_delta_y=int(scrolled['w']))
     step('wheel', wheel)
 
-    # Device scale 1x and back to 2x: exact physical frames (and, on WPE, the page's devicePixelRatio).
+    # Device scale 1x and back to 2x: exact physical frames and the page's devicePixelRatio (WPE, WKWebView).
     session.command('resize', width=800, height=600, device_scale=1)
     session.until(lambda kind, item: kind == 2 and item['width'] == 800 and item['height'] == 600)
-    step('page_scale_1x', lambda: wait_state(session, lambda s: s.get('vw') == '800' and (port != 'wpe' or s.get('dpr') == '1'))['dpr'])
+    step('page_scale_1x', lambda: wait_state(session, lambda s: s.get('vw') == '800' and (port not in ('wpe', 'wkwebview') or s.get('dpr') == '1'))['dpr'])
     session.command('resize', width=900, height=650, device_scale=2)
     session.until(lambda kind, item: kind == 2 and item['width'] == 1800 and item['height'] == 1300)
-    step('page_scale_2x', lambda: wait_state(session, lambda s: s.get('vw') == '900' and (port != 'wpe' or s.get('dpr') == '2'))['dpr'])
+    step('page_scale_2x', lambda: wait_state(session, lambda s: s.get('vw') == '900' and (port not in ('wpe', 'wkwebview') or s.get('dpr') == '2'))['dpr'])
     # Hidden targets present nothing; showing again delivers a frame.
     hidden = session.command('visibility', visible=False)
     session.completed(hidden)

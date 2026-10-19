@@ -218,15 +218,23 @@ test("no tab menu, no installer", () => {
 // WebKit (Linux, fixture profile): availability is platform, pref, host, fixture page — in that order.
 const ROOT = "/home/runner/axiosozo-build";
 const linuxWindow = ({ os = "Linux", abi = "x86_64-gcc3", enabled = true, binary = `${ROOT}/webkit/AxioWebKitHost`,
-  origin = "http://127.0.0.1:41231", web = false } = {}) => ({ Services: {
+  origin = "http://127.0.0.1:41231", web = false, root = ROOT } = {}) => ({ Services: {
   appinfo: { OS: os, XPCOMABI: abi },
-  env: { get: key => ({ AXIOSOZO_ENGINE_SWITCHING: web ? "1" : "", AXIOSOZO_BUILD_ROOT: ROOT, AXIOSOZO_WEBKIT_BINARY: binary,
+  env: { get: key => ({ AXIOSOZO_ENGINE_SWITCHING: web ? "1" : "", AXIOSOZO_BUILD_ROOT: root, AXIOSOZO_WEBKIT_BINARY: binary,
     AXIOSOZO_ENGINE_FIXTURE_ORIGIN: origin })[key] ?? "" },
   prefs: { getBoolPref: (name, fallback) => ({ "axiosozo.engines.webkit.enabled": enabled })[name] ?? fallback } } });
 
 test("webkit availability names the reason: macOS, other platforms, pref, host, fixture page", () => {
+  // macOS arm64 has the WKWebView host; a Linux build root or binary path is not it.
   assert.deepEqual(engineAvailability("webkit", linuxWindow({ os: "Darwin", abi: "aarch64-gcc3" })),
-    { available: false, reason: "WebKit is not available on macOS yet" });
+    { available: false, reason: "The WebKit engine is not installed" });
+  assert.equal(engineAvailability("webkit", linuxWindow({ os: "Darwin", abi: "x86_64-gcc3" })).reason,
+    "WebKit is available on Apple silicon Macs only");
+  const mac = { os: "Darwin", abi: "aarch64-gcc3", root: "/Volumes/AxioSozoBuild", binary: "/Volumes/AxioSozoBuild/webkit/AxioWebKitMacHost" };
+  assert.deepEqual(engineAvailability("webkit", linuxWindow(mac)), { available: true, reason: null, fixtureOnly: true });
+  assert.equal(engineAvailability("webkit", linuxWindow({ ...mac, binary: "/Volumes/AxioSozoBuild/webkit/AxioWebKitHost" })).reason,
+    "The WebKit engine is not installed", "the Linux host name is not the macOS host");
+  assert.equal(engineAvailability("webkit", linuxWindow({ ...mac, enabled: false })).reason, "WebKit is not enabled in this browser");
   assert.equal(engineAvailability("webkit", linuxWindow({ abi: "aarch64-gcc3" })).reason, "WebKit is not available on this platform yet");
   assert.equal(engineAvailability("webkit", linuxWindow({ os: "WINNT" })).reason, "WebKit is not available on this platform yet");
   assert.equal(engineAvailability("webkit", linuxWindow({ enabled: false })).reason, "WebKit is not enabled in this browser");

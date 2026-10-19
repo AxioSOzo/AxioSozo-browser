@@ -33,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 # Bulky output stays under a gitignored project build root (override: AXIOSOZO_BUILD_ROOT).
 BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', str(ROOT / '.local/build')))
-BASE = BUILD_ROOT / 'webkit'
+BASE = Path(os.path.abspath(BUILD_ROOT / 'webkit'))  # mkdtemp() returns normalized paths
 BINARY = BASE / 'AxioWebKitHost'
 # Run output is gitignored (docs/evidence/*); small curated copies are committed explicitly.
 EVIDENCE = ROOT / 'docs/evidence' / ('linux' if platform.system() == 'Linux' else platform.system().lower()) / 'webkit/runs'

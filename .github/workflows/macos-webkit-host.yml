@@ -65,7 +65,7 @@ jobs:
       contents: write
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-host
-      AXIOSOZO_BUILD_ROOT: ${{ github.workspace }}/../build
+      AXIOSOZO_BUILD_ROOT: ${{ runner.temp }}/build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Build the WKWebView host

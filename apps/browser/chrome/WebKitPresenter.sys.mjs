@@ -3,12 +3,14 @@
 
 // Presents a WebKit target inside a Zen tab, in Zen's own content area: a chrome
 // <canvas> over the tab's browserStack, fed with the host's BGRA pipe frames
-// (only the damaged rectangle is converted and uploaded). Zen's tab, address bar
+// (only the damaged rectangle is converted and uploaded) or, on macOS with the
+// engine-view component, bound to the engine-surface-v1 endpoint so IOSurface frames
+// are composited by Gecko without passing through JS (as Chromium tabs on macOS). Zen's tab, address bar
 // and back/forward/reload controls are routed to the tab's engine. Fixture mode
 // only: the tab's Gecko document stays loaded underneath and is shown again on any
 // failure, crash or switch back. Privileged chrome only; nothing is injected into
 // any page.
-import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
+import { launchWebKit, webkitPlatform, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
@@ -69,6 +71,40 @@ export function streamKey(event, type) {
     modifiers: streamModifiers(event), text: event.key.length <= 2 ? event.key : "" };
 }
 
+// macOS virtual key codes (Carbon kVK_*) by KeyboardEvent.code: what the WKWebView host
+// puts in NSEvent.keyCode. Layout and characters come from `text`, never from this table.
+export const MAC_KEYS = Object.freeze({
+  KeyA: 0x00, KeyS: 0x01, KeyD: 0x02, KeyF: 0x03, KeyH: 0x04, KeyG: 0x05, KeyZ: 0x06, KeyX: 0x07, KeyC: 0x08, KeyV: 0x09,
+  IntlBackslash: 0x0A, KeyB: 0x0B, KeyQ: 0x0C, KeyW: 0x0D, KeyE: 0x0E, KeyR: 0x0F, KeyY: 0x10, KeyT: 0x11, Digit1: 0x12,
+  Digit2: 0x13, Digit3: 0x14, Digit4: 0x15, Digit6: 0x16, Digit5: 0x17, Equal: 0x18, Digit9: 0x19, Digit7: 0x1A, Minus: 0x1B,
+  Digit8: 0x1C, Digit0: 0x1D, BracketRight: 0x1E, KeyO: 0x1F, KeyU: 0x20, BracketLeft: 0x21, KeyI: 0x22, KeyP: 0x23,
+  Enter: 0x24, KeyL: 0x25, KeyJ: 0x26, Quote: 0x27, KeyK: 0x28, Semicolon: 0x29, Backslash: 0x2A, Comma: 0x2B, Slash: 0x2C,
+  KeyN: 0x2D, KeyM: 0x2E, Period: 0x2F, Tab: 0x30, Space: 0x31, Backquote: 0x32, Backspace: 0x33, Escape: 0x35,
+  MetaRight: 0x36, MetaLeft: 0x37, ShiftLeft: 0x38, CapsLock: 0x39, AltLeft: 0x3A, ControlLeft: 0x3B, ShiftRight: 0x3C,
+  AltRight: 0x3D, ControlRight: 0x3E, NumpadDecimal: 0x41, NumpadMultiply: 0x43, NumpadAdd: 0x45, NumpadDivide: 0x4B,
+  NumpadEnter: 0x4C, NumpadSubtract: 0x4E, NumpadEqual: 0x51, Numpad0: 0x52, Numpad1: 0x53, Numpad2: 0x54, Numpad3: 0x55,
+  Numpad4: 0x56, Numpad5: 0x57, Numpad6: 0x58, Numpad7: 0x59, Numpad8: 0x5B, Numpad9: 0x5C, Insert: 0x72, Home: 0x73,
+  PageUp: 0x74, Delete: 0x75, End: 0x77, PageDown: 0x79, ArrowLeft: 0x7B, ArrowRight: 0x7C, ArrowDown: 0x7D, ArrowUp: 0x7E,
+});
+const MAC_EDIT_KEYS = new Set(["c", "x", "v", "a", "z"]);
+/**
+ * macOS key routing without key verdicts: Zen keeps its Command shortcuts, F-keys and
+ * Ctrl+Tab; Command+C/X/V/A/Z (and Shift+Command+Z) go to the engine's edit command;
+ * Control and Option chords stay with the page (Cocoa text bindings, Option characters).
+ */
+export function macKeyboardRoute(event) {
+  if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
+  const key = String(event.key ?? "").toLowerCase();
+  if (event.metaKey && !event.ctrlKey && !event.altKey && MAC_EDIT_KEYS.has(key)) return "edit";
+  if (event.metaKey || (event.ctrlKey && key === "tab") || /^F\d{1,2}$/u.test(event.key)) return "chrome";
+  if (Object.hasOwn(MAC_KEYS, event.code)) return "page";
+  return event.key?.length === 1 ? "text" : "unsupported";
+}
+export function macStreamKey(event, type) {
+  return { type, native_key_code: MAC_KEYS[event.code], windows_key_code: Math.min(255, event.keyCode || 0),
+    modifiers: streamModifiers(event), text: event.key.length <= 2 ? event.key : "" };
+}
+
 /**
  * Premultiplied BGRA (host memory order) to unpremultiplied RGBA for ImageData.
  * With `rect` only that rectangle is converted, into a new buffer of its size.
@@ -103,6 +139,9 @@ export class WebKitPresenter {
     this.onEngineChange = onEngineChange; this.onFailure = onFailure; this.onSwitchStart = onSwitchStart;
     this.onTargetEvent = onTargetEvent;
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = []; this.failures = [];
+    let platform = null;
+    try { platform = webkitPlatform(win.Services?.appinfo?.OS, win.Services?.appinfo?.XPCOMABI); } catch {}
+    this.mac = platform === "macos-arm64";
     const container = win.gBrowser.tabContainer;
     this.onTabClose = event => {
       const record = this.records.get(event.target) || (this.pending?.tab === event.target ? this.pending : null);
@@ -176,7 +215,7 @@ export class WebKitPresenter {
       priorDocShellIsActive: browser.docShellIsActive, latestURL: url, title: "", loading: null, listeners: [],
       displayedFrames: 0, damageFrames: 0, uploadedPixels: 0, fullPixels: 0, drawMilliseconds: 0,
       firstFrameAt: null, startedAt: this.window.performance.now(), clicks: { time: 0, x: 0, y: 0, count: 1 },
-      wheel: null, cursor: "default", visible: undefined };
+      wheel: null, cursor: "default", visible: undefined, surfaceMode: false, surfaceGeometry: null };
     this.pending = record;
     this.onSwitchStart(originalTarget.tab_id);
     this.#indicator();
@@ -184,9 +223,18 @@ export class WebKitPresenter {
     stack.appendChild(overlay);
     try {
       record.adapter = await this.launch(this.window, { tabId: originalTarget.tab_id, origin,
+        // macOS surface mode: the endpoint presents frames in this canvas; onFrame is the pipe fallback.
+        element: canvas, onGeometry: geometry => this.#geometry(record, geometry),
         onFrame: (metadata, pixels) => this.#draw(record, metadata, pixels),
         onEvent: event => this.#event(record, event), onFailure: error => this.#revert(record, error) });
       if (this.disposed || this.pending !== record) throw new Error("ENGINE_SWITCH_CANCELLED");
+      record.surfaceMode = record.adapter.surfaceMode === true;
+      if (record.surfaceMode) {
+        // A context-less canvas bound to the endpoint: one surface pixel per device pixel,
+        // anchored top-left while a resize is in flight. No JS pixel work.
+        canvas.setAttribute("moz-opaque", "");
+        canvas.style.objectFit = "none"; canvas.style.objectPosition = "0 0";
+      }
       const target = await record.adapter.create(url, this.#surface(record));
       this.gecko.resolve(originalTarget); // the Gecko tab did not navigate while WebKit started
       if (this.disposed || this.pending !== record || this.window.gBrowser.selectedTab !== tab) throw new Error("ENGINE_SWITCH_CANCELLED");
@@ -280,10 +328,22 @@ export class WebKitPresenter {
   #surface(record) {
     const rect = record.browser.getBoundingClientRect();
     const surface = fitStreamSurface({ width: Math.max(1, Math.floor(rect.width)), height: Math.max(1, Math.floor(rect.height)),
-      device_scale: Math.min(4, Math.max(1, this.window.devicePixelRatio || 1)) });
+      device_scale: Math.min(4, Math.max(1, this.window.devicePixelRatio || 1)) },
+      // Surface mode: bounded only by 4096 px per dimension (no 32 MiB pipe payload).
+      { maxBytes: record.surfaceMode ? Infinity : undefined });
     record.renderScaleLimited = surface.device_scale < (this.window.devicePixelRatio || 1);
     return surface;
   }
+  /** Surface mode: the endpoint presented a first frame, or its size/scale changed. */
+  #geometry(record, geometry) {
+    if (this.disposed) return;
+    // Logical size, so object-fit:none maps one surface pixel to one device pixel.
+    if (record.canvas.width !== geometry.logicalWidth) record.canvas.width = geometry.logicalWidth;
+    if (record.canvas.height !== geometry.logicalHeight) record.canvas.height = geometry.logicalHeight;
+    record.surfaceGeometry = geometry;
+    record.firstFrameAt ??= this.window.performance.now();
+  }
+  /** Pipe frames only (Linux, or macOS without the engine-view component). */
   #draw(record, metadata, pixels) {
     if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
     const started = this.window.performance.now();
@@ -354,7 +414,8 @@ export class WebKitPresenter {
     const engine = record?.committed ? "webkit" : (this.pending && this.pending.tab === this.window.gBrowser.selectedTab ? "pending" : "gecko");
     this.window.document.documentElement?.toggleAttribute?.("axiosozo-webkit-active", engine === "webkit");
     this.onEngineChange({ engine: engine === "webkit" ? "webkit" : "gecko", pending: engine === "pending",
-      experimental: engine === "webkit", version: engine === "webkit" ? WEBKIT_VERSION : null, fixtureOnly: engine === "webkit",
+      experimental: engine === "webkit", version: engine === "webkit" ? (record.adapter?.webkitVersion ?? WEBKIT_VERSION) : null,
+      fixtureOnly: engine === "webkit",
       reason: reason ?? (record?.renderScaleLimited ? "WebKit render scale capped for this window size" : undefined) });
   }
   #visibility(record) {
@@ -464,7 +525,7 @@ export class WebKitPresenter {
     }, { passive: false });
     for (const [name, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, name, event => {
       if (!event.isTrusted || !record.committed) return;
-      const route = linuxKeyboardRoute(event);
+      const route = this.mac ? macKeyboardRoute(event) : linuxKeyboardRoute(event);
       if (route === "chrome") return; // Zen's shortcuts work over WebKit exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") { if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event))); return; }
@@ -473,7 +534,7 @@ export class WebKitPresenter {
         return;
       }
       if (route === "unsupported") { this.#indicator("This experimental engine has no IME bridge yet"); return; }
-      const fields = streamKey(event, type);
+      const fields = this.mac ? macStreamKey(event, type) : streamKey(event, type);
       this.#send(record, "key", fields);
       if (type === "down" && !event.ctrlKey && !event.altKey && !event.metaKey) {
         if (event.key.length <= 2) this.#send(record, "key", { ...fields, type: "char" });
@@ -558,8 +619,13 @@ export class WebKitPresenter {
   diagnostics() {
     const record = this.active;
     if (!record) return { engine: "gecko", ownedTabIds: this.owners(), failures: [...this.failures], pending: !!this.pending };
-    return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra",
-      pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames,
+    // Surface mode: frames never reach JS; the endpoint counts them (presented, released…).
+    const stats = record.surfaceMode ? record.adapter.surfaceStats?.() ?? null : null;
+    return { engine: "webkit", version: record.adapter.webkitVersion ?? WEBKIT_VERSION, target: record.adapter.target,
+      renderPath: record.adapter.renderPath ?? "wpe-fdo-shm-bgra", pipeFallback: !record.surfaceMode,
+      surfaceStats: stats, surfaceGeometry: record.surfaceGeometry,
+      frames: record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
+      damageFrames: record.damageFrames,
       uploadedPixels: record.uploadedPixels, fullPixels: record.fullPixels,
       meanDrawMilliseconds: record.displayedFrames ? record.drawMilliseconds / record.displayedFrames : 0,
       firstFrameMilliseconds: record.firstFrameAt === null ? null : record.firstFrameAt - record.startedAt,
@@ -573,6 +639,8 @@ export class WebKitPresenter {
   /** Explicit diagnostic call in privileged chrome only: the presented WebKit pixels as PNG. */
   captureFixtureFrame() {
     const record = this.active;
+    // Surface frames never exist in chrome JS (drawSnapshot shows an empty canvas); use screencapture.
+    if (record?.surfaceMode) throw new Error("WEBKIT_SURFACE_CAPTURE_UNAVAILABLE");
     if (!record?.displayedFrames || !allowedFixtureURL(record.latestURL, record.originalTarget.identity)) throw new Error("NO_VERIFIED_WEBKIT_FIXTURE_FRAME");
     return { png: record.canvas.toDataURL("image/png"), diagnostics: this.diagnostics() };
   }
