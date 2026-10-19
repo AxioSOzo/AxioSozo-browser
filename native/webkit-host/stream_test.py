@@ -321,7 +321,7 @@ def scenario(session, origin, directory, engine, port='wpe'):
     count = session.frames
     session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='WPE')
     session.title('input=WPE |')
-    real = engine == 'webkit'
+    real = engine == 'webkit' and port == 'wpe'  # region checks are calibrated on WPE frames
     # The frame must show the typed text inside the field, not merely differ somewhere.
     typed = session.frame_after(count, lambda item: region(session.last[1], 1800, INPUT_TEXT_2X) != region(initial_pixels, 1800, INPUT_TEXT_2X)
                                 if real else session.last[1] != initial_pixels, capture=directory / 'input.png', seconds=5)
