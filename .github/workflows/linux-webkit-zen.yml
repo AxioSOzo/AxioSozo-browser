@@ -7,7 +7,10 @@
 #       Ubuntu 24.04) + the WPE WebKit host, both inside the pinned debian:13 image (the
 #       host links the Debian WPE packages; Debian 13's glibc 2.41 runs the Ubuntu-built
 #       app). Xvfb + GUI harness: Gecko -> WebKit -> Gecko round trip with typing, click,
-#       wheel scroll, page 2 and back, screenshots. When the artifact is older than this
+#       the page's link to page 2, Zen's toolbar Back, wheel scroll; the WebKit host killed
+#       while presenting (the Gecko tab must survive); optional three-engine round trip with
+#       the pinned CEF host built in the same container (CEF=1). Screenshots.
+#       When the artifact is older than this
 #       commit its chrome JS is overlaid from this checkout (TEST-ONLY, labelled
 #       `chrome-overlay` in the evidence; compiled code is the artifact's).
 #       No artifact yet: the job records NOT_VERIFIED and stays green (pending, not passed).
@@ -27,6 +30,7 @@ on:
       - contracts/ipc-v1.schema.json
       - contracts/engine-stream-v1.md
       - native/webkit-host/**
+      - native/chromium-host/**
       - scripts/gui_engines/**
       - scripts/gui_test.py
       - scripts/webkit_package.py
@@ -130,7 +134,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 80
     permissions:
       contents: write   # publish-ci-results
       actions: read     # find and download the Zen build artifact of another run
@@ -179,7 +183,7 @@ jobs:
           docker pull -q "$IMAGE"
           start=$(date +%s)
           set +e
-          docker run --rm --shm-size=2g -e ZEN_RUN_ID \
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e CEF=1 \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
             "$IMAGE" sh /src/scripts/webkit_zen_container.sh
@@ -187,7 +191,7 @@ jobs:
           echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start )), \"zen_run_id\": \"$ZEN_RUN_ID\"}" > "$EVIDENCE_OUT/job.json"
           tail -n 40 "$EVIDENCE_OUT/steps.log" 2>/dev/null
           for f in harness/result.json roundtrip/result.json; do
-            [ -f "$EVIDENCE_OUT/$f" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d.get("status"), {k: v.get("status") for k, v in d.get("scenarios", {}).items()}, d.get("reason", ""))' "$EVIDENCE_OUT/$f"
+            [ -f "$EVIDENCE_OUT/$f" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d.get("status"), {k: v.get("status") for k, v in d.get("scenarios", {}).items()}, d.get("reason", ""), {k: v.get("reason") for k, v in d.get("scenarios", {}).items() if v.get("reason")})' "$EVIDENCE_OUT/$f"
           done
           exit $code
       - if: always()

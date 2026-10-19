@@ -34,6 +34,13 @@ test("gecko is always available; chromium follows the web-mode flag; webkit says
   assert.equal(engineAvailability("chromium", windowWith({ web: false })).available, false);
   assert.match(engineAvailability("chromium", windowWith({ web: false })).reason, /not enabled/u);
   assert.equal(engineAvailability("chromium", windowWith({ probe: true })).available, false, "the fixture probe is not web mode");
+  const lineup = windowWith({ web: false, probe: true });
+  lineup[registry.CHROMIUM_FIXTURE_LINEUP] = true;
+  assert.deepEqual({ ...engineAvailability("chromium", lineup) }, { available: true, reason: null, fixtureOnly: true },
+    "inside the three-engine lineup the fixture probe offers Chromium for the test page");
+  const stale = windowWith({ web: false });
+  stale[registry.CHROMIUM_FIXTURE_LINEUP] = true;
+  assert.equal(engineAvailability("chromium", stale).available, false, "the lineup marker alone, without the fixture probe, is not enough");
   assert.equal(engineAvailability("chromium", {}).available, false, "no Services: unavailable, never a throw");
   assert.deepEqual(engineAvailability("webkit", windowWith()), { available: false, reason: "WebKit is not available on this platform yet" });
   assert.equal(engineAvailability("servo", windowWith()).available, false);
