@@ -101,6 +101,8 @@ def region(pixels, width, rect):
 # Interior of the fixture's text field at 2x (tests/fixtures/engine.html), right of the caret
 # and inside the focus ring: changes only when the field's text (or placeholder) changes.
 INPUT_TEXT_2X = (240, 325, 530, 75)
+# Tail of the status line ("input=<typed>") at 2x: empty on a fresh document.
+STATUS_TAIL_2X = (630, 595, 400, 65)
 
 
 class Session:
@@ -351,7 +353,7 @@ def scenario(session, origin, directory, engine, port='wpe'):
     page2 = session.current_frame(count, capture=directory / 'page-2.png')
     if real:
         # A fresh document: its field is empty again. Old-document pixels never carry the new generation.
-        assert page2['width'] == 1800 and region(session.last[1], 1800, INPUT_TEXT_2X) == region(initial_pixels, 1800, INPUT_TEXT_2X), \
+        assert page2['width'] == 1800 and region(session.last[1], 1800, STATUS_TAIL_2X) == region(initial_pixels, 1800, STATUS_TAIL_2X), \
             'page-2 frame shows the previous document'
     timings['navigate_to_frame_s'] = round(time.monotonic() - start, 3)
     assert session.completed(nav)['status'] == 'success'
@@ -371,8 +373,9 @@ def scenario(session, origin, directory, engine, port='wpe'):
     back_load = [e for e in session.events if e.get('event') == 'load' and e.get('target', {}).get('document_generation') == session.target['document_generation']]
     assert back_load and back_load[-1]['restored_from_history'] is True and back_load[-1]['http_status'] in (0, 200), back_load
     if real:
-        # Restored from WebKit's back/forward cache: the page keeps its typed text and is not re-fetched.
-        assert region(session.last[1], 1800, INPUT_TEXT_2X) != region(initial_pixels, 1800, INPUT_TEXT_2X), 'back frame lost page-1 state'
+        # Restored from WebKit's back/forward cache, not re-fetched: the status line keeps the typed
+        # text (WebKit clears the autocomplete=off field itself on restore, as Safari does).
+        assert region(session.last[1], 1800, STATUS_TAIL_2X) != region(initial_pixels, 1800, STATUS_TAIL_2X), 'back frame lost page-1 state'
         pages = [r['path'] for r in [json.loads(line) for line in Path(session.directory / 'fixture-requests.jsonl').read_text().splitlines()]]
         assert pages == ['/engine.html', '/engine.html?page=2'], pages
     back_stale = session.command('focus', target=before_back, focused=True)

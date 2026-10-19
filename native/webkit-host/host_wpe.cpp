@@ -42,15 +42,12 @@ constexpr const char* SandboxKillSwitch = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGER
 // ---- Paint fence ----------------------------------------------------------------------
 // After a commit WebKit keeps re-rendering the previous document's frozen layer tree for
 // a few frames (CI run 39296320523: the first buffer after page 2 committed and finished
-// was byte-identical to page 1). So buffers are held until the new document reports, from
-// an isolated script world the page cannot see or call, that it has shown and rendered
-// three animation frames. pageshow also fires for back/forward-cache restores.
+// was byte-identical to page 1). So buffers are held until the new document, asked from
+// an isolated script world the page cannot see, has rendered three animation frames.
 constexpr const char* FenceWorld = "axiosozo-paint-fence";
-constexpr const char* FenceHandler = "axiosozoPaintFence";
-constexpr const char* FenceSource =
-  "window.webkit.messageHandlers.axiosozoPaintFence.postMessage('start:'+location.href);"
-  "addEventListener('pageshow',()=>{const f=requestAnimationFrame;"
-  "f(()=>f(()=>f(()=>window.webkit.messageHandlers.axiosozoPaintFence.postMessage(location.href)))));},true);";
+constexpr const char* FenceFunction =
+  "await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(r))));"
+  "return location.href;";
 constexpr int FenceTimeoutMs = 2000;  // pages where the script cannot run still present
 
 // ---- Text commit path: a minimal WebKitInputMethodContext ---------------------------
@@ -172,6 +169,8 @@ private:
   WebKitWebView* view_ = nullptr;
   AxioIMContext* im_ = nullptr;
   WebKitUserContentManager* content_ = nullptr;
+  struct FenceCall { WpeView* owner; };
+  FenceCall* fenceCall_ = nullptr;  // in-flight fence query; detached on commit and close
   // Paint fence state: buffers exported since the last commit are held, not presented.
   bool fenced_ = false;
   guint fenceTimer_ = 0;
@@ -193,7 +192,11 @@ private:
   void connect();
   void present(const uint8_t* pixels, int width, int height, size_t stride, PixelFormat format);
 public:
-  void committed() { fenced_ = false; heldValid_ = false; if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; } }
+  void committed() {
+    fenced_ = false; heldValid_ = false;
+    if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; }
+    if (fenceCall_) { fenceCall_->owner = nullptr; fenceCall_ = nullptr; }
+  }
   void finished();
   void openFence(const char* reason);
   void fenceMessage(const std::string& href);
@@ -236,8 +239,7 @@ public:
   WebKitWebContext* context() const { return context_; }
   WebKitNetworkSession* session() const { return session_; }
   WebKitSettings* settings() const { return settings_; }
-  // One content manager per view (the fence message must identify its view); all share
-  // the origin filter and the isolated-world fence script.
+  // One content manager per view, all sharing the origin filter.
   WebKitUserContentManager* newContentManager() const;
   Host& host() { return *host_; }
 
@@ -247,7 +249,6 @@ private:
   WebKitNetworkSession* session_ = nullptr;
   WebKitSettings* settings_ = nullptr;
   WebKitUserContentFilter* filter_ = nullptr;
-  WebKitUserScript* fenceScript_ = nullptr;
   WebKitUserContentFilterStore* filters_ = nullptr;
   std::map<WebKitWebView*, WpeView*> views_;
 };
@@ -279,12 +280,6 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
     delete box;
   }, box_);
   content_ = engine_.newContentManager();
-  g_signal_connect(content_, (std::string("script-message-received::") + FenceHandler).c_str(),
-                   G_CALLBACK(+[](WebKitUserContentManager*, JSCValue* value, gpointer d) {
-    char* href = jsc_value_is_string(value) ? jsc_value_to_string(value) : nullptr;
-    static_cast<WpeView*>(d)->fenceMessage(href ? href : "");
-    g_free(href);
-  }), this);
   view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
                                        "network-session", engine_.session(), "settings", engine_.settings(),
                                        "user-content-manager", content_, nullptr));
@@ -306,6 +301,7 @@ void WpeView::detach() {
   detached_ = true;
   if (frameTimer_) { g_source_remove(frameTimer_); frameTimer_ = 0; }
   if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; }
+  if (fenceCall_) { fenceCall_->owner = nullptr; fenceCall_ = nullptr; }
   if (box_) box_->owner = nullptr;  // late backend callbacks only release buffers
   if (view_) {
     engine_.track(view_, nullptr);
@@ -316,8 +312,6 @@ void WpeView::detach() {
   }
   if (im_) { g_object_unref(im_); im_ = nullptr; }
   if (content_) {
-    g_signal_handlers_disconnect_by_data(content_, this);
-    webkit_user_content_manager_unregister_script_message_handler(content_, FenceHandler, FenceWorld);
     g_object_unref(content_); content_ = nullptr;
   }
 }
@@ -362,8 +356,7 @@ void WpeView::openFence(const char* reason) {
 }
 
 void WpeView::fenceMessage(const std::string& href) {
-  AXIO_TRACE("fence message %s", href.c_str());
-  if (href.rfind("start:", 0) == 0) return;  // diagnostics: the script runs
+  AXIO_TRACE("fence answer %s", href.c_str());
   const char* uri = view_ ? webkit_web_view_get_uri(view_) : nullptr;
   // Only the committed document opens its own fence.
   if (uri && href == uri) openFence("document");
@@ -371,7 +364,23 @@ void WpeView::fenceMessage(const std::string& href) {
 }
 
 void WpeView::finished() {
-  if (fenced_ || fenceTimer_) return;
+  if (fenced_ || fenceTimer_ || !view_) return;
+  fenceCall_ = new FenceCall{this};
+  webkit_web_view_call_async_javascript_function(view_, FenceFunction, -1, nullptr, FenceWorld, nullptr, nullptr,
+                                                 [](GObject* source, GAsyncResult* result, gpointer data) {
+    auto* call = static_cast<FenceCall*>(data);
+    GError* error = nullptr;
+    JSCValue* value = webkit_web_view_call_async_javascript_function_finish(WEBKIT_WEB_VIEW(source), result, &error);
+    if (error) { AXIO_TRACE("fence query failed: %s", error->message); g_error_free(error); }
+    if (WpeView* view = call->owner) {
+      view->fenceCall_ = nullptr;
+      char* href = value && jsc_value_is_string(value) ? jsc_value_to_string(value) : nullptr;
+      if (href) view->fenceMessage(href);
+      g_free(href);
+    }
+    if (value) g_object_unref(value);
+    delete call;
+  }, fenceCall_);
   fenceTimer_ = g_timeout_add(FenceTimeoutMs, [](gpointer d) -> gboolean {
     auto* view = static_cast<WpeView*>(d);
     view->fenceTimer_ = 0;
@@ -625,21 +634,16 @@ bool WpeEngine::initialize(Host& host, const std::string& profile) {
   while (!pending.done && g_get_monotonic_time() < deadline) g_main_context_iteration(nullptr, TRUE);
   if (!pending.filter) return false;  // fail closed: no ready without the origin filter
   filter_ = pending.filter;
-  fenceScript_ = webkit_user_script_new_for_world(FenceSource, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
-                                                  WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, FenceWorld, nullptr, nullptr);
   return true;
 }
 
 WebKitUserContentManager* WpeEngine::newContentManager() const {
   WebKitUserContentManager* content = webkit_user_content_manager_new();
   webkit_user_content_manager_add_filter(content, filter_);
-  webkit_user_content_manager_add_script(content, fenceScript_);
-  webkit_user_content_manager_register_script_message_handler(content, FenceHandler, FenceWorld);
   return content;
 }
 
 void WpeEngine::shutdown() {
-  if (fenceScript_) { webkit_user_script_unref(fenceScript_); fenceScript_ = nullptr; }
   if (filter_) { webkit_user_content_filter_unref(filter_); filter_ = nullptr; }
   if (filters_) { g_object_unref(filters_); filters_ = nullptr; }
   if (settings_) { g_object_unref(settings_); settings_ = nullptr; }
