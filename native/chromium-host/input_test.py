@@ -31,10 +31,10 @@ input{position:absolute;left:40px;width:300px;height:30px;font:16px system-ui}#t
 <input id="t" autofocus autocomplete="off"><input id="p" type="password" autocomplete="off">
 <div id="blank">not editable</div><p class="badge">SYNTHETIC LOCAL INPUT FIXTURE - NO ACCOUNTS</p>
 <script>
-const t=document.querySelector('#t'),s={kd:[],kp:[],v:'',p:0,c:[],w:0,sy:0,pt:0,tt:0,vv:1,f:''};
+const t=document.querySelector('#t'),s={kd:[],kc:[],kp:[],v:'',p:0,c:[],w:0,sy:0,pt:0,tt:0,vv:1,f:''};
 function out(){s.v=t.value;s.p=document.querySelector('#p').value.length;s.sy=Math.round(scrollY);
   s.vv=Math.round(visualViewport.scale*100)/100;document.title=JSON.stringify(s).slice(0,1000);}
-addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':'')+(e.ctrlKey?'+ctrl':''));if(e.key==='b')e.preventDefault();out();},true);
+addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':'')+(e.ctrlKey?'+ctrl':''));s.kc=s.kc.slice(-7);s.kc.push(e.code+':'+e.location+':'+e.key);if(e.key==='b')e.preventDefault();out();},true);
 addEventListener('keypress',e=>{s.kp.push(e.key);out();},true);
 for(const [n,k] of [['compositionstart','s'],['compositionupdate','u'],['compositionend','e']])
   addEventListener(n,e=>{s.c.push(k+':'+e.data);out();},true);
@@ -244,6 +244,25 @@ def run():
             check(checks, 'linux_altgr_text', '\u20ac' in state['v'] and len(state['v']) == len(before) + 1,
                   dict(value=state['v'], keydown_key=state['kd'][-1], keypress=state['kp'][-1:],
                        verdict=verdict.get('reason')))
+            # The XKB keycodes and location flags the Linux presenter sends give Chromium's
+            # DOM `code` and `location` (and the layout key from windows_key_code).
+            mapped = {}
+            for name, native, windows, modifiers, text in (
+                    ('Numpad1', 87, 0x61, 256 | 512, '1'), ('ShiftRight', 62, 0x10, 2 | 2048, ''),
+                    ('ControlLeft', 37, 0x11, 4 | 1024, ''), ('KeyQ_as_a', 24, 65, 0, 'a'),
+                    ('Backquote', 49, 192, 0, '`'), ('IntlBackslash', 94, 226, 0, '<')):
+                before = len(session.state['kd'])
+                session.key((native, windows), text, modifiers=modifiers, char=bool(text))
+                state = session.page(lambda s: len(s['kd']) > before, 5)
+                mapped[name] = state['kc'][-1]
+            # code:location:key; IntlBackslash's key depends on CEF's keysym table, so only
+            # its code and location are required.
+            expected = {'Numpad1': 'Numpad1:3:1', 'ShiftRight': 'ShiftRight:2:Shift', 'ControlLeft': 'ControlLeft:1:Control',
+                        'KeyQ_as_a': 'KeyQ:0:a', 'Backquote': 'Backquote:0:`', 'IntlBackslash': 'IntlBackslash:0:'}
+            matches = all(mapped.get(name, '').startswith(value) if name == 'IntlBackslash' else mapped.get(name) == value
+                          for name, value in expected.items())
+            check(checks, 'linux_xkb_code_location_key', matches, dict(seen=mapped, expected=expected))
+
             # Information only: the DOM `key` of a char event sent with windows_key_code 0.
             session.done(session.command('key', type='char', native_key_code=26, windows_key_code=0,
                                          modifiers=ALTGR, text='\u20ac'))
