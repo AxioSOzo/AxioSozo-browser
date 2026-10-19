@@ -869,6 +869,11 @@ def package():
     for old in dist.glob(LINUX_APP_NAME + '-*.tar.xz'):
         old.unlink()
     env = {**build_environment(), 'ACCEPTED_MAR_CHANNEL_IDS': 'axiosozo-dev', 'MAR_CHANNEL_ID': 'axiosozo-dev'}
+    # MOZ_AUTOMATION=1 (set only to stop mach bootstrapping) also turns on the
+    # release-automation steps of packager.mk (`RUN_X ?= $(MOZ_AUTOMATION)`):
+    # find-dupes, which rejects Zen's duplicated icons, and the mozharness zip.
+    # Defined-but-empty values skip both for this development package.
+    env.update({'RUN_FIND_DUPES': '', 'RUN_MOZHARNESS_ZIP': ''})
     run_command(['./mach', 'package'], engine, env)
     archives = sorted(dist.glob(LINUX_APP_NAME + '-*.tar.xz'))
     if len(archives) != 1:
