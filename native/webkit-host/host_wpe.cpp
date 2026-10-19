@@ -590,7 +590,9 @@ bool WpeEngine::initialize(Host& host, const std::string& profile) {
     if (WpeView* view = engine->viewFor(webkit_download_get_web_view(download))) engine->host().denied(&view->tab(), "download_denied");
   }), this);
   context_ = webkit_web_context_new();
-  webkit_web_context_set_cache_model(context_, WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
+  // WEB_BROWSER keeps the back/forward cache (DOCUMENT_VIEWER disables it, so back re-fetched
+  // the page in CI run 39296774826). Caches live in this instance's private profile.
+  webkit_web_context_set_cache_model(context_, WEBKIT_CACHE_MODEL_WEB_BROWSER);
   webkit_web_context_set_spell_checking_enabled(context_, FALSE);
   settings_ = webkit_settings_new();
   webkit_settings_set_enable_developer_extras(settings_, FALSE);

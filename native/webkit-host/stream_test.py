@@ -98,9 +98,9 @@ def region(pixels, width, rect):
     return b''.join(pixels[(row * width + x) * 4:(row * width + x + w) * 4] for row in range(y, y + h))
 
 
-# Interior of the fixture's text field at 2x (tests/fixtures/engine.html), right of the caret.
+# Interior of the fixture's text field at 2x (tests/fixtures/engine.html), right of the caret
+# and inside the focus ring: changes only when the field's text (or placeholder) changes.
 INPUT_TEXT_2X = (240, 325, 530, 75)
-INPUT_FIELD_2X = (200, 318, 580, 90)
 
 
 class Session:
@@ -321,7 +321,7 @@ def scenario(session, origin, directory, engine, port='wpe'):
     session.title('input=WPE |')
     real = engine == 'webkit'
     # The frame must show the typed text inside the field, not merely differ somewhere.
-    typed = session.frame_after(count, lambda item: region(session.last[1], 1800, INPUT_FIELD_2X) != region(initial_pixels, 1800, INPUT_FIELD_2X)
+    typed = session.frame_after(count, lambda item: region(session.last[1], 1800, INPUT_TEXT_2X) != region(initial_pixels, 1800, INPUT_TEXT_2X)
                                 if real else session.last[1] != initial_pixels, capture=directory / 'input.png', seconds=5)
     assert session.last[1] != initial_pixels, 'typed text changed no pixel'
     # CEF-style down/char/up inserts the character once.
@@ -370,6 +370,11 @@ def scenario(session, origin, directory, engine, port='wpe'):
     assert generations(session.target) == (before_back['document_generation'] + 1, before_back['navigation_generation'] + 1)
     back_load = [e for e in session.events if e.get('event') == 'load' and e.get('target', {}).get('document_generation') == session.target['document_generation']]
     assert back_load and back_load[-1]['restored_from_history'] is True and back_load[-1]['http_status'] in (0, 200), back_load
+    if real:
+        # Restored from WebKit's back/forward cache: the page keeps its typed text and is not re-fetched.
+        assert region(session.last[1], 1800, INPUT_TEXT_2X) != region(initial_pixels, 1800, INPUT_TEXT_2X), 'back frame lost page-1 state'
+        pages = [r['path'] for r in [json.loads(line) for line in Path(session.directory / 'fixture-requests.jsonl').read_text().splitlines()]]
+        assert pages == ['/engine.html', '/engine.html?page=2'], pages
     back_stale = session.command('focus', target=before_back, focused=True)
     session.until(lambda kind, item: item.get('request_id') == back_stale and item.get('code') == 'stale_target')
     before_forward = generations(session.target)
