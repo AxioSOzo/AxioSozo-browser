@@ -189,7 +189,8 @@ test("overlay: one hash-pinned record replaces the existing Zen patch target; ev
   assert.equal(records[0].before_sha256, BEFORE);
   assert.equal(records[0].when, undefined, "always applied");
   assert.deepEqual(overlay.map(item => item.path), ["src/zen/common/ZenPreloadedScripts.js", "src/zen/common/jar.inc.mn", "configs/common/mozconfig",
-    "surfer.json", "package.json", "package-lock.json", "src/zen/toolkit/common/cocoa/ZenShareInternal.mm", "src/zen/moz.build", TARGET]);
+    "surfer.json", "package.json", "package-lock.json", "src/zen/toolkit/common/cocoa/ZenShareInternal.mm", "src/zen/moz.build", TARGET,
+    "prefs/firefox/performance.yaml"]);
   assert.equal(overlay.find(item => item.path === "src/zen/moz.build").when, "native");
   assert.equal(sha256(ORIGINAL), BEFORE, "the embedded fixture is the pinned upstream file");
   if (existsSync(UPSTREAM)) assert.equal(readFileSync(UPSTREAM, "utf8"), ORIGINAL, "and matches this worktree's upstream copy");

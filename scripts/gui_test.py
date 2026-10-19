@@ -81,6 +81,7 @@ return {title: document.title, windowtype: document.documentElement.getAttribute
         widget: Services.appinfo.widgetToolkit,
         contentSandboxLevel: Services.prefs.getIntPref("security.sandbox.content.level", -1),
         compositor: (() => { try { return window.windowUtils.layerManagerType; } catch (e) { return String(e); } })(),
+        webrenderNativeCompositorPref: Services.prefs.getBoolPref("gfx.webrender.compositor", false),
         gfx: (() => {
           const info = {};
           try {

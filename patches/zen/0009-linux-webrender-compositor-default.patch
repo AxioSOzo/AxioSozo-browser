@@ -1,0 +1,14 @@
+--- a/prefs/firefox/performance.yaml
++++ b/prefs/firefox/performance.yaml
+@@ -7,6 +7,10 @@
+ # Make sure its in sync with:
+ # https://searchfox.org/firefox-main/rev/dd2579cb6e7f1761a27ce64fb84d92c61d85c27f/modules/libpref/init/StaticPrefList.yaml#8396
+ - name: gfx.webrender.compositor
+-  condition: "defined(XP_WIN) || defined(XP_DARWIN) || defined(MOZ_WIDGET_GTK)"
++  # AxioSozo: Linux keeps Firefox's own default (off on GTK). On X11 with
++  # software WebRender (llvmpipe, no GPU) the native-compositor path clears
++  # picture caches with quads, which SWGL does not implement (Rust panic in
++  # swgl color_mask; Actions run 39319467610). macOS/Windows keep Zen's value.
++  condition: "defined(XP_WIN) || defined(XP_DARWIN)"
+   value: "@cond"
+   mirror: once
