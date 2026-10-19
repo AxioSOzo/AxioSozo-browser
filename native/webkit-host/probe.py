@@ -168,9 +168,11 @@ def apt_install(missing):
     sudo = [] if os.geteuid() == 0 else ['sudo', '-n']
     env = dict(os.environ, DEBIAN_FRONTEND='noninteractive')
     run_command(sudo + ['apt-get', 'update'], timeout=900)
-    run_command(sudo + ['apt-get', 'install', '-y', '--no-install-recommends', '--download-only', *missing], timeout=3600, env=env)
+    # An explicit pin may be older than what another step installed (e.g. build-dep): allow it.
+    flags = ['-y', '--no-install-recommends', '--allow-downgrades']
+    run_command(sudo + ['apt-get', 'install', *flags, '--download-only', *missing], timeout=3600, env=env)
     checked = verify_downloaded(missing)
-    run_command(sudo + ['apt-get', 'install', '-y', '--no-install-recommends', *missing], timeout=3600, env=env)
+    run_command(sudo + ['apt-get', 'install', *flags, *missing], timeout=3600, env=env)
     emit('PASS', action='pinned_debs_verified', sha256=checked)
 
 
