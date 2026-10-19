@@ -38,6 +38,17 @@ Branch `cloud/perf-pixel-path`; mirror `claude/perf-pixel-path-o0cxbu` (the sess
   64 KiB pipe 15.5 ms receive / 143 wakeups; 1 MiB pipe 6.8 ms / 9; 1 MiB + 24 % damage payload 1.3 ms;
   memfd ring 1.36 ms whole, 0.24 ms at 24 % damage.
 - Linux check and test on PR: run 39340175745 green.
+- Regression suites on this branch (workflows now also run on `cloud/perf-pixel-path`):
+  - linux-cef-host 39341140946 (3137181): x86_64 and arm64 verdict PASS on every gate (check, test-native incl.
+    transport-damage-payload-test, E0, stream, security, input, web, damage, node-tests, test-probe); macOS
+    compile-check green. Its `zen-gui-chromium` job fails in its setup step because `probe.py check` exits 1 on
+    Linux although it prints PASS — the known cloud/linux-cef issue (also on cloud/integration, see
+    docs/handoff/engine-bench.md), not this branch.
+  - linux-webkit-host 39341141004 (3137181) and 39342063286 (9833f88): real WPE 2.48.3 `test` exit 0; at 9833f88
+    the stream run includes `damage_payload` and `memfd` scenarios on real WebKit: PASS, rebuilt frame
+    byte-identical to a forced whole frame (0 differing pixels), payload 4.88 MB vs 7.02 MB whole.
+  - linux-webkit-zen 39341141669: unit + adapter jobs published (node: same 5 pre-existing failures as
+    cloud/integration, unrelated suites).
 - In-Zen A/B: run 39340885934 (queued; run 39340129366's A/B failed on harness bugs, fixed in d8c923c).
 
 ## Next steps
