@@ -118,7 +118,7 @@ def scenario(session, origin, directory, port='wpe'):
         count = session.frames
         session.command('wheel', x=450, y=300, modifiers=0, delta_x=0, delta_y=-400)
         scrolled = wait_state(session, lambda s: int(s.get('sy', '0')) > before, seconds=4)
-        assert int(scrolled['w']) > 0, scrolled
+        assert int(scrolled['w']) == 400, scrolled  # CSS-pixel delta preserved at 2x
         session.frame_after(count, capture=directory / 'input-scrolled.png')
         return dict(delta_y=-400, scroll_y=int(scrolled['sy']), dom_delta_y=int(scrolled['w']))
     step('wheel', wheel)

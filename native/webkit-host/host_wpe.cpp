@@ -379,13 +379,14 @@ void WpeView::mouse(const MouseInput& mouse) {
 }
 
 void WpeView::wheel(const WheelInput& wheel) {
-  // Pixel deltas as a smooth 2D axis event. cef-v1 delta_y < 0 scrolls down;
-  // libwpe/libinput y_axis > 0 scrolls down.
+  // Pixel deltas as a smooth 2D axis event. cef-v1 delta_y < 0 scrolls down. WebKit's WPE
+  // event factory reports DOM deltaY = -y_axis / device_scale (measured, CI run 39295936869:
+  // y_axis +400 at 2x gave deltaY -200), so the cef-v1 CSS-pixel delta is sent scaled, same sign.
   struct wpe_input_axis_2d_event event {};
   event.base.type = static_cast<wpe_input_axis_event_type>(wpe_input_axis_event_type_mask_2d | wpe_input_axis_event_type_motion_smooth);
   event.base.time = nowMs(); event.base.x = int(std::lround(wheel.x * scale_)); event.base.y = int(std::lround(wheel.y * scale_));
   event.base.modifiers = keyboardModifiers(wheel.modifiers) | buttons_;
-  event.x_axis = -double(wheel.deltaX); event.y_axis = -double(wheel.deltaY);
+  event.x_axis = double(wheel.deltaX) * scale_; event.y_axis = double(wheel.deltaY) * scale_;
   wpe_view_backend_dispatch_axis_event(backend_, &event.base);
 }
 
