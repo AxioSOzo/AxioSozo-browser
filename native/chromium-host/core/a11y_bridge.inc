@@ -13,10 +13,8 @@
 // The host side is platform-neutral. Exposing the mirrored tree to a platform
 // accessibility API (VoiceOver via Zen's engine-view hunk on macOS; AT-SPI on Linux)
 // is Zen's job; the Linux/AT-SPI side does not exist yet (NOT_VERIFIED).
-#include "include/capi/cef_accessibility_handler_capi.h"
-#include "include/capi/cef_values_capi.h"
-#include "../a11y_core.hpp"
-#include <cstddef>
+// Its headers (CEF accessibility/values C API, ../a11y_core.hpp) are included at the
+// top of host_core.cc: this file is textually inside namespace axio::host.
 
 static constexpr size_t AxValueBudget = 2000000;  // cef_value_t nodes converted per callback
 static constexpr size_t AxSetValueLimit = 4096;

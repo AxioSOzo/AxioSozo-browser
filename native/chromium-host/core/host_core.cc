@@ -12,9 +12,11 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -22,6 +24,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include "include/capi/cef_accessibility_handler_capi.h"
+#include "include/capi/cef_values_capi.h"
+
+#include "../a11y_core.hpp"
 #include "../transport.hpp"
 #include "cef_util.hpp"
 #include "json.hpp"
