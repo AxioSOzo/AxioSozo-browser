@@ -73,10 +73,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT/webkit"
           start=$(date +%s)
-          xcrun clang++ -std=c++20 -fobjc-arc -O2 -g -arch arm64 -mmacosx-version-min=14.5 -Wall -Wextra -Wno-unused-parameter \
-            native/webkit-host/mac/host_mac.mm native/webkit-host/mac/surface_host.mm -o "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" \
-            -framework Cocoa -framework WebKit -framework IOSurface -framework CoreGraphics -lbsm 2>&1 | tee "$EVIDENCE_OUT/build.log"
-          codesign --force --sign - "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost"
+          native/webkit-host/mac/build.sh 2>&1 | tee "$EVIDENCE_OUT/build.log"
           echo "{\"build_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/build.json"
           otool -L "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" > "$EVIDENCE_OUT/otool-L.txt"
       - name: Engine-free unit tests (strict JSON, AXCF transport, stream core harness)
