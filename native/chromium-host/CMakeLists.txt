@@ -11,7 +11,8 @@
 # flags come from the distribution's own cmake/ (FindCEF), except the rpath: CEF's
 # default "-Wl,-rpath,." would search the *working directory*; the host uses $ORIGIN.
 cmake_minimum_required(VERSION 3.21)
-project(axiosozo_cef_host CXX)
+# C is enabled only because the distribution's cef_variables.cmake probes C flags.
+project(axiosozo_cef_host C CXX)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
   message(FATAL_ERROR "This CMake project builds the Linux host only; macOS uses probe.py setup.")
