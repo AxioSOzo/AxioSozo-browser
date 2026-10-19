@@ -1,0 +1,13 @@
+CHECK gate summary (Linux x86_64):
+  PASS        exit=0   cargo fmt --all --
+  PASS        exit=0   cargo clippy --locked --offline
+  FAIL        exit=1   packages/provider-host/cli.mjs check
+  FAIL        exit=1   scripts/zen.py check
+  BLOCKED_ENV exit=2   native/chromium-host/probe.py check  [macOS CEF probe; the Linux CEF host is the cloud/linux-cef workstream]
+  PASS        exit=0   scripts/project_reader.py check
+  PASS        exit=0   scripts/arrival_subprocess.py check
+  PASS        exit=0   scripts/agent_socket_install.py check
+  PASS        exit=0   scripts/agent_notify_install.py check
+  BLOCKED_ENV exit=20  scripts/agent_bridge_install.py check
+  PASS        exit=0   scripts/manifest_accept.py check
+CHECK: 7 PASS, 2 FAIL, 2 BLOCKED_ENV
