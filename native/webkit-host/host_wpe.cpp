@@ -48,6 +48,7 @@ constexpr const char* SandboxKillSwitch = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGER
 constexpr const char* FenceWorld = "axiosozo-paint-fence";
 constexpr const char* FenceHandler = "axiosozoPaintFence";
 constexpr const char* FenceSource =
+  "window.webkit.messageHandlers.axiosozoPaintFence.postMessage('start:'+location.href);"
   "addEventListener('pageshow',()=>{const f=requestAnimationFrame;"
   "f(()=>f(()=>f(()=>window.webkit.messageHandlers.axiosozoPaintFence.postMessage(location.href)))));},true);";
 constexpr int FenceTimeoutMs = 2000;  // pages where the script cannot run still present
@@ -361,6 +362,8 @@ void WpeView::openFence(const char* reason) {
 }
 
 void WpeView::fenceMessage(const std::string& href) {
+  AXIO_TRACE("fence message %s", href.c_str());
+  if (href.rfind("start:", 0) == 0) return;  // diagnostics: the script runs
   const char* uri = view_ ? webkit_web_view_get_uri(view_) : nullptr;
   // Only the committed document opens its own fence.
   if (uri && href == uri) openFence("document");
