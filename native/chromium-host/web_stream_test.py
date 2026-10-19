@@ -179,6 +179,10 @@ def run(interaction_timeout=15):
             def since(mark, match):
                 seen = [item for item in session.events[mark:] if match(item)]
                 return seen[0] if seen else session.until(lambda _, item: match(item))
+
+            def session_wait(mark, match, seconds):
+                seen = [item for item in session.events[mark:] if match(item)]
+                return seen[0] if seen else session.until(lambda _, item: match(item), seconds)
             is_dialog = lambda item: item.get('event') == 'prompt' and item.get('kind') == 'dialog'
             # A blocked renderer may not paint before its alert: wait for the prompt, not a frame.
             mark = len(session.events)
@@ -201,15 +205,26 @@ def run(interaction_timeout=15):
             result['tests'].append('navigation_cancels_open_javascript_dialog_without_hang')
             # Right-click off any link: CEF reports the empty link/source URLs as NULL
             # userfree strings (E1 2026-09-30: freeing them hung the host).
-            # Chromium dispatches input to a document only after its first frame (paint
-            # holding), so wait for a frame of the current document before clicking.
+            # Chromium drops input to a new document while it still holds the previous
+            # paint (same-origin paint holding). A host frame labelled with the new
+            # generation can still show the old content, so the right-click is repeated
+            # (at most 4 times, 2 s apart) until Chromium asks for its menu; the attempt
+            # count is recorded.
             current = session.target['document_generation']
             if not any(target['document_generation'] == current for target in session.frame_targets):
                 session.until(lambda kind, item: kind == 2 and item['target']['document_generation'] == current)
-            mark = len(session.events)
-            for kind in ('down', 'up'):
-                completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1, mouse_leave=False)
-            menu = since(mark, lambda item: item.get('event') == 'prompt' and item.get('kind') == 'context_menu')
+            is_menu = lambda item: item.get('event') == 'prompt' and item.get('kind') == 'context_menu'
+            menu = None
+            for attempt in range(1, 5):
+                mark = len(session.events)
+                for kind in ('down', 'up'):
+                    completed('mouse', type=kind, x=700, y=500, modifiers=0, button='right', click_count=1,
+                              mouse_leave=False)
+                with contextlib.suppress(TimeoutError):
+                    menu = since(mark, is_menu) if attempt == 4 else session_wait(mark, is_menu, 2)
+                if menu:
+                    break
+            result['context_menu_attempts'] = attempt
             assert menu['details']['link_url'] == '' and menu['details']['source_url'] == '', menu['details']
             assert completed('context_menu_command', prompt_id=menu['prompt_id'], command='dismiss', index=0)['status'] == 'success'
             assert completed('focus', focused=True)['status'] == 'success' and session.process.poll() is None
