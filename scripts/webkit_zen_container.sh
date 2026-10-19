@@ -64,7 +64,7 @@ if [ "${MODE:-e2e}" = adapter ]; then
   setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/home/axio/node/bin:/usr/bin:/bin \
     AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" AXIOSOZO_WEBKIT_LIVE_HOST="$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost" \
     AXIOSOZO_WEBKIT_LIVE_EVIDENCE="$OUT/adapter" \
-    node --test --test-reporter=spec "$REPO/apps/browser/tests/webkit-host-live.test.mjs" >"$OUT/adapter/node.log" 2>&1 || astatus=$?
+    timeout -k 10 240 node --test --test-reporter=spec "$REPO/apps/browser/tests/webkit-host-live.test.mjs" >"$OUT/adapter/node.log" 2>&1 || astatus=$?
   log "live adapter test exit $astatus"
   tail -n 30 "$OUT/adapter/node.log"
   ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"

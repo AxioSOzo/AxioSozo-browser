@@ -75,7 +75,7 @@ jobs:
             apps/browser/tests/console-errors-native.test.mjs 2>&1 | tee "$EVIDENCE_OUT/node-unit.log"
       - name: Whole browser node suite (informational; pre-existing macOS-bound failures are listed)
         run: |
-          node --test apps/browser/tests/*.test.mjs > "$EVIDENCE_OUT/node-all.log" 2>&1 || true
+          node --test --test-reporter=tap apps/browser/tests/*.test.mjs > "$EVIDENCE_OUT/node-all.log" 2>&1 || true
           grep -E "^# (tests|pass|fail)|^not ok" "$EVIDENCE_OUT/node-all.log" | tee "$EVIDENCE_OUT/node-all-summary.txt"
       - name: browser-core engine enum (cargo test)
         run: |

@@ -76,10 +76,13 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
   const origin = `http://127.0.0.1:${server.address().port}`;
   const profile = mkdtempSync(join(process.env.AXIOSOZO_BUILD_ROOT ?? tmpdir(), "webkit-live-"));
   chmodSync(profile, 0o700); mkdirSync(join(profile, "tmp"), { mode: 0o700 });
-  const child = spawn(HOST, ["--stream", profile, profile], { env: webkitHostEnvironment(profile), stdio: ["pipe", "pipe", "pipe"] });
+const log = { requests, frames: [], events: [], steps: {}, at: "start" };
+  const child = spawn(HOST, ["--stream", profile, profile], { env: { ...webkitHostEnvironment(profile), AXIOSOZO_WEBKIT_TRACE: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+  // Navigations have no deadline by contract; this test does. Never leave the host running.
+  const step = label => { log.at = label; };
+  const watchdog = setTimeout(() => { log.watchdog = log.at; child.kill("SIGKILL"); server.close(); }, 100000);
   const process_ = wrap(child);
-  const log = { requests, frames: [], events: [], steps: {} };
-  const instance = "webkit-live-" + randomBytes(6).toString("hex");
+    const instance = "webkit-live-" + randomBytes(6).toString("hex");
   const token = randomBytes(32).toString("hex");
   const host = new EngineStreamHost(process_, { profile: webkitProfile(), token, instance, identity: origin,
     timers: { setTimeout, clearTimeout }, frameDamage: true, requestPrefix: "wk" });
@@ -91,7 +94,7 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
   });
   const notify = item => { for (const waiter of [...waiters]) if (waiter.predicate(item)) { waiters.splice(waiters.indexOf(waiter), 1); waiter.resolve(item); } };
   try {
-    await host.connect();
+    step('await host.connect();'); await host.connect();
     log.ready = host.ready;
     assert.equal(host.ready.webkit, "2.48.3"); assert.equal(host.capabilities.frame_damage, true);
     const adapter = new WebKitEngineAdapter(host, {
@@ -103,20 +106,20 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
         ...(event.event === "load" ? { http_status: event.http_status, restored: event.restored_from_history } : {}) }); notify({ kind: "event", event }); },
     });
     assert.ok(adapter instanceof EngineStreamTarget);
-    const target = await adapter.create(origin + "/engine.html", { width: 900, height: 650, device_scale: 2 });
+    step('const target = await adapter.create('); const target = await adapter.create(origin + "/engine.html", { width: 900, height: 650, device_scale: 2 });
     assert.equal(target.engine, "webkit");
     assert.equal(log.frames[0].w, 1800); assert.equal(log.frames[0].damage, null, "first presented frame is whole");
     if (EVIDENCE) png(join(EVIDENCE, "live-initial.png"), 1800, 1300, last.pixels);
     const title = text => until(item => item.kind === "event" && item.event.event === "title" && item.event.title.includes(text), "title " + text);
-    await adapter.focus(adapter.target, true);
+    step('await adapter.focus(adapter.target, true'); await adapter.focus(adapter.target, true);
     // XKB hardware code + text, down/char/up (§8.1 rows 6, 7): inserted once.
     const typed = title("input=w |");
     for (const type of ["down", "char", "up"]) await adapter.input(adapter.target, "key", { type, native_key_code: XKB_KEYS.KeyW, windows_key_code: 87, modifiers: 0, text: "w" });
-    await typed;
+    step('await typed;'); await typed;
     const committed = title("input=wk |");
     await adapter.input(adapter.target, "ime_commit_text", { text: "k" });
-    await committed;
-    const damaged = await until(item => item.kind === "frame" && item.metadata.damage
+    step('await committed;'); await committed;
+    step('const damaged = await until'); const damaged = await until(item => item.kind === "frame" && item.metadata.damage
       && item.metadata.damage[0][2] * item.metadata.damage[0][3] < 1800 * 1300, "a partially damaged frame (caret or text)");
     const [, , dw, dh] = damaged.metadata.damage[0];
     log.steps.typing_damage_fraction = (dw * dh) / (1800 * 1300);
@@ -125,23 +128,23 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
     // Wheel (CSS px, engine-stream sign): the page scrolls and repaints.
     const scrolled = until(item => item.kind === "frame", "frame after wheel");
     await adapter.input(adapter.target, "wheel", { x: 400, y: 300, modifiers: 0, delta_x: 0, delta_y: -400 });
-    await scrolled;
+    step('await scrolled;'); await scrolled;
     // GET navigation advances both generations by exactly one.
     const before = adapter.target;
     const page2 = title("page=2");
     const page2Frame = until(item => item.kind === "frame" && item.metadata.target.document_generation === before.document_generation + 1, "page-2 frame");
     assert.equal((await adapter.navigate(before, origin + "/engine.html?page=2")).status, "success");
-    await page2;
+    step('await page2;'); await page2;
     assert.equal(adapter.target.document_generation, before.document_generation + 1);
     assert.equal(adapter.target.navigation_generation, before.navigation_generation + 1);
     // A command for the old target is refused by the host itself (§3), nothing dispatched.
     await assert.rejects(host.request("focus", { focused: true }, before, { owner: null }), /STALE_ENGINE_TARGET/u);
-    await page2Frame;
+    step('await page2Frame;'); await page2Frame;
     if (EVIDENCE) png(join(EVIDENCE, "live-page2.png"), 1800, 1300, last.pixels);
     // Back: WebKit's back/forward cache restore (HTTP 200 or 0 with restored_from_history).
     const restored = until(item => item.kind === "event" && item.event.event === "load", "load after back");
     assert.equal((await adapter.back(adapter.target)).status, "success");
-    const load = (await restored).event;
+    step('const load = (await restored).event;'); const load = (await restored).event;
     log.steps.back_load = { http_status: load.http_status, restored: load.restored_from_history };
     assert.equal(load.restored_from_history, true);
     assert.equal(adapter.target.document_generation, before.document_generation + 2);
@@ -149,10 +152,10 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
     // Resize to 1x: frames at exact physical size.
     const oneX = until(item => item.kind === "frame" && item.metadata.width === 800 && item.metadata.height === 600, "1x frame");
     assert.equal((await adapter.resize(adapter.target, { width: 800, height: 600, device_scale: 1 })).status, "success");
-    await oneX;
+    step('await oneX;'); await oneX;
     if (EVIDENCE) png(join(EVIDENCE, "live-1x.png"), 800, 600, last.pixels);
     assert.equal(log.requests.filter(line => line === "GET /engine.html").length, 1, "back restored without a fetch");
-    await adapter.close();
+    step('await adapter.close();'); await adapter.close();
     assert.equal(host.status, "closed");
     assert.equal((await process_.wait()).exitCode, 0);
     log.status = "PASS";
@@ -160,8 +163,8 @@ test("Zen's WebKit client drives the real WPE host: ready, frames with damage, i
     log.status = "FAIL"; log.error = String(error?.stack ?? error); log.stderr = process_.stderrText().slice(-4000);
     throw error;
   } finally {
-    if (EVIDENCE) writeFileSync(join(EVIDENCE, "live-result.json"), JSON.stringify({ ...log, stderr_tail: process_.stderrText().slice(-4000) }, null, 2));
-    child.kill("SIGKILL"); server.close();
+    if (EVIDENCE) writeFileSync(join(EVIDENCE, "live-result.json"), JSON.stringify({ ...log, stderr_tail: process_.stderrText().slice(-20000) }, null, 2));
+    clearTimeout(watchdog); child.kill("SIGKILL"); server.close();
     rmSync(profile, { recursive: true, force: true });
   }
 });
