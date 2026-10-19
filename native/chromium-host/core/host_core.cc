@@ -75,6 +75,9 @@ static bool webBrowsing = false;
 // Optional frame damage (hello `frame_damage:true`): every frame names the one
 // physical-pixel rectangle that changed since the previous frame delivered for its target.
 static bool frameDamage = false;
+// Optional with frame damage (hello `damage_payload:true`): a damaged frame's payload is
+// only the damage rectangle's rows. Zen keeps the whole frame (cef-v1 "Frame damage").
+static bool damagePayload = false;
 static std::unordered_set<std::string> requestIds;
 static std::string shutdownRequest;
 static uint64_t frameId = 0;
@@ -390,6 +393,7 @@ bool streamHandshake() {
       // This platform has no Mach surface service: surface_* keys are not admitted.
       if (hello.has("frame_rate")) fields.push_back("frame_rate");
       if (hello.has("frame_damage")) fields.push_back("frame_damage");
+      if (hello.has("damage_payload")) fields.push_back("damage_payload");
       if (!keys(&hello, fields) || !integer(hello.get("version"), 1) || hello.num("version") != 1 ||
           hello.str("method") != "hello" || !hello.get("method")->isString() || !tokenValue(hello.get("token")) ||
           !identifier(hello.get("engine_instance")) || !textValue(hello.get("fixture_origin"), web ? 4096 : 128))
@@ -405,6 +409,10 @@ bool streamHandshake() {
       if (hello.has("frame_rate")) frameRate = int(hello.num("frame_rate"));
       if (hello.has("frame_damage") && !boolean(hello.get("frame_damage"))) return false;
       frameDamage = hello.has("frame_damage") && hello.flag("frame_damage");
+      // Rectangle-only payloads need damage; asking without it is a malformed hello.
+      if (hello.has("damage_payload") && (!boolean(hello.get("damage_payload")) || !frameDamage)) return false;
+      damagePayload = hello.has("damage_payload") && hello.flag("damage_payload");
+      transport.setDamagePayload(damagePayload);
       streamToken = hello.str("token");
       streamInstance = hello.str("engine_instance");
       fixtureOrigin = claimed;
@@ -434,7 +442,7 @@ static void streamReadyEvent() {
       {"ax_actions", axActionNames()}, {"file_dialogs", webBrowsing}, {"javascript_dialogs", webBrowsing},
       {"heartbeat_interval_ms", HeartbeatIntervalMs}, {"context_menu", webBrowsing}, {"http_auth", webBrowsing},
       {"find", webBrowsing}, {"zoom", webBrowsing}, {"popup_blocked", webBrowsing}, {"media_capture", false},
-      {"frame_damage", frameDamage}});
+      {"frame_damage", frameDamage}, {"damage_payload", damagePayload}});
   event("ready", json::object({{"cef", CEF_VERSION}, {"chromium", runtimeChromium}, {"runtime_cef", runtimeCEF},
                                {"runtime_chromium", runtimeChromium}, {"platform", platform::name()},
                                {"sandbox_configured", true}, {"engine_instance", streamInstance},

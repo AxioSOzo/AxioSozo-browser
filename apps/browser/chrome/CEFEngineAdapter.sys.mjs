@@ -4,6 +4,7 @@
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
+import { DamagePayloadAssembler } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -279,7 +280,7 @@ function validDamage(damage, width, height) {
     && x + w <= width && y + h <= height;
 }
 
-export async function readAXCF(pipe, { damage = false } = {}) {
+export async function readAXCF(pipe, { damage = false, payload = false } = {}) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -297,10 +298,14 @@ export async function readAXCF(pipe, { damage = false } = {}) {
     if (!hasKeys(metadata, damage ? [...frameKeys, "damage"] : frameKeys)
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= 4096)
-        || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
+        || metadata.stride !== metadata.width * 4
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
         || metadata.format !== "BGRA8"
-        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))) throw new Error("INVALID_AXCF_FRAME");
+        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))
+        // `damage_payload`: the payload is exactly the damage rectangle's rows.
+        || size !== (damage && payload ? metadata.damage[0][2] * metadata.damage[0][3] * 4 : metadata.stride * metadata.height)) {
+      throw new Error("INVALID_AXCF_FRAME");
+    }
     validateCEFTarget(metadata.target, { browsingMode: "web" });
   }
   // Allocate/read large pixels only after both framing and metadata are checked.
@@ -402,10 +407,10 @@ export class CEFHostConnection {
   // Heartbeat watchdog (armed by a ready capability): last accepted sequence, the time anything
   // was last heard or the watchdog last reset, the pending check timer and the wake observer.
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatInterval = null; #heartbeatSeen = 0;
-  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers;
+  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers; #assembler = null;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
     shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
-    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64" }) {
+    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64", damagePayload = true }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
     if (!CEF_PLATFORMS.includes(platform)) throw new Error("INVALID_CEF_BOOTSTRAP");
     // The IOSurface path (engine-surface-v1) exists on macOS only.
@@ -418,6 +423,9 @@ export class CEFHostConnection {
     this.platform = platform;
     // Linux pipe frames name their changed rectangle so chrome uploads only that.
     this.frameDamage = platform !== "macosarm64" && !surface;
+    // ...and carry only that rectangle (hello `damage_payload`); frames are rebuilt per target.
+    this.damagePayload = this.frameDamage && damagePayload;
+    this.#assembler = this.damagePayload ? new DamagePayloadAssembler() : null;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
@@ -464,7 +472,8 @@ export class CEFHostConnection {
     const hello = { version: 1, method: "hello", token: this.#token,
       engine_instance: this.instance, fixture_origin: this.identity,
       ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}),
-      ...(this.frameDamage ? { frame_damage: true } : {}) };
+      ...(this.frameDamage ? { frame_damage: true } : {}),
+      ...(this.damagePayload ? { damage_payload: true } : {}) };
     if (this.#endpoint) {
       const endpoint = this.#endpoint;
       try {
@@ -620,7 +629,10 @@ export class CEFHostConnection {
   async #read() {
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout, { damage: this.frameDamage });
+      const packet = await readAXCF(this.#process.stdout, { damage: this.frameDamage, payload: this.damagePayload });
+      const { kind, metadata: value } = packet;
+      // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
+      const pixels = kind === 2 && this.#assembler ? this.#assembler.apply(value, packet.pixels) : packet.pixels;
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -657,6 +669,7 @@ export class CEFHostConnection {
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_CEF_CREATION");
         adapter = creation?.abandoned ? null : this.#adapterFor(value.target, value.event === "created");
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
+        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
       } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
@@ -710,6 +723,7 @@ export class CEFHostConnection {
         || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean"
         // Frame damage is exactly what the hello asked for.
         || (capabilities?.frame_damage ?? false) !== this.frameDamage
+        || (capabilities?.damage_payload ?? false) !== this.damagePayload
         // Optional liveness announcement; a value that could never fit the 5 s rule is not trusted.
         || (capabilities?.heartbeat_interval_ms !== undefined && !(Number.isInteger(capabilities.heartbeat_interval_ms)
           && capabilities.heartbeat_interval_ms >= 100 && capabilities.heartbeat_interval_ms <= 2000))) throw new Error("UNVERIFIED_CEF_RUNTIME");

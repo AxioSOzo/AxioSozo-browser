@@ -6,6 +6,7 @@
      apps/browser/chrome/CEFPresenter.sys.mjs by run_browser.py (sha256 recorded in the result). -->
 <body style="margin:0;background:#000"><canvas id="c"></canvas><canvas id="g"></canvas>
 <script>
+/*ENGINE_FRAME_SURFACE*/
 /*BGRA_TO_RGBA*/
 /*BASELINE_BGRA_TO_RGBA*/
 const SIZES = [[900, 650], [1800, 1300]];
@@ -84,6 +85,21 @@ async function run() {
     r.presenter_draw_full_ms = await time(b => { ctx.putImageData(new ImageData(bgraToRGBA(b), w, h), 0, 0); flush(); }, make);
     if (typeof baselineBgraToRGBA === 'function')
       r.baseline_draw_full_ms = await time(b => { ctx.putImageData(new ImageData(baselineBgraToRGBA(b), w, h), 0, 0); flush(); }, make);
+    if (typeof EngineFrameSurface === 'function') {
+      // The presenters' path (EngineFrameSurface): convert into a persistent ImageData + dirty-rect put.
+      const sw = { requestAnimationFrame() {}, performance, ImageData };
+      const surface = new EngineFrameSurface(sw, canvas, { onPaint() {} });
+      let id = 1;
+      surface.accept({ frame_id: id++, width: w, height: h }, make()); surface.paint();
+      r.surface_draw_full_ms = await time(b => { surface.invalidate(); surface.accept({ frame_id: id++, width: w, height: h }, b);
+        surface.paint(); flush(); }, make);
+      r.surface_draw_damage10_ms = await time(b => { surface.accept({ frame_id: id++, width: w, height: h,
+        damage: [[0, (id * 37) % (h - band), w, band]] }, b); surface.paint(); flush(); }, make);
+      const out = new Uint8ClampedArray(w * h * 4), src = make();
+      convertBGRARect(src, w, 0, 0, out, w, 0, 0, w, h);
+      const ref = new Uint8Array(bgraToRGBAFast(make()).buffer);
+      r.surface_identical_output = out.every((v, i) => v === ref[i]);
+    }
     r.candidate_damage10_fast_put_ms = await time(b => {
       const view = new Uint8Array(b, 0, w * band * 4).slice(0).buffer;  // only the damaged rows are converted
       ctx.putImageData(new ImageData(bgraToRGBAFast(view), w, band), 0, 0); flush(); }, make);

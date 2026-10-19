@@ -41,7 +41,7 @@ export function webkitPlatform(os, abi) {
   return cpu === "x86_64" ? "linux-x86_64" : null;
 }
 
-export function validateWebKitReady(value, { frameDamage = false, platform = "linux-x86_64" } = {}) {
+export function validateWebKitReady(value, { frameDamage = false, damagePayload = false, platform = "linux-x86_64" } = {}) {
   const capabilities = value?.capabilities;
   if (value?.engine !== "webkit" || value.webkit_port !== "wpe" || value.webkit !== WEBKIT_VERSION
       || value.runtime_webkit !== WEBKIT_VERSION || value.libwpe !== LIBWPE_VERSION
@@ -53,7 +53,8 @@ export function validateWebKitReady(value, { frameDamage = false, platform = "li
   for (const [name, expected] of Object.entries(REQUIRED_CAPABILITIES)) {
     if (capabilities[name] !== expected) throw new Error("UNVERIFIED_WEBKIT_RUNTIME");
   }
-  if ((capabilities.frame_damage ?? false) !== frameDamage || typeof capabilities.ime_commit !== "boolean"
+  if ((capabilities.frame_damage ?? false) !== frameDamage || (capabilities.damage_payload ?? false) !== damagePayload
+      || typeof capabilities.ime_commit !== "boolean"
       || ![60, 120].includes(capabilities.frame_rate)) throw new Error("UNVERIFIED_WEBKIT_RUNTIME");
   return true;
 }
@@ -63,7 +64,7 @@ export function webkitProfile({ platform = "linux-x86_64" } = {}) {
     engine: "webkit", readyFields: READY_FIELDS, cursors: CURSORS, imeLimit: 1024,
     // §8.1 row 12: a back/forward-cache restore reports the cached 200 or 0.
     restoreStatuses: Object.freeze([0, 200]),
-    validateReady: (value, { frameDamage }) => validateWebKitReady(value, { frameDamage, platform }),
+    validateReady: (value, { frameDamage, damagePayload }) => validateWebKitReady(value, { frameDamage, damagePayload, platform }),
   });
 }
 
@@ -139,7 +140,8 @@ export class WebKitEngineAdapter extends EngineStreamTarget {
  * Start a private WebKit host for one Zen tab and attach it. Fixture mode only;
  * every path and the fixture origin are re-validated here, at the spawn.
  */
-export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFailure, frameDamage = true }) {
+export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFailure, frameDamage = true,
+  damagePayload = frameDamage }) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
   const platform = webkitPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI);
@@ -169,7 +171,8 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   const cleanup = () => IOUtils.remove(profile, { recursive: true });
   process.wait().then(cleanup, cleanup).catch(() => {});
   const host = new EngineStreamHost(process, { profile: webkitProfile({ platform }), token, instance, identity: origin,
-    timers, frameDamage, requestPrefix: "wk" });
+    // Rectangle-only payloads (engine-stream-v1 §6.2): the pipe carries the damage, not the frame.
+    timers, frameDamage, damagePayload, requestPrefix: "wk" });
   try { await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
   return new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: instance, identity: origin,

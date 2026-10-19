@@ -40,12 +40,14 @@ class Pipe {
 }
 function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRace=false,nativeInputError=null,
   nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200,
-  platform=null,capabilities={},frameFields={}}={}) {
+  platform=null,capabilities={},frameFields={},damagePayload=false}={}) {
   const pipe = new Pipe(), writes=[], rendered=[], failures=[], events=[];
   let finished, current=full, frameID=1;
   const exit = new Promise(resolve => { finished=resolve; });
   const event = value => { if(value.event==='navigation')current=value.target;pipe.push(packet(1,{version:1,...value})); };
-  const sendFrame = (target=current,id=frameID++,fields=frameFields) => pipe.push(packet(2,{...frame(target,id),...fields},new Uint8Array(16)));
+  // With damage_payload the payload is the damage rectangle's rows (filled with the frame id).
+  const sendFrame = (target=current,id=frameID++,fields=frameFields) => pipe.push(packet(2,{...frame(target,id),...fields},
+    damagePayload&&fields.damage?new Uint8Array(fields.damage[0][2]*fields.damage[0][3]*4).fill(id):new Uint8Array(16)));
   const process = { stdout:{read:async count=>transformRead(await pipe.read(count))}, wait:()=>exit,
     kill:async()=>{pipe.close();finished({exitCode:-15});},
     stdin:{close:async()=>{pipe.close();finished({exitCode:0});},write:async text=>{
@@ -94,7 +96,7 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
     }} };
   const callbacks={onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)};
   // `platform`: an owned connection built the way launchHost builds one on that platform.
-  const host=platform?new CEFHostConnection(process,{token,timers,deadline:1000,browsingMode,platform,
+  const host=platform?new CEFHostConnection(process,{token,timers,deadline:1000,browsingMode,platform,damagePayload,
     instance:pending.engine_instance,identity:pending.identity}):process;
   const adapter=new CEFEngineAdapter(host,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,...callbacks});
   return {adapter,host,pipe,writes,rendered,failures,events,sendFrame,event};
@@ -862,6 +864,24 @@ test('Linux frame damage: validated, delivered to the presenter, dropped after a
   await assert.rejects(readAXCF(pipe),/INVALID_AXCF_FRAME/);
 });
 
+test('Linux damage_payload: rectangle-only payloads are rebuilt into whole frames per target',async()=>{
+  const f=fixture({platform:'linux64',overrideReady:{platform:'linux64'},capabilities:{frame_damage:true,damage_payload:true},
+    damagePayload:true,frameFields:{damage:[[0,0,2,2]]}});
+  await f.host.connect();await f.adapter.connect();await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  assert.equal(f.writes[0].damage_payload,true);assert.equal(f.writes[0].frame_damage,true);
+  assert.equal(f.rendered[0].pixels.byteLength,16);
+  f.sendFrame(undefined,undefined,{damage:[[1,1,1,1]]});await tick();await tick();
+  assert.deepEqual(f.rendered.at(-1).meta.damage,[[1,1,1,1]]);
+  // Pixel (1,1) is the new frame's; the rest stays from the whole first frame (frame id 1).
+  assert.deepEqual([...new Uint8Array(f.rendered.at(-1).pixels)],[1,1,1,1, 1,1,1,1, 1,1,1,1, 2,2,2,2]);
+  // A whole-frame-sized payload for a partial damage rectangle is refused.
+  await assert.rejects(readAXCF((()=>{const pipe=new Pipe();pipe.push(packet(2,{...frame(),damage:[[0,0,1,1]]},new Uint8Array(16)));return pipe;})(),
+    {damage:true,payload:true}),/INVALID_AXCF_FRAME/);
+  // A host that does not announce it is refused.
+  const ignored=fixture({platform:'linux64',overrideReady:{platform:'linux64'},capabilities:{frame_damage:true},damagePayload:true});
+  await assert.rejects(ignored.host.connect());
+});
+
 test('presenter uploads only the damaged rectangle once its canvas is current',async()=>{
   // 2x2 BGRA: blue, green / red, half-transparent white.
   const bgra=Uint8Array.of(255,0,0,255, 0,255,0,255, 0,0,255,255, 128,128,128,128).buffer;
@@ -872,7 +892,8 @@ test('presenter uploads only the damaged rectangle once its canvas is current',a
   const presenter=new CEFPresenter(f.win,f.gecko,{launch:f.launch});
   const switching=presenter.switchToChromium();await tick();f.paint();f.settle.resolve(full);await switching;
   const record=presenter.record;
-  record.canvas.getContext=()=>({putImageData:(image,x,y)=>puts.push([image.width,image.height,x,y])});
+  // EngineFrameSurface uploads with putImageData's dirty-rectangle form from one whole-frame ImageData.
+  record.canvas.getContext=()=>({putImageData:(image,x,y,dx,dy,dw,dh)=>puts.push([dw,dh,x+dx,y+dy])});
   const draw=meta=>f.launchCalls[0].onFrame({...frame(),...meta},new ArrayBuffer(16));
   await draw({frame_id:2,damage:[[1,0,1,1]]});
   await draw({frame_id:3,damage:[[0,1,2,1]]});
@@ -884,3 +905,6 @@ test('presenter uploads only the damaged rectangle once its canvas is current',a
   assert.deepEqual(puts.at(-1),[2,2,0,0]);
   await presenter.dispose();
 });
+
+// The shared pipe pixel path of both presenters (EngineFrameSurface.sys.mjs).
+import './engine-frame-surface.test.mjs';

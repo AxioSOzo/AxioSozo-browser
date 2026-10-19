@@ -11,6 +11,7 @@
 // logic with CEF-only extensions (surface mode, web mode, UI delegation, a11y). It is
 // the same protocol; moving CEF onto this module is a later, separate step.
 
+import { DamagePayloadAssembler } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -134,8 +135,15 @@ export function validDamage(damage, width, height) {
     && x + w <= width && y + h <= height;
 }
 
+/** §6.2 damage payloads: the frame's payload is exactly its damage rectangle's rows. */
+function payloadMatches(metadata, size, damage, payload) {
+  if (!payload) return size === metadata.stride * metadata.height;
+  return damage && validDamage(metadata.damage, metadata.width, metadata.height)
+    && size === metadata.damage[0][2] * metadata.damage[0][3] * 4;
+}
+
 /** One AXCF item (§5). Lengths and metadata are validated before pixels are read. */
-export async function readStreamPacket(pipe, { engine, identity, damage = false }) {
+export async function readStreamPacket(pipe, { engine, identity, damage = false, payload = false }) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -154,7 +162,7 @@ export async function readStreamPacket(pipe, { engine, identity, damage = false 
     if (!hasKeys(metadata, damage ? [...FRAME_KEYS, "damage"] : FRAME_KEYS)
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
-        || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
+        || metadata.stride !== metadata.width * 4 || !payloadMatches(metadata, size, damage, payload)
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
         || metadata.format !== "BGRA8"
         || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))) throw new Error("INVALID_AXCF_FRAME");
@@ -177,7 +185,7 @@ const TARGET_EVENTS = new Set(["created", "navigation", "loading", "title", "url
 // Fixed diagnostic codes only: never native payloads, URLs, input or tokens.
 export const STREAM_FAILURE_CODES = new Set([
   "TRUNCATED_AXCF_HEADER", "TRUNCATED_AXCF_METADATA", "TRUNCATED_AXCF_PIXELS", "INVALID_AXCF_HEADER",
-  "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_ENGINE_EVENT",
+  "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_DAMAGE_PAYLOAD", "INVALID_ENGINE_EVENT",
   "INVALID_ENGINE_TARGET", "FOREIGN_ENGINE_TARGET", "INVALID_ENGINE_CREATION", "UNKNOWN_ENGINE_TARGET",
   "INVALID_ENGINE_GENERATION", "STALE_ENGINE_EVENT", "UNEXPECTED_ENGINE_FRAME", "FOREIGN_ENGINE_FRAME",
   "FUTURE_ENGINE_FRAME", "UNVERIFIED_ENGINE_RUNTIME", "UNREQUESTED_ENGINE_CREATION", "MISSING_ENGINE_TARGET",
@@ -198,14 +206,17 @@ export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatSeen = 0; #heartbeatCheckedAt = 0;
-  #heartbeatTimer = null; #heartbeatOn = false; #now;
+  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null;
   constructor(process, { profile, token, instance, identity, timers, deadline = 15000, frameDamage = false,
-    heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
+    damagePayload = false, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
     if (!profile || typeof profile.engine !== "string" || typeof profile.validateReady !== "function") throw new Error("INVALID_ENGINE_PROFILE");
     if (!/^[0-9a-f]{64}$/u.test(token) || !id(instance) || !validFixtureOrigin(identity) || !/^[a-z]{1,8}$/u.test(requestPrefix)) {
       throw new Error("INVALID_ENGINE_BOOTSTRAP");
     }
     this.profile = profile; this.instance = instance; this.identity = identity; this.frameDamage = frameDamage === true;
+    // §6.2: rectangle-only payloads (needs frame damage); frames are rebuilt per target here.
+    this.damagePayload = this.frameDamage && damagePayload === true;
+    this.#assembler = this.damagePayload ? new DamagePayloadAssembler() : null;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.requestPrefix = requestPrefix;
     this.onFailure = onFailure;
@@ -236,7 +247,8 @@ export class EngineStreamHost {
       else if (!this.#closing) this.fail("ENGINE_UNEXPECTED_EXIT");
     }, () => this.fail("ENGINE_PROCESS_FAILURE"));
     const hello = { version: 1, method: "hello", token: this.#token, engine_instance: this.instance,
-      fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}) };
+      fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}),
+      ...(this.damagePayload ? { damage_payload: true } : {}) };
     await this.#write(hello);
     await this.#readyWait.promise;
     this.status = "connected";
@@ -298,10 +310,13 @@ export class EngineStreamHost {
     adapter.fail(code);
   }
   async #read() {
-    const options = { engine: this.profile.engine, identity: this.identity, damage: this.frameDamage };
+    const options = { engine: this.profile.engine, identity: this.identity, damage: this.frameDamage, payload: this.damagePayload };
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readStreamPacket(this.#process.stdout, options);
+      const packet = await readStreamPacket(this.#process.stdout, options);
+      const { kind, metadata: value } = packet;
+      // Every delivered frame is applied, presented or not (§6.2).
+      const pixels = kind === 2 && this.#assembler ? this.#assembler.apply(value, packet.pixels) : packet.pixels;
       if (kind === 2) {
         this.readPhase = "frame_validate";
         if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
@@ -332,6 +347,7 @@ export class EngineStreamHost {
         const creation = value.event === "created" && this.#requests.get(value.request_id);
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_ENGINE_CREATION");
         adapter = this.#adapterFor(value.target, value.event === "created");
+        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
       } else if (TARGET_EVENTS.has(value.event)) {
         throw new Error("MISSING_ENGINE_TARGET");
       } else if (value.event === "error" && !value.request_id) {
@@ -367,7 +383,7 @@ export class EngineStreamHost {
     if (this.#ready || this.status !== "starting") throw new Error("UNVERIFIED_ENGINE_RUNTIME");
     const fields = this.profile.readyFields;
     if (!hasKeys(value, ["version", "event", ...fields]) || value.engine_instance !== this.instance) throw new Error("UNVERIFIED_ENGINE_RUNTIME");
-    try { this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage }); }
+    try { this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage, damagePayload: this.damagePayload }); }
     catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
     const interval = value.capabilities?.heartbeat_interval_ms;
     if (interval !== undefined && !(Number.isInteger(interval) && interval >= 100 && interval <= 2000)) throw new Error("UNVERIFIED_ENGINE_RUNTIME");

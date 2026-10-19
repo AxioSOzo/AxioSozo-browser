@@ -37,12 +37,13 @@ class FakeView final : public EngineView {
     if (!visible_) return;
     int w = int(std::ceil(width_ * scale_)), h = int(std::ceil(height_ * scale_));
     std::vector<uint8_t> pixels(size_t(w) * size_t(h) * 4);
-    // Content rows depend on document y (row + scroll) so a wheel shift is measurable.
+    // Content rows depend on document y (row + scroll) so a wheel shift is measurable; typed
+    // input changes only the top quarter, so frame damage (and damage_payload) is partial.
     for (int y = 0; y < h; ++y)
       for (int x = 0; x < w; ++x) {
         uint8_t* p = &pixels[(size_t(y) * size_t(w) + size_t(x)) * 4];
         int doc = y + int(scroll_ * scale_);
-        p[0] = uint8_t(doc * 7); p[1] = uint8_t(page() == "2" ? 200 : 40); p[2] = uint8_t(input_.size() * 30 + (x / 64) * 9); p[3] = 0;
+        p[0] = uint8_t(doc * 7); p[1] = uint8_t(page() == "2" ? 200 : 40); p[2] = uint8_t((y < h / 4 ? input_.size() * 30 : 0) + (x / 64) * 9); p[3] = 0;
       }
     host->frame(&tab_, pixels.data(), w, h, size_t(w) * 4, PixelFormat::BGRX8);
   }

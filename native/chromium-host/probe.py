@@ -579,6 +579,7 @@ def linux_native_test():
     out.mkdir(parents=True, exist_ok=True)
     tests = [('transport-test', [here / 'test_transport.cc'], [], 15),
              ('transport-damage-test', [here / 'tests/transport_damage_test.cc'], ['-I', here], 15),
+             ('transport-damage-payload-test', [here / 'tests/transport_damage_payload_test.cc'], ['-I', here], 15),
              ('a11y-core-test', [here / 'tests/a11y_core_test.cc'], ['-I', here], 30),
              ('core-test', [here / 'tests/core_test.cc'], ['-I', here], 15)]
     if (CEF / 'include').is_dir():

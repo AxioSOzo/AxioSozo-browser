@@ -291,7 +291,7 @@ function presenterFixture() {
     addEventListener(type, handler) { this.handlers.set(type, handler); }, removeEventListener(type) { this.handlers.delete(type); },
     focus() { this.focused = true; }, hasPointerCapture: () => false, setPointerCapture() {}, releasePointerCapture() {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 2, height: 2 }),
-    getContext: () => ({ putImageData: (data, x, y) => puts.push({ width: data.width, height: data.height, x, y }) }), toDataURL: () => "data:image/png;base64,AAAA" });
+    getContext: () => ({ putImageData: (data, x, y, dx = 0, dy = 0, dw = data.width, dh = data.height) => puts.push({ width: dw, height: dh, x: x + dx, y: y + dy }) }), toDataURL: () => "data:image/png;base64,AAAA" });
   const stack = { ...element(), classList: { contains: value => value === "browserStack" } };
   const browser = { style: { visibility: "" }, parentNode: stack, currentURI: { spec: origin + "/engine.html" },
     getBoundingClientRect: () => ({ width: 2, height: 2 }), loadURI: uri => loads.push(uri.spec), focus() {} };

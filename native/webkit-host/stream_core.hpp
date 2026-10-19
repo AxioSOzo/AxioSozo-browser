@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <set>
@@ -131,6 +132,7 @@ struct Tab {
   // Damage bookkeeping (frame_damage): pixels and damage of the last submitted frame.
   std::vector<uint8_t> sent; int sentWidth = 0, sentHeight = 0; bool sentValid = false;
   int lastDamage[4] = {0, 0, 0, 0};
+  std::vector<uint8_t> payload;  // damage_payload: the rectangle's rows of the frame being sent
 };
 
 struct Rect { int x = 0, y = 0, width = 0, height = 0; bool empty() const { return width <= 0 || height <= 0; } };
@@ -179,6 +181,7 @@ public:
     std::vector<std::string> fields{"version", "method", "token", "engine_instance", "fixture_origin"};
     if (hello->has("frame_rate")) fields.push_back("frame_rate");
     if (hello->has("frame_damage")) fields.push_back("frame_damage");
+    if (hello->has("damage_payload")) fields.push_back("damage_payload");
     if (!exactKeys(*hello, fields) || !integer(hello->get("version"), 1) || hello->get("version")->number != 1) return false;
     if (!hello->get("method")->isString() || hello->get("method")->string != "hello" || !tokenValue(hello->get("token"))) return false;
     if (!identifier(hello->get("engine_instance")) || !text(hello->get("fixture_origin"), 128)
@@ -188,6 +191,11 @@ public:
       frameRate_ = int(rate->number);
     }
     if (auto damage = hello->get("frame_damage")) { if (!boolean(damage)) return false; frameDamage_ = damage->boolean; }
+    // Rectangle-only payloads (engine-stream-v1 §6.2) need damage.
+    if (auto payload = hello->get("damage_payload")) {
+      if (!boolean(payload) || (payload->boolean && !frameDamage_)) return false;
+      damagePayload_ = payload->boolean;
+    }
     token_ = hello->get("token")->string;
     instance_ = hello->get("engine_instance")->string;
     fixtureOrigin_ = hello->get("fixture_origin")->string;
@@ -197,6 +205,7 @@ public:
   const std::string& instance() const { return instance_; }
   int frameRate() const { return frameRate_; }
   bool frameDamage() const { return frameDamage_; }
+  bool damagePayload() const { return damagePayload_; }
 
   // Strict fixture policy: exactly the synthetic page and its GET navigation.
   bool allowedURL(const std::string& url, bool resource = false) const {
@@ -215,7 +224,8 @@ public:
       {"downloads", false}, {"popups", false}, {"accessibility", false}, {"file_dialogs", false},
       {"javascript_dialogs", false}, {"heartbeat_interval_ms", HeartbeatIntervalMs}, {"context_menu", false},
       {"http_auth", false}, {"find", false}, {"zoom", false}, {"popup_blocked", false}, {"media_capture", false},
-      {"favicon", false}, {"text_input", false}, {"frame_damage", frameDamage_}};
+      {"favicon", false}, {"text_input", false}, {"frame_damage", frameDamage_},
+      {"damage_payload", damagePayload_}};
   }
   void ready() {
     Object caps = baseCapabilities();
@@ -367,7 +377,7 @@ private:
   Transport& transport_;
   Engine& engine_;
   std::string token_, instance_, fixtureOrigin_, shutdownRequest_;
-  int frameRate_ = 60; bool frameDamage_ = false;
+  int frameRate_ = 60; bool frameDamage_ = false, damagePayload_ = false;
   bool ready_ = false, closing_ = false, closed_ = false;
   uint64_t frameId_ = 0, heartbeat_ = 0;
   std::chrono::steady_clock::time_point nextHeartbeat_{};
@@ -428,8 +438,9 @@ private:
     int w = tab->latestWidth, h = tab->latestHeight;
     Object meta{{"version", 1}, {"target", tab->target}, {"width", w}, {"height", h}, {"stride", w * 4},
                 {"device_scale", tab->scale}, {"format", "BGRA8"}};
+    Rect damageRect{0, 0, w, h};
     if (frameDamage_) {
-      Rect damage{0, 0, w, h};
+      Rect& damage = damageRect;
       if (tab->sentValid && tab->sentWidth == w && tab->sentHeight == h) {
         damage = diffBounds(tab->sent.data(), tab->latest.data(), w, h);
         // The undelivered frame this one replaces carried damage Zen never saw.
@@ -442,6 +453,17 @@ private:
     }
     if (frameId_ == MaxGeneration) { failProtocol(); return; }
     meta["frame_id"] = ++frameId_;
+    if (damagePayload_ && (damageRect.x || damageRect.y || damageRect.width != w || damageRect.height != h)) {
+      // §6.2: only the rectangle's rows; Zen patches them into the frame it already has.
+      // A replaced pending frame's damage is already in damageRect (united above).
+      size_t rowBytes = size_t(damageRect.width) * 4;
+      tab->payload.resize(rowBytes * size_t(damageRect.height));
+      for (int row = 0; row < damageRect.height; ++row)
+        memcpy(tab->payload.data() + size_t(row) * rowBytes,
+               tab->latest.data() + (size_t(damageRect.y + row) * size_t(w) + size_t(damageRect.x)) * 4, rowBytes);
+      transport_.frame(tab->key, json::dump(Value(std::move(meta))), json::dump(tab->target), frameId_, tab->payload.data(), tab->payload.size());
+      return;
+    }
     transport_.frame(tab->key, json::dump(Value(std::move(meta))), json::dump(tab->target), frameId_, tab->latest.data(), tab->latest.size());
   }
   void closeTab(Tab* tab) {

@@ -1,7 +1,7 @@
 #pragma once
 // Private inherited pipes only. The engine UI thread never performs a pipe write.
 // Copied from native/chromium-host/transport.hpp at a3ab14e (cloud/integration);
-// the only delta is pendingFrame() below, used for computed damage rectangles
+// the deltas are pendingFrame() below and the Linux pipe capacity (pipeBytes), used for computed damage rectangles
 // (contracts/engine-stream-v1.md "Frame damage"). Framing, credit and bounds are
 // byte-for-byte the AXCF v1 implementation.
 #include <algorithm>
@@ -21,9 +21,15 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#if defined(__linux__) && !defined(F_SETPIPE_SZ)
+#define F_SETPIPE_SZ 1031
+#define F_GETPIPE_SZ 1032
+#endif
 
 namespace axio {
 constexpr size_t MaxLine = 16384, MaxMeta = 8192, MaxFrame = 33554432;
+// Requested stdout pipe capacity on Linux (the unprivileged fs.pipe-max-size default).
+constexpr int PipeBytes = 1 << 20;
 struct Packet {
   uint16_t kind = 1;
   std::string metadata, target;
@@ -130,12 +136,26 @@ public:
     bool redirected = dup2(null, STDIN_FILENO) >= 0 && dup2(null, STDOUT_FILENO) >= 0;
     close(null);
     if (!redirected) return false;
+#ifdef __linux__
+    // A 2x frame is ~9 MB: with the default 64 KiB pipe every frame costs Zen's Subprocess
+    // reader ~150 wakeups and worker round trips. Best effort, within fs.pipe-max-size.
+    if (fcntl(output_, F_GETPIPE_SZ) > 0 && fcntl(output_, F_GETPIPE_SZ) < PipeBytes) fcntl(output_, F_SETPIPE_SZ, PipeBytes);
+#endif
     int inputFlags = fcntl(input_, F_GETFL), outputFlags = fcntl(output_, F_GETFL);
     if (inputFlags < 0 || outputFlags < 0 || fcntl(input_, F_SETFL, inputFlags | O_NONBLOCK) < 0
         || fcntl(output_, F_SETFL, outputFlags | O_NONBLOCK) < 0) return false;
     reader_ = std::thread([this] { readLoop(); });
     writer_ = std::thread([this] { writeLoop(); });
     return true;
+  }
+  // The stdout pipe's capacity now (0 where unknown or not a pipe).
+  int pipeBytes() const {
+#ifdef __linux__
+    int size = output_ >= 0 ? fcntl(output_, F_GETPIPE_SZ) : -1;
+    return size > 0 ? size : 0;
+#else
+    return 0;
+#endif
   }
   bool failed() const { return failed_; }
   bool eof() const { return eof_; }
