@@ -39,6 +39,19 @@ namespace {
 
 constexpr const char* SandboxKillSwitch = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
 
+// ---- Paint fence ----------------------------------------------------------------------
+// After a commit WebKit keeps re-rendering the previous document's frozen layer tree for
+// a few frames (CI run 39296320523: the first buffer after page 2 committed and finished
+// was byte-identical to page 1). So buffers are held until the new document reports, from
+// an isolated script world the page cannot see or call, that it has shown and rendered
+// three animation frames. pageshow also fires for back/forward-cache restores.
+constexpr const char* FenceWorld = "axiosozo-paint-fence";
+constexpr const char* FenceHandler = "axiosozoPaintFence";
+constexpr const char* FenceSource =
+  "addEventListener('pageshow',()=>{const f=requestAnimationFrame;"
+  "f(()=>f(()=>f(()=>window.webkit.messageHandlers.axiosozoPaintFence.postMessage(location.href)))));},true);";
+constexpr int FenceTimeoutMs = 2000;  // pages where the script cannot run still present
+
 // ---- Text commit path: a minimal WebKitInputMethodContext ---------------------------
 // WebKit tells the context when an editable element gains or loses focus; Zen's text
 // (`key` char, `ime_commit_text`) is committed through the `committed` signal, the
@@ -157,6 +170,13 @@ private:
   struct wpe_view_backend* backend_ = nullptr;
   WebKitWebView* view_ = nullptr;
   AxioIMContext* im_ = nullptr;
+  WebKitUserContentManager* content_ = nullptr;
+  // Paint fence state: buffers exported since the last commit are held, not presented.
+  bool fenced_ = false;
+  guint fenceTimer_ = 0;
+  std::vector<uint8_t> held_;
+  int heldWidth_ = 0, heldHeight_ = 0; PixelFormat heldFormat_ = PixelFormat::BGRA8Premultiplied;
+  bool heldValid_ = false;
   guint frameTimer_ = 0;
   gint64 lastComplete_ = 0;
   int frameRate_ = 60;
@@ -170,6 +190,12 @@ private:
   void commit(const std::string& text);
   void typeCodepoint(uint32_t codepoint, uint32_t modifiers);
   void connect();
+  void present(const uint8_t* pixels, int width, int height, size_t stride, PixelFormat format);
+public:
+  void committed() { fenced_ = false; heldValid_ = false; if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; } }
+  void finished();
+  void openFence(const char* reason);
+  void fenceMessage(const std::string& href);
 };
 
 struct BackendBox {
@@ -209,7 +235,9 @@ public:
   WebKitWebContext* context() const { return context_; }
   WebKitNetworkSession* session() const { return session_; }
   WebKitSettings* settings() const { return settings_; }
-  WebKitUserContentManager* content() const { return content_; }
+  // One content manager per view (the fence message must identify its view); all share
+  // the origin filter and the isolated-world fence script.
+  WebKitUserContentManager* newContentManager() const;
   Host& host() { return *host_; }
 
 private:
@@ -217,7 +245,8 @@ private:
   WebKitWebContext* context_ = nullptr;
   WebKitNetworkSession* session_ = nullptr;
   WebKitSettings* settings_ = nullptr;
-  WebKitUserContentManager* content_ = nullptr;
+  WebKitUserContentFilter* filter_ = nullptr;
+  WebKitUserScript* fenceScript_ = nullptr;
   WebKitUserContentFilterStore* filters_ = nullptr;
   std::map<WebKitWebView*, WpeView*> views_;
 };
@@ -248,9 +277,16 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
     wpe_view_backend_exportable_fdo_destroy(box->exportable);
     delete box;
   }, box_);
+  content_ = engine_.newContentManager();
+  g_signal_connect(content_, (std::string("script-message-received::") + FenceHandler).c_str(),
+                   G_CALLBACK(+[](WebKitUserContentManager*, JSCValue* value, gpointer d) {
+    char* href = jsc_value_is_string(value) ? jsc_value_to_string(value) : nullptr;
+    static_cast<WpeView*>(d)->fenceMessage(href ? href : "");
+    g_free(href);
+  }), this);
   view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
                                        "network-session", engine_.session(), "settings", engine_.settings(),
-                                       "user-content-manager", engine_.content(), nullptr));
+                                       "user-content-manager", content_, nullptr));
   if (!view_) return false;
   // libwpe drops dispatches made before WebKit registered its backend client
   // (CI run 39294885122: the page saw devicePixelRatio 1), so apply scale and size now.
@@ -268,6 +304,7 @@ void WpeView::detach() {
   if (detached_) return;
   detached_ = true;
   if (frameTimer_) { g_source_remove(frameTimer_); frameTimer_ = 0; }
+  if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; }
   if (box_) box_->owner = nullptr;  // late backend callbacks only release buffers
   if (view_) {
     engine_.track(view_, nullptr);
@@ -277,6 +314,11 @@ void WpeView::detach() {
     view_ = nullptr;
   }
   if (im_) { g_object_unref(im_); im_ = nullptr; }
+  if (content_) {
+    g_signal_handlers_disconnect_by_data(content_, this);
+    webkit_user_content_manager_unregister_script_message_handler(content_, FenceHandler, FenceWorld);
+    g_object_unref(content_); content_ = nullptr;
+  }
 }
 
 void WpeView::exported(struct wpe_fdo_shm_exported_buffer* buffer) {
@@ -288,14 +330,51 @@ void WpeView::exported(struct wpe_fdo_shm_exported_buffer* buffer) {
     AXIO_TRACE("export %dx%d", width, height);
     auto* pixels = static_cast<const uint8_t*>(wl_shm_buffer_get_data(shm));
     if ((format == WL_SHM_FORMAT_ARGB8888 || format == WL_SHM_FORMAT_XRGB8888) && stride > 0)
-      host_.frame(&tab_, pixels, width, height, size_t(stride),
-                  format == WL_SHM_FORMAT_ARGB8888 ? PixelFormat::BGRA8Premultiplied : PixelFormat::BGRX8);
+      present(pixels, width, height, size_t(stride),
+              format == WL_SHM_FORMAT_ARGB8888 ? PixelFormat::BGRA8Premultiplied : PixelFormat::BGRX8);
     else host_.denied(&tab_, "unsupported_surface_format");
     wl_shm_buffer_end_access(shm);
   }
   // The pixels are already copied: the buffer goes straight back to WebKit.
   wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(exportable_, buffer);
   scheduleFrameComplete();
+}
+
+void WpeView::present(const uint8_t* pixels, int width, int height, size_t stride, PixelFormat format) {
+  if (fenced_) { host_.frame(&tab_, pixels, width, height, stride, format); return; }
+  // Before the fence: keep only the newest buffer, tightly packed.
+  size_t row = size_t(width) * 4;
+  held_.resize(row * size_t(height));
+  for (int y = 0; y < height; ++y) memcpy(held_.data() + row * size_t(y), pixels + stride * size_t(y), row);
+  heldWidth_ = width; heldHeight_ = height; heldFormat_ = format; heldValid_ = true;
+  AXIO_TRACE("held %dx%d", width, height);
+}
+
+void WpeView::openFence(const char* reason) {
+  if (fenced_ || detached_) return;
+  fenced_ = true;
+  if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; }
+  AXIO_TRACE("fence %s held=%d", reason, int(heldValid_));
+  // WebKit renders at least one frame after the third animation frame; the newest held
+  // buffer is also from the new document by then.
+  if (heldValid_) { heldValid_ = false; host_.frame(&tab_, held_.data(), heldWidth_, heldHeight_, size_t(heldWidth_) * 4, heldFormat_); }
+}
+
+void WpeView::fenceMessage(const std::string& href) {
+  const char* uri = view_ ? webkit_web_view_get_uri(view_) : nullptr;
+  // Only the committed document opens its own fence.
+  if (uri && href == uri) openFence("document");
+  else AXIO_TRACE("fence ignored %s", href.c_str());
+}
+
+void WpeView::finished() {
+  if (fenced_ || fenceTimer_) return;
+  fenceTimer_ = g_timeout_add(FenceTimeoutMs, [](gpointer d) -> gboolean {
+    auto* view = static_cast<WpeView*>(d);
+    view->fenceTimer_ = 0;
+    view->openFence("timeout");
+    return G_SOURCE_REMOVE;
+  }, this);
 }
 
 // frame_complete is WebKit's vsync: paced to the negotiated frame rate.
@@ -410,8 +489,9 @@ void WpeView::connect() {
     std::string url = uri ? uri : "";
     AXIO_TRACE("load-changed %d %s", int(event), url.c_str());
     if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; }
-    else if (event == WEBKIT_LOAD_COMMITTED) view->host_.loadCommitted(&view->tab_, url);
+    else if (event == WEBKIT_LOAD_COMMITTED) { view->committed(); view->host_.loadCommitted(&view->tab_, url); }
     else if (event == WEBKIT_LOAD_FINISHED && !view->loadFailed_) {
+      view->finished();
       int status = 0;
       if (WebKitWebResource* resource = webkit_web_view_get_main_resource(v))
         if (WebKitURIResponse* response = webkit_web_resource_get_response(resource)) status = int(webkit_uri_response_get_status_code(response));
@@ -518,7 +598,6 @@ bool WpeEngine::initialize(Host& host, const std::string& profile) {
   webkit_settings_set_enable_media_stream(settings_, FALSE);
   webkit_settings_set_enable_webrtc(settings_, FALSE);
   webkit_settings_set_enable_page_cache(settings_, TRUE);
-  content_ = webkit_user_content_manager_new();
   // Subresource policy: WebKit's content blocker allows only the fixture origin.
   // Navigations are additionally checked path-exactly in decide-policy.
   std::string origin = host.fixtureOrigin(), escaped;
@@ -540,13 +619,23 @@ bool WpeEngine::initialize(Host& host, const std::string& profile) {
   gint64 deadline = g_get_monotonic_time() + 20 * G_USEC_PER_SEC;
   while (!pending.done && g_get_monotonic_time() < deadline) g_main_context_iteration(nullptr, TRUE);
   if (!pending.filter) return false;  // fail closed: no ready without the origin filter
-  webkit_user_content_manager_add_filter(content_, pending.filter);
-  webkit_user_content_filter_unref(pending.filter);
+  filter_ = pending.filter;
+  fenceScript_ = webkit_user_script_new_for_world(FenceSource, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                                                  WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, FenceWorld, nullptr, nullptr);
   return true;
 }
 
+WebKitUserContentManager* WpeEngine::newContentManager() const {
+  WebKitUserContentManager* content = webkit_user_content_manager_new();
+  webkit_user_content_manager_add_filter(content, filter_);
+  webkit_user_content_manager_add_script(content, fenceScript_);
+  webkit_user_content_manager_register_script_message_handler(content, FenceHandler, FenceWorld);
+  return content;
+}
+
 void WpeEngine::shutdown() {
-  if (content_) { g_object_unref(content_); content_ = nullptr; }
+  if (fenceScript_) { webkit_user_script_unref(fenceScript_); fenceScript_ = nullptr; }
+  if (filter_) { webkit_user_content_filter_unref(filter_); filter_ = nullptr; }
   if (filters_) { g_object_unref(filters_); filters_ = nullptr; }
   if (settings_) { g_object_unref(settings_); settings_ = nullptr; }
   if (session_) { g_signal_handlers_disconnect_by_data(session_, this); g_object_unref(session_); session_ = nullptr; }
