@@ -7,11 +7,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <fcntl.h>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <poll.h>
 #include <string>
 #include <thread>
@@ -25,6 +27,10 @@ struct Packet {
   std::string metadata, target;
   std::vector<uint8_t> pixels;
   uint64_t frame = 0;
+  // Optional frame damage (frameWithDamage only): one physical-pixel rectangle
+  // {x, y, width, height}, added to the metadata as "damage":[[x,y,w,h]] on write.
+  bool damaged = false;
+  uint32_t damage[4] = {0, 0, 0, 0}, size[2] = {0, 0};
 };
 class Transport {
   int input_ = -1, output_ = -1;
@@ -37,6 +43,9 @@ class Transport {
   // Latest undelivered frame per target; one frame is in flight at a time.
   std::map<std::string, Packet> pending_;
   std::string lastKey_;
+  // Targets whose next damaged frame must be full-size: a pending frame was dropped.
+  std::set<std::string> fullNext_;
+  bool damageUsed_ = false;  // only frameWithDamage callers pay for fullNext_
   uint64_t outstanding_ = 0;
   std::string outstandingTarget_;
   bool writing_ = false;
@@ -100,6 +109,14 @@ class Transport {
         } else continue;
         writing_ = true;
       }
+      if (packet.damaged) {
+        // The metadata is a JSON object; append the damage member before its closing brace.
+        char member[96];
+        snprintf(member, sizeof(member), ",\"damage\":[[%u,%u,%u,%u]]}", packet.damage[0], packet.damage[1],
+                 packet.damage[2], packet.damage[3]);
+        packet.metadata.pop_back();
+        packet.metadata += member;
+      }
       std::array<uint8_t, 16> h{'A','X','C','F',0,1,0,uint8_t(packet.kind)};
       uint32_t sizes[2] = {uint32_t(packet.metadata.size()), uint32_t(packet.pixels.size())};
       for (int j = 0; j < 2; ++j)
@@ -153,7 +170,45 @@ public:
     std::lock_guard lock(mutex_);
     pending_[key] = std::move(packet); changed_.notify_all(); return true;
   }
-  void invalidatePendingFrame(const std::string& key) { std::lock_guard lock(mutex_); pending_.erase(key); }
+  // Frame damage (engine-stream-v1 §6.1 semantics): pixels outside `damage` equal the
+  // previous frame delivered for this target and size. A replaced pending frame's damage
+  // is merged into its replacement; after a dropped pending frame the next one is full.
+  bool frameWithDamage(const std::string& key, std::string metadata, std::string target, uint64_t id,
+                       const void* pixels, uint32_t width, uint32_t height, const uint32_t damage[4]) {
+    size_t bytes = size_t(width) * size_t(height) * 4;
+    if (metadata.size() < 2 || metadata.back() != '}' || metadata.size() + 64 > MaxMeta || !pixels || !bytes ||
+        bytes > MaxFrame || !id || !damage[2] || !damage[3] || damage[0] + damage[2] > width ||
+        damage[1] + damage[3] > height) {
+      fail();
+      return false;
+    }
+    Packet packet{2, std::move(metadata), std::move(target), {}, id};
+    packet.pixels.assign(static_cast<const uint8_t*>(pixels), static_cast<const uint8_t*>(pixels) + bytes);
+    packet.damaged = true;
+    packet.size[0] = width; packet.size[1] = height;
+    std::copy(damage, damage + 4, packet.damage);
+    std::lock_guard lock(mutex_);
+    damageUsed_ = true;
+    auto replaced = pending_.find(key);
+    if (fullNext_.erase(key)) {
+      packet.damage[0] = packet.damage[1] = 0; packet.damage[2] = width; packet.damage[3] = height;
+    } else if (replaced != pending_.end()) {
+      const Packet& old = replaced->second;
+      if (!old.damaged || old.size[0] != width || old.size[1] != height) {
+        packet.damage[0] = packet.damage[1] = 0; packet.damage[2] = width; packet.damage[3] = height;
+      } else {
+        uint32_t left = std::min(old.damage[0], packet.damage[0]), top = std::min(old.damage[1], packet.damage[1]);
+        uint32_t right = std::max(old.damage[0] + old.damage[2], packet.damage[0] + packet.damage[2]);
+        uint32_t bottom = std::max(old.damage[1] + old.damage[3], packet.damage[1] + packet.damage[3]);
+        packet.damage[0] = left; packet.damage[1] = top; packet.damage[2] = right - left; packet.damage[3] = bottom - top;
+      }
+    }
+    pending_[key] = std::move(packet); changed_.notify_all(); return true;
+  }
+  void invalidatePendingFrame(const std::string& key) {
+    std::lock_guard lock(mutex_);
+    if (pending_.erase(key) && damageUsed_) fullNext_.insert(key);
+  }
   bool acknowledge(uint64_t frame, const std::string& exactTarget) {
     std::lock_guard lock(mutex_);
     // The outstanding target may predate current navigation/resize. This exact

@@ -54,6 +54,31 @@ def read_packet(pipe, deadline):
     return kind, metadata, read_exact(pipe, size, deadline)
 
 
+def require_host():
+    """probe.check(), but an unusable environment ends the test as BLOCKED_ENV (exit 2,
+    one JSON status line) instead of a traceback that ./dev would count as FAIL."""
+    try:
+        return probe.check()
+    except RuntimeError as error:
+        if not str(error).startswith('BLOCKED_ENV'):
+            raise
+        print(json.dumps(dict(status='BLOCKED_ENV', reason=str(error))), flush=True)
+        raise SystemExit(2)
+
+
+def painted(bgra):
+    """True when a BGRA frame has content: not every sampled pixel has the same value
+    (a document's first, not yet painted frame is one flat colour)."""
+    step = 4 * 211  # a prime stride samples across rows and columns
+    colours = {}
+    for i in range(0, len(bgra) - 3, step):
+        colour = bytes(bgra[i:i + 4])
+        colours[colour] = colours.get(colour, 0) + 1
+    # Content means more than a stray strip: the second colour covers at least 0.1%.
+    counts = sorted(colours.values(), reverse=True)
+    return len(counts) > 1 and sum(counts[1:]) * 1000 >= sum(counts)
+
+
 def png(path, width, height, bgra):
     # Lossless encoding of actual OnPaint bytes, not generated/simulated evidence.
     rgba = bytearray(bgra)
@@ -66,7 +91,7 @@ def png(path, width, height, bgra):
 
 
 class Session:
-    def __init__(self, origin, directory, browsing_mode=None, timeout=15):
+    def __init__(self, origin, directory, browsing_mode=None, timeout=15, hello_fields=None):
         self.origin, self.directory = origin, directory
         self.profile = Path(tempfile.mkdtemp(prefix='cef-profile-stream-', dir=probe.BASE))
         os.chmod(self.profile, 0o700)
@@ -74,7 +99,7 @@ class Session:
         self.process = subprocess.Popen([str(probe.BINARY), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.error,
                                         start_new_session=True, bufsize=0,
-                                        env={'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'TMPDIR': str(self.profile)})
+                                        env=probe.host_environment(self.profile))
         self.token = secrets.token_hex(32)
         self.instance = 'cef-fixture-' + secrets.token_hex(8)
         self.counter = 0
@@ -88,6 +113,7 @@ class Session:
                      fixture_origin=origin)
         if browsing_mode:
             hello['browsing_mode'] = browsing_mode
+        hello.update(hello_fields or {})
         self.write(hello)
 
     def write(self, item):
@@ -118,6 +144,7 @@ class Session:
                     if self.target is None or target['tab_id'] == self.target['tab_id']:
                         self.target = target
             else:
+                self.pixels = pixels
                 self.frames += 1
                 self.frame_targets.append(item['target'])
                 self.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
@@ -239,7 +266,7 @@ def check_accessibility(session, ready):
 
 
 def run():
-    probe.check()
+    require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-stream-', dir=probe.EVIDENCE))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), probe.FixtureHandler)
     server.request_log = directory / 'fixture-requests.jsonl'
@@ -253,14 +280,19 @@ def run():
     previous_term = signal.signal(signal.SIGTERM, interrupted)
     try:
         origin = f'http://127.0.0.1:{server.server_port}'
+        spawned = time.monotonic()
         session = Session(origin, directory)
         ready = session.until(lambda kind, item: item.get('event') == 'ready')
+        timings = dict(ready_seconds=round(time.monotonic() - spawned, 3))
         assert ready['cef'] == probe.VERSION and ready['render_path'] == 'native-osr-bgra'
         pending = dict(tab_id='fixture-tab', engine_instance=session.instance, identity=origin,
                        document_generation=1, navigation_generation=1, private_mode=False)
+        created = time.monotonic()
         session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=2)
         initial = session.until(lambda kind, item: kind == 2, capture=directory / 'initial.png')
+        timings['create_to_first_frame_seconds'] = round(time.monotonic() - created, 3)
         assert initial['width'] == 1800 and initial['height'] == 1300
+        sandbox = probe.linux_process_snapshot(session.process.pid) if probe.IS_LINUX else None
         session.command('focus', focused=True)
         session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='CEF')
         session.until(lambda kind, item: item.get('event') == 'title' and 'input=CEF' in item.get('title', ''))
@@ -276,10 +308,16 @@ def run():
         capped = session.until(lambda kind, item: kind == 2 and item['width'] == 3840 and item['height'] == 2160,
                                capture=directory / 'fullscreen-capped.png')
         assert capped['device_scale'] == 1.5
+        # Device scale 1x: physical pixels equal logical points.
+        session.command('resize', width=900, height=650, device_scale=1)
+        one_x = session.until(lambda kind, item: kind == 2 and item['width'] == 900 and item['height'] == 650,
+                              capture=directory / 'scale-1x.png')
+        assert one_x['device_scale'] == 1
         focus_id = session.command('focus', focused=True)
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == focus_id)
         for key_type in ('down', 'up'):
-            tab_id = session.command('key', type=key_type, native_key_code=0x30,
+            # Tab: X11 keycode 23 on Linux, kVK_Tab 0x30 on macOS.
+            tab_id = session.command('key', type=key_type, native_key_code=23 if probe.IS_LINUX else 0x30,
                                      windows_key_code=9, modifiers=0, text='')
             session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == tab_id)
         session.command('navigate', url=origin + '/engine.html?page=2')
@@ -299,12 +337,22 @@ def run():
         heartbeat = check_heartbeat(session, ready)
         accessibility = check_accessibility(session, ready)
         close_id = session.command('close')
+        closing = time.monotonic()
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close_id)
         session.process.wait(timeout=8)
+        timings['close_to_exit_seconds'] = round(time.monotonic() - closing, 3)
         assert session.process.returncode == 0
+        linux = {}
+        if probe.IS_LINUX:
+            # Renderers ran inside seccomp-bpf + a PID namespace; nothing outlived the host.
+            orphans = probe.linux_orphans()
+            assert sandbox and sandbox['renderer_seccomp_bpf'] and sandbox['renderer_pid_namespace'], sandbox
+            assert not orphans, orphans
+            linux = dict(platform=ready['platform'], sandbox_observation=sandbox, orphan_processes=orphans)
         result.update(status='PASS', cef=ready['cef'], chromium=ready['chromium'], frames=session.frames,
                       native_pid=session.process.pid, native_exit_code=0, heartbeat=heartbeat, accessibility=accessibility,
-                      tests=['real_OSR_frame', 'input', 'retina_resize', 'fullscreen_size_capped_1_5x',
+                      timings=timings, **linux,
+                      tests=['real_OSR_frame', 'input', 'retina_resize', 'fullscreen_size_capped_1_5x', 'device_scale_1x',
                              'fullscreen_focus_and_tab', 'GET_navigation', 'back',
                              'stale_target_rejected', 'BFCache_generation_revoked', 'heartbeat_cadence_and_frozen_host', 'accessibility_gate_tree_ack_press', 'HTTP0_explicit_history_only', 'native_close_completed'])
     except (Exception, KeyboardInterrupt) as exc:
