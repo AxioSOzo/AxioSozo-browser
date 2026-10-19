@@ -56,10 +56,12 @@ if [ "${MODE:-e2e}" = adapter ]; then
   # Zen's WebKit client (apps/browser/chrome) against the real host, with the pinned CI Node.
   chown -R axio:axio "$AXIOSOZO_BUILD_ROOT" "$REPO"
   mkdir -p "$OUT/adapter" && chown axio:axio "$OUT/adapter"
+  # The pinned Node arrives read-only from the runner's private build root: copy it for the test user.
+  cp -a /opt/node /home/axio/node && chown -R axio:axio /home/axio/node && chmod -R u+rwX,go+rX /home/axio/node
   setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/usr/bin:/bin \
     AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" $P check >"$OUT/webkit-check.log" 2>&1 || log "webkit check exit $?"
   astatus=0
-  setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/opt/node/bin:/usr/bin:/bin \
+  setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/home/axio/node/bin:/usr/bin:/bin \
     AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" AXIOSOZO_WEBKIT_LIVE_HOST="$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost" \
     AXIOSOZO_WEBKIT_LIVE_EVIDENCE="$OUT/adapter" \
     node --test --test-reporter=spec "$REPO/apps/browser/tests/webkit-host-live.test.mjs" >"$OUT/adapter/node.log" 2>&1 || astatus=$?
