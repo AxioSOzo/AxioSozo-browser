@@ -1,0 +1,129 @@
+{
+  "E0": "PASS",
+  "E1": "BLOCKED_ENV",
+  "E2": "BLOCKED_ENV",
+  "exit_code": 0,
+  "elapsed_seconds": 14.672,
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "cef": "154.0.23+g062ebe4+chromium-154.0.8037.17",
+  "archive_sha256": "8beed3410b79aa4ae964bb7f955f08ac550eb2a377a6d12090be8bdb7de1369d",
+  "profile": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef-profile-o9pf2z5g",
+  "native_pid": 2994,
+  "profile_removed": true,
+  "fixture_requests": [
+    {
+      "timestamp": 1792433300.8851967,
+      "method": "GET",
+      "status": 200,
+      "path": "/engine.html",
+      "host": "127.0.0.1:41851"
+    },
+    {
+      "timestamp": 1792433300.929494,
+      "method": "GET",
+      "status": 404,
+      "path": "REJECTED_PATH",
+      "host": "127.0.0.1:41851"
+    },
+    {
+      "timestamp": 1792433310.7794526,
+      "method": "GET",
+      "status": 200,
+      "path": "/engine.html?page=2",
+      "host": "127.0.0.1:41851"
+    }
+  ],
+  "timed_out": false,
+  "group_cleanup_required": false,
+  "reason": "CEF component only; Zen embedding and user switching are separate unverified gates",
+  "linux_arch": "linux64",
+  "orphan_processes": [],
+  "sandbox_observation": {
+    "processes": [
+      {
+        "pid": 2994,
+        "type": "browser",
+        "seccomp": 0,
+        "pid_namespace_depth": 1,
+        "user_namespace": "same"
+      },
+      {
+        "pid": 2999,
+        "type": "zygote",
+        "seccomp": 0,
+        "pid_namespace_depth": 1,
+        "user_namespace": "same"
+      },
+      {
+        "pid": 3000,
+        "type": "zygote",
+        "seccomp": 0,
+        "pid_namespace_depth": 1,
+        "user_namespace": "unreadable"
+      },
+      {
+        "pid": 3028,
+        "type": "utility",
+        "seccomp": 0,
+        "pid_namespace_depth": 1,
+        "user_namespace": "same"
+      },
+      {
+        "pid": 3001,
+        "type": "zygote",
+        "seccomp": 0,
+        "pid_namespace_depth": 2,
+        "user_namespace": "same"
+      },
+      {
+        "pid": 3003,
+        "type": "zygote",
+        "seccomp": 0,
+        "pid_namespace_depth": 2,
+        "user_namespace": "unreadable"
+      },
+      {
+        "pid": 3036,
+        "type": "utility",
+        "seccomp": 2,
+        "pid_namespace_depth": 2,
+        "user_namespace": "unreadable"
+      },
+      {
+        "pid": 3057,
+        "type": "renderer",
+        "seccomp": 2,
+        "pid_namespace_depth": 2,
+        "user_namespace": "unreadable"
+      },
+      {
+        "pid": 3060,
+        "type": "renderer",
+        "seccomp": 2,
+        "pid_namespace_depth": 2,
+        "user_namespace": "unreadable"
+      },
+      {
+        "pid": 3023,
+        "type": "gpu-process",
+        "seccomp": 0,
+        "pid_namespace_depth": 1,
+        "user_namespace": "same"
+      }
+    ],
+    "renderers": 2,
+    "renderer_seccomp_bpf": true,
+    "renderer_pid_namespace": true,
+    "suid_helper_process": false,
+    "layer1": "suid"
+  },
+  "sandbox_status": {
+    "suid_helper_installed": true,
+    "apparmor_restrict_unprivileged_userns": 1,
+    "unprivileged_userns_clone": 1,
+    "max_user_namespaces": 63795,
+    "unprivileged_userns": false,
+    "expected": "suid",
+    "usable": true
+  }
+}
