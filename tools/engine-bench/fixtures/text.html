@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:text</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). A focused text field with a transparent caret (no caret
+     blink), so the only pixel change after a key press is the typed character. The title reports the length. -->
+<style>html{color-scheme:light}body{font:24px system-ui,sans-serif;margin:40px;background:#edf2f5;color:#163247}
+input{font:40px ui-monospace,monospace;padding:16px;width:760px;caret-color:transparent;outline:none;border:2px solid #257d65}
+.badge{font:14px ui-monospace,monospace;color:#596772}</style>
+<p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · TEXT INPUT · NO ACCOUNTS</p>
+<input id="t" autocomplete="off" autofocus spellcheck="false" maxlength="40">
+<script>const t=document.getElementById('t');const page=new URLSearchParams(location.search).get('page')||'1';
+function update(){document.title='bench:text|page='+page+'|len='+t.value.length;}
+t.addEventListener('input',()=>{if(t.value.length>=36)t.value='';update();});addEventListener('load',()=>{t.focus();update();});update();</script></html>

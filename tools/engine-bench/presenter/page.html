@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>presenter pixel path bench</title>
+<!-- SYNTHETIC LOCAL BENCH PAGE (tools/engine-bench/presenter). Measures the Zen presenter's AXCF pipe-fallback
+     pixel path (CEFPresenter #draw: bgraToRGBA + new ImageData + putImageData on a 2D canvas) in a real browser
+     engine, and candidate replacements. The bgraToRGBA source below is extracted verbatim from
+     apps/browser/chrome/CEFPresenter.sys.mjs by run_browser.py (sha256 recorded in the result). -->
+<body style="margin:0;background:#000"><canvas id="c"></canvas><canvas id="g"></canvas>
+<script>
+/*BGRA_TO_RGBA*/
+const SIZES = [[900, 650], [1800, 1300]];
+const ITER = Number(new URLSearchParams(location.search).get('iter') || 30);
+function frame(width, height) {
+  const buffer = new ArrayBuffer(width * height * 4), px = new Uint8Array(buffer);
+  for (let i = 0, p = 0; i < px.length; i += 4, p++) { const x = p % width, y = (p / width) | 0;
+    px[i] = (x * 3) & 255; px[i + 1] = (y * 5) & 255; px[i + 2] = (x ^ y) & 255; px[i + 3] = 255; }
+  return buffer;
+}
+function bgraToRGBAFast(buffer) {
+  const u32 = new Uint32Array(buffer), u8 = new Uint8ClampedArray(buffer);
+  for (let p = 0; p < u32.length; p++) { const v = u32[p], a = v >>> 24;
+    if (a === 255) { u32[p] = (v & 0xff00ff00) | ((v & 0xff) << 16) | ((v >>> 16) & 0xff); continue; }
+    const i = p * 4, b = u8[i], g = u8[i + 1], r = u8[i + 2], s = a ? 255 / a : 1; u8[i] = r * s; u8[i + 1] = g * s; u8[i + 2] = b * s; }
+  return u8;
+}
+function stats(samples) {
+  samples.sort((a, b) => a - b);
+  const q = p => samples[Math.max(0, Math.ceil(p / 100 * samples.length) - 1)];
+  return { n: samples.length, median: +q(50).toFixed(3), p95: +q(95).toFixed(3), min: +samples[0].toFixed(3) };
+}
+async function time(fn, make) {
+  const out = [];
+  for (let k = 0; k < ITER + 3; k++) {
+    const input = make();
+    const t = performance.now();
+    await fn(input);
+    const dt = performance.now() - t;
+    if (k >= 3) out.push(dt);
+  }
+  return stats(out);
+}
+function glSetup(canvas, w, h) {
+  canvas.width = w; canvas.height = h;
+  const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: false });
+  if (!gl) return null;
+  const vs = `#version 300 es
+  in vec2 p; out vec2 uv; void main(){ uv = vec2(p.x * .5 + .5, .5 - p.y * .5); gl_Position = vec4(p, 0, 1); }`;
+  // BGRA bytes uploaded as RGBA: swap in the shader (no CPU conversion); premultiplied output as-is.
+  const fs = `#version 300 es
+  precision mediump float; in vec2 uv; uniform sampler2D t; out vec4 o; void main(){ o = texture(t, uv).bgra; }`;
+  const prog = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); gl.attachShader(prog, s); }
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.viewport(0, 0, w, h);
+  return { gl, renderer: (() => { const e = gl.getExtension('WEBGL_debug_renderer_info');
+    return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); })() };
+}
+async function run() {
+  const results = [], probe = new Uint8Array(4);
+  for (const [w, h] of SIZES) {
+    const base = frame(w, h), make = () => base.slice(0), r = { width: w, height: h, bytes: w * h * 4 };
+    const canvas = document.getElementById('c'); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const flush = () => ctx.getImageData(0, 0, 1, 1);  // forces the pending upload to complete
+    const band = Math.max(1, Math.round(h * 0.1));      // damage: a 10 % full-width band
+    r.copy_ms = await time(b => new Uint8Array(b.byteLength).set(new Uint8Array(b)), make);
+    r.presenter_bgraToRGBA_ms = await time(bgraToRGBA, make);
+    r.candidate_u32_fast_path_ms = await time(bgraToRGBAFast, make);
+    const rgba = new ImageData(bgraToRGBA(make()), w, h);
+    r.putImageData_full_ms = await time(() => { ctx.putImageData(rgba, 0, 0); flush(); }, () => null);
+    // Exactly #draw's per-frame work (canvas already sized): convert, wrap, put; then flush.
+    r.presenter_draw_full_ms = await time(b => { ctx.putImageData(new ImageData(bgraToRGBA(b), w, h), 0, 0); flush(); }, make);
+    r.candidate_damage10_fast_put_ms = await time(b => {
+      const view = new Uint8Array(b, 0, w * band * 4).slice(0).buffer;  // only the damaged rows are converted
+      ctx.putImageData(new ImageData(bgraToRGBAFast(view), w, band), 0, 0); flush(); }, make);
+    r.candidate_createImageBitmap_ms = await time(async b => {
+      const bmp = await createImageBitmap(new ImageData(bgraToRGBAFast(b), w, h)); ctx.drawImage(bmp, 0, 0); bmp.close(); flush(); }, make);
+    const g = glSetup(document.getElementById('g'), w, h);
+    if (g) {
+      const { gl } = g; r.webgl_renderer = g.renderer;
+      const upload = (bytes, rows) => { gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, rows, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, probe); };
+      r.candidate_webgl_full_ms = await time(b => upload(new Uint8Array(b), h), make);
+      r.candidate_webgl_damage10_ms = await time(b => upload(new Uint8Array(b, 0, w * band * 4), band), make);
+    } else r.webgl_renderer = null;
+    results.push(r);
+  }
+  return { schema: 'axiosozo-presenter-browser-v1', userAgent: navigator.userAgent, iterations: ITER,
+           hardwareConcurrency: navigator.hardwareConcurrency, results };
+}
+run().then(result => fetch('/result', { method: 'POST', body: JSON.stringify(result) }),
+           error => fetch('/result', { method: 'POST', body: JSON.stringify({ error: String(error && error.stack || error) }) }));
+</script></body></html>
