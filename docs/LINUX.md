@@ -102,6 +102,7 @@ publishes small results to the `ci-results` branch
 | `linux-zen-build.yml` | push to `cloud/linux-platform` touching build inputs; PR label `linux-build` | calls `linux-zen-reusable.yml` (build + GUI) |
 | `linux-gui.yml` | push touching the harness; PR label `linux-gui` | newest run with an app artifact → GUI harness |
 | `linux-zen-reusable.yml` | `workflow_call` only | build (or reuse an artifact) + `./dev gui-test` |
+| `linux-source-probe.yml` | push touching it or `scripts/source_probe.txt` | greps/copies files of the pinned Firefox 156 tarball (sha512 checked) and Zen revision, optionally after applying Zen's `src/**/*.patch`; results `…-source-probe/` |
 
 ### Getting a built app in another branch's Actions job
 
@@ -161,6 +162,21 @@ engine-view surface service absent → AXCF pipe fallback), `about`
 (about:axiosozo renders its heading), `fixture` (the fixture renders in the
 engine's tab), `input` (xdotool click/type/button/address-bar navigation,
 observed through the page title).
+
+### Software WebRender and Zen's backdrop patch
+
+On runners without a GPU, Gecko uses software WebRender (SWGL) on llvmpipe.
+Zen's pinned `src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch`
+(a backport of Mozilla bug 2036640, pref `gfx.webrender.opaque-backdrop-fallback`,
+default true) clears a captured backdrop's alpha with `glColorMask`. SWGL does
+not implement `color_mask` (it is a bare `panic!()`), so every backdrop-filter
+(for example Zen's urlbar after Return) used to crash the parent's Renderer
+thread. The `gfx/webrender_bindings/WebRenderAPI.cpp` record in
+`patches/zen/firefox-native.json` turns the fallback on only when the
+renderer is not SWGL. GPU WebRender, including macOS, is unchanged. If a Zen
+update changes that file, the record fails with `PATCH_CONFLICT`. Rerun the
+source probe with `patched|gfx/webrender_bindings/WebRenderAPI.cpp` to get the
+new post-import hash.
 
 Engine plug-ins live in `scripts/gui_engines/<name>.py` and export
 `ENGINE = <GuiEngine subclass>()` with `browser_environment`, `prepare`,
