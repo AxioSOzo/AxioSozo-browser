@@ -1,0 +1,1781 @@
+   Compiling serde_core v1.0.228
+   Compiling zmij v1.0.23
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling serde_json v1.0.149
+   Compiling serde v1.0.228
+   Compiling browser-core v0.1.0 (/home/runner/work/AxioSozo-browser/AxioSozo-browser/crates/browser-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.31s
+     Running unittests src/lib.rs (/home/runner/axiosozo-build/cargo-target/debug/deps/browser_core-67c31d366e9d7a1c)
+
+running 11 tests
+test tests::authentication_and_session_isolation ... ok
+test tests::chrome_registration_preserves_real_target_and_rejects_rebinding ... ok
+test tests::expiry_scope_and_one_use ... ok
+test tests::forged_engine_identity_fails ... ok
+test tests::private_context_never_granted ... ok
+test tests::generations_are_lossless_in_javascript ... ok
+test tests::no_web_origin_or_extra_fields ... ok
+test tests::stale_document_invalidates_grant ... ok
+test tests::replay_and_reconnect_never_repeat_action ... ok
+test tests::target_ids_are_browser_minted_and_unique ... ok
+test tests::webkit_engine_is_its_own_identity ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling browser-core v0.1.0 (/home/runner/work/AxioSozo-browser/AxioSozo-browser/crates/browser-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.68s
+TAP version 13
+# Subtest: the option a client refused is read from its own error text, for every parser we know
+ok 1 - the option a client refused is read from its own error text, for every parser we know
+  ---
+  duration_ms: 4.018063
+  type: 'test'
+  ...
+# Subtest: request inspection: tools, leaked customizations and missing own instructions are refusals
+ok 2 - request inspection: tools, leaked customizations and missing own instructions are refusals
+  ---
+  duration_ms: 1.075558
+  type: 'test'
+  ...
+# Subtest: loopback stand-in answers both APIs, records shape facts only and never keeps headers
+ok 3 - loopback stand-in answers both APIs, records shape facts only and never keeps headers
+  ---
+  duration_ms: 50.782474
+  type: 'test'
+  ...
+# Subtest: checkClient never rejects; a missing client is not-installed without starting anything
+ok 4 - checkClient never rejects; a missing client is not-installed without starting anything
+  ---
+  duration_ms: 1.58259
+  type: 'test'
+  ...
+# Subtest: describeCheck names the client, version and exact reason
+ok 5 - describeCheck names the client, version and exact reason
+  ---
+  duration_ms: 0.208293
+  type: 'test'
+  ...
+# Subtest: Claude: the client's own init report must show no tools and no MCP servers; unknown events are ignored
+ok 6 - Claude: the client's own init report must show no tools and no MCP servers; unknown events are ignored
+  ---
+  duration_ms: 1.845466
+  type: 'test'
+  ...
+# Subtest: Claude failure results map to fixed reasons only
+ok 7 - Claude failure results map to fixed reasons only
+  ---
+  duration_ms: 0.320411
+  type: 'test'
+  ...
+# Subtest: Codex check loop: a removed feature of ours is dropped and re-checked; required keys and flags are refusals
+ok 8 - Codex check loop: a removed feature of ours is dropped and re-checked; required keys and flags are refusals
+  ---
+  duration_ms: 0.798561
+  type: 'test'
+  ...
+# Subtest: reader keeps only the documented core and ignores everything else
+ok 9 - reader keeps only the documented core and ignores everything else
+  ---
+  duration_ms: 4.007047
+  type: 'test'
+  ...
+# Subtest: a turn streams the agent message, completes, and later turns carry a bounded transcript
+ok 10 - a turn streams the agent message, completes, and later turns carry a bounded transcript
+  ---
+  duration_ms: 108.097414
+  type: 'test'
+  ...
+# Subtest: several agent messages are joined; unknown events and fields never break a turn
+ok 11 - several agent messages are joined; unknown events and fields never break a turn
+  ---
+  duration_ms: 38.724173
+  type: 'test'
+  ...
+# Subtest: rate: the turn ends failed (RATE_LIMITED) with a fixed reason and the process is reaped
+ok 12 - rate: the turn ends failed (RATE_LIMITED) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 82.727607
+  type: 'test'
+  ...
+# Subtest: auth: the turn ends failed (PROVIDER_AUTH) with a fixed reason and the process is reaped
+ok 13 - auth: the turn ends failed (PROVIDER_AUTH) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 90.359485
+  type: 'test'
+  ...
+# Subtest: exit: the turn ends uncertain (PROCESS_EXIT) with a fixed reason and the process is reaped
+ok 14 - exit: the turn ends uncertain (PROCESS_EXIT) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 89.023622
+  type: 'test'
+  ...
+# Subtest: tool: the turn ends failed (PROVIDER_TOOLS_ENABLED) with a fixed reason and the process is reaped
+ok 15 - tool: the turn ends failed (PROVIDER_TOOLS_ENABLED) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 332.879263
+  type: 'test'
+  ...
+# Subtest: malformed: the turn ends uncertain (MALFORMED_MESSAGE) with a fixed reason and the process is reaped
+ok 16 - malformed: the turn ends uncertain (MALFORMED_MESSAGE) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 84.377118
+  type: 'test'
+  ...
+# Subtest: Stop ends the running turn as cancelled; the next turn starts a fresh process
+ok 17 - Stop ends the running turn as cancelled; the next turn starts a fresh process
+  ---
+  duration_ms: 147.117743
+  type: 'test'
+  ...
+# Subtest: binding, busy and migration rules match the other adapters
+ok 18 - binding, busy and migration rules match the other adapters
+  ---
+  duration_ms: 6.136029
+  type: 'test'
+  ...
+# Subtest: Providers declare capabilities; Jev has no image input; OpenAI is UNVERIFIED_SHAPE and NOT_AUTHORIZED live
+ok 19 - Providers declare capabilities; Jev has no image input; OpenAI is UNVERIFIED_SHAPE and NOT_AUTHORIZED live
+  ---
+  duration_ms: 1.589631
+  type: 'test'
+  ...
+# Subtest: Provider defaults to jev, may be named explicitly, and an unknown provider is INVALID_INPUT without any call
+ok 20 - Provider defaults to jev, may be named explicitly, and an unknown provider is INVALID_INPUT without any call
+  ---
+  duration_ms: 22.380781
+  type: 'test'
+  ...
+# Subtest: A screen request to Jev is IMAGE_UNSUPPORTED with zero Keychain reads and zero network calls
+ok 21 - A screen request to Jev is IMAGE_UNSUPPORTED with zero Keychain reads and zero network calls
+  ---
+  duration_ms: 2.489214
+  type: 'test'
+  ...
+# Subtest: Screen observation validation: PNG signature, IHDR matches declared size ≤ 1280, decoded ≤ 1 MiB, exact keys
+ok 22 - Screen observation validation: PNG signature, IHDR matches declared size ≤ 1280, decoded ≤ 1 MiB, exact keys
+  ---
+  duration_ms: 30.748978
+  type: 'test'
+  ...
+# Subtest: The raised 1.5 MiB state cap applies only to screen requests
+ok 23 - The raised 1.5 MiB state cap applies only to screen requests
+  ---
+  duration_ms: 15.640484
+  type: 'test'
+  ...
+# Subtest: OpenAI is refused with UNVERIFIED_SHAPE in the product configuration: no Keychain read, no fetch
+ok 24 - OpenAI is refused with UNVERIFIED_SHAPE in the product configuration: no Keychain read, no fetch
+  ---
+  duration_ms: 0.618771
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture route: own key, own endpoint, image moved out of state, probabilities optional, confidence reported
+ok 25 - OpenAI fixture route: own key, own endpoint, image moved out of state, probabilities optional, confidence reported
+  ---
+  duration_ms: 5.813173
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture route fails closed: low confidence, unlisted choice, wrong model, bad probabilities, no key
+ok 26 - OpenAI fixture route fails closed: low confidence, unlisted choice, wrong model, bad probabilities, no key
+  ---
+  duration_ms: 3.123859
+  type: 'test'
+  ...
+# Subtest: watch_v1 asks one fixed-instruction question over the user outcomes plus reserved unknown
+ok 27 - watch_v1 asks one fixed-instruction question over the user outcomes plus reserved unknown
+  ---
+  duration_ms: 1.630122
+  type: 'test'
+  ...
+# Subtest: watch_v1 strict validation: 2–6 unique outcomes, reserved unknown, caps and unknown keys
+ok 28 - watch_v1 strict validation: 2–6 unique outcomes, reserved unknown, caps and unknown keys
+  ---
+  duration_ms: 1.889382
+  type: 'test'
+  ...
+# Subtest: Host decision/watch shares the decision budget and cancellation
+ok 29 - Host decision/watch shares the decision budget and cancellation
+  ---
+  duration_ms: 1.758274
+  type: 'test'
+  ...
+# Subtest: stdio admits a line over 72 KiB only for a screen decision; other long lines close the host
+ok 30 - stdio admits a line over 72 KiB only for a screen decision; other long lines close the host
+  ---
+  duration_ms: 545.896637
+  type: 'test'
+  ...
+# Subtest: Jev off never calls network
+ok 31 - Jev off never calls network
+  ---
+  duration_ms: 1.113655
+  type: 'test'
+  ...
+# Subtest: Jev validates pinned model/schema and never authorizes an action
+ok 32 - Jev validates pinned model/schema and never authorizes an action
+  ---
+  duration_ms: 17.112618
+  type: 'test'
+  ...
+# Subtest: Jev malformed, unexpected model, invalid probability and low confidence fail closed
+ok 33 - Jev malformed, unexpected model, invalid probability and low confidence fail closed
+  ---
+  duration_ms: 1.373115
+  type: 'test'
+  ...
+# Subtest: Jev deadline cancels the actual fetch, no retry
+ok 34 - Jev deadline cancels the actual fetch, no retry
+  ---
+  duration_ms: 30.416708
+  type: 'test'
+  ...
+# Subtest: Jev caller cancellation, oversized response and Keychain failure
+ok 35 - Jev caller cancellation, oversized response and Keychain failure
+  ---
+  duration_ms: 1.736873
+  type: 'test'
+  ...
+# Subtest: Jev refuses private/real context and stale schema
+ok 36 - Jev refuses private/real context and stale schema
+  ---
+  duration_ms: 0.836027
+  type: 'test'
+  ...
+# Subtest: Keychain missing helper never falls back to plaintext storage
+ok 37 - Keychain missing helper never falls back to plaintext storage
+  ---
+  duration_ms: 0.519782
+  type: 'test'
+  ...
+# Subtest: Host opens lazily, streams actual child protocol, binds identity and closes owned child
+ok 38 - Host opens lazily, streams actual child protocol, binds identity and closes owned child
+  ---
+  duration_ms: 63.272505
+  type: 'test'
+  ...
+# Subtest: Host cancels a pending turn and remains responsive while a request is running
+ok 39 - Host cancels a pending turn and remains responsive while a request is running
+  ---
+  duration_ms: 51.816455
+  type: 'test'
+  ...
+# Subtest: Host deadline kills and reaps a held provider without reporting completed
+ok 40 - Host deadline kills and reaps a held provider without reporting completed
+  ---
+  duration_ms: 110.19595
+  type: 'test'
+  ...
+# Subtest: Unknown fields cannot grant shell, executable, cwd, environment or credentials
+ok 41 - Unknown fields cannot grant shell, executable, cwd, environment or credentials
+  ---
+  duration_ms: 0.62521
+  type: 'test'
+  ...
+# Subtest: Malformed/oversized JSONL and EOF close host without starting clients
+ok 42 - Malformed/oversized JSONL and EOF close host without starting clients
+  ---
+  duration_ms: 1.642761
+  type: 'test'
+  ...
+# Subtest: Closing browser during provider startup reaps the newly connected child
+ok 43 - Closing browser during provider startup reaps the newly connected child
+  ---
+  duration_ms: 28.471422
+  type: 'test'
+  ...
+# Subtest: Actual stdio host exits cleanly at idle even when browser stdin remains open
+ok 44 - Actual stdio host exits cleanly at idle even when browser stdin remains open
+  ---
+  duration_ms: 161.063267
+  type: 'test'
+  ...
+# Subtest: keys/status reports presence only, per provider, with capabilities and shape status
+ok 45 - keys/status reports presence only, per provider, with capabilities and shape status
+  ---
+  duration_ms: 2.528042
+  type: 'test'
+  ...
+# Subtest: keys/store writes each provider to its own item and never echoes the key
+ok 46 - keys/store writes each provider to its own item and never echoes the key
+  ---
+  duration_ms: 0.672522
+  type: 'test'
+  ...
+# Subtest: keys/store rejects bad keys, providers and fields before touching the Keychain; failures use fixed codes
+ok 47 - keys/store rejects bad keys, providers and fields before touching the Keychain; failures use fixed codes
+  ---
+  duration_ms: 0.929948
+  type: 'test'
+  ...
+# Subtest: keys/remove deletes only the named provider item; missing counts as removed
+ok 48 - keys/remove deletes only the named provider item; missing counts as removed
+  ---
+  duration_ms: 0.654384
+  type: 'test'
+  ...
+# Subtest: MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper)
+ok 49 - MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper) # SKIP
+  ---
+  duration_ms: 0.054442
+  type: 'test'
+  ...
+# Subtest: SecretServiceKeychain keeps the same argv/exit contract on Linux (fake helper)
+ok 50 - SecretServiceKeychain keeps the same argv/exit contract on Linux (fake helper)
+  ---
+  duration_ms: 23.916632
+  type: 'test'
+  ...
+# Subtest: platformKeychain selects the platform store and refuses unknown providers
+ok 51 - platformKeychain selects the platform store and refuses unknown providers
+  ---
+  duration_ms: 0.411389
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks jev site_rule before store, fetch and budget
+ok 52 - Browser capability blocks jev site_rule before store, fetch and budget
+  ---
+  duration_ms: 2.699921
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks openai site_rule before store, fetch and budget
+ok 53 - Browser capability blocks openai site_rule before store, fetch and budget
+  ---
+  duration_ms: 0.327893
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks jev watch before store, fetch and budget
+ok 54 - Browser capability blocks jev watch before store, fetch and budget
+  ---
+  duration_ms: 0.59874
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks openai watch before store, fetch and budget
+ok 55 - Browser capability blocks openai watch before store, fetch and budget
+  ---
+  duration_ms: 0.243446
+  type: 'test'
+  ...
+# Subtest: Default Jev selection is blocked by the browser capability
+ok 56 - Default Jev selection is blocked by the browser capability
+  ---
+  duration_ms: 0.7911
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture permission cannot bypass the browser capability
+ok 57 - OpenAI fixture permission cannot bypass the browser capability
+  ---
+  duration_ms: 3.617871
+  type: 'test'
+  ...
+# Subtest: Strict validation runs before NOT_AUTHORIZED, and request fields cannot enable it
+ok 58 - Strict validation runs before NOT_AUTHORIZED, and request fields cannot enable it
+  ---
+  duration_ms: 1.659165
+  type: 'test'
+  ...
+# Subtest: Browser capability covers diagnostic requests after their strict validation
+ok 59 - Browser capability covers diagnostic requests after their strict validation
+  ---
+  duration_ms: 0.465711
+  type: 'test'
+  ...
+# Subtest: Only literal true grants the host capability
+ok 60 - Only literal true grants the host capability
+  ---
+  duration_ms: 1.045903
+  type: 'test'
+  ...
+# Subtest: Explicit authorized diagnostic uses the injected fake fetch
+ok 61 - Explicit authorized diagnostic uses the injected fake fetch
+  ---
+  duration_ms: 23.52966
+  type: 'test'
+  ...
+# Subtest: Legacy injected fake Jev path retains its default behavior
+ok 62 - Legacy injected fake Jev path retains its default behavior
+  ---
+  duration_ms: 1.360627
+  type: 'test'
+  ...
+# Subtest: Legacy OpenAI canned fixture path retains its separate fake store and fetch
+ok 63 - Legacy OpenAI canned fixture path retains its separate fake store and fetch
+  ---
+  duration_ms: 0.764941
+  type: 'test'
+  ...
+# Subtest: Decision host with the disabled browser factory returns neutral results despite zero budget
+ok 64 - Decision host with the disabled browser factory returns neutral results despite zero budget
+  ---
+  duration_ms: 1.585435
+  type: 'test'
+  ...
+# Subtest: Decision reason list includes the fixed authorization failure
+ok 65 - Decision reason list includes the fixed authorization failure
+  ---
+  duration_ms: 0.137707
+  type: 'test'
+  ...
+# Subtest: No version pin is exported or consulted: acceptance is the capability check
+ok 66 - No version pin is exported or consulted: acceptance is the capability check
+  ---
+  duration_ms: 1.636972
+  type: 'test'
+  ...
+# Subtest: Live client environment never forwards inherited credentials, endpoints or loader hooks
+ok 67 - Live client environment never forwards inherited credentials, endpoints or loader hooks
+  ---
+  duration_ms: 0.526492
+  type: 'test'
+  ...
+# Subtest: Claude profile: Keychain path for the official client only, no shells, no personal directories
+ok 68 - Claude profile: Keychain path for the official client only, no shells, no personal directories
+  ---
+  duration_ms: 0.962677
+  type: 'test'
+  ...
+# Subtest: Codex profile: own CODEX_HOME minus every customization file, no fork, no Keychain helper
+ok 69 - Codex profile: own CODEX_HOME minus every customization file, no fork, no Keychain helper
+  ---
+  duration_ms: 0.47862
+  type: 'test'
+  ...
+# Subtest: Production argv disables ambient integrations without permission bypass flags
+ok 70 - Production argv disables ambient integrations without permission bypass flags
+  ---
+  duration_ms: 1.148908
+  type: 'test'
+  ...
+# Subtest: Reported versions are parsed from bounded --version output of any client
+ok 71 - Reported versions are parsed from bounded --version output of any client
+  ---
+  duration_ms: 0.35949
+  type: 'test'
+  ...
+# Subtest: Missing clients and Antigravity fail before launch
+ok 72 - Missing clients and Antigravity fail before launch
+  ---
+  duration_ms: 0.792702
+  type: 'test'
+  ...
+# Subtest: Any Codex version resolves to its native executable (npm layout or direct binary); unsafe installs are refused
+ok 73 - Any Codex version resolves to its native executable (npm layout or direct binary); unsafe installs are refused
+  ---
+  duration_ms: 12.010465
+  type: 'test'
+  ...
+# Subtest: codex: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 74 - codex: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 150.76305
+  type: 'test'
+  ...
+# Subtest: codex: instance/account isolation rejects before send
+ok 75 - codex: instance/account isolation rejects before send
+  ---
+  duration_ms: 44.521738
+  type: 'test'
+  ...
+# Subtest: codex: cancellation waits for native terminal event
+ok 76 - codex: cancellation waits for native terminal event
+  ---
+  duration_ms: 65.021195
+  type: 'test'
+  ...
+# Subtest: codex: process crash is uncertain and reconnect never replays
+ok 77 - codex: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 66.365582
+  type: 'test'
+  ...
+# Subtest: codex: no live launch without authentication or proven sandbox
+ok 78 - codex: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 3.590511
+  type: 'test'
+  ...
+# Subtest: claude-code: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 79 - claude-code: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 134.414807
+  type: 'test'
+  ...
+# Subtest: claude-code: instance/account isolation rejects before send
+ok 80 - claude-code: instance/account isolation rejects before send
+  ---
+  duration_ms: 38.959763
+  type: 'test'
+  ...
+# Subtest: claude-code: cancellation waits for native terminal event
+ok 81 - claude-code: cancellation waits for native terminal event
+  ---
+  duration_ms: 52.787846
+  type: 'test'
+  ...
+# Subtest: claude-code: process crash is uncertain and reconnect never replays
+ok 82 - claude-code: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 53.820208
+  type: 'test'
+  ...
+# Subtest: claude-code: no live launch without authentication or proven sandbox
+ok 83 - claude-code: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 1.208698
+  type: 'test'
+  ...
+# Subtest: antigravity: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 84 - antigravity: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 102.651764
+  type: 'test'
+  ...
+# Subtest: antigravity: instance/account isolation rejects before send
+ok 85 - antigravity: instance/account isolation rejects before send
+  ---
+  duration_ms: 27.92437
+  type: 'test'
+  ...
+# Subtest: antigravity: cancellation waits for native terminal event
+ok 86 - antigravity: cancellation waits for native terminal event
+  ---
+  duration_ms: 39.333339
+  type: 'test'
+  ...
+# Subtest: antigravity: process crash is uncertain and reconnect never replays
+ok 87 - antigravity: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 51.029682
+  type: 'test'
+  ...
+# Subtest: antigravity: no live launch without authentication or proven sandbox
+ok 88 - antigravity: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 1.101567
+  type: 'test'
+  ...
+# Subtest: Codex resume executes generated-schema native thread/resume
+ok 89 - Codex resume executes generated-schema native thread/resume
+  ---
+  duration_ms: 32.268643
+  type: 'test'
+  ...
+# Subtest: Claude and Antigravity do not claim unimplemented continuation
+ok 90 - Claude and Antigravity do not claim unimplemented continuation
+  ---
+  duration_ms: 57.888877
+  type: 'test'
+  ...
+# Subtest: Codex validates outgoing methods against installed version, not guessed methods
+ok 91 - Codex validates outgoing methods against installed version, not guessed methods
+  ---
+  duration_ms: 3.328116
+  type: 'test'
+  ...
+# Subtest: Deduplicates native UUID events but retains legitimate repeated text
+ok 92 - Deduplicates native UUID events but retains legitimate repeated text
+  ---
+  duration_ms: 100.783805
+  type: 'test'
+  ...
+# Subtest: Codex command approvals are explicitly denied
+ok 93 - Codex command approvals are explicitly denied
+  ---
+  duration_ms: 54.065457
+  type: 'test'
+  ...
+# Subtest: Host rejects malformed fixture messages and reaps child
+ok 94 - Host rejects malformed fixture messages and reaps child
+  ---
+  duration_ms: 29.286748
+  type: 'test'
+  ...
+# Subtest: Host rejects oversized fixture messages and reaps child
+ok 95 - Host rejects oversized fixture messages and reaps child
+  ---
+  duration_ms: 47.65132
+  type: 'test'
+  ...
+# Subtest: Discovery never executes malicious launch hooks, MCP, or provider PATH entries
+ok 96 - Discovery never executes malicious launch hooks, MCP, or provider PATH entries
+  ---
+  duration_ms: 1.932627
+  type: 'test'
+  ...
+# Subtest: T3 version extraction and bounded redaction regressions
+ok 97 - T3 version extraction and bounded redaction regressions
+  ---
+  duration_ms: 0.933314
+  type: 'test'
+  ...
+# Subtest: Settings admit exactly the three real metadata routes and reject live capability claims
+ok 98 - Settings admit exactly the three real metadata routes and reject live capability claims
+  ---
+  duration_ms: 2.808294
+  type: 'test'
+  ...
+# Subtest: Settings retain explicit version mismatch and reject a false metadata match
+ok 99 - Settings retain explicit version mismatch and reject a false metadata match
+  ---
+  duration_ms: 0.309255
+  type: 'test'
+  ...
+# Subtest: Settings persist only immutable generated instance identity, driver and nonsecret label
+ok 100 - Settings persist only immutable generated instance identity, driver and nonsecret label
+  ---
+  duration_ms: 0.711921
+  type: 'test'
+  ...
+# Subtest: Corrupt or credential-bearing saved configuration fails closed and is preserved
+ok 101 - Corrupt or credential-bearing saved configuration fails closed and is preserved
+  ---
+  duration_ms: 0.205208
+  type: 'test'
+  ...
+# Subtest: zero, one, two and three enabled instances select at most one verified route
+ok 102 - zero, one, two and three enabled instances select at most one verified route
+  ---
+  duration_ms: 1.052484
+  type: 'test'
+  ...
+# Subtest: Browser-owned discovery launches only fixed metadata command with no inherited environment
+ok 103 - Browser-owned discovery launches only fixed metadata command with no inherited environment
+  ---
+  duration_ms: 0.745411
+  type: 'test'
+  ...
+# Subtest: The capability check runs the fixed clients command with build root and HOME only, and validates its report
+ok 104 - The capability check runs the fixed clients command with build root and HOME only, and validates its report
+  ---
+  duration_ms: 1.330041
+  type: 'test'
+  ...
+# Subtest: Discovery output limits, nonzero exit and cancellation all remain failures
+ok 105 - Discovery output limits, nonzero exit and cancellation all remain failures
+  ---
+  duration_ms: 0.569337
+  type: 'test'
+  ...
+# Subtest: An active metadata subprocess is reaped after timeout
+ok 106 - An active metadata subprocess is reaped after timeout
+  ---
+  duration_ms: 0.57147
+  type: 'test'
+  ...
+# Subtest: An active metadata subprocess is reaped after abort
+ok 107 - An active metadata subprocess is reaped after abort
+  ---
+  duration_ms: 4.507279
+  type: 'test'
+  ...
+# Subtest: Settings exports no Keychain helper of its own; its metadata runner never writes stdin
+ok 108 - Settings exports no Keychain helper of its own; its metadata runner never writes stdin
+  ---
+  duration_ms: 0.431219
+  type: 'test'
+  ...
+# Subtest: Web callers and private windows cannot open persistent provider settings
+ok 109 - Web callers and private windows cannot open persistent provider settings
+  ---
+  duration_ms: 0.326932
+  type: 'test'
+  ...
+# Subtest: site_rule_v1 valid choices return the exact suggestion-only result shape
+ok 110 - site_rule_v1 valid choices return the exact suggestion-only result shape
+  ---
+  duration_ms: 32.503167
+  type: 'test'
+  ...
+# Subtest: site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions
+ok 111 - site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions
+  ---
+  duration_ms: 1.18353
+  type: 'test'
+  ...
+# Subtest: An effect the rule does not list becomes none with malformed_output
+ok 112 - An effect the rule does not list becomes none with malformed_output
+  ---
+  duration_ms: 1.095217
+  type: 'test'
+  ...
+# Subtest: Low confidence becomes none; the optional reason is fixed-code only
+ok 113 - Low confidence becomes none; the optional reason is fixed-code only
+  ---
+  duration_ms: 2.968995
+  type: 'test'
+  ...
+# Subtest: Malformed, oversized, wrong-model and bad-probability responses fail closed to none
+ok 114 - Malformed, oversized, wrong-model and bad-probability responses fail closed to none
+  ---
+  duration_ms: 3.523941
+  type: 'test'
+  ...
+# Subtest: 401, HTTP and network errors map to none and still disclose the transmission
+ok 115 - 401, HTTP and network errors map to none and still disclose the transmission
+  ---
+  duration_ms: 2.615133
+  type: 'test'
+  ...
+# Subtest: Deadline aborts the actual fetch once; caller abort cancels; no retry
+ok 116 - Deadline aborts the actual fetch once; caller abort cancels; no retry
+  ---
+  duration_ms: 52.83356
+  type: 'test'
+  ...
+# Subtest: No key means zero fetch calls and data_sent false; Keychain failure likewise
+ok 117 - No key means zero fetch calls and data_sent false; Keychain failure likewise
+  ---
+  duration_ms: 0.818571
+  type: 'test'
+  ...
+# Subtest: Strict request validation rejects unknown keys, caps and level violations without Keychain or fetch
+ok 118 - Strict request validation rejects unknown keys, caps and level violations without Keychain or fetch
+  ---
+  duration_ms: 7.790708
+  type: 'test'
+  ...
+# Subtest: The diagnostic choice set is unchanged and now discloses data_sent
+ok 119 - The diagnostic choice set is unchanged and now discloses data_sent
+  ---
+  duration_ms: 1.797944
+  type: 'test'
+  ...
+# Subtest: Host decision/site_rule replies with the decision result and never starts a provider client
+ok 120 - Host decision/site_rule replies with the decision result and never starts a provider client
+  ---
+  duration_ms: 1.469931
+  type: 'test'
+  ...
+# Subtest: Host enforces the default rolling-hour budget of 30 and never fetches when exhausted
+ok 121 - Host enforces the default rolling-hour budget of 30 and never fetches when exhausted
+  ---
+  duration_ms: 16.361979
+  type: 'test'
+  ...
+# Subtest: Budget counts only real transmissions: no key and invalid input never consume it
+ok 122 - Budget counts only real transmissions: no key and invalid input never consume it
+  ---
+  duration_ms: 3.729249
+  type: 'test'
+  ...
+# Subtest: Host decision/cancel aborts the in-flight fetch; closing the host aborts too
+ok 123 - Host decision/cancel aborts the in-flight fetch; closing the host aborts too
+  ---
+  duration_ms: 1.149288
+  type: 'test'
+  ...
+# Subtest: Actual stdio framing accepts a 64 KiB decision state and replies on one line
+ok 124 - Actual stdio framing accepts a 64 KiB decision state and replies on one line
+  ---
+  duration_ms: 43.192859
+  type: 'test'
+  ...
+# Subtest: Transport timeout is distinct from a possibly mutating uncertain outcome, without retries
+ok 125 - Transport timeout is distinct from a possibly mutating uncertain outcome, without retries
+  ---
+  duration_ms: 100.92035
+  type: 'test'
+  ...
+# Subtest: Transport rejects queue overload and releases all pending requests on shutdown
+ok 126 - Transport rejects queue overload and releases all pending requests on shutdown
+  ---
+  duration_ms: 41.828272
+  type: 'test'
+  ...
+# (node:7299) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ordinary success close never signals a numeric PGID or the retained child
+ok 127 - ordinary success close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 6.137952
+  type: 'test'
+  ...
+# Subtest: ordinary nonzero close never signals a numeric PGID or the retained child
+ok 128 - ordinary nonzero close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 0.800824
+  type: 'test'
+  ...
+# Subtest: ordinary signal exit close never signals a numeric PGID or the retained child
+ok 129 - ordinary signal exit close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 0.802637
+  type: 'test'
+  ...
+# Subtest: close alone never tries group cleanup even if fake retained exit fields are still null
+ok 130 - close alone never tries group cleanup even if fake retained exit fields are still null
+  ---
+  duration_ms: 0.791601
+  type: 'test'
+  ...
+# Subtest: cancel after leader exit settles without a close event or descendant signals
+ok 131 - cancel after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 1.371713
+  type: 'test'
+  ...
+# Subtest: cancel while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 132 - cancel while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 0.761365
+  type: 'test'
+  ...
+# Subtest: timeout after leader exit settles without a close event or descendant signals
+ok 133 - timeout after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 0.817539
+  type: 'test'
+  ...
+# Subtest: timeout while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 134 - timeout while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 0.602466
+  type: 'test'
+  ...
+# Subtest: close after leader exit settles without a close event or descendant signals
+ok 135 - close after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 1.358654
+  type: 'test'
+  ...
+# Subtest: close while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 136 - close while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 3.975179
+  type: 'test'
+  ...
+# Subtest: host exit signals only a retained live leader; known exit is left alone
+ok 137 - host exit signals only a retained live leader; known exit is left alone
+  ---
+  duration_ms: 0.653293
+  type: 'test'
+  ...
+# Subtest: a leader exit observed during the group attempt suppresses the direct fallback and bounds cancel
+ok 138 - a leader exit observed during the group attempt suppresses the direct fallback and bounds cancel
+  ---
+  duration_ms: 0.492441
+  type: 'test'
+  ...
+# Subtest: a failed group attempt still uses the retained live child fallback
+ok 139 - a failed group attempt still uses the retained live child fallback
+  ---
+  duration_ms: 0.514865
+  type: 'test'
+  ...
+# Subtest: unknown retained exit facts refuse both signals; close still settles the selected timeout
+ok 140 - unknown retained exit facts refuse both signals; close still settles the selected timeout
+  ---
+  duration_ms: 0.496968
+  type: 'test'
+  ...
+# Subtest: a stopped exited child can advance the queue; its late close cannot remove the next child exit hook
+ok 141 - a stopped exited child can advance the queue; its late close cannot remove the next child exit hook
+  ---
+  duration_ms: 0.556377
+  type: 'test'
+  ...
+# Subtest: Read-only argument arrays are fixed arrays, never shell strings
+ok 142 - Read-only argument arrays are fixed arrays, never shell strings
+  ---
+  duration_ms: 2.140981
+  type: 'test'
+  ...
+# Subtest: Claude fake: brief over stdin, minimal env, project cwd, exact argv, normalized strict document
+ok 143 - Claude fake: brief over stdin, minimal env, project cwd, exact argv, normalized strict document
+  ---
+  duration_ms: 99.28468
+  type: 'test'
+  ...
+# Subtest: Codex fake: explain_errors embeds the console errors as untrusted data and returns the explanation
+ok 144 - Codex fake: explain_errors embeds the console errors as untrusted data and returns the explanation
+  ---
+  duration_ms: 54.72596
+  type: 'test'
+  ...
+# Subtest: Failures: non-zero exit, invalid JSON and unknown keys never return a document or stderr
+ok 145 - Failures: non-zero exit, invalid JSON and unknown keys never return a document or stderr
+  ---
+  duration_ms: 122.66167
+  type: 'test'
+  ...
+# Subtest: stdout over 256 KiB is invalid_output and the CLI is killed
+ok 146 - stdout over 256 KiB is invalid_output and the CLI is killed
+  ---
+  duration_ms: 26.938
+  type: 'test'
+  ...
+# Subtest: Timeout kills the whole process group, including a grandchild
+ok 147 - Timeout kills the whole process group, including a grandchild
+  ---
+  duration_ms: 306.502462
+  type: 'test'
+  ...
+# Subtest: Queue: one running, at most four queued, then busy; cancel queued and running; close kills
+ok 148 - Queue: one running, at most four queued, then busy; cancel queued and running; close kills
+  ---
+  duration_ms: 73.257337
+  type: 'test'
+  ...
+# Subtest: Without the test-only launch, a real CLI is never started: NOT_AUTHORIZED, or not installed
+ok 149 - Without the test-only launch, a real CLI is never started: NOT_AUTHORIZED, or not installed
+  ---
+  duration_ms: 1.022718
+  type: 'test'
+  ...
+# Subtest: Request validation: project root, kind/cli, input shape, timeout bounds, unknown keys
+ok 150 - Request validation: project root, kind/cli, input shape, timeout bounds, unknown keys
+  ---
+  duration_ms: 2.30696
+  type: 'test'
+  ...
+# Subtest: Strict document validators reject unknown keys, over-cap strings, bad hosts and unsafe paths
+ok 151 - Strict document validators reject unknown keys, over-cap strings, bad hosts and unsafe paths
+  ---
+  duration_ms: 3.064479
+  type: 'test'
+  ...
+# Subtest: Host understand/* methods: available, run, cancel; host close kills; UNSUPPORTED without a runner
+ok 152 - Host understand/* methods: available, run, cancel; host close kills; UNSUPPORTED without a runner
+  ---
+  duration_ms: 109.951929
+  type: 'test'
+  ...
+# Subtest: setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged
+ok 153 - setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged
+  ---
+  duration_ms: 0.700694
+  type: 'test'
+  ...
+# Subtest: setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section
+ok 154 - setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section
+  ---
+  duration_ms: 0.201734
+  type: 'test'
+  ...
+# Subtest: setup: pickSetupCli prefers Codex, then Claude Code, else null
+ok 155 - setup: pickSetupCli prefers Codex, then Claude Code, else null
+  ---
+  duration_ms: 0.135765
+  type: 'test'
+  ...
+# Subtest: setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes
+ok 156 - setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes
+  ---
+  duration_ms: 3.035465
+  type: 'test'
+  ...
+# Subtest: setup: Codex and Claude fakes run with model args and return the validated document
+ok 157 - setup: Codex and Claude fakes run with model args and return the validated document
+  ---
+  duration_ms: 87.579864
+  type: 'test'
+  ...
+# Subtest: setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing
+ok 158 - setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing
+  ---
+  duration_ms: 0.545591
+  type: 'test'
+  ...
+# Subtest: Exact pinned metadata is not a claim of actual client protocol compatibility
+ok 159 - Exact pinned metadata is not a claim of actual client protocol compatibility
+  ---
+  duration_ms: 9.644376
+  type: 'test'
+  ...
+# Subtest: Overnight metadata updates explicitly mismatch pinned versions without executing a client
+ok 160 - Overnight metadata updates explicitly mismatch pinned versions without executing a client
+  ---
+  duration_ms: 3.562188
+  type: 'test'
+  ...
+# Subtest: Unknown, malformed and unpinned client versions stay untested and fail closed
+ok 161 - Unknown, malformed and unpinned client versions stay untested and fail closed
+  ---
+  duration_ms: 3.479573
+  type: 'test'
+  ...
+# Subtest: Metadata discovery rejects oversized and redirected package metadata without executing a client
+ok 162 - Metadata discovery rejects oversized and redirected package metadata without executing a client
+  ---
+  duration_ms: 4.170502
+  type: 'test'
+  ...
+# Subtest: Prerelease/build metadata is never silently truncated into an exact version match
+ok 163 - Prerelease/build metadata is never silently truncated into an exact version match
+  ---
+  duration_ms: 3.444521
+  type: 'test'
+  ...
+1..163
+# tests 163
+# suites 0
+# pass 162
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 2449.397023
+TAP version 13
+# Subtest: Linux: the sandbox proof refuses to run without a sandbox (BLOCKED_ENV)
+ok 1 - Linux: the sandbox proof refuses to run without a sandbox (BLOCKED_ENV)
+  ---
+  duration_ms: 2.685159
+  type: 'test'
+  ...
+# LINUX_PROVIDER_SANDBOX: UNSUPPORTED (fail closed); no broker artifact is admitted
+# Subtest: Linux: live provider launches are refused before any client lookup
+ok 2 - Linux: live provider launches are refused before any client lookup
+  ---
+  duration_ms: 0.836408
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 113.441683
+TAP version 13
+# Subtest: Helper rejects malformed input and selectors before any Secret Service call
+ok 1 - Helper rejects malformed input and selectors before any Secret Service call
+  ---
+  duration_ms: 26.649923
+  type: 'test'
+  ...
+# TEST_FIXTURE: invalid inputs and selectors refused without a bus
+# Subtest: No Secret Service: every operation fails closed (exit 1), nothing on stdout, no fallback
+ok 2 - No Secret Service: every operation fails closed (exit 1), nothing on stdout, no fallback
+  ---
+  duration_ms: 22.078257
+  type: 'test'
+  ...
+# TEST_FIXTURE: unreachable session bus refused for read/exists/store/remove (jev, openai)
+# Subtest: Negative fixture build never mutates and reports an unavailable service
+ok 3 - Negative fixture build never mutates and reports an unavailable service
+  ---
+  duration_ms: 7.770187
+  type: 'test'
+  ...
+# Subtest: JS adapter: an unavailable Secret Service is KEYCHAIN_ERROR, never null or a plaintext fallback
+ok 4 - JS adapter: an unavailable Secret Service is KEYCHAIN_ERROR, never null or a plaintext fallback
+  ---
+  duration_ms: 18.259804
+  type: 'test'
+  ...
+# Subtest: Private Secret Service round trip (own bus, own keyring, synthetic keys)
+ok 5 - Private Secret Service round trip (own bus, own keyring, synthetic keys)
+  ---
+  duration_ms: 282.976096
+  type: 'test'
+  ...
+# {"steps":{"exists_before":44,"read_before":44,"store":0,"exists_after":0,"read_after":0,"openai_exists":44,"openai_store":0,"openai_read_matches":true,"negative_read":44,"remove":0,"read_removed":44,"remove_again":44,"openai_remove":0},"read_matches":true,"negative_stderr":"TEST_FIXTURE secret_service=available result=44","daemon_stderr":""}
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 413.635395
+{
+  "status": "BLOCKED_ENV",
+  "reason": "BLOCKED_ENV",
+  "message": "macOS Keychain positive fixture; on Linux see keychain-negative-test (private Secret Service round trip)"
+}
+✔ host input is normalized to contract host patterns (3.872024ms)
+✔ the handoff example rule round-trips through the editor form and passes the contract validator (1.808981ms)
+✔ a new rule from the editor is valid, uses the generated id and defaults to observation none (1.157471ms)
+✔ raised observation hosts are kept only for outline and only for listed hosts (0.404658ms)
+✔ the editor reports field errors instead of producing invalid rules (0.282905ms)
+✔ agents settings are preserved but never widened by the editor (0.21952ms)
+✔ Jev settings form enforces 1–30 minute intervals and a 0–30 hourly budget (0.255704ms)
+✔ Jev wording states exactly when Jev is called and what is sent (M2) (0.300942ms)
+✔ service status text never promises remote checks (M1) (0.235985ms)
+✔ service and surface addresses with a query or fragment are refused in the editor (L5) (1.387587ms)
+✔ detection draft review keeps provenance and guess markers and yields a valid manifest (1.264723ms)
+✔ draft review rejects invalid edits instead of silently dropping them (0.437248ms)
+✔ editing a confirmed project round-trips its manifest (0.277978ms)
+✔ ledger views group per host/context and per day with readable durations (0.58485ms)
+✔ attention items map to page actions and never to non-web URLs (0.351839ms)
+✔ the page model shares enum values with the contexts core (0.342415ms)
+✔ add-project review, Domo-like: environments grouped per app, production URL on the web app, v2 manifest (29.577241ms)
+✔ add-project review, RemoteRAL-like: + Add environment gets a dev server; guesses stay marked; bad production URL refused (2.277136ms)
+✔ surfaces: Shown/More is written only where it differs from the kind's default; unticked ones are dropped (0.281053ms)
+✔ projects are grouped by space (any type) and the page says where a new project lives (0.372931ms)
+✔ deep links: four views, old hashes redirect, item links validated (0.531058ms)
+✔ AI & keys: provider cards keep the honest labels; Jev key form rules; Keychain texts match ProviderStatus (3.887487ms)
+✔ site rules show their own screen time; top sites are marked when a rule covers them (0.404318ms)
+✔ four sections only; the first run guide is the Projects empty state; every space is listed (84.044636ms)
+✔ Site rules carry their own screen time; the busiest sites follow, with Add rule (50.485466ms)
+✔ old hashes redirect; #ai loads provider status with honest labels (41.872425ms)
+✔ decision keys: explicit Store clears the field at once, crosses once, per provider; never echoed; fixed error texts (91.392434ms)
+✔ decision keys: with entry off a stored key can still be removed, after confirming; the other provider is independent (56.251945ms)
+✔ decision keys: a second press while a change runs is ignored; leaving AI & keys cancels it, clears typed keys and shows no late answer (62.752909ms)
+✔ decision keys: an uncertain outcome says it could not be confirmed, reads presence once more and never retries the change (31.344364ms)
+✔ admission: a startup sender refusal is asked again; only the actor's answer admits the page, then keys and providers load (315.246569ms)
+✔ admission: any other failed flags read admits nothing: no retry, no other read, no subscription, key forms off (897.463346ms)
+✔ admission: a page the actor keeps refusing asks a bounded number of times, then stays not connected and reads nothing (3575.630237ms)
+✔ admission: a pagehide during the retry stops asking; an answer from before the hide is not used; a restore asks afresh (422.827263ms)
+✔ decision keys: a private window or a refused check says why and offers nothing (26.716647ms)
+✔ rule editor: a legacy rule keeps no provider; a chosen provider is written and kept through unrelated edits (142.218938ms)
+✔ rule editor: a screenshot cannot be newly chosen; a saved screen rule keeps it; raising a host never allows it (60.060104ms)
+✔ add project: one sheet with name, type, services and space up front; addresses and links under More options; then where it lives (91.683858ms)
+✔ add project: the sheet opens at once, shows reading, applies the assistant's setup check, shows the icon and saves once (79.078807ms)
+✔ add project: closing the sheet while the assistant checks ends that check; a refused folder offers another (528.303141ms)
+✔ a project's icon shows in the list and on its home; its Start section copies each command, with its folder (76.664631ms)
+✔ P2: the home shows the own container in Firefox's colour, typed account labels and unconfirmed shared sites (41.059959ms)
+✔ P2: every project link on the home goes through the container router, never a plain openUrl (50.903406ms)
+✔ P2: account editor: labels the user types per service or site, sent one by one; bad sites are refused locally (62.229874ms)
+✔ P2: shared-sites editor offers the suggestions and shares only after the user turns sharing on (71.408866ms)
+✔ P2: the list card keeps editing secondary but reachable: its menu opens the same editors (38.178044ms)
+✔ #add-project=<space> from the space menu preselects that space; #edit-project opens the editor (55.361407ms)
+✔ edit project: a production address already listed hides the separate Production URL field (24.269517ms)
+✔ agent status: off in every new page; Turn on asks the browser and shows what it reports; hook settings only while listening (58.518841ms)
+✔ agent status: while the switch is on its way it keeps focus and ignores a second press (47.835115ms)
+✔ agent status: a failed start is one calm sentence with the code only in a detail; Try again asks again (38.073217ms)
+✔ agent status: without a verified notify script the hook rows say so and offer no copy; private windows see a calm line (49.966476ms)
+✔ agent status lifecycle: a hidden page publishes nothing; an agents event re-reads only while AI & keys shows; a restore reads afresh (345.341471ms)
+✔ browser tools: the browser's own list, with fixed reasons; plugin settings only while on, named by agent, shown as text and copied on request (183.629873ms)
+✔ plugin settings: no verified bridge says so and offers no copy; an answer prepared for an earlier socket is never shown (200.595103ms)
+✔ browser tools without the browser's capabilities say so; nothing is claimed as available (64.925728ms)
+✔ AI & keys: opening reads the status as it is; Check again asks the provider host to check the clients again (24.690025ms)
+✔ sender validation accepts only the top-level about:axiosozo content principal in privilegedabout (2.342484ms)
+✔ the actual actor refuses a tab without an embedder element, and admits the same document once it has one (1.771856ms)
+✔ wrong principal is rejected before any service call (0.454654ms)
+✔ the method list is closed and matches contexts-api-v1 §3.3 plus refreshProjectDetection, P2 accounts, the project home, openContext, openUrl, flags, P3 agents, P4 plugin settings, decision keys, Understand, project setup and the Lab (1.301067ms)
+✔ unknown methods, prototype names and malformed params are rejected at the parent boundary (1.985647ms)
+✔ valid requests map named params onto the services API (1.227807ms)
+✔ activeContext asks services for the requesting tab's window only (0.382265ms)
+✔ service errors keep their contract code; page cannot patch project root or Jev beyond bounds (0.887946ms)
+✔ engine preference other than default is refused while the experimental pref is off (0.578861ms)
+✔ folder picking uses the requesting tab's window and only picked roots can be detected or confirmed (1.749111ms)
+✔ openUrl accepts only http(s) without credentials and opens in the requesting window (1.045944ms)
+✔ P2 account methods: closed shapes, no container IDs, project links in the requesting window only (2.318387ms)
+✔ project home: an id only, for the requesting tab's window; never a root, container, window or private tab (1.026243ms)
+✔ openContext goes through services with the requesting window and reports when unsupported (0.307733ms)
+✔ service events reach subscribed pages as names only, and stop after destroy (0.627714ms)
+✔ provider status and decision-key methods go to ProviderStatus with the actor's own signal, never to services, and never echo the key (1.555299ms)
+✔ decision-key params are strict; failures carry fixed codes without the key; the Jev-only methods are gone (2.133469ms)
+✔ decision keys need a registered normal window and the current document, before any work and after it answered (18.805668ms)
+✔ the actor owns cancellation: cancel and destroy abort only this document's key work; one change per provider at a time (2.675224ms)
+✔ with the real ProviderStatus and ProviderKeys behind the actor: both providers store, report and remove independently (3.468357ms)
+✔ the actual actor refuses missing, malformed or throwing privacy and current-document facts before any key work (1.191753ms)
+✔ the current document lost while the factory admits: the key never reaches the helper, with or without the page's cancel (0.510688ms)
+✔ window, manager, browsing context or privacy changing while the factory admits or the helper is verified: no key is written (3.886617ms)
+✔ control: didDestroy while the factory admits aborts before any key is written (0.221683ms)
+✔ a helper failure after the key was written is reported as unconfirmed, never as nothing changed (0.617679ms)
+✔ through the actor: a fresh runtime per status, store and refresh; the other provider is unchanged (0.814946ms)
+✔ through the actor and root's real fixture runtime: revoked during the remove's in-spawn admission, the helper never starts (4.428392ms)
+✔ validateRequest and dispatch are usable without an actor (2.600621ms)
+✔ child request serializes params as JSON and resolves with a clone of the reply (0.598751ms)
+✔ child rejects bad names and non-JSON params without messaging the parent (1.954921ms)
+✔ child maps parent errors to page errors (0.249375ms)
+✔ child subscription sends one subscribe, filters event names and unsubscribes with the last listener (0.273131ms)
+✔ Send errors to agent is recognized only as a trusted click on the authored button of this about:axiosozo document (1.856152ms)
+✔ the child's click listener sends the fixed { v: 1 } message and nothing of the page; destroy removes it (0.766764ms)
+✔ the page API is exposed as a frozen, non-writable window property with only request and subscribe (0.1196ms)
+✔ about:axiosozo uses exactly the §3.4 flags: never safe for untrusted content, never linkable (0.082013ms)
+✔ the about module loads the chrome page with the about: URI and drops the chrome system principal (0.228694ms)
+✔ registerAboutAxioSozo is idempotent, reaches privilegedabout processes and unregisters cleanly (0.284458ms)
+✔ the process script registers only in the parent and privilegedabout processes (0.314693ms)
+✔ registerOverviewActor registers the contract actor once and returns its unregister (0.240842ms)
+✔ actor modules export the class names Gecko constructs (`${ACTOR_NAME}Parent` / `${ACTOR_NAME}Child`) (0.256997ms)
+✔ the overview page carries the strict CSP and loads only chrome: resources (0.792221ms)
+✔ overview scripts and styles have no network, markup injection or remote references (3.957583ms)
+✔ the overview's palette, shape, type and spacing come from native Firefox and Zen tokens, with no colour literals (1.979268ms)
+✔ destructive buttons use a readable text colour, not the on-red destructive token (0.329837ms)
+✔ all capabilities default false and absence/malformed dependencies prevent native construction (7.138698ms)
+✔ page.click maps exactly one effect to context+sandbox root document handle (1.638845ms)
+✔ page.type maps exactly one effect to context+sandbox root document handle (0.53192ms)
+✔ tabs.navigate maps exactly one effect to context+sandbox root document handle (0.414313ms)
+✔ open uses standard background create and wait:none navigation, skips action confirmation and adopts (0.603738ms)
+✔ strict parameters/project/private/source gates refuse before native effects (0.582125ms)
+✔ missing beforeBinding native proof prevents effect dispatch (0.602326ms)
+✔ missing beforeEffect native proof prevents effect dispatch (0.311578ms)
+✔ doc remote value serialization is never traversed and malformed binding is refused (0.84472ms)
+✔ realm replacement NoSuchHandle is a single uncertain dispatched failure, with no fallback/broadcast (0.655847ms)
+✔ confirmation must be literal one-shot true bound to exact Core signal and immutable request (2.11393ms)
+✔ pending native gate proof cancelled before commit cannot dispatch, and late failure is consumed (7.452865ms)
+✔ revocation after effect invocation cannot claim rollback and pending ownership blocks reuse (0.914606ms)
+✔ timeout while factory pending retains and disposes exact late owner without any native call (1.048007ms)
+✔ cancelled late open create performs guarded blank cleanup, never URL navigation (0.865763ms)
+✔ blank target validation failure suppresses navigation and failed guarded cleanup retains claim+owner (0.588525ms)
+✔ open navigation-dispatched errors never auto-close and committed claim persists until positive adoption (0.396206ms)
+✔ failed claim mint keeps raw created context, retrying only on explicit close (0.433552ms)
+✔ literal owner close failure retains exact owner; explicit close retries and admission stays closed (2.424117ms)
+✔ pending close is bounded/coalesced and no effect result publishes before true receipt (2.150695ms)
+✔ ignored release Promise is observed and synchronous release cancels before native commit (1.303241ms)
+✔ synchronous native create reentry cannot close owner before exact late-created cleanup (0.642296ms)
+✔ strict rejecting Promise approval and arbitrary thenables cannot cause effects/unhandled rejection (0.733614ms)
+✔ read-only state invokes no runtime callbacks and excludes private handles/params (0.543738ms)
+✔ pending open adoption is bounded by timeout, exact claim/owner stay retained and coalesce (0.756619ms)
+✔ pending open adoption is bounded by release, exact claim/owner stay retained and coalesce (2.28043ms)
+✔ unknown create rejection retains exact pre-dispatch allocation lease and owner until literal reconciliation (0.603908ms)
+✔ unknown create rejection permits owner close only after explicit trusted no-allocation reconciliation (0.308084ms)
+✔ pending rejected-create reconciliation stays coalesced with exact lease and owner after bounded cleanup (1.046714ms)
+✔ allocation setup synchronous release captures exact lease before reconciliation and suppresses create (0.637879ms)
+✔ open requires tracker/reconciliation and refuses a promised allocation lease before native create (0.543427ms)
+✔ selector512 and text4096 limits count Unicode code points and preserve astral strings (0.630429ms)
+✔ astral destination URL preserves Core webUrl8192 UTF16 unit boundary (2.679831ms)
+✔ admission: normal, current, top-level, credential-free http(s) at exactly the approved URL (1.461929ms)
+✔ password history: current and former password fields, unknown history, frames and closed roots refuse; values are never read (8.771414ms)
+✔ targets: plain light-DOM click targets and ordinary text fields only; never custom, customized, password, credential or disabled (0.748947ms)
+✔ the gate is one attempt only, bound to its original document, URL, method and destination; revocation ends it (0.830849ms)
+✔ install looks up only the request's existing session handler and realm, checks its sandbox and context, and exports one gate (1.491944ms)
+✔ install refuses unknown sessions or realms, foreign sandboxes or contexts, bad shapes and unsafe documents (0.571039ms)
+✔ admit is read-only; destruction revokes the installed gate; the parent actor relays only its destruction (0.393412ms)
+✔ the doorhanger names the agent, the action and its target as inert text; host and path only (1.487798ms)
+✔ Allow once resolves literal true only for a trusted click; the notification is the target tab's doorhanger (0.822557ms)
+✔ Deny, an untrusted click, dismissal, Escape removal, 60 s, abort and teardown all deny; a late click cannot allow (6.855252ms)
+✔ other browsers keep their prompt; nothing is shown without a manager, a known method, a browser or a live signal (0.415275ms)
+✔ an Allow once is bound to the issued binding and project authority it was shown for; drift with equal visible fields denies (14.008061ms)
+✔ every act and open capability is a literal false: UNAVAILABLE before any prompt, remote module, actor or owner (7.311568ms)
+✔ the fixed function declarations: one gate call immediately before one effect, no await, no evaluation, no value read (0.355865ms)
+✔ each native automation fact must be literally false: anything else refuses before native tracking, budget or constructor (19.826824ms)
+✔ only the pinned native Marionette startup value is normalized, in the native loader; an injected unknown stays unavailable (0.282855ms)
+✔ an aborted, unapproved or revoked request never imports native tracking, even while the remote modules load (10.633244ms)
+✔ a fact or authority that changes while native tracking loads refuses before constructor or dispatch (8.370972ms)
+✔ the owner rechecks strict facts after loading and immediately before construction; refusals construct nothing (3.673115ms)
+✔ a constructor that throws after native side effects is retained, quarantines the shared budget and never closes positively (3.062426ms)
+✔ a destroy that throws or answers anything but native void quarantines and keeps the exact owner for an explicit retry (8.850814ms)
+✔ close publishes its one attempt before native destroy can reenter; reentry observes it and destroys nothing twice (4.990011ms)
+✔ a pending or failed gate revocation keeps the owner; no success is fabricated; an explicit retry completes (3.686565ms)
+✔ a trusted Allow once keeps one receipt for Core's exact signal, session, params and target; it is consumed once (20.683242ms)
+✔ binding drift with equal visible fields denies before execute, without any invalidation event, and consumes the receipt (9.209373ms)
+✔ no prompt for an unapproved session, a stale Core target, an unattached window, open, or a second prompt per request (2.850928ms)
+✔ document proof: beforeBinding is read-only admission; beforeEffect installs the one-use gate in the exact owned realm (4.975294ms)
+✔ positive no-allocation needs a complete tracker that saw no tab open; an unrelated blank is never attributed or closed (6.598666ms)
+✔ only the exact tab the create reply names, untouched since it opened, may be closed, and only its actual removal counts (21.158687ms)
+✔ with create pending, process close waits for the boundary: tracker and session stay usable until the late exact result is retired (7.59825ms)
+✔ after URL navigation the tab is only adopted: close waits for positive adoption and never closes it (6.719067ms)
+✔ a touched created tab is never retired: close stays false and its ownership is retained for an explicit retry (4.257368ms)
+✔ a created blank touched while create is pending stays touched after its visible state returns: never removed, never a false retirement (43.234589ms)
+✔ events naming other tabs do not touch the created blank; with every event heard, its exact removal is still the one receipt (3.341397ms)
+✔ a touch listener that cannot be installed leaves the tracker unable to vouch for any tab: no automatic removal (4.215221ms)
+✔ an admitted click with all five facts false dispatches capture and effect; the global session predicate is not asked again (6.519196ms)
+✔ a fact that changes during the document proof, the binding capture or the gate installation refuses the next dispatch: no effect (276.858104ms)
+✔ a fact that changes while the new tab is created refuses its navigation; the blank is never navigated and stays owed (14.382064ms)
+✔ the owner's dispatch also needs its own live request: aborted, revoked or closing owners dispatch nothing (6.40891ms)
+✔ configuration is literal core JSON/TOML bound to the checksum bundle and current socket (6.004603ms)
+✔ request data rejects unsafe agents/paths and actor extras before runtime work (1.53548ms)
+✔ maximum socket UTF-8 length and shell punctuation remain literal argument data (1.770783ms)
+✔ only validated static namespace root is used, with reviewed build-root fallback (0.750459ms)
+✔ missing verification capabilities and nonliteral success refuse (1.049829ms)
+✔ UID must be numeric bounded process owner and equal every installation entry (1.84803ms)
+✔ private directories require exact 0700 and the root refuses group/other write (1.364352ms)
+✔ all six bridge files and copied Node require regular one-link exact mode and bounded positive size (7.51232ms)
+✔ malformed metadata never reaches hashing or configuration (2.527081ms)
+✔ inventory must be exactly seven pinned files in the specified tree (1.308158ms)
+✔ every installed input including package.json and Node must match its fixed digest (2.484377ms)
+✔ hashing cannot publish after named inode/size/owner/mode replacement or inventory additions (1.800379ms)
+✔ late directory replacement after successful digest reads is rejected (0.394433ms)
+✔ deadline while own UID is pending prevents all later metadata and drops a late success (1.490582ms)
+✔ deadline while metadata is pending prevents hashing and further filesystem calls (2.08741ms)
+✔ deadline while hashing is pending prevents later digests and post-read admission (1.284342ms)
+✔ private native/filesystem exceptions cannot leak paths or diagnostics (0.334593ms)
+✔ manifest pins exactly package.json, all five transitive imports, and fixed Node without executing any (18.566879ms)
+✔ fixed metadata branch accepts only numeric native EOF from stdin close plus actual stdout EOF and zero wait (14.489956ms)
+✔ native EOF alone cannot admit invalid metadata or nonzero owned wait (1.181538ms)
+✔ non-EOF numeric, string EOF and private close failures reject fixed metadata without hashing (2.492299ms)
+✔ raw stdout/stderr enforce 512-byte cap and reject non-ASCII metadata (0.891842ms)
+✔ missing canonical OS metadata tool refuses before any process seam (0.261864ms)
+✔ metadata setup watchdog drops late child and cleans only that retained handle without reading it (0.707034ms)
+✔ hanging owned wait is refused within metadata plus bounded cleanup deadlines, never treated as exit proof (0.903849ms)
+✔ owned exit remains known when stdout read later fails (0.799753ms)
+✔ owned exit remains known when stderr read later fails (0.565131ms)
+✔ owned exit remains known when stdin close later fails with a non-EOF error (0.701355ms)
+✔ known owned exit plus stalled stderr still refuses at the metadata deadline without kill (1.775641ms)
+✔ read failure before any owned exit still kills and cleanup stays bounded (0.557919ms)
+✔ one exact six-function composite is installed; the standalone owners and their close/getState stay private (3.854318ms)
+✔ availability: tab metadata, project and console reads only; screenshot, open and every act are unavailable with fixed reasons (0.789558ms)
+✔ titles: none without an approved request; the exact issued global's cached native title in a separate sanitized copy (5.778622ms)
+✔ reentrant revocation while the native title is read publishes no title (1.0373ms)
+✔ private windows and unknown engines never list; every normal window shares one registry and one active tab; nothing reads a Chromium tab (2.961475ms)
+✔ console.errors: the exact issued descriptor, the Step 7 owner's own native tab owner and synchronous RAM readTab (4.489804ms)
+✔ screenshot, open and acts answer UNAVAILABLE before any capture, prompt or effect; confirmAction is literal false (1.654669ms)
+✔ releaseSession revokes at entry and returns an observed Promise; malformed IDs resolve false, never unhandled (1.031321ms)
+✔ replacement keeps the superseded standalone owner until its private close is literal true; screenshot and acts stay denied meanwhile (7.254132ms)
+✔ process close installs inert tools synchronously, denies new work, awaits every owner and retries a failed close (0.739603ms)
+✔ windows: one process owner, normal windows only; navigation and project changes end action prompts and receipts (0.893023ms)
+✔ project.info: the session project from the validated cache; a null-project session gets null (0.522316ms)
+✔ the released-session bound spans every generation: 4096 distinct IDs, then the tools close for good (88.144609ms)
+✔ a pending or failed superseded close stays retained and resets neither the session bound nor the shared budget quarantine (80.731618ms)
+✔ an uncertain action construction or destroy quarantines the one shared budget: fresh action and capture owners stay refused after replace() (68.712197ms)
+✔ a superseded generation's cleanup stays pending until the exact reader and PNG receipts succeed; nothing is published (18.320678ms)
+✔ bridge constructor/default off cannot call generator or native admission (3.226874ms)
+✔ bridge allowlist is literal and rejects before any generator call (4.843986ms)
+✔ listening bridge generation receives only verified agent/socket binding (2.241722ms)
+✔ absent bridge builder is CONFIG_UNAVAILABLE while existing hooks still work (1.264011ms)
+✔ bridge disable in the first microtask performs zero builder calls (1.256ms)
+✔ bridge disable/re-enable ABA discards old same-path snippet (2.27354ms)
+✔ actual endpoint stop/lost listening rejects pending bridge snippet (1.122249ms)
+✔ shutdown abort rejects hanging bridge verification and drops late success (1.036739ms)
+✔ bridge captures exact immutable path and refuses a mutable injected config swap (1.291924ms)
+✔ bridge bounds UTF-8 bytes and refuses malformed/empty generated output (5.881437ms)
+✔ bridge deadline remains bounded and late output cannot revive it (0.997791ms)
+✔ bridge private generator exceptions become a fixed configuration error (0.554444ms)
+✔ service approval predicate defaults false and validates primitive session IDs passively (0.34591ms)
+✔ service approval predicate gates actual Core approval and immediate revocation (2.803227ms)
+✔ service approval predicate fails immediately at disable project invalidation or shutdown (3.612143ms)
+✔ service preserves known-project approval policy and cannot grant null-project sessions (1.9077ms)
+✔ service ignores copied sessions snapshots as authority and rechecks after accessor reentrancy (1.037521ms)
+✔ service refuses public approved state once EOF is draining an outstanding read (2.478348ms)
+✔ bridge cache invalidation and same-cache refresh cannot revive an old generated binding (0.892993ms)
+✔ service forwards frozen approved metadata context and exact request signal to installed tools (1.631995ms)
+✔ passive authority read accepts only primitive IDs and invokes no runtime callbacks (3.421276ms)
+✔ private checker refuses hello pending denied hook revoked and stopped states (2.916206ms)
+✔ null-project approved bridge sessions are valid independently of presentation filtering (0.612291ms)
+✔ EOF while a genuine read job drains rejects authority despite approved public snapshot (1.484282ms)
+✔ EOF before late approval cannot create capture authority (0.414163ms)
+✔ synchronous approved-state observer revocation prevents authority publication (0.685942ms)
+✔ list and active receive exact frozen approved view and request AbortSignal without wire extras (1.82179ms)
+✔ getTab receives same live request signal and fresh frozen approved view before and after action approval (1.507978ms)
+✔ revocation while action approval waits aborts metadata context and prevents second native read (0.895327ms)
+✔ synchronous availability revocation is refused before any injected metadata read (0.661555ms)
+✔ a clean static document is admitted: the document is observed before the walk and every root before its subtree (2.668524ms)
+✔ native facts refuse before any observer is created or any node read (2.438348ms)
+✔ scope refusals: every field, frame and unproved control, editable content, foreign namespaces, UA roots and bounds (12.008748ms)
+✔ any delivered or pending record invalidates for good; the observer is disconnected and nothing is rebaselined (0.728305ms)
+✔ host→root identity: a new closed root on a known host, a replaced root or a new element refuse even without a record (0.901286ms)
+✔ viewport, document, global, privacy, modal and readback changes after begin invalidate the lease (1.081016ms)
+✔ one active lease per document; wrong tokens grant nothing; pagehide and destruction retire (0.464398ms)
+✔ the child's readback checks are literal-false point checks; alone they cannot see false→true→false between two checks (0.300352ms)
+✔ a refusal after the observer was allocated reports exactly what remains; uncertain cleanup stays owned and blocks every new token (0.512971ms)
+✔ pure scanner: baseline identity and counts; scope facts read the readback preference literally (0.481294ms)
+✔ the actor's own teardown disconnects an uncertain refused observer and a held lease's observer (0.883178ms)
+✔ the actor answers exactly three fixed queries with correlated yes/no only; pagehide and destruction end its lease (0.745391ms)
+✔ the actor is registered on the first capture owner only; its options are the fixed top-level http(s) tab scope (5.086832ms)
+✔ expected: the registry's own issued descriptor of the trusted binding; clones, copies and other requests refuse (1.506836ms)
+✔ currentness: navigation, window close, tab transfer, privacy, container, project and documentGlobal all refuse at once (20.140916ms)
+✔ a composed owner: begin, rechecks around every native step, reader closed before the terminal commit, frozen PNG (28.651378ms)
+✔ a child refusal that positively retained nothing ends at once: no reader, capture, PNG work or RELEASE (3.125001ms)
+✔ ok:false alone is never cleanup proof: retained, inconsistent or malformed answers stay owned until an exact RELEASE or the actor's destruction (21.432143ms)
+✔ a failed recheck or a refused commit publishes no image; the lease is retired with commit:false (23.332387ms)
+✔ navigation, a background tab, readback or an oversized viewport between steps refuse before any image (41.120554ms)
+✔ the caller's own context predicate is required at every parent checkpoint (2.692651ms)
+✔ actor destruction retires its leases positively; a destroyed actor's capture never publishes (6.639247ms)
+✔ a begin whose answer is late stays owned and is retired after the timeout; a lost begin blocks new owners until retired (5.075244ms)
+✔ owner close is literal true only when both composed owners closed; failures stay owned and retry (0.925813ms)
+✔ readback false→true→false between any awaited capture, PNG, resize, reader-close or terminal boundary never publishes (59.538989ms)
+✔ unchanged false publishes; the parent observer exists from owner creation through the terminal commit and is removed once (16.351937ms)
+✔ an initially true, missing, non-boolean or unreadable preference, or a failed registration, refuses the owner; its exact removal leaves nothing (2.992471ms)
+✔ a refused preference whose observer cannot be removed is a retained orphan; it blocks new owners even once the preference is false (16.874523ms)
+✔ an observation that fails without its exact removal stays owned for good: no PNG owner, every new owner refused, close never positive (0.641395ms)
+✔ a PNG factory that throws leaves the already-registered observer a setup orphan, removed now or retained while removal fails (0.647554ms)
+✔ a viewport factory that throws keeps the observer attached to the PNG owner until that owner closed positively (3.635558ms)
+✔ a false or pending reader close keeps the attached observer through runtime.close; one positive retry removes it exactly once (33.930839ms)
+✔ a late notification after publication invalidates the owner for good: it never publishes again (14.988225ms)
+✔ an observer that cannot be removed keeps the owner retained; an explicit retry closes it; late notifications are inert (15.515619ms)
+✔ a deferred reader close blocks the terminal commit; only its literal-true receipt lets the image publish (16.490084ms)
+✔ a false or rejected reader receipt keeps the exact reader owned; one explicit positive retry retires it exactly once (59.766201ms)
+✔ cancellation while the reader closes suppresses publication; the owner closes only after the late positive receipt (14.404127ms)
+✔ assembled guard re-verifies every helper dispatch and admits only fixed argv/environment (4.377755ms)
+✔ assembled guard refuses installation changed after factory admission without a second spawn (1.293596ms)
+✔ assembled guard reconstructs immutable dispatch after caller mutates options during proof (1.022888ms)
+✔ assembled guard owns late-spawned child cleanup and never publishes its handle after expiry (1.730093ms)
+✔ assembled helper lifetime stderr refuses 513 raw bytes privately and closes the exact child (0.556407ms)
+✔ assembled contexts public exports require exact binding and agree with product bridge argv (0.63826ms)
+✔ assembled service uses public pure hook export with only its currently listening native binding (3.855169ms)
+✔ coalesced and split UTF-8 hello+hook complete at EOF without losing accepted status (4.19457ms)
+✔ nc can close its read side early and fail welcome writes without dropping its buffered report (0.564319ms)
+✔ payload cwd is parsed by the existing core and matched to its own known project (1.456071ms)
+✔ malformed/oversized hooks are acknowledged but never accepted or parsed as transcripts (2.999692ms)
+✔ global status report budget reserves synchronously across connections and expires (9.861493ms)
+✔ invalid JSON, UTF-8, object framing, missing newline and line overflow close (1.231752ms)
+✔ path matching requires absolute segment boundaries and rejects traversal (0.16591ms)
+✔ only eight connections are accepted and idle connections close after ten minutes (0.627404ms)
+✔ approval is per session, requests before grant fail, and late answers after timeout are ignored (1.490662ms)
+✔ sixteen outstanding effect requests are bounded and timeouts abort/release slots (3.009416ms)
+✔ duplicate in-flight request ids close instead of confusing one confirmation with another (0.361974ms)
+✔ list/active omit private and blocked tabs and strip account/internal metadata (0.57175ms)
+✔ tab effects enforce private, privileged, blocked, Chromium, project and safety-metadata gates (1.386956ms)
+✔ act tools need Allow once; deny/timeouts and document changes cancel effects (1.403971ms)
+✔ read EOF suppresses a pending act confirmation even if its user answer arrives later (0.283948ms)
+✔ method and parameter contracts reject malformed or privileged inputs before effects (0.473463ms)
+✔ known unavailable runtime methods fail before a needless action confirmation (0.304708ms)
+✔ screenshots enforce PNG/decoded byte caps and console output is bounded (18.849043ms)
+✔ revoke aborts an active effect and suppresses its late result (0.499041ms)
+✔ controller publishes immutable hello/pending/approved/closed membership without profile data (4.635333ms)
+✔ controller denial and approval expiry have different fixed reasons and suppress late grants (1.652536ms)
+✔ controller hook/reporting events drain complete report and ack before EOF closure (0.678661ms)
+✔ controller EOF, disconnect, malformed input and idle expiry produce closed snapshots (0.714645ms)
+✔ controller pending and reporting observer revocation prevents subsequent approval/status effects (0.488926ms)
+✔ controller approved observer revocation prevents approval grant or tab effects (0.491159ms)
+✔ controller stop snapshots every removal and rejects callback-created replacement sessions (0.278118ms)
+✔ controller observer exceptions, rejecting promises and hostile thenables cannot alter lifecycle (1.696542ms)
+✔ endpoint emits authoritative immutable disabled/starting/listening/disabled snapshots (1.17627ms)
+✔ endpoint refusal states use only fixed reasons without accepting arbitrary exception content (0.633923ms)
+✔ endpoint handles asynchronous listener loss and rejects stale listener sockets (0.323016ms)
+✔ endpoint synchronous asyncListen failure cannot publish a false listening event (0.229455ms)
+✔ endpoint thrown asyncListen detaches before close and cleans the claim only once (0.897239ms)
+✔ endpoint lock loss resolved or rejected closes listener and publishes one fixed unavailable event (0.407413ms)
+✔ endpoint lock-loss cleanup barrier preserves a newer re-enable and ignores old callbacks (0.303547ms)
+✔ endpoint disable/re-enable during prepare awaits claim cleanup before creating a successor (0.407783ms)
+✔ endpoint cancelled startup failure cannot overwrite disabled and a later disable supersedes pending enable (0.242855ms)
+✔ endpoint starting observer disable prevents all path/server effects (0.125839ms)
+✔ endpoint disabled observer re-enable waits for cleanup and repeated stop does not recurse (0.264517ms)
+✔ endpoint observer exceptions/rejections cannot prevent listen, lock cleanup or disable (0.550188ms)
+✔ composed endpoint lock loss stops approved controller effects and reports matching immutable removals (0.933143ms)
+✔ concurrent enables behind cleanup both await the successor final listening or refusal state (0.623338ms)
+✔ later disable wins over concurrent enables waiting for successor startup (0.382576ms)
+✔ synchronous listener-stop followed by listen throw transfers cleanup exactly once (0.234073ms)
+✔ rejected shutdown cleanup remains owned, rejects stop and blocks rebind until explicit retry succeeds (0.682947ms)
+✔ startup failure plus rejected claim release publishes cleanup failure and never implicitly retries (0.280211ms)
+✔ cancelled startup release failure is visible to the original stop and closes its server once (0.294634ms)
+✔ async lock loss with rejected release reports cleanup failure without unhandled rejection (0.371579ms)
+✔ controller shutdown failure still closes listener, reports unavailable and requires successful stop (0.319891ms)
+✔ disable promptly closes the exact bound starting server before deferred verification completes (0.301083ms)
+✔ reentrant controller shutdown failure cannot leave a disabled snapshot while failure is latched (0.367102ms)
+✔ lock rejection during deferred verification is consumed and closes startup before any listen (0.954977ms)
+✔ cancelled startup consumes late lock rejection while retaining deferred cleanup (0.270317ms)
+✔ an already-rejected owned lock is observed before creating or binding a server (0.176766ms)
+✔ synchronous socket accept before listen commitment is rejected even if asyncListen then throws (0.175033ms)
+✔ startup refusal cleanup settling owned lock loss retains the original blocked reason (0.210226ms)
+✔ ordinary shutdown settling the owned release promise never reports external lock loss (0.156305ms)
+✔ constructor and initialization remain explicitly off and perform no native admission (5.598141ms)
+✔ explicit enable composes actual controller/endpoint and shares one listener across presenters (4.491336ms)
+✔ project cache is frozen, bounded, and fails closed for invalid or duplicate authority (1.972637ms)
+✔ reversed project reads cannot restore an old snapshot after a newer refresh (4.245006ms)
+✔ a hanging project loader is bounded and cannot admit a native endpoint (2.07414ms)
+✔ most-recent private or unknown presenter never receives approval (2.159057ms)
+✔ private-only and unknown-project bridge sessions are denied without a prompt (1.508449ms)
+✔ presenter closure settles denial, aborts presentation, and ignores late allow (1.059183ms)
+✔ native presenter privacy drift is checked again after an answer (1.079434ms)
+✔ approval expiry emits immutable authoritative denial and late allow cannot grant (1.928982ms)
+✔ session revocation is restricted to current project association and aborts its presenter (0.919323ms)
+✔ synchronous invalidation revokes stale sessions before any asynchronous mutation refresh (0.753404ms)
+✔ real parser status payload cwd selects nested projects and stale unknown paths ack false (2.34712ms)
+✔ parsed status acceptance does not wait for notification UI and survives observer rejection (0.858301ms)
+✔ status receipt after synchronous invalidation cannot retain removed project authority (0.466221ms)
+✔ normal hosts use the required boolean wrapper while unavailable and object mistakes fail closed (1.759937ms)
+✔ Step8 methods stay unavailable before effects or act confirmation (0.718681ms)
+✔ rapid enable-disable-reenable waits for native admission cancellation and starts only the newest listener (1.240105ms)
+✔ startup path failures preserve their machine state after owned cleanup and allow explicit retry (0.526822ms)
+✔ listener and lock loss invalidate sessions and publish endpoint failure (1.254427ms)
+✔ hanging owned cleanup blocks re-enable rather than rebinding before the lifetime lock releases (1.310562ms)
+✔ disable and process close abort pending prompts, remove owned listener, and prohibit further factories (1.22978ms)
+✔ never-resolving native path preparation is cancelled and cleanup uncertainty blocks replacement binding (1.978296ms)
+✔ native verify stall closes the owned listener promptly and forbids late binding reuse (0.721085ms)
+✔ native startup deadline fails closed rather than leaving an infinite enabled transition (0.670859ms)
+✔ async rejecting service observers cannot break native or status outcomes (1.791875ms)
+✔ late verified cleanup of an explicitly disabled endpoint restores disabled state (0.865763ms)
+✔ configuration ownership closes exactly once after admission failure, staleness, and normal stop (2.690277ms)
+✔ process close cancels its own hanging cache watchdog and leaves a closed empty snapshot (0.390487ms)
+✔ activity observers that revoke cache or endpoint authority suppress subsequent status presentation (2.128692ms)
+✔ rejected owned lock cleanup prevents rebind until an explicit retry proves successful release (1.075908ms)
+✔ enablement publishes no disabled constructor snapshot before its first listening state (0.410388ms)
+✔ status that expires during its snapshot never presents a null latest record (0.626001ms)
+✔ async hook verification cannot publish a stale binding after disable and re-enable (0.674355ms)
+✔ hook verification is bounded and rejects malformed or oversized output (2.140069ms)
+✔ diagnostics preserve terminal owned receipts without repeating cleanup or native admission (0.483477ms)
+✔ precheck answers privacy facts only: no title and no selected text are read (1.592616ms)
+✔ capture reads the title, and the selection only when the user opted in (0.708696ms)
+✔ password controls deny before any title or selection read: focused, inside a shadow root, in the page, or unknown (1.167797ms)
+✔ focus depth: a focused node left when the bound is used up is unknown and denies, whatever is at the leaf (0.376887ms)
+✔ focus inside a frame, embed or object is unknown and denies; its document is never touched (1.493417ms)
+✔ ordinary focus is fine: a text field, a button, the body or nothing focused (0.366251ms)
+✔ stale documents are refused before any read: not current, closed, another inner window, a subframe or a changed URL (0.273371ms)
+✔ system, null, private and non-web principals are refused; malformed requests are refused (0.323797ms)
+✔ only ranges of this very document count; an unbounded selection is refused (0.215454ms)
+✔ the child reads this.document, never a content window that may already show a newer document (0.329826ms)
+✔ the parent side exposes no receiver: nothing from content can copy, authorize or start anything (0.159329ms)
+✔ actor registration: top-level http(s) web documents only, explicitly safe for web processes, once per process (0.196115ms)
+✔ chrome rebinds every answer: exact keys, the asked URL and inner window, bounded text, no smuggled selection (0.640774ms)
+✔ text normalization: one line titles, prose selections, well-formed UTF-16 (0.139219ms)
+✔ one trusted shortcut opens the doorhanger after a privacy precheck; untrusted commands do nothing (9.652389ms)
+✔ Copy: the trusted click sends one exact request through the core; the clipboard gets the bounded context; the return target is native (6.265715ms)
+✔ an untrusted Copy click copies nothing and ends the session (0.982378ms)
+✔ an unticked selection (the default): no selected text is read and none is copied; no selection means the opt-in is disabled (2.776346ms)
+✔ a page with a password field is refused at the precheck: no doorhanger, nothing read, nothing copied (0.777769ms)
+✔ sensitive sites, non-web pages, Chromium tabs and private windows are refused before any content query (2.131446ms)
+✔ navigation, including a same-document one, ends the session; the old doorhanger cannot copy (2.323936ms)
+✔ navigation while capturing discards the capture; nothing is copied and the change is said calmly (1.018282ms)
+✔ a process swap (new frameLoader), another principal, container or space while copying discards everything (4.277635ms)
+✔ while the capture awaits, another selected tab or browser without any TabSelect delivery discards everything (6.238589ms)
+✔ the final copy boundary itself rechecks the selected tab, selected browser and frameLoader synchronously (5.00289ms)
+✔ only a known live tab with its native permanentKey and frameLoader is offered; unknown state reads nothing (1.499996ms)
+✔ the tab's own window is its native Node.documentGlobal: foreign, missing or ownerGlobal-only tabs are never offered (1.603973ms)
+✔ the final clipboard guard checks project authority synchronously: a change just before the write copies nothing (1.38243ms)
+✔ a project write while copying ends it at once; unknown authority at open is read again, and a different project is refused (3.964693ms)
+✔ an unprojected page copies with project null; never an invented one (1.141847ms)
+✔ Cancel, Escape-equivalent removal, tab switch and tab close end the session without a copy (1.880369ms)
+✔ the context menu reads nothing on opening, shows only for eligible pages, and its trusted command opens the doorhanger (0.927845ms)
+✔ teardown removes the shortcut, the menu item, the doorhanger template and every listener; a pending session ends (0.756437ms)
+✔ synthetic agent: an ordinary browser shows no test action and never asks the factory; Copy stays the default (3.632884ms)
+✔ synthetic agent: one fresh trusted click asks the factory once; only its own adapter and configuration reach the core (2.889597ms)
+✔ synthetic agent: absent or invalid admission is said as unavailable; nothing launches, copies or falls back (2.50579ms)
+✔ synthetic agent: a navigation, swap without an event, frameLoader or project change during the factory await closes it unused (8.700898ms)
+✔ synthetic agent: the same changes while the native dispatch awaits make isActive false before dispatch (6.058503ms)
+✔ synthetic agent: Cancel, dismissal, tab close and teardown close the fixture; a late factory answer is closed unused (5.897201ms)
+✔ synthetic agent: an uncertain launch is said as uncertain and never copied; unavailable and cancelled stay distinct (3.593135ms)
+✔ synthetic agent: early clicks, a background window and an unprojected page request nothing (3.199452ms)
+✔ synthetic agent with the actual root factory and terminal adapter: the session's isActive guards the real dispatch (30.620699ms)
+✔ synthetic agent: refused before anything for private, stale or password pages; the copy guards are unchanged (0.929438ms)
+✔ superseded: a cancelled old factory answering after a newer copy or hand-off never replaces that newer result (2.364327ms)
+✔ superseded: an old uncertain launch settling while a new composer is open leaves it alone, then is said once nothing newer shows (1.355429ms)
+✔ superseded: an old uncertain launch waits behind a newer result and never clears it (1.58251ms)
+✔ current session: a late cancellation and a late uncertainty are still said for the newest request (1.420617ms)
+✔ with the console owner: console errors are offered unticked; unticked copies none and reads none (1.744754ms)
+✔ ticked at the trusted Copy: the owner's records of exactly this tab and document, sanitized and bounded, under both authorities (2.911359ms)
+✔ ticked console errors: nothing is copied when the native console authority changes (0.681415ms)
+✔ ticked console errors: nothing is copied when the owner refuses the read (0.97742ms)
+✔ with the console owner, a page of no project cannot tick console errors, and a navigation still ends the session (0.895928ms)
+✔ structured context strips query/fragment and copies only the allowlisted data (4.073687ms)
+✔ private/blocked/password/unknown privacy facts are rejected before any capture getter is read (1.446917ms)
+✔ sensitive and invalid URLs fail closed; missing classification never admits capture (0.510979ms)
+✔ unknown keys, accessors, malformed identifiers and path traversal cannot enter context (0.998882ms)
+✔ only selected navigation data are admitted (0.449286ms)
+✔ console sources cannot include privileged URLs or query secrets; error count and text are capped (0.705862ms)
+✔ screen is explicit bounded PNG with matching IHDR, canonical base64 and dimension limits (4.28071ms)
+✔ clipboard path requires explicit user action and does not observe after a denied action (0.634936ms)
+✔ clipboard dispatch writes fresh serialized context and performs no provider/terminal call (0.733474ms)
+✔ privacy denial avoids native capture and clipboard (3.544351ms)
+✔ navigation and private transitions during capture discard everything (0.581835ms)
+✔ stale tab immediately before clipboard dispatch is rejected (0.502305ms)
+✔ collector cannot smuggle an opt-out selection, screen or console errors (0.952373ms)
+✔ product terminal and undocumented desktop routes are gated with a clipboard fallback (1.802912ms)
+✔ a fixture launch receives structured context, never a shell command, and creates no agent-status fiction (0.46529ms)
+✔ ambiguous external launch is never duplicated by copying context (0.417138ms)
+✔ known launch refusal may fall back to clipboard (0.534284ms)
+✔ aborted/closed service never observes or dispatches, including cancellation mid-capture (0.375244ms)
+✔ duplicate request stays bounded and malformed request errors do not echo content (12.669838ms)
+✔ concurrent gesture checks reserve request ids before awaiting authorization (0.457308ms)
+✔ at most eight handoffs may be awaiting user authorization (0.293842ms)
+✔ native failures and launch refusals cannot echo stderr or captured page data (0.800515ms)
+✔ existing project ids accepted by the context schema remain compatible (0.326211ms)
+✔ abort or close while describing a tab prevents subsequent capture and terminal launch (0.572902ms)
+✔ descriptor and capture from another valid tab cannot replace the selected tab (0.213682ms)
+✔ Unicode limits match native UTF16 units and reject unpaired surrogates (0.880995ms)
+✔ Claude uses the bound fixed script through argv and emits only a snippet (3.64949ms)
+✔ Codex uses literal notify argv and a changed endpoint is regenerated (0.869548ms)
+✔ caller-supplied script/root fields never configure the helper (0.502325ms)
+✔ invalid agent/socket values refuse before any injected native activity (0.867255ms)
+✔ invalid storage roots refuse before UID, stat, hash or timers (0.696688ms)
+✔ missing runtime capabilities fail closed without native imports (0.324778ms)
+✔ root/parent/script type ownership permissions and hardlinks refuse (1.134326ms)
+✔ canonicality verifier must return literal true (0.336787ms)
+✔ hash mismatch and native private exceptions disclose only fixed failure (0.532731ms)
+✔ replacement of root/parent/script across hash inspection refuses (0.700443ms)
+✔ metadata snapshots do not share mutable runtime return records (0.40544ms)
+✔ malformed UID and metadata refuse (0.677509ms)
+✔ a deadline prevents late UID from starting further metadata work (6.984672ms)
+✔ a deadline during hash rejects late completion and never emits cached snippets (0.527413ms)
+✔ literal quote/backtick/dollar paths survive as data; placeholder syntax refuses (0.21916ms)
+✔ default native pattern uses only fixed id/stat argv with synthetic raw pipes (2.18765ms)
+✔ default native raw output cap fails closed and cleans its retained fake child (0.573818ms)
+✔ default native late fake spawn is closed/killed/waited by its own handle (1.729802ms)
+✔ the genuine BiDi reader refuses any automation fact that is not literally false, or unknown modules, before any allocation (9.662304ms)
+✔ the action owner admits only literal-false automation facts, before native tracking, budget, constructor or dispatch (18.956144ms)
+✔ only the pinned native Marionette startup value reads as false, and only in the native loader (2.641142ms)
+✔ an aborted, unapproved or revoked request never invokes the native tracking import, even while the remote modules load (6.723344ms)
+✔ a fact that changes after the tracking import, or before construction, refuses before constructor or dispatch (8.607267ms)
+✔ one process BiDi retention budget is shared by capture and actions; a refused session leaves its slot unused (1.372985ms)
+✔ window ownership is Node.documentGlobal: a missing or other documentGlobal refuses even when ownerGlobal looks right (7.357547ms)
+✔ the original issued descriptor carries authority; a frozen clone or a sanitized copy never does (1.042178ms)
+✔ the actual AgentChannelService accepts exactly the six-function composite; the standalone owner and extra functions are refused (1.512385ms)
+✔ capture and every act/open flag are literal false, with no preference, environment or page activation (1.52255ms)
+✔ post-acquire release failure retains an unbound claim, blocks reuse and reaches explicit Endpoint.stop (7.682876ms)
+✔ a successful pre-claim release preserves the original refusal and does not retain a claim (0.487624ms)
+✔ a failure arising during an explicit stop is retained for the next stop, not retried in the same stop (1.084792ms)
+✔ pre-ack malformed reply retains the exact owned child after close and kill acknowledgements (3.686486ms)
+✔ pre-ack EOF, oversized reply and helper error retain unresolved ownership; owned exit preserves each original error (0.720484ms)
+✔ pre-ack watchdog retains a hanging child through Endpoint.stop without any bind (2.502094ms)
+✔ pending raw spawn is retained after the watchdog; its late child is cleaned on the same owned handle (2.786612ms)
+✔ late actual spawn rejection proves no child, but deadline rejection alone does not (0.797449ms)
+✔ an indefinitely pending spawn remains owned through bounded retries and never starts another helper (1.621209ms)
+✔ only an issued retained snapshot can retry pre-claim cleanup; unrelated releases are never invoked (1.552635ms)
+✔ provisional release before launch prevents launch and has no actual-exit receipt (0.191688ms)
+✔ rejected or malformed raw wait keeps a pre-ack owner unresolved even after usability loss (1.844054ms)
+✔ native guard watchdog publishes a late raw lock child to retained ownership before proxy construction (4.204315ms)
+✔ native proof watchdog cannot spawn after cancellation and records no-child separately from owned exit (0.635065ms)
+✔ native installed-helper mutation fails admission before spawn or retention (0.317567ms)
+✔ categorical ownership diagnostics have no native effects and never count kill or close as exit (5.361174ms)
+✔ service retains the original configuration after failed unbound cleanup and blocks replacement (3.788359ms)
+AxioSozo: deleted container still mapped; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+AxioSozo: deleted container still mapped; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+AxioSozo: container reset not saved; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+✔ construction and window registration start nothing; first use creates one channel that only loads the guarded cache (7.43278ms)
+✔ a routing mutation invalidates before its first await; only the final quiescent scope refreshes, never an intermediate snapshot (5.283598ms)
+✔ the guarded loader refuses a write that started and settled inside its read, even with nothing pending (2.36644ms)
+✔ a failed write keeps the original error and the last committed authority; a failing refresh cannot mask a result (1.984075ms)
+✔ enabling while a project write is pending is refused without any native admission; an explicit retry then listens (3.80274ms)
+✔ a deleted container's whole cleanup is one scope: nested assignment and verification never refresh early (3.088746ms)
+✔ a failed deletion cleanup stays quarantined after its writes settle, until a tracked retry succeeds (6.7408ms)
+✔ an older failed deletion attempt cannot latch over a newer successful one (2.766701ms)
+✔ a failed container reset blocks authority until a tracked reset retry succeeds; invalid observer ids change nothing (5.269327ms)
+✔ handoff authority: captured at quiescence, checked synchronously, refused while pending; no project only when none matches (2.71279ms)
+✔ handoff authority is refused for a private window (0.517759ms)
+✔ presenters: only registered normal windows; approval goes to the most recent one with the project's name; Deny and Allow (6.63448ms)
+✔ private-only presenters: a bridge request is denied without any prompt; closing the last normal window cancels its prompt (2.877654ms)
+✔ approval expires after 55 s as a denial and aborts the presentation (1.810444ms)
+✔ status reports: parsed records reach the home, attention and the most recent normal presenter; never another root (6.625676ms)
+✔ home re-entrancy: a write to this project started from an expiry callback during the home read refuses the stale home (2.078837ms)
+✔ home re-entrancy: a write to another project keeps this home's own mark but revokes the activity cache: activity is null (2.873833ms)
+✔ home re-entrancy: without any callback write the home and its activity read normally (1.439706ms)
+✔ hook settings only for a normal window while listening; diagnostics keep counts and booleans only; shutdown closes the channel (1.775145ms)
+✔ a native start failure is reported honestly and an explicit retry starts it; disable stops it (1.118872ms)
+✔ no verified hook builder means no hook settings, never a constructed fallback (0.986524ms)
+✔ plugin settings: a normal window while listening; the builder gets exactly the agent and the channel's own socket; stale answers are refused (2.056764ms)
+✔ without a verified bridge builder no plugin settings are constructed (0.873183ms)
+✔ the tools owner: registered once with its shutdown; its fixed capabilities reach the endpoint state; tools install into the channel (1.850644ms)
+✔ approval for tools is the channel's own predicate: pending, denied, revoked and read-ended sessions are not approved (2.115843ms)
+✔ project.info for tools: names, roots, environment links and integrations from the validated cache; never account labels (1.682641ms)
+✔ default and incomplete metadata backends are unavailable before mutation (2.595094ms)
+✔ path validation counts UTF-8 bytes and rejects ambiguous absolute paths (0.241113ms)
+✔ missing directories are individually created 0700 and bound socket is verified 0600 (0.649327ms)
+✔ symlink/foreign/permissive parents and writable unstuck ancestors are refused (0.562766ms)
+✔ non-sockets, foreign sockets and permissive sockets are never probed or removed (0.873074ms)
+✔ live or ambiguous/EACCES Unix probe preserves existing socket (0.540943ms)
+✔ only raw refused, same-owner/type/inode stale socket is removed (0.2595ms)
+✔ changed socket inode or parent after stale probe blocks removal (0.384358ms)
+✔ lifetime lock excludes another product startup before any probe/bind and releases on failure (0.475065ms)
+✔ cleanup preserves replacements and verifyBound rejects wrong owner/mode/type (0.434283ms)
+✔ endpoint binds only Unix filename and verifies permission before accepting; disabled kills listener (1.265213ms)
+✔ endpoint missing exact metadata and live-instance states never create a listener (0.537919ms)
+✔ stop during async bind verification closes/removes only owned bound socket and never listens (0.483447ms)
+✔ POSIX subprocess backend uses fixed argv, isolated Python, no inherited credentials and trusted paths (0.858651ms)
+✔ POSIX subprocess backend caps output, time and helper failure without accepting ambiguous metadata (30.297303ms)
+✔ persistent POSIX lock helper keeps stdin open until release and reports lock contention (1.650032ms)
+✔ Gecko factory uses real API-shaped fakes, drains nc data at stop, and closes transports with a reason (2.504848ms)
+✔ a failed stdin close cannot turn release retries into false positive cleanup (5.660725ms)
+✔ concurrent pending releases share one attempt and receipt, never just a released flag (0.484598ms)
+✔ rejected usability wait only invalidates held; independent owned receipt is required (0.953835ms)
+✔ rejected actual wait can be retried on the same retained handle but never proves exit (0.493042ms)
+✔ owned wait receipt rejects malformed/non-own/accessor/array/noninteger results (1.313757ms)
+✔ actual owned exit is sufficient even when prior stdin close and kill rejected (0.447683ms)
+✔ late close failure after owned receipt does not schedule new cleanup or signals (1.13028ms)
+✔ actual Unix cleanup and endpoint preserve unresolved helper ownership and block rebind (2.326479ms)
+✔ actual service keeps native configuration and blocks replacement until owned helper exit receipt (3.574037ms)
+✔ derived native proxy keeps actual exit receipt after bounded public wait rejects and retries owned cleanup (3.790913ms)
+✔ raw stderr never treats nonempty incomplete UTF-8 bytes as EOF and counts the exact 512-byte cap (0.265269ms)
+✔ raw metadata keeps only numeric ASCII, distinguishes true zero-byte EOF and refuses string-only adapters (0.275454ms)
+✔ raw pipe brand check admits genuine cross-realm buffers and refuses views or spoofed buffers (2.237286ms)
+✔ API-shaped native metadata counts partial UTF-8 stderr through raw EOF and never executes a helper (4.012296ms)
+✔ API-shaped native metadata refuses 513 raw stderr bytes despite empty decoded prefix and cleans owned child (0.387252ms)
+✔ API-shaped native numeric stdout refuses non-ASCII raw prefix and cleans owned child (0.276396ms)
+✔ API-shaped raw metadata watchdog bounds owned cleanup even when every native operation hangs (0.584169ms)
+✔ only a normal window presents: it registers once, with its own functions, and becomes current when focused (2.723617ms)
+✔ approval: one notification with Allow and Deny; only a trusted Allow grants (2.977339ms)
+✔ approval: abort (expiry, revocation, shutdown) removes the prompt and a late click cannot grant; teardown denies (1.122112ms)
+✔ status: started stays silent; needs you, done and failed show one calm line, replaced by the newer one (1.293526ms)
+✔ Go to project reloads the remembered tab only while its document, navigation, container and project still match (3.166593ms)
+✔ Go to project proves the tab's window through its native Node.documentGlobal; foreign, missing or ownerGlobal-only never reload (1.625576ms)
+✔ Go to project never selects or reloads a target that no longer shows Gecko, before or during the lookup (0.972473ms)
+✔ a vetoed or different selection is never reloaded; the project home opens and the veto is counted (0.580563ms)
+✔ contexts 4-character project ID survives public and internal projection (2.621994ms)
+✔ contexts 32-character project ID survives public and internal projection (1.587918ms)
+✔ contexts rejects three characters before any registry title read or allocation (0.863949ms)
+✔ contexts rejects 33 characters before any registry title read or allocation (0.250627ms)
+✔ contexts rejects underscore before any registry title read or allocation (0.282956ms)
+✔ contexts rejects hyphen before any registry title read or allocation (0.298198ms)
+✔ non-string runtime project IDs deny without coercion or title reads (0.74482ms)
+✔ a current invalid project match suppresses existing descriptors and trusted callbacks before title (1.017371ms)
+✔ ambiguous matches must still carry null or a valid contexts project ID before title reads (0.500273ms)
+✔ the closed mode set: exactly seven fixed modes plus the refusal, each its own inert template (9.319729ms)
+✔ unknown keys, repeated, empty or unknown modes refuse and show nothing else (5.5511ms)
+✔ clean, navigated and opened are field-free and frame-free; the clean page is in the capture scope by tag (3.132933ms)
+✔ clean: the click target's visible result counts to 99 at most and changes nothing else (7.969422ms)
+✔ type: one ordinary text field, no password anywhere; the visible echo is bounded to 80 characters (1.611604ms)
+✔ password: a present field, a type change that keeps its history, and removal (1.483682ms)
+✔ closed-shadow: field-free at first; a password inside the existing closed root; a new closed root with a short-lived field (1.546867ms)
+✔ opaque-focus: an about:blank frame (no src) with its own field; focus moves into it only on request (1.252895ms)
+✔ no network, storage, clipboard or markup injection; only the inline icon is a URL (0.654405ms)
+✔ contexts: every workspace is personal by default; type and links survive a restart (6.504545ms)
+✔ contexts: invalid changes are refused and nothing is written (1.467468ms)
+✔ contexts: leaving type project or organization clears dependent links (16.865449ms)
+✔ orphans: a deleted workspace's metadata is never applied and is removed only on request (1.966969ms)
+✔ orphans: private windows never count as live contexts (0.356136ms)
+✔ detection reads only allowlisted regular files inside the root (3.689599ms)
+✔ projects: confirm, link to a context, map URLs, write the manifest only on request (18.93331ms)
+✔ writeManifest refuses a symlinked .axiosozo directory (2.86534ms)
+✔ writeManifest never follows a planted project.json.tmp link (H1) (3.101415ms)
+✔ writeManifest: a planted link at the exact temp name makes the exclusive create fail closed (3.129217ms)
+✔ writeManifest refuses a symlinked or non-regular project.json (8.30992ms)
+✔ writeManifest re-checks right before the rename and cleans up its temp file (4.711427ms)
+✔ detection refuses a file whose path changed between the check and the read (L6) (3.064931ms)
+✔ service status connects only to loopback on declared ports, on request, rate-limited (M1) (4.545527ms)
+✔ rules: create with defaults, update, delete; Jev settings validated (1.598424ms)
+✔ ledger: private and malformed records are ignored; batching, limits and export (3.946446ms)
+✔ ledger: an invalid ledger file is never overwritten and pending time is kept, bounded (22445.824674ms)
+✔ events, navigation helpers and process singletons (3.81565ms)
+✔ chromeFileSystem.lstat: an absent path is null (nsIFile.isSymlink throws for missing entries) (0.486943ms)
+✔ tcpProbe: up on STATUS_CONNECTED_TO, down on refusal or timeout, never contacts non-loopback (21.032051ms)
+✔ Overview rule editor contract: a new rule is saved without the model's placeholder id (4.993442ms)
+✔ store v3: a v1 contexts.json is migrated on load and written back as v3 once (0.915187ms)
+✔ projects live in any space: several per space, personal spaces included, moved with linkProject (3.453986ms)
+✔ projectForUrl links tabs by URL: loopback aliases, the active space first, app of the environment (3.311712ms)
+✔ activeContext reports the requesting window's space and nothing for private windows (0.236736ms)
+✔ detection v2 runs every phase through the containment reader; agent files and native folders are names only (3.207115ms)
+✔ without a containment reader nothing is read; the native reader is made only for an admitted detection (2.145909ms)
+✔ settings, key and profile folders are refused by name and resolved path before any reader call (0.417048ms)
+✔ confirm detects the picked folder again: a same-path replacement is read afresh, a moved root is refused, duplicates by canonical root (5.523269ms)
+✔ refreshProjectDetection reads the stored root again and keeps manifest, space, container, accounts, shared sites, brief and trust (2.47311ms)
+✔ store v3: a v2 store is written back once; a failed write keeps the old file and is retried; persistence emits no event (0.698801ms)
+✔ store v3: v3 files with v1 records are upgraded; current files are not rewritten; invalid files are never written (0.715296ms)
+✔ arrival: a new loopback folder gets an opaque one-use token; Keep adds a v2 project in the tab's space and writes nothing to the folder (9.201172ms)
+✔ arrival: private windows, private or unknown-privacy tabs and foreign tabs get nothing and start no process (0.471219ms)
+✔ arrival: a tab's window is its native Node.documentGlobal; foreign, missing or ownerGlobal-only tabs start nothing (1.304923ms)
+✔ arrival: a known repository URL links to its project without any process (2.447682ms)
+✔ arrival: tokens are bound to the originating tab's exact URL, window and privacy and die with dismissal, disposal and time (4.762274ms)
+✔ arrival: an acceptance in flight is revoked by navigation; nothing is added and the token cannot be replayed (5.659825ms)
+✔ arrival: an acceptance in flight is revoked by reload; nothing is added and the token cannot be replayed (5.074054ms)
+✔ arrival: an acceptance in flight is revoked by tab close; nothing is added and the token cannot be replayed (5.236688ms)
+✔ arrival: an acceptance in flight is revoked by window disposal; nothing is added and the token cannot be replayed (5.179352ms)
+✔ arrival: an acceptance in flight is revoked by private browsing; nothing is added and the token cannot be replayed (4.594472ms)
+✔ arrival: the acceptance is checked again inside the serialized store write, after earlier queued writes (10.360766ms)
+✔ root admission: detect refuses a folder swapped for a blocked settings folder during reader setup, before opening it (0.457889ms)
+✔ root admission: acceptArrival refuses a folder swapped for a blocked settings folder during reader setup, before opening it (1.004992ms)
+✔ root admission: a consumed arrival whose folder now resolves to another allowed folder is refused before it is opened (2.800664ms)
+✔ root admission: confirm refuses a picked alias that now resolves elsewhere than its preview, before opening it (3.591202ms)
+✔ arrival: settings folders and foreign listeners are never offered (0.765181ms)
+✔ arrival roots: /Volumes/T9/Code by default; synthetic GUI roots only below the build root's gui-fixtures (0.57127ms)
+✔ arrival runtime: the trusted adapter is built on the first call only, shared, retried after a failed build (1.843333ms)
+✔ arrival through the trusted adapter: id runs directly, own-UID lsof selectors go through the pinned helper, never lsof itself (5.853286ms)
+✔ arrival through an untrusted adapter: nothing starts, no offer, and a later discovery tries again (2.626341ms)
+✔ P2: a new project gets its own container before any link; links open there with an explicit container (5.374065ms)
+✔ P2: two projects on one origin get two containers; parallel opens assign exactly one identity each, persisted (5.662048ms)
+✔ P2: a failed save never routes; the retry reuses the identity it already made (3.600176ms)
+✔ P2: compare-and-set: a project removed while its container is made gets no tab (2.254321ms)
+✔ P2: account labels are typed by the user, validated, replaceable and removable; every other field stays (13.071675ms)
+✔ P2: suggested shared sites stay in the project's container; only confirmed ones use the space's sign-ins (4.288622ms)
+✔ P2: private and unknown-privacy windows open plain tabs and never create or use a project container (1.991857ms)
+✔ P2: Firefox deleting a container or turning containers off clears mappings; reused IDs are never adopted (23.593194ms)
+✔ P2: a failed reset or deletion cleanup blocks project links until a retry succeeds; startup with containers off resets (5.628027ms)
+✔ P2: an opening stops when Firefox deletes the container while the space switches (2.439981ms)
+✔ P2: a link in flight is refused when the shared host is removed while sharing stays confirmed during the space switch (2.736818ms)
+✔ P2: a link in flight is refused when sharing is revoked during the space switch (2.428804ms)
+✔ P2: a link in flight is refused when the project is deleted during the space switch (2.259028ms)
+✔ P2: a link in flight is refused when the project is renamed during the space switch (2.696236ms)
+✔ P2: a link in flight is refused when the project moves to another space during the space switch (2.47986ms)
+✔ P2: a link in flight is refused when an account label is saved during the space switch (2.177025ms)
+✔ P2: a link in flight is refused when a mutation of the project fails during the space switch (2.260581ms)
+✔ P2: a link in flight is refused when containers are turned off and reset during the space switch (4.365467ms)
+✔ P2: a link in flight is refused when Firefox deletes the project's container during the space switch (2.569084ms)
+✔ P2: a mutation still in flight when the tab would open refuses it; after the change the link opens by the new policy (2.774264ms)
+✔ P2: another project's change does not stop a link in flight; the guard is per project (3.616651ms)
+✔ P2: a vetoed selection leaves the owned tab open and says so; a modal window is refused before any tab (2.378318ms)
+✔ P2: renaming renames only the project's own container; removing a project keeps its container (2.402584ms)
+✔ P2: the Overview reads each project's container without IDs; nothing is created by reading (3.858925ms)
+✔ project home: the current stored record for a registered normal window; no container ID, nothing probed or created (3.35049ms)
+✔ project home: an older request held across the container lookup never returns a removed or superseded record (2.730518ms)
+✔ project home: a mutation of the project in flight refuses at once; afterwards the current record is returned (0.717059ms)
+✔ project home: a project in no live space has no space; a re-read folder keeps labels, sharing, brief and manifest (2.503837ms)
+﹣ native project containers import the pinned ContextualIdentityService by its packaged moz-src URL (0.885933ms) # pinned Gecko source is not mounted; packaging not compared
+✔ P2: a configured but broken identity service fails closed instead of opening in a shared jar (1.699908ms)
+✔ native authority: published from the settled store while Understand and the agent endpoint stay closed; nothing else starts (3.720407ms)
+✔ native authority: every project mutation withdraws it before its first await and the settling scope publishes a new epoch (2.192618ms)
+✔ native authority: the facade's own brief commit (understand: false) withdraws it before its write, and the acceptance still succeeds (9.334232ms)
+✔ native authority: a folder re-read withdraws it before the reader starts; it settles only at global quiescence (6.057002ms)
+✔ native authority: root admission is fresh synchronous metadata; mismatch, file, throw, Promise and denied roots refuse (0.935517ms)
+✔ native owner: one per process, idempotent, detached from a window before it loses normal authority, replaceable until shutdown (0.945973ms)
+✔ native shutdown: the registered callback withdraws publication before the owner is disposed; held checks end; nothing reopens (1.45567ms)
+✔ native shutdown: a first hydration held across shutdown publishes nothing when it completes (1.072463ms)
+✔ native authority listeners: a throwing or re-entrant listener changes nothing for the others or for checks (1.259455ms)
+✔ project home: console errors are the owner's RAM count and five newest of this window, or null; events are name-only and throttled (1.187917ms)
+✔ runs: targets come from declared services; a start needs a normal window and an approved command (5.798734ms)
+✔ attention: only a run that crashed or could not start needs the user, announced once per change (2.641484ms)
+✔ runs: a project folder that moved or lies under a denied root is never run in; no runner means unavailable (4.392588ms)
