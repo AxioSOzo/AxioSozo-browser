@@ -5,13 +5,22 @@ Reuses the GUI harness (scripts/gui_test.py: Xvfb, owned throwaway profile, Mari
 xdotool) and its engine plug-ins (scripts/gui_engines). Per fixture and repetition, in a
 fresh tab: page-load-to-visible (navigation timing + first-contentful-paint, and the
 harness wall time to the page title), rAF cadence, scroll cadence under real X11 wheel
-input (xdotool button 5), key-to-next-frame latency under real X11 key input, CPU% of
-the whole app process tree during the scroll window, and total RSS/PSS of every app
-process. Gecko tabs measure in-page (performance.now, rAF); an engine whose plug-in is
-not implemented yet reports BLOCKED_ENV. Test-only switches are the harness's
-(-marionette, --remote-allow-system-access, throwaway profile); nothing else changes.
+input (xdotool button 5), key-to-next-frame latency under real X11 key input, tab
+switch time, CPU% of the whole app process tree (engine hosts included) during each
+window, and total RSS/PSS of every app process.
 
-usage: zen_bench.py --engine gecko --app fetched|PATH --out DIR [--reps 5]
+Gecko tabs measure in-page (performance.now, rAF, navigation timing). Chromium and WebKit
+tabs are switched with Zen's own engine switch (the fixture-mode facade
+`window.AxioSozo.engineProbe` that the GUI plug-ins use); their pages are not reachable
+from Gecko, so they measure from Zen's chrome side: the presenter's engine-reported state
+(frame counter, title) sampled every 2 ms by a chrome timer, chrome keydown timestamps
+for keys routed to the presenter canvas, and the switch promises' durations. Both views
+are labelled in the JSON (`measured_in`). An engine whose plug-in or host is missing
+reports BLOCKED_ENV. Test-only switches are the harness's (-marionette,
+--remote-allow-system-access, throwaway profile) and the plug-ins' (fixture mode, the
+WebKit pref); nothing else changes.
+
+usage: zen_bench.py --engine gecko|chromium|webkit --app fetched|PATH --out DIR [--reps 5]
 """
 import argparse
 import json
@@ -70,6 +79,69 @@ return true;
 """
 KEY_READ = 'return window.__axioKeys || [];'
 
+# ---- Engine (Chromium/WebKit) tabs: Zen chrome-side view of the presenter ----------------------
+# Engine-reported state of the selected tab's presenter: frame counter and title.
+PRESENTED = """
+const probe = window.AxioSozo?.engineProbe;
+const n = probe?.diagnostics?.().native ?? {};
+return {engine: n.engine ?? null, frames: n.frames ?? null, title: n.title ?? gBrowser.selectedTab.label,
+        tabEngine: probe?.engineOf?.(gBrowser.selectedTab) ?? null, renderPath: n.renderPath ?? null,
+        meanDrawMilliseconds: n.meanDrawMilliseconds ?? null, uploadedPixelShare: n.uploadedPixelShare ?? null,
+        firstFrameMilliseconds: n.firstFrameMilliseconds ?? null};
+"""
+# A 2 ms chrome timer records every change of the presenter's frame counter (the canvas got
+# a new engine frame) and every chrome keydown (keys routed to the presenter canvas).
+SAMPLER_START = """
+const probe = window.AxioSozo.engineProbe;
+const read = () => { const n = probe.diagnostics().native ?? {};
+  return {frames: n.frames ?? 0, title: n.title ?? gBrowser.selectedTab.label}; };
+if (window.__axioSampler) clearInterval(window.__axioSampler.timer);
+const first = read();
+const state = window.__axioSampler = {t0: performance.now(), frames0: first.frames, last: first.frames, title: first.title,
+  changes: [], titles: [], keys: [], marks: {}};
+state.onkey = event => { if (event.type === 'keydown') state.keys.push({stamp: event.timeStamp, now: performance.now(), frames: state.last}); };
+window.addEventListener('keydown', state.onkey, true);
+state.timer = setInterval(() => {
+  const now = performance.now(), value = read();
+  if (value.frames !== state.last) { state.changes.push([now, value.frames - state.last]); state.last = value.frames; }
+  if (value.title !== state.title) { state.titles.push([now, value.title]); state.title = value.title; }
+}, 2);
+return {t0: state.t0, frames: first.frames, title: first.title};
+"""
+SAMPLER_MARK = 'window.__axioSampler.marks[arguments[0]] = performance.now(); return window.__axioSampler.marks[arguments[0]];'
+SAMPLER_STOP = """
+const state = window.__axioSampler; clearInterval(state.timer);
+window.removeEventListener('keydown', state.onkey, true); window.__axioSampler = null;
+return {t0: state.t0, t1: performance.now(), frames0: state.frames0, frames1: state.last, changes: state.changes,
+        titles: state.titles, keys: state.keys, marks: state.marks};
+"""
+# Navigate the engine tab (fixture URLs only, enforced by the presenter) without awaiting it.
+ENGINE_NAVIGATE = """
+const [url] = arguments; const mark = performance.now();
+window.__axioNavigate = window.AxioSozo.engineProbe.navigate(url).then(() => null, error => String(error?.message ?? error));
+return mark;
+"""
+# Duration of a Zen engine switch of the selected tab (the promise resolves once the target
+# engine shows the tab: for WebKit/Chromium, after the first presented frame).
+SWITCH = """
+const [engine, done] = arguments; const t0 = performance.now();
+window.AxioSozo.engineProbe.switchTo(engine).then(
+  () => done({ok: true, ms: performance.now() - t0}),
+  error => done({ok: false, ms: performance.now() - t0, error: String(error?.message ?? error)}));
+"""
+# Tab switch: select a tab and wait for Firefox's TabSwitchDone (its layers are shown), then
+# two chrome frames; also records how long until an engine presenter shows a frame again.
+TAB_SWITCH = """
+const [index, done] = arguments; const tab = gBrowser.tabs[index]; const t0 = performance.now();
+let settled = false;
+const finish = (how) => { if (settled) return; settled = true;
+  requestAnimationFrame(() => requestAnimationFrame(() => done({ms: performance.now() - t0, signal: how,
+    engine: window.AxioSozo?.engineProbe?.engineOf?.(tab) ?? 'gecko'}))); };
+gBrowser.addEventListener('TabSwitchDone', () => finish('TabSwitchDone'), {once: true});
+setTimeout(() => finish('timeout-3s'), 3000);
+gBrowser.selectedTab = tab;
+"""
+
 
 def describe_list(values):
     return bench.describe([v for v in values if v is not None])
@@ -80,9 +152,40 @@ class ZenBench(gui_test.Harness):
         super().__init__(args, engine, evidence)
         self.result.update(harness='axiosozo-zen-bench', bench={})
 
+    @property
+    def native_engine(self):
+        """Chromium/WebKit tabs are measured from Zen's chrome side; Gecko tabs in-page."""
+        return self.engine.name != 'gecko'
+
     def async_content(self, script, args=()):
         self.set_context('content')
         return self.marionette.call('WebDriver:ExecuteAsyncScript', {'script': script, 'args': list(args)})['value']
+
+    def async_chrome(self, script, args=()):
+        self.set_context('chrome')
+        return self.marionette.call('WebDriver:ExecuteAsyncScript', {'script': script, 'args': list(args)})['value']
+
+    def presented(self):
+        return self.chrome_script(PRESENTED)
+
+    def switch_engine(self, engine):
+        result = self.async_chrome(SWITCH, [engine])
+        if not result.get('ok'):
+            raise AssertionError(f'switch to {engine} failed: {result}')
+        return round(result['ms'], 1)
+
+    def tab_switches(self, count=3):
+        """Away to the first (Gecko, about:blank) tab and back, `count` times each way."""
+        index = self.chrome_script('return gBrowser.tabs.indexOf(gBrowser.selectedTab);')
+        away, back = [], []
+        for _ in range(count):
+            away.append(self.async_chrome(TAB_SWITCH, [0]))
+            time.sleep(0.3)
+            back.append(self.async_chrome(TAB_SWITCH, [index]))
+            time.sleep(0.5)
+        return dict(to_gecko_blank_tab_ms=describe_list([r['ms'] for r in away]),
+                    back_to_bench_tab_ms=describe_list([r['ms'] for r in back]),
+                    signals=sorted({r['signal'] for r in away + back}), engine_after=back[-1]['engine'])
 
     def app_usage(self):
         return bench.Usage(self.browser.pid)
@@ -93,6 +196,8 @@ class ZenBench(gui_test.Harness):
         path = bench.FixtureServer.PATHS[self.loads % 2]
         server.assign(path, fixture)
         url = server.origin + path
+        if self.native_engine:
+            return self.engine_load(url, fixture)
         t0 = time.monotonic()
         if self.engine.name == 'gecko' and getattr(self, 'bench_tab', None):
             self.set_context('content')  # reuse one tab: navigation, not tab creation, is measured
@@ -107,7 +212,72 @@ class ZenBench(gui_test.Harness):
         timing = self.content_script(TIMING) if self.engine.name == 'gecko' else {}
         return dict(navigate_to_title_wall_ms=wall, title=title, timing=timing, shown=bool(shown))
 
+    def open_engine_tab(self, server, fixture):
+        """A new Gecko tab with the fixture, then Zen's engine switch of that tab (timed)."""
+        self.loads = getattr(self, 'loads', 0) + 1
+        path = bench.FixtureServer.PATHS[self.loads % 2]
+        server.assign(path, fixture)
+        url = server.origin + path
+        self.open_tab(url)
+        self.wait(lambda: (self.chrome_script('return gBrowser.selectedBrowser.contentTitle;') or '').startswith('bench:' + fixture),
+                  'the ' + fixture + ' fixture in the Gecko tab before the switch')
+        t0 = time.monotonic()
+        switch_ms = self.switch_engine(self.engine.name)
+        state = self.wait(lambda: (lambda p: p if p['engine'] == self.engine.name and str(p['title'] or '').startswith('bench:' + fixture)
+                                   and (p['frames'] or 0) > 0 else None)(self.presented()),
+                          self.engine.name + ' frames of the ' + fixture + ' fixture')
+        return dict(gecko_to_engine_switch_ms=switch_ms, switch_to_title_wall_ms=round((time.monotonic() - t0) * 1000, 1),
+                    presenter=state)
+
+    def engine_load(self, url, fixture):
+        """Navigate the engine tab; page-load-to-visible from the chrome-side sampler."""
+        self.chrome_script(SAMPLER_START)
+        t0 = time.monotonic()
+        start = self.chrome_script(ENGINE_NAVIGATE, [url])
+        self.wait(lambda: str(self.presented()['title'] or '').startswith('bench:' + fixture), 'title of the ' + fixture + ' fixture')
+        wall = round((time.monotonic() - t0) * 1000, 1)
+        time.sleep(0.4)  # frames that follow the title event
+        data = self.chrome_script(SAMPLER_STOP)
+        error = self.async_chrome('const done = arguments[arguments.length - 1]; window.__axioNavigate.then(done);')
+        title_at = next((t for t, title in data['titles'] if str(title).startswith('bench:' + fixture)), None)
+        frames = [t for t, _ in data['changes'] if t >= start]
+        after = [t for t in frames if title_at is not None and t >= title_at]
+        before = [t for t in frames if title_at is not None and t < title_at]
+        visible, basis = (after[0], 'first frame after the title event') if after else \
+            ((before[-1], 'last frame before the title event') if before else (None, 'no frame'))
+        return dict(navigate_to_title_wall_ms=wall, title=self.presented()['title'], measured_in='zen-chrome',
+                    timing=dict(navigate_to_title_ms=round(title_at - start, 1) if title_at is not None else None,
+                                navigate_to_visible_ms=round(visible - start, 1) if visible is not None else None,
+                                visible_basis=basis, frames_after_navigate=len(frames)), error=error)
+
+    def engine_window(self, seconds, during=None):
+        """Presented-frame cadence of the engine tab (frame-counter changes seen by the 2 ms sampler)."""
+        self.chrome_script(SAMPLER_START)
+        usage = self.app_usage()
+        start = usage.snapshot()
+        if during:
+            during()
+        else:
+            time.sleep(seconds)
+        end = usage.snapshot(memory=True)
+        data = self.chrome_script(SAMPLER_STOP)
+        window_s = (data['t1'] - data['t0']) / 1000
+        times = [t for t, _ in data['changes']]
+        iv = [b - a for a, b in zip(times, times[1:])]
+        frames = data['frames1'] - data['frames0']
+        # Over the active part only (first to last new frame), as the in-page rAF window does.
+        active = (times[-1] - times[0]) / 1000 if len(times) > 1 else 0
+        return dict(measured_in='zen-chrome (presenter frame counter, 2 ms sampler)', frames=frames,
+                    canvas_updates=len(times), fps=round((len(times) - 1) / active, 2) if active else None,
+                    fps_whole_window=round(frames / window_s, 2) if window_s else None,
+                    interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
+                    long_intervals_share=round(sum(1 for v in iv if v > 25) / len(iv), 4) if iv else None,
+                    multi_frame_updates=sum(1 for _, n in data['changes'] if n > 1),
+                    presenter=self.presented(), usage=bench.Usage.window(start, end))
+
     def raf_window(self, seconds, during=None):
+        if self.native_engine:
+            return self.engine_window(seconds, during)
         self.content_script(RAF_START)
         usage = self.app_usage()
         start = usage.snapshot()
@@ -131,7 +301,26 @@ class ZenBench(gui_test.Harness):
         self.xdotool('mousemove', '--sync', point[0], point[1])
         self.xdotool('click', '--repeat', count, '--delay', delay_ms, '5')
 
+    def engine_key_latency(self, samples):
+        """Chrome keydown (routed to the presenter canvas) -> next presented engine frame."""
+        self.chrome_script('return window.AxioSozo.engineProbe.focus();')
+        self.chrome_script(SAMPLER_START)
+        for _ in range(samples):
+            self.xdotool('key', 'a')
+            time.sleep(0.15)
+        time.sleep(0.3)
+        data = self.chrome_script(SAMPLER_STOP)
+        latencies = []
+        for key in data['keys']:
+            nxt = next((t for t, _ in data['changes'] if t >= key['stamp']), None)
+            latencies.append(None if nxt is None else nxt - key['stamp'])
+        return dict(samples=len(data['keys']), measured_in='zen-chrome', title=self.presented()['title'],
+                    keydown_to_presented_frame_ms=describe_list(latencies),
+                    keys_without_frame=sum(1 for v in latencies if v is None))
+
     def key_latency(self, samples):
+        if self.native_engine:
+            return self.engine_key_latency(samples)
         target = self.element_screen_point('#t')
         self.xdotool('mousemove', '--sync', target[0], target[1])
         self.xdotool('click', '1')
@@ -152,6 +341,8 @@ class ZenBench(gui_test.Harness):
     def repetition(self, server, index, samples):
         rep = dict(index=index)
         try:
+            if self.native_engine:
+                rep['switch'] = self.open_engine_tab(server, 'static')
             for fixture in ('static', 'image', 'dom'):
                 rep[fixture] = self.load(server, fixture)
                 rep[fixture]['idle_raf'] = self.raf_window(1.5)
@@ -160,6 +351,12 @@ class ZenBench(gui_test.Harness):
             rep['image_scroll'] = dict(load=self.load(server, 'image'), window=self.raf_window(0, during=self.wheel))
             rep['key'] = dict(load=self.load(server, 'text'), **self.key_latency(samples))
             rep['memory_all_processes'] = self.memory()
+            rep['tab_switch'] = self.tab_switches()
+            if self.native_engine:
+                rep['switch']['engine_to_gecko_switch_ms'] = self.switch_engine('gecko')
+                time.sleep(1)
+                rep['memory_after_switch_back'] = self.memory()
+                self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
             rep['status'] = 'PASS'
         except EngineUnavailable as error:
             rep.update(status='BLOCKED_ENV', reason=str(error))
@@ -173,6 +370,9 @@ class ZenBench(gui_test.Harness):
         server = bench.FixtureServer()
         try:
             with OwnedSession(gui_test.SESSION_ROOT / ('bench-' + secrets.token_hex(8))) as session:
+                # The engine plug-ins bind fixture mode to this origin and read the session path.
+                self.fixture = server
+                self.result['session'] = str(session.path)
                 profile = private_directory(session.path / 'gecko')
                 (profile / '.axiosozo-dev-profile').touch(mode=0o600)
                 try:
@@ -217,7 +417,18 @@ def summarize(reps):
             'scroll.window.scrolled_css_px', 'scroll.window.usage.cpu_percent',
             'image_scroll.window.fps', 'image_scroll.window.interval_p99_ms', 'image_scroll.window.usage.cpu_percent',
             'key.keydown_to_second_raf_ms.median', 'key.keydown_to_second_raf_ms.p95', 'key.event_to_handler_ms.median',
-            'memory_all_processes.rss_mb', 'memory_all_processes.pss_mb', 'memory_all_processes.processes']
+            'memory_all_processes.rss_mb', 'memory_all_processes.pss_mb', 'memory_all_processes.processes',
+            'tab_switch.to_gecko_blank_tab_ms.median', 'tab_switch.back_to_bench_tab_ms.median']
+    # Engine (Chromium/WebKit) tabs, measured from Zen's chrome side.
+    keys += ['switch.gecko_to_engine_switch_ms', 'switch.engine_to_gecko_switch_ms',
+             'static.timing.navigate_to_title_ms', 'static.timing.navigate_to_visible_ms',
+             'image.timing.navigate_to_title_ms', 'image.timing.navigate_to_visible_ms',
+             'dom.timing.navigate_to_title_ms', 'dom.timing.navigate_to_visible_ms',
+             'raf.window.fps_whole_window', 'scroll.window.fps_whole_window', 'image_scroll.window.fps_whole_window',
+             'raf.window.presenter.meanDrawMilliseconds', 'scroll.window.presenter.meanDrawMilliseconds',
+             'raf.window.multi_frame_updates', 'scroll.window.multi_frame_updates',
+             'key.keydown_to_presented_frame_ms.median', 'key.keydown_to_presented_frame_ms.p95',
+             'memory_after_switch_back.rss_mb', 'memory_after_switch_back.processes']
     return {key: bench.describe(bench.collect(ok, key)) for key in keys if bench.collect(ok, key)}
 
 
@@ -228,6 +439,8 @@ def main():
     parser.add_argument('--app', default='fetched')
     parser.add_argument('--out', required=True)
     parser.add_argument('--reps', type=int, default=5)
+    parser.add_argument('--chrome-overlay', help='report of scripts/webkit_package.py overlay-chrome (TEST-ONLY), recorded in the result')
+    parser.add_argument('--label', help='result name (default: the engine), e.g. gecko-debian')
     parser.add_argument('--samples', type=int, default=20)
     parser.add_argument('--size', default='1280x800')
     parser.add_argument('--timeout', type=float, default=60)
@@ -252,9 +465,14 @@ def main():
         status, harness.result['reason'] = 'BLOCKED_ENV', str(error)
     except (RuntimeError, OSError, subprocess.SubprocessError, AssertionError, gui_test.MarionetteError) as error:
         harness.result['reason'] = f'{type(error).__name__}: {error}'
-    harness.result.update(status=status, schema='axiosozo-zen-bench-v1', E1='NOT_TESTED', E2='NOT_TESTED',
+    label = args.label or args.engine
+    if args.chrome_overlay and Path(args.chrome_overlay).is_file():
+        overlay = json.loads(Path(args.chrome_overlay).read_text())
+        harness.result['chrome_overlay'] = {key: overlay.get(key) for key in ('label', 'overlay_commit', 'app_build_commit')} | {
+            'replaced': len(overlay.get('replaced') or []), 'added': len(overlay.get('added') or [])}
+    harness.result.update(status=status, schema='axiosozo-zen-bench-v1', label=label, E1='NOT_TESTED', E2='NOT_TESTED',
                           machine=bench.machine())
-    (out / f'zen-bench-{args.engine}.json').write_text(json.dumps(harness.result, indent=1) + '\n')
+    (out / f'zen-bench-{label}.json').write_text(json.dumps(harness.result, indent=1) + '\n')
     print(json.dumps(dict(component='zen-bench', engine=args.engine, status=status, reason=harness.result.get('reason'))))
     return {'PASS': 0, 'BLOCKED_ENV': 2}.get(status, 1)
 

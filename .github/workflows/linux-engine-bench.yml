@@ -1,13 +1,25 @@
 # Engine performance benchmarks on Linux (tools/engine-bench, docs/PERFORMANCE.md).
 #
-#   webkit     WPE WebKit host (native/webkit-host of this checkout) in the pinned debian:13 image,
-#              5 repetitions without damage (what Zen negotiates today) + 1 MiB-pipe A/B,
-#              5 repetitions with hello.frame_damage.
-#   chromium   Linux CEF host from cloud/linux-cef at a pinned commit (that branch's own lockfile
-#              pins and sha256-checks the CEF distribution), same bench under Xvfb.
-#   presenter  Zen presenter pixel path: the real bgraToRGBA in Node, and bgraToRGBA + putImageData
-#              (+ candidate fixes) in the Firefox/Chrome preinstalled on the runner image.
-#   summary    one markdown + JSON across all jobs.
+#   webkit       WPE WebKit host (native/webkit-host of this checkout) in the pinned debian:13 image,
+#                5 repetitions without damage (what Zen negotiates today) + 1 MiB-pipe A/B,
+#                5 repetitions with hello.frame_damage.
+#   chromium     Linux CEF host (native/chromium-host of this checkout; its probe.py pins and
+#                sha256-checks the CEF distribution), same bench under Xvfb.
+#   presenter    Zen presenter pixel path: the real bgraToRGBA in Node, and bgraToRGBA + putImageData
+#                (+ candidate fixes) in the Firefox/Chrome preinstalled on the runner image. With the
+#                `presenter_baseline_ref` input: a same-process A/B against that ref's presenter.
+#   zen          in-Zen bench (zen_bench.py) on a prebuilt Linux Zen app, Gecko and Chromium tabs, on
+#                the runner. The app's chrome JS is overlaid from this checkout (TEST-ONLY, labelled).
+#   zen-webkit   in-Zen bench, WebKit tabs (+ Gecko tabs for a same-machine comparison), in debian:13
+#                next to the WPE host.
+#   summary      one markdown + JSON across all jobs; with a baseline, compare.py deltas.
+#
+# Callable from other branches (docs/PERFORMANCE.md "Regression gate"):
+#   jobs:
+#     bench:
+#       permissions: { contents: write, actions: read }
+#       uses: ./.github/workflows/linux-engine-bench.yml
+#       with: { jobs: 'presenter,chromium', baseline: '<run id or ci-results folder>', presenter_baseline_ref: cloud/integration }
 #
 # Every job publishes small results (JSON, logs, a few 1x PNGs) to the ci-results branch.
 # Runners have no GPU: all engines render in software (see docs/PERFORMANCE.md "Bias").
@@ -22,6 +34,27 @@ on:
       - tools/engine-bench/**
       - .github/workflows/linux-engine-bench.yml
       - .github/actions/publish-ci-results/**
+  workflow_call:
+    inputs:
+      jobs:
+        description: "all, or a comma list of webkit,chromium,presenter,zen,zen-webkit"
+        type: string
+        default: all
+      baseline:
+        description: "compare.py baseline: a run id of this workflow's summary on cloud/engine-bench, or ci-results:<folder>"
+        type: string
+        default: ''
+      presenter_baseline_ref:
+        description: git ref whose apps/browser/chrome/CEFPresenter.sys.mjs the presenter job A/Bs against
+        type: string
+        default: ''
+      zen_build_run_id:
+        description: run whose axiosozo-zen-linux-x86_64 artifact the zen jobs use (default newest unexpired)
+        type: string
+        default: ''
+      reps:
+        type: string
+        default: '5'
 
 permissions:
   contents: read
@@ -33,12 +66,15 @@ concurrency:
 env:
   # upstreams.lock.json webkit.ci_image
   WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
-  # cloud/linux-cef head of green linux-cef-host run 39298920882
-  CEF_REF: ae99a098d550e8c0fdfac77d3c8d986cc1f3c125
-  BENCH_REPS: "5"
+  BENCH_REPS: ${{ inputs.reps || '5' }}
+  JOBS: ",${{ inputs.jobs || 'all' }},"
+  # Default comparison for pushes to cloud/engine-bench: the baseline in docs/PERFORMANCE.md.
+  BASELINE: ${{ inputs.baseline || (github.event_name == 'push' && '39303324088' || '') }}
+  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id }}
 
 jobs:
   webkit:
+    if: contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',webkit,')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -73,6 +109,7 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+          name: webkit
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -81,28 +118,23 @@ jobs:
           retention-days: 30
 
   chromium:
+    if: contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',chromium,')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
       contents: write
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      AXIOSOZO_BUILD_ROOT: ${{ github.workspace }}/cef-src/.local/build
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
       EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-chromium
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Linux CEF host sources (cloud/linux-cef, pinned commit)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.CEF_REF }}
-          path: cef-src
-          persist-credentials: false
       - name: Runner resources
         run: |
-          mkdir -p "$EVIDENCE_OUT"
-          { uname -a; nproc; lscpu | head -20; free -m; ls -la /dev/dri 2>&1 || true; git -C cef-src rev-parse HEAD; } > "$EVIDENCE_OUT/runner.txt"
+          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT"
+          { uname -a; nproc; lscpu | head -20; free -m; ls -la /dev/dri 2>&1 || true; git rev-parse HEAD; } > "$EVIDENCE_OUT/runner.txt"
       - name: Install apt packages (native/chromium-host README "Linux", as linux-cef-host.yml)
         run: |
           sudo apt-get update -q
@@ -115,26 +147,26 @@ jobs:
         id: cef-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/cef-src/.local/build/cef/*.tar.bz2
-          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-bench
       - name: probe.py setup (download, verify, CMake build)
         run: |
           set -o pipefail
-          python3 cef-src/native/chromium-host/probe.py setup 2>&1 | tee "$EVIDENCE_OUT/setup.log"
+          python3 native/chromium-host/probe.py setup 2>&1 | tee "$EVIDENCE_OUT/setup.log"
       - name: Save pinned CEF archive
-        if: always() && steps.cef-cache.outputs.cache-hit != 'true' && hashFiles('cef-src/.local/build/cef/*.tar.bz2') != ''
+        if: always() && steps.cef-cache.outputs.cache-hit != 'true' && hashFiles('/home/runner/axiosozo-build/cef/*.tar.bz2') != ''
+        continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/cef-src/.local/build/cef/*.tar.bz2
-          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-bench
       - name: probe.py install-sandbox and check
         run: |
-          # Judged by the last JSON status line: at CEF_REF `probe.py check` prints PASS on Linux but
-          # exits 1 (it returns a dict to sys.exit), which linux-cef-host.yml tolerates the same way.
-          python3 cef-src/native/chromium-host/probe.py install-sandbox 2>&1 | tee "$EVIDENCE_OUT/install-sandbox.log"
-          python3 cef-src/native/chromium-host/probe.py check 2>&1 | tee "$EVIDENCE_OUT/check.log"
+          # Judged by the JSON status lines, as linux-cef-host.yml does.
+          python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee "$EVIDENCE_OUT/install-sandbox.log" || true
+          python3 native/chromium-host/probe.py check 2>&1 | tee "$EVIDENCE_OUT/check.log" || true
           grep -q '"status": "PASS"' "$EVIDENCE_OUT/install-sandbox.log"
-          grep -q '"status": "PASS", "action": "native_build_check"' "$EVIDENCE_OUT/check.log"
+          grep -q '"status": "PASS"' "$EVIDENCE_OUT/check.log"
       - name: Start Xvfb
         run: |
           Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp > "$EVIDENCE_OUT/xvfb.log" 2>&1 &
@@ -143,13 +175,13 @@ jobs:
       - name: Bench (no damage + 1 MiB pipe A/B)
         run: |
           set -o pipefail
-          timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root cef-src --out "$EVIDENCE_OUT/bench" \
+          timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root . --out "$EVIDENCE_OUT/bench" \
             --reps "$BENCH_REPS" --pipe-experiment 2>&1 | tee "$EVIDENCE_OUT/bench.log"
       - name: Bench (hello.frame_damage)
         if: always()
         run: |
           set -o pipefail
-          timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root cef-src --out "$EVIDENCE_OUT/bench" \
+          timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root . --out "$EVIDENCE_OUT/bench" \
             --reps "$BENCH_REPS" --frame-damage 2>&1 | tee "$EVIDENCE_OUT/bench-damage.log"
       - name: Summary
         if: always()
@@ -160,6 +192,7 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+          name: chromium
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -168,29 +201,45 @@ jobs:
           retention-days: 30
 
   presenter:
+    if: contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',presenter,')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-presenter
+      BASELINE_REF: ${{ inputs.presenter_baseline_ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Runner resources and preinstalled browsers (runner image; nothing downloaded)
         run: |
           mkdir -p "$EVIDENCE_OUT"
           { uname -a; nproc; lscpu | head -20; free -m; node --version; command -v firefox; firefox --version;
             command -v google-chrome; google-chrome --version; } > "$EVIDENCE_OUT/runner.txt" 2>&1 || true
+      - name: Baseline presenter for the same-process A/B
+        if: env.BASELINE_REF != ''
+        run: |
+          base="$RUNNER_TEMP/presenter-baseline"
+          mkdir -p "$base"
+          git rev-parse --verify --quiet "origin/$BASELINE_REF" > /dev/null && ref="origin/$BASELINE_REF" || ref="$BASELINE_REF"
+          git archive "$ref" apps/browser/chrome | tar -x -C "$base"
+          echo "{\"baseline_ref\": \"$BASELINE_REF\", \"commit\": \"$(git rev-parse "$ref")\"}" | tee "$EVIDENCE_OUT/presenter-baseline.json"
+          echo "BASELINE_PRESENTER=$base/apps/browser/chrome/CEFPresenter.sys.mjs" >> "$GITHUB_ENV"
       - name: Node (V8) - real bgraToRGBA and candidates
         run: node tools/engine-bench/presenter/node_bench.mjs "$EVIDENCE_OUT/presenter-node.json" > "$EVIDENCE_OUT/node.log"
       - name: Firefox (Gecko) - bgraToRGBA + putImageData and candidates
         if: always()
-        run: python3 tools/engine-bench/presenter/run_browser.py --browser firefox --binary "$(command -v firefox)" --out "$EVIDENCE_OUT/presenter-firefox.json"
+        run: |
+          python3 tools/engine-bench/presenter/run_browser.py --browser firefox --binary "$(command -v firefox)" \
+            --out "$EVIDENCE_OUT/presenter-firefox.json" ${BASELINE_PRESENTER:+--baseline-presenter "$BASELINE_PRESENTER"}
       - name: Chrome (Blink) - same page, for comparison
         if: always()
-        run: python3 tools/engine-bench/presenter/run_browser.py --browser chromium --binary "$(command -v google-chrome)" --out "$EVIDENCE_OUT/presenter-chrome.json"
+        run: |
+          python3 tools/engine-bench/presenter/run_browser.py --browser chromium --binary "$(command -v google-chrome)" \
+            --out "$EVIDENCE_OUT/presenter-chrome.json" ${BASELINE_PRESENTER:+--baseline-presenter "$BASELINE_PRESENTER"}
       - name: Summary
         if: always()
         run: python3 tools/engine-bench/summarize.py "$EVIDENCE_OUT" --out "$EVIDENCE_OUT/summary.md" --run-id "${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY" || true
@@ -198,6 +247,7 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+          name: presenter
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -205,71 +255,111 @@ jobs:
           path: ${{ env.EVIDENCE_OUT }}/presenter-*.json
           retention-days: 30
 
-  # Integrated: fixtures in Zen tabs (Gecko now; Chromium/WebKit once their scripts/gui_engines
-  # plug-ins exist). Uses the newest successful linux-zen-build artifact (or ZEN_BUILD_RUN_ID);
-  # with none available the job records BLOCKED_ENV and passes.
-  zen:
+  # Which prebuilt Linux Zen app the in-Zen jobs use: the input, else the newest unexpired
+  # axiosozo-zen-linux-x86_64 artifact of any linux-zen-build run (those runs can be red on a
+  # later GUI step while the packaged app is complete; fetch-build verifies it).
+  zen-source:
+    if: contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',zen')
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run_id: ${{ steps.pick.outputs.run_id }}
+      artifact: ${{ steps.pick.outputs.artifact }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$ZEN_BUILD_RUN_ID" ]; then
+            artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ZEN_BUILD_RUN_ID/artifacts" \
+              --jq '[.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not))][0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          else
+            artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=30" \
+              --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          fi
+          echo "$artifact"
+          echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"
+
+  zen:
+    needs: zen-source
+    if: always() && needs.zen-source.result == 'success' && (contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',zen,'))
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [gecko, chromium]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
     permissions:
       contents: write  # publish-ci-results
-      actions: read    # find and download the build artifact of another run
+      actions: read    # download the build artifact of another run
     defaults:
       run:
         shell: bash
     env:
+      PYTHONDONTWRITEBYTECODE: "1"
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
-      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-zen
-      ZEN_BUILD_RUN_ID: ""
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-zen-${{ matrix.engine }}
+      RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+      ENGINE: ${{ matrix.engine }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Find a Linux Zen build artifact
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Build artifact
         run: |
-          mkdir -p "$EVIDENCE_OUT"
-          run="$ZEN_BUILD_RUN_ID"
-          if [ -z "$run" ]; then
-            for id in $(gh api "repos/${{ github.repository }}/actions/workflows/linux-zen-build.yml/runs?status=success&per_page=20" --jq '.workflow_runs[].id'); do
-              if gh api "repos/${{ github.repository }}/actions/runs/$id/artifacts" --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and .expired==false) | .id' | grep -q .; then run=$id; break; fi
-            done
+          mkdir -p "$EVIDENCE_OUT/$ENGINE" "$AXIOSOZO_BUILD_ROOT"
+          echo '${{ needs.zen-source.outputs.artifact }}' > "$EVIDENCE_OUT/zen-artifact.json"
+          if [ -z "$RUN_ID" ]; then
+            echo '{"schema":"axiosozo-zen-bench-v1","engine":"'"$ENGINE"'","status":"BLOCKED_ENV","reason":"no unexpired axiosozo-zen-linux-x86_64 artifact"}' > "$EVIDENCE_OUT/$ENGINE/zen-bench-$ENGINE.json"
           fi
-          echo "run_id=$run" >> "$GITHUB_OUTPUT"
-          if [ -z "$run" ]; then
-            echo '{"schema":"axiosozo-zen-bench-v1","status":"BLOCKED_ENV","reason":"no successful linux-zen-build run with an unexpired axiosozo-zen-linux-x86_64 artifact yet"}' > "$EVIDENCE_OUT/zen-bench-gecko.json"
-          fi
-          echo "build run: ${run:-none}" | tee "$EVIDENCE_OUT/source.txt"
-      - name: GUI packages (scripts/linux_packages.py gui)
-        if: steps.source.outputs.run_id != ''
+      - name: GUI packages (scripts/linux_packages.py gui) and the CEF runtime
+        if: env.RUN_ID != ''
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui)
-          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+          extra=""
+          [ "$ENGINE" = chromium ] && extra="cmake ninja-build g++ zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libatspi2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 \
+            libx11-6 libxcb1 libxshmfence1 libpango-1.0-0 libcairo2 libglib2.0-0t64 libdbus-1-3 libexpat1"
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) $extra
+          { uname -a; nproc; lscpu | head -20; free -m; ls -la /dev/dri 2>&1 || true; } > "$EVIDENCE_OUT/runner.txt"
       - name: Download the build artifact
-        if: steps.source.outputs.run_id != ''
+        if: env.RUN_ID != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: axiosozo-zen-linux-x86_64
           path: artifact
-          run-id: ${{ steps.source.outputs.run_id }}
+          run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-      - name: Verify and unpack (./dev fetch-build)
-        if: steps.source.outputs.run_id != ''
-        run: ./dev fetch-build --from-dir artifact --run "${{ steps.source.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
-      - name: Zen bench (Gecko tabs)
-        if: steps.source.outputs.run_id != ''
-        run: timeout 2400 python3 tools/engine-bench/zen_bench.py --engine gecko --app fetched --out "$EVIDENCE_OUT/gecko" --reps "$BENCH_REPS" 2>&1 | tail -n 40
-      - name: Zen bench (Chromium and WebKit tabs; BLOCKED_ENV until their GUI plug-ins exist)
-        if: steps.source.outputs.run_id != ''
-        continue-on-error: true
+      - name: Verify and unpack (./dev fetch-build), TEST-ONLY chrome overlay
+        if: env.RUN_ID != ''
         run: |
-          for engine in chromium webkit; do
-            timeout 1200 python3 tools/engine-bench/zen_bench.py --engine $engine --app fetched --out "$EVIDENCE_OUT/$engine" --reps "$BENCH_REPS" 2>&1 | tail -n 5 || true
-          done
+          set -o pipefail
+          ./dev fetch-build --from-dir artifact --run "$RUN_ID" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+          app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$AXIOSOZO_BUILD_ROOT/linux-app/current.json")
+          python3 scripts/webkit_package.py overlay-chrome --app "$app" --out "$EVIDENCE_OUT/chrome-overlay.json" > "$EVIDENCE_OUT/chrome-overlay.log"
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["label"], d["overlay_commit"], "over", d["app_build_commit"], len(d["replaced"]), "replaced", len(d["added"]), "added")' "$EVIDENCE_OUT/chrome-overlay.json"
+      - name: Restore pinned CEF archive
+        if: env.RUN_ID != '' && matrix.engine == 'chromium'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-bench
+      - name: CEF host (probe.py setup, install-sandbox, check)
+        if: env.RUN_ID != '' && matrix.engine == 'chromium'
+        run: |
+          python3 native/chromium-host/probe.py setup 2>&1 | tail -n 5 | tee "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
+          python3 native/chromium-host/probe.py check 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
+      - name: Zen bench (${{ matrix.engine }} tabs)
+        if: env.RUN_ID != ''
+        run: |
+          set -o pipefail
+          timeout 2700 python3 tools/engine-bench/zen_bench.py --engine "$ENGINE" --app fetched --out "$EVIDENCE_OUT/$ENGINE" \
+            --reps "$BENCH_REPS" --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
       - name: Keep evidence small
         if: always()
         run: find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
@@ -277,17 +367,76 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+          name: zen-${{ matrix.engine }}
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: bench-zen
+          name: bench-zen-${{ matrix.engine }}
+          path: ${{ env.EVIDENCE_OUT }}/**/zen-bench-*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  zen-webkit:
+    needs: zen-source
+    if: always() && needs.zen-source.result == 'success' && needs.zen-source.outputs.run_id != '' && (contains(format(',{0},', inputs.jobs || 'all'), ',all,') || contains(format(',{0},', inputs.jobs), ',zen-webkit,'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download the build artifact of another run
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-zen-webkit
+      ZEN_RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runner resources
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          echo '${{ needs.zen-source.outputs.artifact }}' > "$EVIDENCE_OUT/zen-artifact.json"
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Zen + WebKit host + zen_bench in debian:13 (pinned)
+        run: |
+          docker pull -q "$WEBKIT_IMAGE"
+          start=$(date +%s); set +e
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e BENCH_REPS \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
+            "$WEBKIT_IMAGE" sh /src/tools/engine-bench/ci/zen_webkit_container.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start )), \"zen_run_id\": \"$ZEN_RUN_ID\"}" > "$EVIDENCE_OUT/job.json"
+          tail -n 30 "$EVIDENCE_OUT/steps.log" 2>/dev/null
+          exit $code
+      - name: Keep evidence small
+        if: always()
+        run: sudo find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; sudo find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; sudo find "$EVIDENCE_OUT" -name '*.deb' -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: zen-webkit
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-zen-webkit
           path: ${{ env.EVIDENCE_OUT }}/**/zen-bench-*.json
           retention-days: 30
           if-no-files-found: ignore
 
   summary:
     if: always()
-    needs: [webkit, chromium, presenter, zen]
+    needs: [webkit, chromium, presenter, zen, zen-webkit]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -307,8 +456,15 @@ jobs:
           mkdir -p "$EVIDENCE_OUT"
           python3 tools/engine-bench/summarize.py "${{ github.workspace }}/.local/bench-artifacts" --out "$EVIDENCE_OUT/summary.md" \
             --json "$EVIDENCE_OUT/summary.json" --run-id "${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '{"webkit":"${{ needs.webkit.result }}","chromium":"${{ needs.chromium.result }}","presenter":"${{ needs.presenter.result }}","zen":"${{ needs.zen.result }}"}' > "$EVIDENCE_OUT/jobs.json"
+          echo '{"webkit":"${{ needs.webkit.result }}","chromium":"${{ needs.chromium.result }}","presenter":"${{ needs.presenter.result }}","zen":"${{ needs.zen.result }}","zen-webkit":"${{ needs.zen-webkit.result }}"}' > "$EVIDENCE_OUT/jobs.json"
+      - name: Compare with the baseline (tools/engine-bench/compare.py)
+        if: env.BASELINE != ''
+        run: |
+          git fetch -q --depth=1 "https://github.com/${{ github.repository }}.git" ci-results:refs/remotes/origin/ci-results
+          python3 tools/engine-bench/compare.py "$BASELINE" "$EVIDENCE_OUT/summary.json" --out "$EVIDENCE_OUT/compare.md" \
+            --json "$EVIDENCE_OUT/compare.json" >> "$GITHUB_STEP_SUMMARY" || true
       - if: always()
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
+          name: summary

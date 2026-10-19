@@ -128,12 +128,21 @@ def main():
         if p.get('error'):
             lines.append(f'Error: {p["error"]}')
     for z in zens:
-        lines += ['', f'## Integrated (Zen app) — engine {z.get("engine")}: {z.get("status")}', '']
+        lines += ['', f'## Integrated (Zen app) — {z.get("label") or z.get("engine")}: {z.get("status")}', '']
         if z.get('reason'):
             lines.append(f'Reason: {z["reason"]}')
         app = z.get('app') or {}
         if app:
-            lines.append(f'App: {app.get("source")} run {app.get("run_id")}, commit {app.get("repository_commit")}')
+            lines.append(f'App: {app.get("source")} run {app.get("run_id")}, commit {app.get("repository_commit")}'
+                         + (f'; TEST-ONLY chrome-overlay: apps/browser/chrome of {z["chrome_overlay"].get("overlay_commit")} '
+                            f'({z["chrome_overlay"].get("replaced")} replaced, {z["chrome_overlay"].get("added")} added)'
+                            if z.get('chrome_overlay') else ''))
+        m = z.get('machine') or {}
+        if m:
+            lines.append(f'Machine: {m.get("cpu_model")} × {m.get("nproc")}, {m.get("mem_total_mb")} MB, {m.get("os")}')
+        reps = (z.get('bench') or {}).get('repetitions') or []
+        if reps:
+            lines.append('Repetitions: ' + ', '.join(r.get('status', '?') + (f' ({r["reason"][:160]})' if r.get('reason') else '') for r in reps))
         summary = z.get('summary') or {}
         if summary:
             lines += ['', '| Metric | median [p95] |', '| --- | --- |']
@@ -142,7 +151,7 @@ def main():
     if args.json:
         Path(args.json).write_text(json.dumps(dict(run_id=args.run_id, benches={k: dict(status=v['status'], summary=v.get('summary'),
                                                     machine=v.get('machine'), ready=v.get('ready')) for k, v in benches.items()},
-                                                    presenters=presenters, zen=[dict(engine=z.get('engine'), status=z.get('status'), reason=z.get('reason'), summary=z.get('summary')) for z in zens]), indent=1) + '\n')
+                                                    presenters=presenters, zen=[dict(engine=z.get('engine'), label=z.get('label') or z.get('engine'), machine=z.get('machine'), status=z.get('status'), reason=z.get('reason'), summary=z.get('summary')) for z in zens]), indent=1) + '\n')
     print('\n'.join(lines))
 
 

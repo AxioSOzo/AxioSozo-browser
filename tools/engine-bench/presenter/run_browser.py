@@ -7,6 +7,12 @@ candidate replacements. Gecko numbers use the Firefox that ships on GitHub's ubu
 runner image (not a new download; version recorded). Loopback only, throwaway profile.
 
 usage: run_browser.py --browser firefox|chromium --binary PATH --out result.json [--iter 30]
+                      [--baseline-presenter OLD/CEFPresenter.sys.mjs]
+
+--baseline-presenter adds a same-process A/B: the baseline file's bgraToRGBA (for example
+from `git archive <base ref> apps/browser/chrome`) is measured next to this checkout's, as
+baseline_bgraToRGBA_ms / baseline_draw_full_ms, with an identical-output check. Runner
+CPUs differ between runs, so this is the regression gate for pixel-path changes.
 """
 import argparse
 import hashlib
@@ -54,9 +60,15 @@ def main():
     parser.add_argument('--out', required=True)
     parser.add_argument('--iter', type=int, default=60)
     parser.add_argument('--timeout', type=int, default=300)
+    parser.add_argument('--baseline-presenter', help='an older CEFPresenter.sys.mjs to A/B against this checkout')
     args = parser.parse_args()
     function = extract_function(PRESENTER.read_text(), 'bgraToRGBA')
-    page = (HERE / 'page.html').read_text().replace('/*BGRA_TO_RGBA*/', function).encode()
+    baseline = 'const baselineBgraToRGBA = null;'
+    if args.baseline_presenter:
+        baseline = extract_function(Path(args.baseline_presenter).read_text(), 'bgraToRGBA').replace(
+            'function bgraToRGBA(', 'function baselineBgraToRGBA(', 1)
+    page = (HERE / 'page.html').read_text().replace('/*BGRA_TO_RGBA*/', function).replace(
+        '/*BASELINE_BGRA_TO_RGBA*/', baseline).encode()
     done = threading.Event()
     box = {}
 
@@ -109,6 +121,8 @@ def main():
     result = box.get('result') or {'error': 'no result within %d s' % args.timeout}
     result.update(browser=args.browser, browser_version=version, wall_s=round(time.monotonic() - started, 1),
                   bgraToRGBA_source_sha256=hashlib.sha256(function.encode()).hexdigest(),
+                  baseline_presenter=args.baseline_presenter,
+                  baseline_bgraToRGBA_source_sha256=hashlib.sha256(baseline.encode()).hexdigest() if args.baseline_presenter else None,
                   source=str(PRESENTER.relative_to(ROOT)), stderr_tail=stderr.decode(errors='replace')[-1500:] if not ok else None)
     result['status'] = 'PASS' if ok and 'error' not in result else 'FAIL'
     Path(args.out).write_text(json.dumps(result, indent=1) + '\n')

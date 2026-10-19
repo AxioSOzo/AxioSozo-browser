@@ -3,9 +3,17 @@
 // compares it with candidate replacements on synthetic frames of the bench sizes.
 // V8 is not SpiderMonkey: the in-Gecko numbers come from presenter/page.html (run_browser.py);
 // this run is a portable cross-check. usage: node node_bench.mjs [out.json]
+// BASELINE_PRESENTER=<older apps/browser/chrome/CEFPresenter.sys.mjs> adds a same-process A/B
+// (baseline_bgraToRGBA_ms, baseline_identical_output): the regression gate for pixel-path changes.
 import { bgraToRGBA } from '../../../apps/browser/chrome/CEFPresenter.sys.mjs';
 import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import os from 'node:os';
+
+const baselinePath = process.env.BASELINE_PRESENTER ? resolve(process.env.BASELINE_PRESENTER) : null;
+const baselineBgraToRGBA = baselinePath ? (await import(pathToFileURL(baselinePath).href)).bgraToRGBA : null;
+if (baselinePath && typeof baselineBgraToRGBA !== 'function') throw new Error('no bgraToRGBA export in ' + baselinePath);
 
 const SIZES = [[900, 650], [1800, 1300]];
 const ITER = Number(process.env.BENCH_ITER || 30);
@@ -59,11 +67,14 @@ for (const [w, h] of SIZES) {
       copy_ms: time(b => new Uint8Array(b.byteLength).set(new Uint8Array(b)), make),
       presenter_bgraToRGBA_ms: time(bgraToRGBA, make),
       candidate_u32_opaque_fast_path_ms: time(bgraToRGBAFast, make),
-      candidate_identical_output: same });
+      candidate_identical_output: same,
+      ...(baselineBgraToRGBA ? { baseline_bgraToRGBA_ms: time(baselineBgraToRGBA, make),
+        baseline_identical_output: Buffer.compare(Buffer.from(bgraToRGBA(make()).buffer),
+          Buffer.from(baselineBgraToRGBA(make()).buffer)) === 0 } : {}) });
   }
 }
 const out = { schema: 'axiosozo-presenter-node-v1', engine: 'v8 ' + process.version, cpu: os.cpus()[0]?.model,
-  nproc: os.cpus().length, iterations: ITER, source: 'apps/browser/chrome/CEFPresenter.sys.mjs bgraToRGBA (imported)', results };
+  nproc: os.cpus().length, iterations: ITER, source: 'apps/browser/chrome/CEFPresenter.sys.mjs bgraToRGBA (imported)', baseline_presenter: baselinePath, results };
 const text = JSON.stringify(out, null, 1);
 if (process.argv[2]) writeFileSync(process.argv[2], text + '\n');
 console.log(text);

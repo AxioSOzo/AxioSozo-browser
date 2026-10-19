@@ -7,6 +7,7 @@
 <body style="margin:0;background:#000"><canvas id="c"></canvas><canvas id="g"></canvas>
 <script>
 /*BGRA_TO_RGBA*/
+/*BASELINE_BGRA_TO_RGBA*/
 const SIZES = [[900, 650], [1800, 1300]];
 const ITER = Number(new URLSearchParams(location.search).get('iter') || 60);
 function frame(width, height) {
@@ -72,10 +73,17 @@ async function run() {
     r.alloc_copy_ms = await time(b => new Uint8Array(b.byteLength).set(new Uint8Array(b)), make);
     r.presenter_bgraToRGBA_ms = await time(bgraToRGBA, make);
     r.candidate_u32_fast_path_ms = await time(bgraToRGBAFast, make);
+    if (typeof baselineBgraToRGBA === 'function') {  // same-process A/B against an older presenter
+      r.baseline_bgraToRGBA_ms = await time(baselineBgraToRGBA, make);
+      const a = new Uint8Array(bgraToRGBA(make()).buffer), b = new Uint8Array(baselineBgraToRGBA(make()).buffer);
+      r.baseline_identical_output = a.length === b.length && a.every((v, i) => v === b[i]);
+    }
     const rgba = new ImageData(bgraToRGBA(make()), w, h);
     r.putImageData_full_ms = await time(() => { ctx.putImageData(rgba, 0, 0); flush(); }, () => null);
     // Exactly #draw's per-frame work (canvas already sized): convert, wrap, put; then flush.
     r.presenter_draw_full_ms = await time(b => { ctx.putImageData(new ImageData(bgraToRGBA(b), w, h), 0, 0); flush(); }, make);
+    if (typeof baselineBgraToRGBA === 'function')
+      r.baseline_draw_full_ms = await time(b => { ctx.putImageData(new ImageData(baselineBgraToRGBA(b), w, h), 0, 0); flush(); }, make);
     r.candidate_damage10_fast_put_ms = await time(b => {
       const view = new Uint8Array(b, 0, w * band * 4).slice(0).buffer;  // only the damaged rows are converted
       ctx.putImageData(new ImageData(bgraToRGBAFast(view), w, band), 0, 0); flush(); }, make);
