@@ -57,3 +57,51 @@ jobs:
         env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: capture-bench, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
                REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
         run: bash native/webkit-host/mac/ci/publish.sh
+
+  host:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-host
+      AXIOSOZO_BUILD_ROOT: ${{ github.workspace }}/../build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Build the WKWebView host
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT/webkit"
+          start=$(date +%s)
+          xcrun clang++ -std=c++20 -fobjc-arc -O2 -g -arch arm64 -mmacosx-version-min=14.5 -Wall -Wextra -Wno-unused-parameter \
+            native/webkit-host/mac/host_mac.mm native/webkit-host/mac/surface_host.mm -o "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" \
+            -framework Cocoa -framework WebKit -framework IOSurface -framework CoreGraphics -lbsm 2>&1 | tee "$EVIDENCE_OUT/build.log"
+          codesign --force --sign - "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost"
+          echo "{\"build_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/build.json"
+          otool -L "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" > "$EVIDENCE_OUT/otool-L.txt"
+      - name: Engine-free unit tests (strict JSON, AXCF transport, stream core harness)
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/probe.py test-native 2>&1 | tail -n 40 | tee "$EVIDENCE_OUT/unit.log"
+      - name: Stream, input and security tests over the pipe (real WKWebView)
+        if: always()
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/mac/mac_test.py "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" 2>&1 | tee "$EVIDENCE_OUT/mac-test.log"
+      - name: engine-surface-v1 tests with the standalone receiver (real WKWebView)
+        if: always()
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/mac/surface_test.py "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" "$EVIDENCE_OUT/surface" 2>&1 | tee "$EVIDENCE_OUT/surface-test.log"
+      - name: Collect evidence
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE_OUT/runs"
+          cp -R docs/evidence/darwin/webkit/runs/. "$EVIDENCE_OUT/runs/" 2>/dev/null || true
+          rm -f "$EVIDENCE_OUT/surface/surface-receiver"
+          ps -axo pid=,comm= | grep -i webkit > "$EVIDENCE_OUT/webkit-processes-after.txt" || true
+      - name: Publish results (ci-results branch)
+        if: always()
+        env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: host, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
+               REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
+        run: bash native/webkit-host/mac/ci/publish.sh

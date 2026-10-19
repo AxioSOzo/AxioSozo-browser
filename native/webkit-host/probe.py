@@ -318,8 +318,45 @@ def descendants(pid, table=None):
     return found
 
 
+def mac_webkit_helpers():
+    """pid -> name of every live system WebKit XPC helper (com.apple.WebKit.*), macOS only."""
+    if platform.system() != 'Darwin':
+        return {}
+    done = subprocess.run(['/bin/ps', '-axo', 'pid=,comm='], capture_output=True, text=True, timeout=10)
+    helpers = {}
+    for line in done.stdout.splitlines():
+        pid, _, comm = line.strip().partition(' ')
+        name = comm.strip().rsplit('/', 1)[-1]
+        if pid.isdigit() and name.startswith('com.apple.WebKit.'):
+            helpers[int(pid)] = name
+    return helpers
+
+
+# WebKit helpers that existed before any host of this test process started (other apps).
+MAC_HELPER_BASELINE = set(mac_webkit_helpers())
+
+
+def mac_sandboxed(pid):
+    """sandbox_check(pid, NULL, SANDBOX_FILTER_NONE) == 1: the process runs under a Seatbelt profile."""
+    libsystem = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    check = libsystem.sandbox_check
+    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    check.restype = ctypes.c_int
+    return check(pid, None, 0) == 1
+
+
 def sandbox_observation(host_pid):
-    """Which WebKit helpers run, and whether each one runs under bubblewrap."""
+    """Which WebKit helpers run, and whether each one runs under bubblewrap (Linux) or Seatbelt (macOS)."""
+    if platform.system() == 'Darwin':
+        # System WebKit's helpers are launchd XPC services, not our children: attribute
+        # the ones that appeared after this test process started.
+        helpers = {pid: name for pid, name in mac_webkit_helpers().items() if pid not in MAC_HELPER_BASELINE}
+        processes = [dict(pid=pid, comm=name, sandboxed=mac_sandboxed(pid)) for pid, name in sorted(helpers.items())]
+        web = [p for p in processes if p['comm'].startswith('com.apple.WebKit.WebContent')]
+        network = [p for p in processes if p['comm'].startswith('com.apple.WebKit.Networking')]
+        return dict(observed=True, processes=processes, bwrap_processes=0, web_process=bool(web), network_process=bool(network),
+                    web_process_sandboxed=bool(web) and all(p['sandboxed'] for p in web),
+                    all_helpers_sandboxed=bool(processes) and all(p['sandboxed'] for p in processes), sandbox='seatbelt')
     if platform.system() != 'Linux':
         return dict(observed=False, reason='not Linux')
     tree = descendants(host_pid)
@@ -333,7 +370,10 @@ def sandbox_observation(host_pid):
 
 
 def orphans(marker):
-    """Live processes that are our re-parented children or mention this run's private profile."""
+    """Live processes that are our re-parented children or mention this run's private profile.
+    macOS: any WebKit XPC helper started since this test process began (hosts run one at a time)."""
+    if platform.system() == 'Darwin':
+        return [dict(pid=pid, comm=name) for pid, name in mac_webkit_helpers().items() if pid not in MAC_HELPER_BASELINE]
     me = os.getpid()
     table = proc_table()
     return [dict(pid=pid, comm=comm, cmdline=cmd[:300]) for pid, (ppid, comm, cmd) in table.items()

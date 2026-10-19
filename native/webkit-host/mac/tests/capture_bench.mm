@@ -190,12 +190,13 @@ Image snapshot(WKWebView* web, bool afterUpdates, double* latency) {
   return out;
 }
 
-NSDictionary* snapshotLoop(WKWebView* web, bool afterUpdates, double seconds, double scale, NSString* png) {
+NSDictionary* snapshotLoop(WKWebView* web, bool afterUpdates, double seconds, double scale, NSString* png, double hz = 0) {
   std::vector<double> latencies; std::set<uLong> crcs; Image last;
   Cpu a = cpu(); double start = nowMs(); int frames = 0;
   while (nowMs() - start < seconds * 1000) {
-    double latency = 0;
+    double latency = 0, begun = nowMs();
     last = snapshot(web, afterUpdates, &latency);
+    if (hz > 0) spin(std::max(0.0, (1000 / hz - (nowMs() - begun)) / 1000));
     if (!last.width) break;
     frames++; latencies.push_back(latency);
     crcs.insert(crc32(0, last.bgra.data(), uInt(last.bgra.size())));
@@ -374,6 +375,7 @@ int main(int argc, char** argv) {
       {@"ordered-offscreen-no-occlusion-spi", true, false, 1, true, false, NSApplicationActivationPolicyAccessory, true},
       {@"unordered-no-occlusion-spi", false, false, 1, true, false, NSApplicationActivationPolicyProhibited, true},
       {@"unordered-no-occlusion-spi-scale2-spi", false, false, 1, true, true, NSApplicationActivationPolicyProhibited, true},
+      {@"ordered-offscreen-no-occlusion-spi-scale2-spi", true, false, 1, true, true, NSApplicationActivationPolicyAccessory, true},
       {@"ordered-onscreen-alpha0", true, true, 0, false, false, NSApplicationActivationPolicyAccessory, false},
       {@"ordered-onscreen-visible-reference", true, true, 1, false, false, NSApplicationActivationPolicyAccessory, false},
     };
@@ -401,6 +403,7 @@ int main(int argc, char** argv) {
         r[@"cpu_idle_no_capture"] = cpuDelta(idle0, idle1, 2.0);
         r[@"snapshot"] = snapshotLoop(v.web, false, 3, 1, [c.name stringByAppendingString:@"-snapshot.png"]);
         r[@"snapshot_after_screen_updates"] = snapshotLoop(v.web, true, 3, 1, nil);
+        r[@"snapshot_paced_60hz"] = snapshotLoop(v.web, false, 3, 1, nil, 60);
         r[@"render_layer"] = renderLayer(v.web, W, H, [c.name stringByAppendingString:@"-render-layer.png"]);
         r[@"input_to_snapshot"] = inputLatency(v, [r[@"snapshot"][@"pixel_size"][0] doubleValue] / W);
         if (c.ordered) r[@"sck"] = sck(v.window, W, H, 3);
