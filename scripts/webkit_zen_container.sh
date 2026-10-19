@@ -8,7 +8,9 @@
 #    and .deb sha256 recorded in /out);
 # 3. as an unprivileged user: verify/unpack the app, TEST-ONLY chrome overlay
 #    (scripts/webkit_package.py) when the app predates this commit, then the GUI harness
-#    with --engine webkit and the Gecko -> WebKit -> Gecko round trip.
+#    with --engine webkit and the Gecko -> WebKit -> Gecko round trip, the host-kill
+#    scenario and, with CEF=1, the CEF host built in the same build root for the optional
+#    three-engine round trip (Gecko -> WebKit -> Gecko -> Chromium -> Gecko).
 # WebKit's bubblewrap sandbox stays on; WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS is never set.
 set -eu
 OUT=/out
@@ -26,6 +28,8 @@ chown -R axio:axio /home/axio/repo
 REPO=/home/axio/repo
 export AXIOSOZO_BUILD_ROOT=/home/axio/build
 install -d -m 0700 -o axio -g axio "$AXIOSOZO_BUILD_ROOT"
+# Evidence written by the unprivileged test user (harness, round trip, overlay record).
+chown axio:axio "$OUT"
 git config --global --add safe.directory "$REPO"
 
 log "WPE host: pinned Debian 13 packages + build (probe.py setup --apt)"
@@ -91,6 +95,25 @@ dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort >"$OUT/dpkg-
 as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio \
   PATH=/usr/bin:/bin AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" LANG=C.UTF-8 "$@"; }
 
+if [ "${CEF:-0}" = 1 ]; then
+  # Optional Chromium leg: the pinned CEF host (native/chromium-host/probe.py, sha256-checked)
+  # built as the test user; Chromium's namespace sandbox (same user namespaces as bubblewrap).
+  log "CEF host: build tools + runtime libraries, probe.py setup/check (optional three-engine leg)"
+  if apt-get install -y --no-install-recommends cmake ninja-build g++ zlib1g-dev bzip2 curl openssl \
+       libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 libgbm1 \
+       libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxshmfence1 libasound2t64 \
+       fonts-liberation >"$OUT/apt-cef.log" 2>&1; then
+    cstatus=0
+    setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/usr/bin:/bin \
+      AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" python3 "$REPO/native/chromium-host/probe.py" setup >"$OUT/cef-setup.log" 2>&1 || cstatus=$?
+    log "cef setup exit $cstatus"
+    setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio PATH=/usr/bin:/bin \
+      AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" python3 "$REPO/native/chromium-host/probe.py" check >"$OUT/cef-check.log" 2>&1 || log "cef check exit $?"
+  else
+    log "CEF apt packages FAILED (see apt-cef.log); three-engine leg will report BLOCKED_ENV"
+  fi
+fi
+
 log "check (pins, build fingerprint, bubblewrap user namespaces)"
 status=0
 as_axio $P check >"$OUT/webkit-check.log" 2>&1 || status=$?
@@ -108,12 +131,14 @@ fi
 as_axio python3 "$REPO/scripts/webkit_package.py" host >"$OUT/webkit-host.json" 2>&1 || true
 
 gstatus=0
-log "GUI harness --engine webkit (launch, chrome, fixture, input)"
-as_axio python3 "$REPO/scripts/gui_test.py" --app fetched --engine webkit --scenario launch,chrome,fixture,input \
+# Not the harness `input` scenario: it types into the address bar (Linux parent crash on
+# Return, owned by cloud/linux-platform); the round trip covers input without it.
+log "GUI harness --engine webkit (launch, chrome, fixture)"
+as_axio python3 "$REPO/scripts/gui_test.py" --app fetched --engine webkit --scenario launch,chrome,fixture \
   --evidence-dir "$OUT/harness" --screenshot "$OUT/harness-final.png" >"$OUT/harness.log" 2>&1 || gstatus=$?
 log "harness exit $gstatus"
 rstatus=0
-log "round trip Gecko -> WebKit -> Gecko"
+log "round trip Gecko -> WebKit -> Gecko, host failure, three engines (optional)"
 as_axio python3 "$REPO/scripts/webkit_zen_e2e.py" --app fetched --evidence-dir "$OUT/roundtrip" \
   >"$OUT/roundtrip.log" 2>&1 || rstatus=$?
 log "roundtrip exit $rstatus"
