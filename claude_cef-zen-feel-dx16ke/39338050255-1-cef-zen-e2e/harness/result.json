@@ -1,0 +1,130 @@
+{
+  "harness": "axiosozo-linux-gui",
+  "version": 1,
+  "engine": "chromium",
+  "started_utc": "2026-10-19T22:55:08+00:00",
+  "host": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "2097155",
+          "xwininfo": {
+            "Width": "1152",
+            "Height": "720",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo \u2014 AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.03
+    },
+    "chrome": {
+      "status": "PASS",
+      "details": {
+        "title": "AxioSozo \u2014 AxioSozo Dev",
+        "windowtype": "navigator:browser",
+        "axiosozo": true,
+        "version": 5,
+        "engineAdapter": "GeckoEngineAdapter",
+        "toolsEntry": true,
+        "spaceSwitcher": true,
+        "zenWorkspaces": true,
+        "tabs": 2,
+        "foundationPref": true,
+        "engineSurfaceService": false,
+        "appName": "AxioSozo",
+        "appVersion": "0.1a1",
+        "platformVersion": "156.0",
+        "os": "Linux",
+        "widget": "gtk",
+        "contentSandboxLevel": 6,
+        "compositor": "WebRender (Software)",
+        "gfx": {
+          "adapterDescription": "llvmpipe (LLVM 20.1.2, 256 bits)",
+          "adapterVendorID": "Mesa",
+          "adapterDriver": "",
+          "adapterDriverVersion": "25.2.8.0",
+          "windowProtocol": "x11",
+          "desktopEnvironment": null
+        },
+        "engine_view": "absent (AXCF pipe fallback)"
+      },
+      "seconds": 1.56
+    },
+    "fixture": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for X11 window title showing the fixture",
+      "seconds": 46.57
+    }
+  },
+  "screenshots": [
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/harness/chrome.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/harness/failure-fixture.png"
+  ],
+  "app": {
+    "executable": "/home/runner/axiosozo-build/linux-app/39325384904/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39325384904",
+    "repository_commit": "832ac3e3d2a68eb742f11a0345962983076e4c0e",
+    "fingerprint": "6800b1183ad6e3da8beb840ce5cdbf0e7b502cff5567f9120baaa446b47d16df",
+    "fingerprint_matches_checkout": false
+  },
+  "session": "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-16cea826a5307b9f",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "dbus": "private session bus",
+  "command": [
+    "/home/runner/axiosozo-build/linux-app/39325384904/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-16cea826a5307b9f/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 3115,
+    "marionette_port": 44603,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 4.18,
+    "exit_code": 0
+  },
+  "cef_check": "{\"component\": \"cef\", \"status\": \"PASS\", \"action\": \"native_build_check\", \"version\": \"154.0.23+g062ebe4+chromium-154.0.8037.17\", \"platform\": \"linux64\", \"sandbox\": {\"suid_helper_installed\": true, \"apparmor_restrict_unprivileged_userns\": 1, \"unprivileged_userns_clone\": 1, \"max_user_namespaces\": 63838, \"unprivileged_userns\": false, \"expected\": \"suid\", \"usable\": true}}",
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "status": "FAIL",
+  "evidence_dir": "/home/runner/work/AxioSozo-browser/evidence-e2e/harness"
+}
