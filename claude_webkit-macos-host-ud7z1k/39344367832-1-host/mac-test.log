@@ -1,0 +1,187 @@
+{"status": "PASS", "engine": "webkit", "port": "wkwebview", "E1": "NOT_TESTED", "E2": "NOT_TESTED", "started_at": 1792454125.6150851, "platform": "macOS-15.7.9-arm64-arm-64bit-Mach-O", "test_subreaper": false, "ready": {"capture": "wkwebview-snapshot", "engine": "webkit", "engine_instance": "webkit-fixture-f57307af50f6fb11", "platform": "macos-15.7-arm64", "private_spi": ["_setWindowOcclusionDetectionEnabled:", "_setOverrideDeviceScaleFactor:"], "process_model": "multi-process", "render_path": "wkwebview-snapshot-bgra", "runtime_webkit": "20621.3.11.11.3", "sandbox": "macos-webkit-xpc", "sandbox_configured": true, "webkit": "20621.3.11.11.3", "webkit_port": "wkwebview"}, "capabilities": {"accessibility": false, "back": true, "close": true, "context_menu": false, "cursor": false, "devtools": false, "downloads": false, "edit": true, "external_begin_frame": false, "favicon": false, "file_dialogs": false, "find": false, "fixture_only": true, "forward": true, "frame_damage": false, "frame_rate": 60, "frame_rate_command": true, "heartbeat_interval_ms": 1000, "http_auth": false, "ime": false, "ime_commit": true, "input": true, "javascript_dialogs": false, "key_verdict": false, "max_targets": 32, "media_capture": false, "multi_target": true, "navigate": true, "observe": true, "open_in_tab": false, "permissions": false, "persistent_profile": false, "pinch": false, "popup_blocked": false, "popups": false, "private_mode": false, "reload": true, "stop": true, "surface": false, "text_input": false, "visibility": true, "wheel_phases": false, "zoom": false}, "frames": 52, "timings": {"ready_s": 0.162, "create_to_first_frame_s": 2.887, "navigate_to_frame_s": 0.527, "back_to_frame_s": 0.252}, "heartbeat": {"heartbeat_gaps": [0.995, 1.004, 1.006], "heartbeats_while_stopped": 0, "resumed_sequence": 10}, "sandbox": {"observed": true, "processes": [{"pid": 2641, "comm": "com.apple.WebKit.WebContent", "sandboxed": true}, {"pid": 2643, "comm": "com.apple.WebKit.Networking", "sandboxed": true}], "bwrap_processes": 0, "web_process": true, "network_process": true, "web_process_sandboxed": true, "all_helpers_sandboxed": true, "sandbox": "seatbelt"}, "native_pid": 2639, "native_exit_code": 0, "tests": ["real_frame_1800x1300_at_2x", "typed_text_in_title_and_pixels", "down_char_up_inserts_once", "ime_commit_text", "resize_2x", "resize_1x", "tab_key", "GET_navigation_exact_generation", "stale_target_rejected", "back_exact_generation_restored_from_history", "stale_after_back", "forward_exact_generation", "history_boundary", "heartbeat_cadence_and_frozen_host", "close_completed_exit_0"], "profile_removed": true, "orphans": [], "group_cleanup_required": false, "damage": {"status": "PASS", "frames": 2, "damage_checked": 1, "damage_violations": 0, "damage_area_fraction": [1.0, 0.0605]}, "fixture_requests": [{"timestamp": 1792454162.732818, "method": "GET", "status": 200, "path": "/engine.html", "host": "127.0.0.1:49168"}, {"timestamp": 1792454165.778174, "method": "GET", "status": 200, "path": "/engine.html?page=2", "host": "127.0.0.1:49168"}, {"timestamp": 1792454175.498243, "method": "GET", "status": 200, "path": "/engine.html", "host": "127.0.0.1:49168"}], "finished_at": 1792454176.469132, "evidence": "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/docs/evidence/darwin/webkit/runs/webkit-wkwebview-stream-qp9rw05f"}
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49174)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+{"status": "FAIL", "engine": "webkit", "port": "wkwebview", "E1": "NOT_TESTED", "E2": "NOT_TESTED", "started_at": 1792454176.517479, "test_subreaper": false, "error": "ValueError: invalid AXCF header", "orphans": [], "profile_removed": true, "finished_at": 1792454184.763063, "evidence": "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/docs/evidence/darwin/webkit/runs/webkit-wkwebview-input-ow3uacsr"}
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49178)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49180)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49182)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49184)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49186)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49189)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 49191)
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 500, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 468, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+----------------------------------------
+{"status": "PASS", "engine": "webkit", "port": "wkwebview", "started_at": 1792454184.791002, "tests": [{"name": "wrong_token", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "duplicate_frame_ack", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "unknown_frame_ack", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "duplicate_target_id", "status": "PASS", "native_exit_code": 0, "orphans": [], "profile_removed": true}, {"name": "replayed_request_id", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "unknown_key", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "malformed_json", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "overlong_line", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "denied_navigation_url", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "web_mode_hello", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "surface_hello", "status": "PASS", "native_exit_code": 64, "orphans": [], "profile_removed": true}, {"name": "clean_pipe_eof", "status": "PASS", "native_exit_code": 0, "orphans": [], "profile_removed": true}, {"name": "shutdown", "status": "PASS", "native_exit_code": 0, "orphans": [], "profile_removed": true}], "profiles": ["/Users/runner/work/_temp/build/webkit/webkit-profile-0fraad3z", "/Users/runner/work/_temp/build/webkit/webkit-profile-hxwy3ya5", "/Users/runner/work/_temp/build/webkit/webkit-profile-0xcm9qnr", "/Users/runner/work/_temp/build/webkit/webkit-profile-n7url145", "/Users/runner/work/_temp/build/webkit/webkit-profile-46gwi8kp", "/Users/runner/work/_temp/build/webkit/webkit-profile-h5uhc267", "/Users/runner/work/_temp/build/webkit/webkit-profile-91k4_moa", "/Users/runner/work/_temp/build/webkit/webkit-profile-2hfd0q2w", "/Users/runner/work/_temp/build/webkit/webkit-profile-khy7_opd", "/Users/runner/work/_temp/build/webkit/webkit-profile-4z6grqn1", "/Users/runner/work/_temp/build/webkit/webkit-profile-jehqfdg9", "/Users/runner/work/_temp/build/webkit/webkit-profile-7kg4b48h", "/Users/runner/work/_temp/build/webkit/webkit-profile-e7scknzk"], "test_subreaper": false, "E1": "NOT_TESTED", "E2": "NOT_TESTED", "profile_isolation": "13 distinct fresh private profile directories, all removed", "finished_at": 1792454203.760823, "evidence": "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/docs/evidence/darwin/webkit/runs/webkit-wkwebview-security-dh204fus"}
