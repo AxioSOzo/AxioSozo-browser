@@ -85,5 +85,21 @@ int main() {
   assert(killed == 2 && seconds >= 0.25 && seconds < 3);
   assert(gone(lingering, std::chrono::milliseconds(3000)) && gone(grandchild, std::chrono::milliseconds(3000)));
   printf("PASS: reapHelpers reaped a helper that exited and killed 2 lingering ones after %.2fs\n", seconds);
+
+  // Zygotes are ended at once (no grace period): they only exit when the host does.
+  pid_t zygote = fork();
+  assert(zygote >= 0);
+  if (zygote == 0) {
+    // argv[0] carries the marker (Chromium rewrites its title the same way).
+    execl("/bin/sleep", "AxioCEFProbeHelper --type=zygote", "30", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  usleep(100 * 1000);  // exec done
+  started = std::chrono::steady_clock::now();
+  killed = axio::platform::reapHelpers(5);
+  seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+  assert(killed >= 1 && seconds < 1);
+  assert(gone(zygote, std::chrono::milliseconds(3000)));
+  printf("PASS: reapHelpers ended a zygote without waiting (%.3fs)\n", seconds);
   return 0;
 }

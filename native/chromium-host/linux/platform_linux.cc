@@ -134,12 +134,29 @@ static int killDescendants() {
   return killed;
 }
 
+// Chromium's zygotes (including the SUID-sandboxed ones) exit only when the browser
+// process closes their socket, i.e. when this host exits; waiting for them is useless.
+static bool zygote(pid_t pid) {
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/%d/cmdline", int(pid));
+  FILE* f = fopen(path, "r");
+  if (!f) return false;
+  char buffer[4096] = {};
+  size_t n = fread(buffer, 1, sizeof(buffer) - 1, f);
+  fclose(f);
+  for (size_t i = 0; i < n; ++i) if (!buffer[i]) buffer[i] = ' ';  // argv or a rewritten title
+  return strstr(buffer, "--type=zygote") != nullptr;
+}
+
 int reapHelpers(double seconds) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(seconds);
   for (;;) {
     while (waitpid(-1, nullptr, WNOHANG) > 0) {}
-    if (descendants().empty()) return 0;
-    if (std::chrono::steady_clock::now() >= deadline) break;
+    std::vector<pid_t> left = descendants();
+    if (left.empty()) return 0;
+    bool onlyZygotes = true;
+    for (pid_t pid : left) onlyZygotes = onlyZygotes && zygote(pid);
+    if (onlyZygotes || std::chrono::steady_clock::now() >= deadline) break;
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
   int killed = killDescendants();
