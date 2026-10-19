@@ -245,6 +245,10 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
                                        "network-session", engine_.session(), "settings", engine_.settings(),
                                        "user-content-manager", engine_.content(), nullptr));
   if (!view_) return false;
+  // libwpe drops dispatches made before WebKit registered its backend client
+  // (CI run 39294885122: the page saw devicePixelRatio 1), so apply scale and size now.
+  wpe_view_backend_dispatch_set_device_scale_factor(backend_, float(scale));
+  wpe_view_backend_dispatch_set_size(backend_, uint32_t(width), uint32_t(height));
   wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_visible | wpe_view_activity_state_in_window);
   im_ = static_cast<AxioIMContext*>(g_object_new(axio_im_context_get_type(), nullptr));
   webkit_web_view_set_input_method_context(view_, WEBKIT_INPUT_METHOD_CONTEXT(im_));
