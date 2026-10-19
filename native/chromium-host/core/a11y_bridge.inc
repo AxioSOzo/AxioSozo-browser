@@ -1,0 +1,418 @@
+// Included by host_core.cc. Port of ../a11y.inc: Chromium accessibility for OSR
+// targets, mirrored through axio::ax::Mirror (../a11y_core.hpp, unchanged).
+//
+//   * Zen enables a target's tree only while an assistive client needs it
+//     (`accessibility {enabled}`); CEF then runs renderer accessibility in TreeOnly
+//     mode for that browser only. The host never enables it by itself.
+//   * CefAccessibilityHandler callbacks carry no browser, and the host shares one
+//     cef_client_t, so each target gets its own thin client/render/accessibility
+//     handler wrapper (AxClient) that copies the shared callbacks and adds only
+//     get_accessibility_handler. The wrapper identifies the target.
+//   * `ax_action` maps assistive actions onto synthesized mouse/wheel/key input,
+//     frame select_all and IME commit (no AXActionData entry point in the C API).
+// The host side is platform-neutral. Exposing the mirrored tree to a platform
+// accessibility API (VoiceOver via Zen's engine-view hunk on macOS; AT-SPI on Linux)
+// is Zen's job; the Linux/AT-SPI side does not exist yet (NOT_VERIFIED).
+// Its headers (CEF accessibility/values C API, ../a11y_core.hpp) are included at the
+// top of host_core.cc: this file is textually inside namespace axio::host.
+
+static constexpr size_t AxValueBudget = 2000000;  // cef_value_t nodes converted per callback
+static constexpr size_t AxSetValueLimit = 4096;
+static constexpr int AxActionsPerSecond = 20;
+static constexpr int64_t AxFlushDelayMs = 16, AxRetryDelayMs = 50, AxFollowUpMs = 120;
+
+struct AxClient;
+// CEF structs first (standard layout) so each callback recovers its owner.
+struct AxShell {
+  cef_client_t client;
+  cef_render_handler_t render;
+  cef_accessibility_handler_t handler;
+  AxClient* owner;
+};
+struct AxClient {
+  AxShell shell{};
+  std::atomic<int> refs{1};
+  uint64_t serial = 0;
+  Tab* tab = nullptr;  // cleared by axTabClosed before the Tab is deleted
+  bool enabled = false, flushScheduled = false;
+  axio::ax::Mirror mirror;
+  uint64_t rateWindow = 0;
+  int rateCount = 0;
+};
+static std::map<uint64_t, AxClient*> axClients;  // live wrappers by serial
+static uint64_t axLastSerial = 0;
+static double axNowMs() { return double(nowNs()) / 1e6; }
+
+template <size_t Offset>
+static AxClient* axOwner(void* base) {
+  return reinterpret_cast<AxShell*>(reinterpret_cast<char*>(base) - Offset)->owner;
+}
+static void axDestroy(AxClient* owner) {
+  // CEF may drop its last reference on any thread; all wrapper state is UI-thread owned.
+  uint64_t serial = owner->serial;
+  if (!postUI([owner, serial] { axClients.erase(serial); delete owner; })) {
+    // No UI thread any more (after shutdown): nothing else can reach the wrapper.
+    axClients.erase(serial);
+    delete owner;
+  }
+}
+template <size_t Offset>
+static void axBase(cef_base_ref_counted_t& base, size_t size) {
+  base.size = size;
+  base.add_ref = [](cef_base_ref_counted_t* b) { axOwner<Offset>(b)->refs++; };
+  base.release = [](cef_base_ref_counted_t* b) -> int {
+    AxClient* o = axOwner<Offset>(b);
+    if (--o->refs == 0) { axDestroy(o); return 1; }
+    return 0;
+  };
+  base.has_one_ref = [](cef_base_ref_counted_t* b) -> int { return axOwner<Offset>(b)->refs == 1; };
+  base.has_at_least_one_ref = [](cef_base_ref_counted_t* b) -> int { return axOwner<Offset>(b)->refs >= 1; };
+}
+static AxClient* axFor(Tab* tab) {
+  if (!tab) return nullptr;
+  for (auto& item : axClients) if (item.second->tab == tab) return item.second;
+  return nullptr;
+}
+
+// ---- cef_value_t -> axio::ax::Value ----------------------------------------------------
+static std::string axUtf8(const char16_t* text, size_t length) {
+  std::string out;
+  out.reserve(length);
+  for (size_t i = 0; i < length; i++) {
+    uint32_t cp = text[i];
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < length && text[i + 1] >= 0xDC00 && text[i + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (uint32_t(text[i + 1]) - 0xDC00);
+      i++;
+    } else if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;  // unpaired surrogate
+    axio::ax::appendUtf8(out, cp);
+  }
+  return out;
+}
+static std::string axString(cef_string_userfree_t value) {
+  if (!value) return std::string();
+  std::string out = axUtf8(value->str, std::min<size_t>(value->length, 65536));
+  cef::p_cef_string_userfree_utf16_free(value);
+  return out;
+}
+static bool axConvert(cef_value_t* v, axio::ax::Value& out, int depth, size_t& budget);
+static bool axConvertDictionary(cef_dictionary_value_t* d, axio::ax::Value& out, int depth, size_t& budget) {
+  out.type = axio::ax::Value::Type::Dict;
+  cef_string_list_t keyList = p_cef_string_list_alloc();
+  bool ok = d->get_keys(d, keyList);
+  size_t count = ok ? p_cef_string_list_size(keyList) : 0;
+  for (size_t i = 0; ok && i < count; i++) {
+    cef_string_t key{};
+    if (!p_cef_string_list_value(keyList, i, &key)) continue;
+    cef_value_t* child = d->get_value(d, &key);
+    std::string name = axUtf8(key.str, std::min<size_t>(key.length, 256));
+    if (key.dtor) key.dtor(key.str);
+    if (!child) continue;
+    out.fields.push_back({name, {}});
+    ok = axConvert(child, out.fields.back().second, depth + 1, budget);
+  }
+  p_cef_string_list_free(keyList);
+  return ok;
+}
+// Bounded recursive copy; false when the budget ran out (the update is then dropped).
+static bool axConvert(cef_value_t* v, axio::ax::Value& out, int depth, size_t& budget) {
+  HOLD(v);
+  if (!v || depth > 16 || budget == 0) return false;
+  budget--;
+  switch (v->get_type(v)) {
+    case VTYPE_BOOL: out.type = axio::ax::Value::Type::Bool; out.boolean = v->get_bool(v); return true;
+    case VTYPE_INT: out.type = axio::ax::Value::Type::Number; out.number = v->get_int(v); return true;
+    case VTYPE_DOUBLE: out.type = axio::ax::Value::Type::Number; out.number = v->get_double(v); return true;
+    case VTYPE_STRING: out.type = axio::ax::Value::Type::String; out.text = axString(v->get_string(v)); return true;
+    case VTYPE_DICTIONARY: {
+      cef_dictionary_value_t* d = v->get_dictionary(v);
+      if (!d) return true;
+      bool ok = axConvertDictionary(d, out, depth, budget);
+      d->base.release(&d->base);
+      return ok;
+    }
+    case VTYPE_LIST: {
+      cef_list_value_t* l = v->get_list(v);
+      if (!l) return true;
+      out.type = axio::ax::Value::Type::List;
+      bool ok = true;
+      size_t count = l->get_size(l);
+      out.items.reserve(std::min<size_t>(count, 4096));
+      for (size_t i = 0; ok && i < count; i++) {
+        cef_value_t* child = l->get_value(l, i);
+        if (!child) continue;
+        out.items.emplace_back();
+        ok = axConvert(child, out.items.back(), depth + 1, budget);
+      }
+      l->base.release(&l->base);
+      return ok;
+    }
+    default: return true;  // null, binary, invalid: Null
+  }
+}
+
+// ---- Flush / flow control ---------------------------------------------------------------
+static void axScheduleFlush(AxClient* owner, int64_t delayMs);
+static void axFlush(AxClient* owner) {
+  owner->flushScheduled = false;
+  Tab* tab = owner->tab;
+  if (!tab || !owner->enabled || tab->closing || streamClosing || !tab->live()) return;
+  std::string target = json::write(tab->target);
+  for (const auto& line : owner->mirror.flush(target, tab->width, tab->height, tab->scale, axNowMs()))
+    if (!transport.event(line)) return;  // a failed transport ends the host anyway
+  // Throttled or waiting for credit: try again soon; an ack also reschedules.
+  if (owner->mirror.pending() && owner->mirror.outstanding() < axio::ax::MaxOutstanding) axScheduleFlush(owner, AxRetryDelayMs);
+}
+static void axScheduleFlush(AxClient* owner, int64_t delayMs) {
+  if (owner->flushScheduled) return;
+  owner->flushScheduled = true;
+  uint64_t serial = owner->serial;
+  postUI([serial] { auto found = axClients.find(serial); if (found != axClients.end()) axFlush(found->second); },
+         std::max<int64_t>(delayMs, 0));
+}
+
+// ---- Per-target client wrapper (create_browser takes axClientFor(tab)) -----------------
+static cef_client_t* axClientFor(Tab* tab) {
+  auto* owner = new AxClient();
+  owner->serial = ++axLastSerial;
+  owner->tab = tab;
+  owner->shell.owner = owner;
+  AxShell& s = owner->shell;
+  // Every shared callback ignores `self`; only the base and the two getters differ.
+  s.client = client.api;
+  s.render = render.api;
+  axBase<offsetof(AxShell, client)>(s.client.base, sizeof(cef_client_t));
+  axBase<offsetof(AxShell, render)>(s.render.base, sizeof(cef_render_handler_t));
+  axBase<offsetof(AxShell, handler)>(s.handler.base, sizeof(cef_accessibility_handler_t));
+  s.client.get_render_handler = [](cef_client_t* self) {
+    AxClient* o = axOwner<offsetof(AxShell, client)>(self);
+    o->refs++;
+    return &o->shell.render;
+  };
+  s.render.get_accessibility_handler = [](cef_render_handler_t* self) {
+    AxClient* o = axOwner<offsetof(AxShell, render)>(self);
+    o->refs++;
+    return &o->shell.handler;
+  };
+  s.handler.on_accessibility_tree_change = [](cef_accessibility_handler_t* self, cef_value_t* value) {
+    AxClient* o = axOwner<offsetof(AxShell, handler)>(self);
+    if (!o->tab || !o->enabled || !value) { if (value) value->base.release(&value->base); return; }
+    axio::ax::Value converted;
+    size_t budget = AxValueBudget;
+    // axConvert releases `value` (the reference CEF passed in).
+    if (!axConvert(value, converted, 0, budget)) {
+      tabEvent(o->tab, "error", json::object({{"code", "accessibility_update_too_large"}}));
+      return;
+    }
+    o->mirror.treeChange(converted, axNowMs());
+    axScheduleFlush(o, AxFlushDelayMs);
+  };
+  s.handler.on_accessibility_location_change = [](cef_accessibility_handler_t* self, cef_value_t* value) {
+    AxClient* o = axOwner<offsetof(AxShell, handler)>(self);
+    if (!o->tab || !o->enabled || !value) { if (value) value->base.release(&value->base); return; }
+    axio::ax::Value converted;
+    size_t budget = AxValueBudget;
+    if (!axConvert(value, converted, 0, budget)) return;
+    o->mirror.locationChange(converted);
+    axScheduleFlush(o, AxFlushDelayMs);
+  };
+  axClients[owner->serial] = owner;
+  return &s.client;  // the initial reference is the one create_browser transfers to CEF
+}
+// Lifespan on_before_close, before the Tab is deleted.
+static void axTabClosed(Tab* tab) {
+  for (auto& item : axClients)
+    if (item.second->tab == tab) { item.second->tab = nullptr; item.second->enabled = false; item.second->mirror.disable(); }
+}
+static Value axActionNames() {
+  return json::array({"press", "focus", "scroll_to", "set_value", "show_menu", "increment", "decrement"});
+}
+static bool axActionName(const std::string& name) {
+  return oneOf(name, {"press", "focus", "scroll_to", "set_value", "show_menu", "increment", "decrement"});
+}
+
+// ---- Commands -----------------------------------------------------------------------------
+static const std::vector<std::string>* axCommandFields(const std::string& method) {
+  static const std::map<std::string, std::vector<std::string>> table = {
+      {"accessibility", {"enabled"}}, {"ax_action", {"node_id", "action"}}, {"ax_ack", {"seq"}}};
+  auto found = table.find(method);
+  return found == table.end() ? nullptr : &found->second;
+}
+static std::vector<std::string> axOptionalFields(const std::string& method) {
+  return method == "ax_action" ? std::vector<std::string>{"value"} : std::vector<std::string>{};
+}
+// `ax_ack` is like frame_ack: it names the exact target of the event it answers,
+// which may predate a navigation, and only returns flow-control credit. Returns
+// false for a protocol error.
+static bool axAcknowledge(const Value* supplied, const Value& command) {
+  if (!integer(command.get("seq")) || command.num("seq") == 0) return false;
+  auto found = tabsByKey.find(supplied->str("tab_id"));
+  AxClient* owner = found == tabsByKey.end() ? nullptr : axFor(found->second);
+  if (!owner || supplied->str("native_target_id") != found->second->target.str("native_target_id")) return true;  // stale
+  auto result = owner->mirror.ack(uint64_t(command.num("seq")));
+  if (result == axio::ax::Mirror::Ack::Unknown) return false;
+  if (result == axio::ax::Mirror::Ack::Released && owner->mirror.pending()) axScheduleFlush(owner, 0);
+  return true;
+}
+
+static void axMouse(Tab* tab, double x, double y, cef_mouse_button_type_t button) {
+  cef_mouse_event_t mouse{};
+  mouse.x = int(std::lround(x));
+  mouse.y = int(std::lround(y));
+  mouse.modifiers = 0;
+  auto* host = tab->browser->get_host(tab->browser);
+  host->send_mouse_move_event(host, &mouse, 0);
+  host->send_mouse_click_event(host, &mouse, button, 0, 1);
+  host->send_mouse_click_event(host, &mouse, button, 1, 1);
+  host->base.release(&host->base);
+}
+static bool axVisible(Tab* tab, const axio::ax::Rect& r, axio::ax::Rect& visible) {
+  double left = std::max(0.0, r.x), top = std::max(0.0, r.y), right = std::min(double(tab->width), r.x + r.w),
+         bottom = std::min(double(tab->height), r.y + r.h);
+  visible = {left, top, right - left, bottom - top};
+  return visible.w >= 1 && visible.h >= 1;
+}
+// Wheel the nearest scroller (or the page) until the node's top is about a third
+// down the view. Chromium wheel deltas are pixels; positive deltaY scrolls up.
+static void axScrollInto(Tab* tab, AxClient* owner, uint32_t node, const axio::ax::Rect& r) {
+  axio::ax::Rect area{0, 0, double(tab->width), double(tab->height)}, container;
+  if (owner->mirror.scrollContainer(node, tab->width, tab->scale, container) && axVisible(tab, container, container)) area = container;
+  double margin = std::min(area.h / 3, 48.0);
+  double dy = 0, dx = 0;
+  if (r.y < area.y) dy = area.y + margin - r.y;
+  else if (r.y + std::min(r.h, area.h * 0.8) > area.y + area.h) dy = -(r.y - area.y - margin);
+  if (r.x < area.x) dx = area.x - r.x;
+  else if (r.x + std::min(r.w, area.w) > area.x + area.w) dx = -(r.x + std::min(r.w, area.w) - area.x - area.w);
+  cef_mouse_event_t mouse{};
+  mouse.x = int(area.x + area.w / 2);
+  mouse.y = int(area.y + area.h / 2);
+  auto* host = tab->browser->get_host(tab->browser);
+  for (int step = 0; step < 8 && (std::fabs(dx) >= 1 || std::fabs(dy) >= 1); step++) {
+    int sx = int(std::clamp(dx, -2000.0, 2000.0)), sy = int(std::clamp(dy, -2000.0, 2000.0));
+    host->send_mouse_wheel_event(host, &mouse, sx, sy);
+    dx -= sx;
+    dy -= sy;
+  }
+  host->base.release(&host->base);
+}
+static bool axEditable(const axio::ax::Node* n) { return n && (n->states & axio::ax::StateEditable); }
+static void axKey(Tab* tab, bool up) {
+  auto* host = tab->browser->get_host(tab->browser);
+  cef_key_event_t key{};
+  key.size = sizeof(key);
+  key.native_key_code = platform::arrowNativeKeyCode(up);
+  key.windows_key_code = up ? 0x26 : 0x28;
+  key.character = key.unmodified_character = platform::keyCharacter(key.native_key_code);
+  key.type = KEYEVENT_RAWKEYDOWN;
+  host->send_key_event(host, &key);
+  key.type = KEYEVENT_KEYUP;
+  host->send_key_event(host, &key);
+  host->base.release(&host->base);
+}
+// Runs `then` on the UI thread after `ms` if the target and its wrapper still exist.
+static void axLater(AxClient* owner, int64_t ms, std::function<void(Tab*, AxClient*)> then) {
+  uint64_t serial = owner->serial;
+  auto run = [serial, then = std::move(then)] {
+    auto found = axClients.find(serial);
+    if (found == axClients.end()) return;
+    AxClient* o = found->second;
+    Tab* tab = o->tab;
+    if (!tab || !tab->browser || tab->closing || streamClosing) return;
+    then(tab, o);
+  };
+  postUI(run, std::max<int64_t>(ms, 0));  // always asynchronous, like dispatch_after
+}
+
+// Returns false when `method` is not an accessibility command handled here.
+static bool axCommand(Tab* tab, const std::string& method, const Value& command, const std::string& requestId) {
+  if (method != "accessibility" && method != "ax_action") return false;
+  AxClient* owner = axFor(tab);
+  if (method == "accessibility") {
+    if (!boolean(command.get("enabled"))) { failProtocol(); return true; }
+    if (!owner) { unsupported(requestId, "accessibility_unavailable"); return true; }
+    event("accepted", json::object({{"request_id", requestId}}));
+    bool enable = command.flag("enabled");
+    if (enable != owner->enabled) {
+      owner->enabled = enable;
+      if (enable) owner->mirror.reset();
+      else owner->mirror.disable();
+      auto* host = tab->browser->get_host(tab->browser);
+      host->set_accessibility_state(host, enable ? STATE_ENABLED : STATE_DISABLED);
+      host->base.release(&host->base);
+      if (enable) axScheduleFlush(owner, AxFlushDelayMs);
+    }
+    complete(requestId, "success");
+    return true;
+  }
+  // ax_action {node_id, action, [value]}
+  const Value* action = command.get("action");
+  const Value* value = command.get("value");
+  if (!integer(command.get("node_id"), UINT32_MAX) || command.num("node_id") == 0 || !textValue(action, 16) ||
+      !axActionName(action->text) || (value && action->text != "set_value") ||
+      (action->text == "set_value" && !textValue(value, AxSetValueLimit))) {
+    failProtocol();
+    return true;
+  }
+  if (!owner || !owner->enabled) { unsupported(requestId, "accessibility_disabled"); return true; }
+  uint64_t second = uint64_t(axNowMs() / 1000);
+  if (second != owner->rateWindow) { owner->rateWindow = second; owner->rateCount = 0; }
+  if (++owner->rateCount > AxActionsPerSecond) { unsupported(requestId, "rate_limited"); return true; }
+  uint32_t node = uint32_t(command.num("node_id"));
+  const axio::ax::Node* n = owner->mirror.node(node);
+  axio::ax::Rect r, visible;
+  if (!n || n->hidden || !owner->mirror.rect(node, tab->width, tab->scale, r)) { unsupported(requestId, "stale_node"); return true; }
+  event("accepted", json::object({{"request_id", requestId}}));
+  bool focused = owner->mirror.focus() == node;
+  const std::string& name = action->text;
+  if (name == "scroll_to") { axScrollInto(tab, owner, node, r); complete(requestId, "success"); return true; }
+  if (name == "press" || name == "show_menu") {
+    cef_mouse_button_type_t button = name == "press" ? MBT_LEFT : MBT_RIGHT;
+    if (axVisible(tab, r, visible)) {
+      axMouse(tab, visible.x + visible.w / 2, visible.y + visible.h / 2, button);
+      complete(requestId, "success");
+      return true;
+    }
+    // Off screen: scroll, then click where it landed (location changes arrive meanwhile).
+    axScrollInto(tab, owner, node, r);
+    axLater(owner, AxFollowUpMs, [node, button, requestId](Tab* t, AxClient* o) {
+      axio::ax::Rect now, shown;
+      if (o->mirror.node(node) && o->mirror.rect(node, t->width, t->scale, now) && axVisible(t, now, shown)) {
+        axMouse(t, shown.x + shown.w / 2, shown.y + shown.h / 2, button);
+        complete(requestId, "success");
+      } else unsupported(requestId, "offscreen");
+    });
+    return true;
+  }
+  if (name == "increment" || name == "decrement") {
+    // Sliders and spin buttons step with arrow keys once they have focus.
+    if (!focused) { unsupported(requestId, "focus_required"); return true; }
+    axKey(tab, name == "increment");
+    complete(requestId, "success");
+    return true;
+  }
+  // focus / set_value need a focused editable; other elements cannot be focused
+  // without activating them through the C API (no AXActionData/kFocus path).
+  if (!axEditable(n)) { unsupported(requestId, name == "focus" ? "focus_unavailable" : "not_editable"); return true; }
+  if (!focused) {
+    if (!axVisible(tab, r, visible)) { axScrollInto(tab, owner, node, r); unsupported(requestId, "offscreen"); return true; }
+    // A click near the start of the field focuses it without activating anything.
+    axMouse(tab, visible.x + std::min(3.0, visible.w / 2), visible.y + visible.h / 2, MBT_LEFT);
+  }
+  if (name == "focus") { complete(requestId, "success"); return true; }
+  // set_value: replace the field's text as an IME commit would. Never logged.
+  std::string text = value->text;
+  axLater(owner, focused ? 0 : AxFollowUpMs, [text, requestId](Tab* t, AxClient*) {
+    auto* frame = t->browser->get_focused_frame(t->browser);
+    if (!frame) { unsupported(requestId, "no_focused_frame"); return; }
+    frame->select_all(frame);
+    frame->base.release(&frame->base);
+    auto* host = t->browser->get_host(t->browser);
+    auto utf = json::toUtf16(text);
+    auto string = view(utf);
+    cef_range_t invalid{UINT32_MAX, UINT32_MAX};
+    host->ime_commit_text(host, &string, &invalid, 0);
+    host->base.release(&host->base);
+    std::fill(utf.begin(), utf.end(), u'\0');
+    complete(requestId, "success");
+  });
+  return true;
+}

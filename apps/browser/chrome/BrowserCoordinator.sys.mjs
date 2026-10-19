@@ -8,7 +8,7 @@ const sameTarget = (a, b) => TARGET_KEYS.every(key => a?.[key] === b?.[key]);
 
 function snapshot(target) {
   if (!target || Object.keys(target).length !== TARGET_KEYS.length
-      || !["gecko", "chromium"].includes(target.engine)
+      || !["gecko", "chromium", "webkit"].includes(target.engine)
       || typeof target.private_mode !== "boolean"
       || typeof target.identity !== "string" || !target.identity.length || target.identity.length > 4096
       || /[\u0000-\u001f\u007f]/u.test(target.identity)) throw new Error("INVALID_TARGET");

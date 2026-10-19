@@ -26,15 +26,15 @@ probe = stream.probe
 PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8"><title>input fixture</title>
 <style>html,body{margin:0}body{height:3000px;font:16px system-ui;background:#edf2f5;color:#163247}
 input{position:absolute;left:40px;width:300px;height:30px;font:16px system-ui}#t{top:40px}#p{top:120px}
-#blank{position:absolute;left:500px;top:300px;width:200px;height:100px;background:#c4dfd8}
+#blank{position:absolute;left:500px;top:300px;width:200px;height:100px;background:#c4dfd8;cursor:pointer}
 .badge{position:absolute;left:40px;top:200px;font:12px ui-monospace}</style>
 <input id="t" autofocus autocomplete="off"><input id="p" type="password" autocomplete="off">
 <div id="blank">not editable</div><p class="badge">SYNTHETIC LOCAL INPUT FIXTURE - NO ACCOUNTS</p>
 <script>
-const t=document.querySelector('#t'),s={kd:[],kp:[],v:'',p:0,c:[],w:0,sy:0,pt:0,tt:0,vv:1,f:''};
+const t=document.querySelector('#t'),s={kd:[],kc:[],kp:[],v:'',p:0,c:[],w:0,sy:0,pt:0,tt:0,vv:1,f:''};
 function out(){s.v=t.value;s.p=document.querySelector('#p').value.length;s.sy=Math.round(scrollY);
   s.vv=Math.round(visualViewport.scale*100)/100;document.title=JSON.stringify(s).slice(0,1000);}
-addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':''));if(e.key==='b')e.preventDefault();out();},true);
+addEventListener('keydown',e=>{s.kd.push(e.key+(e.metaKey?'+meta':'')+(e.ctrlKey?'+ctrl':''));s.kc=s.kc.slice(-7);s.kc.push(e.code+':'+e.location+':'+e.key);if(e.key==='b')e.preventDefault();out();},true);
 addEventListener('keypress',e=>{s.kp.push(e.key);out();},true);
 for(const [n,k] of [['compositionstart','s'],['compositionupdate','u'],['compositionend','e']])
   addEventListener(n,e=>{s.c.push(k+':'+e.data);out();},true);
@@ -47,9 +47,18 @@ addEventListener('focusin',e=>{s.f=e.target.id||e.target.tagName;out();});
 addEventListener('input',out);addEventListener('load',out);
 </script></html>'''
 
-# macOS virtual key codes (Carbon kVK_*) and CEF modifier flags.
-KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = 0x00, 0x0B, 0x25, 0x7B, 0x35
-COMMAND = 1 << 7
+# (native_key_code, windows_key_code) as the presenter sends them, and CEF modifier flags.
+# macOS: Carbon kVK_* codes (CEF's macOS translator derives the key from them; the
+# windows code stays 0 as before). Linux: X11 keycodes (evdev + 8) plus the DOM/Windows
+# keyCode, from which CEF's Linux translator derives the keydown key. The browser
+# shortcut chord is Command+L on macOS and Ctrl+L on Linux.
+if probe.IS_LINUX:
+    KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (38, 65), (56, 66), (46, 76), (113, 37), (9, 27)
+    SHORTCUT, SHORTCUT_MARK = 1 << 2, '+ctrl'
+    LINUX_KEY_E, ALTGR = (26, 69), 1 << 12
+else:
+    KEY_A, KEY_B, KEY_L, KEY_LEFT, KEY_ESCAPE = (0x00, 0), (0x0B, 0), (0x25, 0), (0x7B, 0), (0x35, 0)
+    SHORTCUT, SHORTCUT_MARK = 1 << 7, '+meta'
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
@@ -98,15 +107,16 @@ class InputSession(stream.Session):
                 return item
         return self.until(lambda kind, item: kind == 1 and item.get('event') == 'text_input' and check(item), seconds)
 
-    def key(self, code, text='', modifiers=0, char=True):
+    def key(self, codes, text='', modifiers=0, char=True):
         """One keystroke as the presenter sends it; returns (down completion, ms)."""
+        code, windows = codes
         started = time.monotonic()
-        down = self.command('key', type='down', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+        down = self.command('key', type='down', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         if char and text:
-            self.command('key', type='char', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+            self.command('key', type='char', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         verdict = self.done(down)
         elapsed = round((time.monotonic() - started) * 1000, 1)
-        up = self.command('key', type='up', native_key_code=code, windows_key_code=0, modifiers=modifiers, text=text)
+        up = self.command('key', type='up', native_key_code=code, windows_key_code=windows, modifiers=modifiers, text=text)
         self.done(up)
         return verdict, elapsed
 
@@ -122,7 +132,7 @@ def check(results, name, condition, detail=None):
 
 
 def run():
-    probe.check()
+    stream.require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-input-', dir=probe.EVIDENCE))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -162,7 +172,7 @@ def run():
         check(checks, 'key_consumed_prevent_default', verdict_b.get('reason') == 'key_consumed'
               and state['v'] == 'a' and 'b' not in state['kp'],
               dict(reason=verdict_b.get('reason'), ms=ms_b, value=state['v'], keypress=state['kp']))
-        verdict_meta, ms_meta = session.key(KEY_L, 'l', modifiers=COMMAND, char=False)
+        verdict_meta, ms_meta = session.key(KEY_L, 'l', modifiers=SHORTCUT, char=False)
         check(checks, 'key_not_consumed_shortcut', verdict_meta.get('reason') == 'key_not_consumed',
               dict(reason=verdict_meta.get('reason'), ms=ms_meta))
         verdict_left, ms_left = session.key(KEY_LEFT, char=False)
@@ -171,7 +181,7 @@ def run():
         checks['key_escape_info'] = dict(passed=True, detail=dict(reason=verdict_escape.get('reason'), ms=ms_escape))
         state = session.state
         # The inert probes never reach the page: only the keys sent above appear.
-        check(checks, 'probe_invisible_to_page', state['kd'] == ['a', 'b', 'l+meta', 'ArrowLeft', 'Escape']
+        check(checks, 'probe_invisible_to_page', state['kd'] == ['a', 'b', 'l' + SHORTCUT_MARK, 'ArrowLeft', 'Escape']
               and state['kp'] == ['a'], dict(keydown=state['kd'], keypress=state['kp']))
 
         # IME: composition, commit, optional fields, cancel. ArrowLeft left the caret at 0.
@@ -203,6 +213,64 @@ def run():
         none = session.text_input(lambda item: item['mode'] == 'none' and item['caret_height'] == 0, 5)
         check(checks, 'text_input_none', none['mode'] == 'none', none)
 
+        if probe.IS_LINUX:
+            # Cursor changes are forwarded as CSS keywords (the presenter sets them on its canvas).
+            def cursor_now():
+                found = [item['cursor'] for item in session.events if item.get('event') == 'cursor']
+                return found[-1] if found else None
+
+            def cursor_after(x, y, expected):
+                # CEF reports cursor changes only; compare the latest reported state.
+                session.done(session.command('mouse', type='move', x=x, y=y, modifiers=0, button='left',
+                                             click_count=1, mouse_leave=False))
+                deadline = time.monotonic() + 3
+                while cursor_now() != expected and time.monotonic() < deadline:
+                    with contextlib.suppress(TimeoutError):
+                        session.until(lambda kind, item: kind == 1 and item.get('event') == 'cursor',
+                                      max(0.1, deadline - time.monotonic()))
+                return cursor_now()
+            sequence = [(600, 350, 'pointer'), (100, 55, 'text'), (450, 600, 'default'), (600, 350, 'pointer')]
+            seen = [cursor_after(x, y, expected) for x, y, expected in sequence]
+            check(checks, 'linux_cursor_forwarding', seen == [expected for *_, expected in sequence],
+                  dict(expected=[expected for *_, expected in sequence], seen=seen))
+
+            # AltGr (EVENTFLAG_ALTGR_DOWN) on KeyE as the presenter sends it for a layout's
+            # euro sign: XKB keycode 26, keyCode 69, text from Gecko's event.key.
+            session.click(100, 55)
+            session.text_input(lambda item: item['mode'] == 'text', 5)
+            before = session.state['v']
+            verdict, _ = session.key(LINUX_KEY_E, '\u20ac', modifiers=ALTGR)
+            state = session.page(lambda s: '\u20ac' in s['v'], 5)
+            check(checks, 'linux_altgr_text', '\u20ac' in state['v'] and len(state['v']) == len(before) + 1,
+                  dict(value=state['v'], keydown_key=state['kd'][-1], keypress=state['kp'][-1:],
+                       verdict=verdict.get('reason')))
+            # The XKB keycodes and location flags the Linux presenter sends give Chromium's
+            # DOM `code` and `location` (and the layout key from windows_key_code).
+            mapped = {}
+            for name, native, windows, modifiers, text in (
+                    ('Numpad1', 87, 0x61, 256 | 512, '1'), ('ShiftRight', 62, 0x10, 2 | 2048, ''),
+                    ('ControlLeft', 37, 0x11, 4 | 1024, ''), ('KeyQ_as_a', 24, 65, 0, 'a'),
+                    ('Backquote', 49, 192, 0, '`'), ('IntlBackslash', 94, 226, 0, '<')):
+                before = len(session.state['kd'])
+                session.key((native, windows), text, modifiers=modifiers, char=bool(text))
+                state = session.page(lambda s: len(s['kd']) > before, 5)
+                mapped[name] = state['kc'][-1]
+            # code:location:key; IntlBackslash's key depends on CEF's keysym table, so only
+            # its code and location are required.
+            expected = {'Numpad1': 'Numpad1:3:1', 'ShiftRight': 'ShiftRight:2:Shift', 'ControlLeft': 'ControlLeft:1:Control',
+                        'KeyQ_as_a': 'KeyQ:0:a', 'Backquote': 'Backquote:0:`', 'IntlBackslash': 'IntlBackslash:0:'}
+            matches = all(mapped.get(name, '').startswith(value) if name == 'IntlBackslash' else mapped.get(name) == value
+                          for name, value in expected.items())
+            check(checks, 'linux_xkb_code_location_key', matches, dict(seen=mapped, expected=expected))
+
+            # Information only: the DOM `key` of a char event sent with windows_key_code 0.
+            session.done(session.command('key', type='char', native_key_code=26, windows_key_code=0,
+                                         modifiers=ALTGR, text='\u20ac'))
+            with contextlib.suppress(TimeoutError):
+                session.page(lambda s: s['v'].count('\u20ac') == 2, 3)
+            checks['linux_char_without_windows_code_info'] = dict(passed=True, detail=dict(
+                value=session.state['v'], keypress=session.state['kp'][-1:]))
+
         # Wheel with trackpad phases; zero-delta boundary events are accepted and dropped.
         wheel = dict(x=450, y=500, modifiers=0, delta_x=0, precise=True)
         for phase, momentum, dy in (('may_begin', 'none', 0), ('began', 'none', -100), ('changed', 'none', -100),
@@ -212,6 +280,34 @@ def run():
         session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-50))  # legacy shape
         state = session.page(lambda s: s['w'] >= 350 and s['sy'] > 0)
         check(checks, 'wheel_phases_delta', state['w'] >= 350 and state['sy'] > 0, dict(wheel_delta_y=state['w'], scroll_y=state['sy']))
+
+        # Information only: does one non-precise wheel notch scroll in one jump or animate
+        # (Chromium smooth scrolling)? scrollY is sampled from the page's scroll events.
+        start_y = state['sy']
+        samples, started = [], time.monotonic()
+        session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-120,
+                                     phase='none', momentum_phase='none', precise=False))
+        def sample(kind, item):
+            if kind == 1 and item.get('event') == 'title' and session.state is not None:
+                samples.append((round((time.monotonic() - started) * 1000), session.state['sy']))
+            return time.monotonic() - started > 0.6
+        with contextlib.suppress(TimeoutError):
+            session.until(sample, 2)
+        checks['wheel_notch_animation_info'] = dict(passed=True, detail=dict(
+            start_scroll_y=start_y, samples_ms_scroll_y=samples[:40],
+            distinct_positions=len({value for _, value in samples})))
+        if probe.IS_LINUX:
+            # The same delta marked precise (touchpad): expected to apply without animation.
+            time.sleep(0.3)
+            session.done(session.command('focus', focused=True))  # drain title events
+            start_y, samples, started = session.state['sy'], [], time.monotonic()
+            session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-120,
+                                         phase='none', momentum_phase='none', precise=True))
+            with contextlib.suppress(TimeoutError):
+                session.until(sample, 2)
+            checks['wheel_precise_animation_info'] = dict(passed=True, detail=dict(
+                start_scroll_y=start_y, samples_ms_scroll_y=samples[:40],
+                distinct_positions=len({value for _, value in samples})))
 
         # Pinch: a two-point touch sequence zooms the visual viewport.
         session.done(session.command('pinch', x=450, y=325, modifiers=0, phase='began', magnification=0))
@@ -236,12 +332,13 @@ def run():
         except subprocess.TimeoutExpired:
             result['native_exit_code'] = None
             result['teardown'] = 'host still running 15 s after close (Keychain gate suspected; see README)'
-            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
-                subprocess.run(['/usr/bin/sample', str(session.process.pid), '1', '1', '-file',
-                                str(directory / 'host-teardown.sample.txt')], capture_output=True, timeout=5)
+            if not probe.IS_LINUX:  # /usr/bin/sample is macOS-only
+                with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+                    subprocess.run(['/usr/bin/sample', str(session.process.pid), '1', '1', '-file',
+                                    str(directory / 'host-teardown.sample.txt')], capture_output=True, timeout=5)
         result['status'] = result['functional'] if result.get('native_exit_code') == 0 else (
             'PASS_TEARDOWN_BLOCKED' if result['functional'] == 'PASS' else 'FAIL')
-        result.update(cef=ready['cef'], chromium=ready['chromium'], frames=session.frames)
+        result.update(cef=ready['cef'], chromium=ready['chromium'], frames=session.frames, platform=ready['platform'])
     except (Exception, KeyboardInterrupt) as exc:
         result['error'] = type(exc).__name__ + ': ' + str(exc)
         result['page_state'] = session.state if session else None

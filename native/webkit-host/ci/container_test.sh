@@ -47,6 +47,14 @@ fi
 chown -R axio:axio "$REPO/.local"
 
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort >"$OUT/dpkg-installed.tsv"
+# Pin drift: the archive's current candidate (from apt's signed indexes) for every pinned
+# package, so a newer Debian (security) update is visible with its Filename and SHA256.
+python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1]))["webkit"]["debian"]["packages"]; print("\n".join(sorted({**d["runtime"], **d["build"]})))' "$REPO/upstreams.lock.json" |
+  while read -r pkg; do
+    printf '== %s\n' "$pkg"
+    apt-cache policy "$pkg" | sed -n '2,3p'
+    apt-cache show "$pkg" | grep -E '^(Version|Filename|SHA256|Size):'
+  done >"$OUT/pin-drift.txt" 2>&1 || true
 ( cd /var/cache/apt/archives && sha256sum ./*.deb 2>/dev/null | sed 's#\./##' ) >"$OUT/deb-sha256.txt" || true
 {
   echo "{"

@@ -6,14 +6,27 @@
 // "Open in" submenu once there are more. Chrome-owned; no page is touched.
 import { tabMenuModel } from "./EngineRegistry.sys.mjs";
 
+// One menu per window. A later installer (the three-engine controls over the
+// Chromium presenter) takes the menu over until it disposes; the earlier one is
+// then in charge again. Window scripts and modules share the slot by registry symbol.
+const MENU_SLOT = Symbol.for("axiosozo.engine-tab-menu");
+
 /**
  * `engineOf(tab)` → engine id; `setTabEngine(tab, id)` → Promise. Returns
  * `{ dispose() }`, or null when the tab menu does not exist.
  */
 export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure = () => {} }) {
+  const delegate = { engineOf, setTabEngine, onFailure };
+  const existing = window[MENU_SLOT];
+  if (existing) {
+    existing.delegates.push(delegate);
+    return { dispose() { existing.release(delegate); } };
+  }
   const document = window.document;
   const menu = document.getElementById?.("tabContextMenu");
   if (!menu) return null;
+  const delegates = [delegate];
+  const current = () => delegates[delegates.length - 1];
   const item = document.createXULElement("menuitem");
   item.id = "axiosozo-context-engine";
   const submenu = document.createXULElement("menu");
@@ -25,7 +38,8 @@ export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure
   let toggleTarget = null;
 
   const choose = (tab, id) => {
-    if (tab && id && id !== engineOf(tab)) Promise.resolve(setTabEngine(tab, id)).catch(onFailure);
+    const owner = current();
+    if (tab && id && id !== owner.engineOf(tab)) Promise.resolve(owner.setTabEngine(tab, id)).catch(owner.onFailure);
   };
 
   // Firefox's MenuSectionLayout rearranges this menu on popupshowing and
@@ -35,7 +49,7 @@ export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure
     if (event.target !== menu) return;
     const tab = contextTab();
     const usable = tab && !window.PrivateBrowsingUtils?.isWindowPrivate?.(window);
-    const model = usable ? tabMenuModel(engineOf(tab), window) : { mode: "hidden", items: [] };
+    const model = usable ? tabMenuModel(current().engineOf(tab), window) : { mode: "hidden", items: [] };
     item.hidden = model.mode !== "toggle";
     submenu.hidden = model.mode !== "submenu";
     toggleTarget = null;
@@ -68,11 +82,17 @@ export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure
   menu.addEventListener("popupshowing", showing);
   menu.addEventListener("popuphidden", hidden);
   for (const element of elements) { element.hidden = true; menu.appendChild(element); }
-  return {
-    dispose() {
-      menu.removeEventListener("popupshowing", showing); menu.removeEventListener("popuphidden", hidden);
-      item.removeEventListener("command", onItem); popup.removeEventListener("command", onChoice);
-      for (const element of elements) element.remove();
-    },
+  const teardown = () => {
+    menu.removeEventListener("popupshowing", showing); menu.removeEventListener("popuphidden", hidden);
+    item.removeEventListener("command", onItem); popup.removeEventListener("command", onChoice);
+    for (const element of elements) element.remove();
+    if (window[MENU_SLOT] === slot) delete window[MENU_SLOT];
   };
+  const slot = { delegates, release(owner) {
+    const index = delegates.lastIndexOf(owner);
+    if (index >= 0) delegates.splice(index, 1);
+    if (!delegates.length) teardown();
+  } };
+  window[MENU_SLOT] = slot;
+  return { dispose() { slot.release(delegate); } };
 }
