@@ -69,6 +69,23 @@ jobs:
             [ -f "$SRC/$path" ] && cp "$SRC/$path" "$OUT/files/$(echo "$path" | tr / _)" || echo "missing $path" >> "$OUT/files/missing.txt"
           done
 
+      - name: Post-Zen-import copies (patched|path lines)
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT/patched"
+          grep '^patched|' scripts/source_probe.txt | cut -d'|' -f2 > "$SRC/wanted.txt"
+          [ -s "$SRC/wanted.txt" ] || exit 0
+          tar -xJf "$SRC/firefox-156.0.source.tar.xz" -C "$SRC/ff" --strip-components=1 --wildcards $(sed 's|^|*/|' "$SRC/wanted.txt")
+          includes=$(sed 's|^|--include=|' "$SRC/wanted.txt")
+          find "$SRC/zen/src" -name '*.patch' | sort | while read -r patch; do
+            git -C "$SRC/ff" apply --ignore-space-change --ignore-whitespace $includes "$patch" 2>>"$OUT/patched/apply-errors.txt" \
+              && grep -qF -f <(sed 's|^|+++ b/|' "$SRC/wanted.txt") "$patch" && echo "${patch#$SRC/}" >> "$OUT/patched/applied.txt"
+          done
+          while read -r path; do
+            sha256sum "$SRC/ff/$path" | sed "s|$SRC/ff/||" >> "$OUT/patched/sha256.txt"
+            cp "$SRC/ff/$path" "$OUT/patched/$(echo "$path" | tr / _)"
+          done < "$SRC/wanted.txt"
+
       - if: always()
         uses: ./.github/actions/publish-ci-results
         with:
