@@ -49,9 +49,9 @@ NSString* const Page = @"<!doctype html><html><meta charset=utf-8><title>bench</
   "function tick(t){__frames++;bar.style.transform=`translateX(${(t*0.4)%700}px)`;count.textContent=`rAF ${__frames}`;requestAnimationFrame(tick);}"
   "requestAnimationFrame(tick);addEventListener('keydown',e=>{k++;probe.style.background=k%2?'rgb(0,0,255)':'rgb(255,0,0)';});</script></html>";
 
-void spin(double seconds, const std::function<bool()>& done = [] { return false; }) {
+void spin(double seconds, BOOL (^done)(void) = nil) {
   double end = nowMs() + seconds * 1000;
-  while (nowMs() < end && !done()) {
+  while (nowMs() < end && !(done && done())) {
     @autoreleasepool {
       NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]
                                              inMode:NSDefaultRunLoopMode dequeue:YES];
@@ -173,7 +173,7 @@ View makeView(const Config& c, int width, int height) {
 id evaluate(WKWebView* web, NSString* script) {
   __block id result = nil; __block bool done = false;
   [web evaluateJavaScript:script completionHandler:^(id value, NSError*) { result = value; done = true; }];
-  spin(5, [&] { return done; });
+  spin(5, ^BOOL { return done; });
   return result;
 }
 
@@ -184,7 +184,7 @@ Image snapshot(WKWebView* web, bool afterUpdates, double* latency) {
   __block NSImage* image = nil; __block bool done = false;
   double start = nowMs();
   [web takeSnapshotWithConfiguration:config completionHandler:^(NSImage* value, NSError*) { image = value; done = true; }];
-  spin(5, [&] { return done; });
+  spin(5, ^BOOL { return done; });
   Image out = toBGRA(image ? [image CGImageForProposedRect:nullptr context:nil hints:nil] : nullptr);
   if (latency) *latency = nowMs() - start;
   return out;
@@ -295,7 +295,7 @@ NSDictionary* sck(NSWindow* window, int width, int height, double seconds) {
   [SCShareableContent getShareableContentExcludingDesktopWindows:NO onScreenWindowsOnly:NO completionHandler:^(SCShareableContent* c, NSError* e) {
     content = c; failure = e; done = true;
   }];
-  spin(10, [&] { return done; });
+  spin(10, ^BOOL { return done; });
   if (!done) return @{@"error": @"shareable_content_timeout"};
   if (failure) return @{@"error": [NSString stringWithFormat:@"%@ %ld: %@", failure.domain, long(failure.code), failure.localizedDescription]};
   SCWindow* found = nil;
@@ -311,12 +311,12 @@ NSDictionary* sck(NSWindow* window, int width, int height, double seconds) {
   [stream addStreamOutput:output type:SCStreamOutputTypeScreen sampleHandlerQueue:dispatch_queue_create("sck", DISPATCH_QUEUE_SERIAL) error:&addError];
   __block NSError* startError = nil; done = false;
   [stream startCaptureWithCompletionHandler:^(NSError* e) { startError = e; done = true; }];
-  spin(10, [&] { return done; });
+  spin(10, ^BOOL { return done; });
   if (startError || addError) return @{@"error": [NSString stringWithFormat:@"start: %@", (startError ?: addError).localizedDescription]};
   Cpu a = cpu(); spin(seconds); Cpu b = cpu();
   done = false;
   [stream stopCaptureWithCompletionHandler:^(NSError*) { done = true; }];
-  spin(5, [&] { return done; });
+  spin(5, ^BOOL { return done; });
   double span = (output.last - output.first) / 1000;
   return @{@"frames": @(output.frames), @"complete": @(output.complete), @"with_iosurface": @(output.withSurface),
            @"with_dirty_rects": @(output.withDirty), @"complete_fps": @(span > 0 ? (output.complete - 1) / span : 0),
@@ -384,9 +384,10 @@ int main(int argc, char** argv) {
                                     @"occlusion_detection_disabled_spi": @(c.occlusionOff), @"override_scale_spi": @(c.overrideScale),
                                     @"product_eligible_window": @(c.productEligible)} mutableCopy];
         View v = makeView(c, W, H);
-        bool loaded = false;
+        __block bool loaded = false;
+        WKWebView* web = v.web;
         [v.web loadHTMLString:Page baseURL:nil];
-        spin(15, [&] { return !v.web.loading && v.web.URL != nil && (loaded = true); });
+        spin(15, ^BOOL { return !web.loading && web.URL != nil && (loaded = true); });
         spin(1.0);
         r[@"loaded"] = @(loaded);
         r[@"visibility_state"] = evaluate(v.web, @"document.visibilityState") ?: [NSNull null];
