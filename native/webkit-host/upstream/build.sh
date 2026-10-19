@@ -4,6 +4,7 @@
 # it to /usr/local/wpe-upstream, then run the host suites against it (container_test.sh, upstream mode).
 # /src = repo (ro), /out = evidence, /ccache = persisted compiler cache.
 # usage: build.sh <lock key: upstream | upstream.previous_stable>
+# The host-suite stage reuses ci/container_test.sh (pinned runtime packages, downgrades allowed).
 set -eu
 OUT=/out; mkdir -p "$OUT"
 KEY=${1:-upstream}
