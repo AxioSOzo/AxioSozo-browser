@@ -58,6 +58,19 @@ export function convertBGRARect(source, sourceWidth, sx, sy, target, targetWidth
 }
 
 function swizzleRun(src32, src8, from, dst32, dst8, to, count) {
+  if (from === to && src32.buffer === dst32.buffer && src32.byteOffset === dst32.byteOffset) {
+    // In place: one array for reads and writes (SpiderMonkey keeps this loop tightest).
+    const end = from + count;
+    for (let p = from; p < end; p++) {
+      const value = src32[p], alpha = value >>> 24;
+      if (alpha === 255) {
+        src32[p] = (value & 0xff00ff00) | ((value & 0xff) << 16) | ((value >>> 16) & 0xff);
+        continue;
+      }
+      unpremultiply(src8, p * 4, dst8, p * 4, alpha);
+    }
+    return;
+  }
   if (from === to) {
     // Same pixel index in source and target (whole frames, and every surface paint): one
     // index, the shape SpiderMonkey compiles best (presenter bench, run 39340129366).
