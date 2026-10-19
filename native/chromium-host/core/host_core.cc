@@ -730,6 +730,10 @@ static void streamCommand(const std::string& line) {
     cef_browser_settings_t settings{};
     settings.size = sizeof(settings);
     settings.windowless_frame_rate = frameRate;
+    // Opaque white base background, as in Chrome and Firefox. CEF's default (alpha 0)
+    // makes a windowless view paint transparently: an unstyled page's background then
+    // has alpha 0 and showed as black in the presenter's opaque canvas.
+    settings.background_color = 0xFFFFFFFF;
     auto value = json::toUtf16(command.str("url"));
     auto address = view(value);
     event("accepted", json::object({{"request_id", requestId}}));

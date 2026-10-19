@@ -80,7 +80,7 @@ def serve(tls=None):
 
 
 def run(interaction_timeout=15):
-    probe.check()
+    stream.require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-web-stream-', dir=probe.EVIDENCE))
     session, servers = None, []
     result = dict(status='FAIL', E1='NOT_TESTED', E2='NOT_TESTED', tests=[], started_at=time.time())
@@ -138,6 +138,9 @@ def run(interaction_timeout=15):
             completed('key', type='char', native_key_code=36, windows_key_code=13, modifiers=0, text='\r')
             session.until(lambda _, item: item.get('title') == 'post received')
             session.until(lambda kind, _: kind == 2 and stream.painted(session.pixels), 15, capture=directory / 'post.png')
+            if probe.IS_LINUX:
+                # The unstyled result page has an opaque white background (alpha 255), not transparency.
+                assert bytes(session.pixels[:4]) == b'\xff\xff\xff\xff', bytes(session.pixels[:4])
             assert main.submitted == ['value=WEB'], main.submitted
             result['tests'].append('native_input_edit_select_all_user_POST')
             navigate(origin + '/redirect')

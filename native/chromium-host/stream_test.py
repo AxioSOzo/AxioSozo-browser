@@ -54,11 +54,29 @@ def read_packet(pipe, deadline):
     return kind, metadata, read_exact(pipe, size, deadline)
 
 
+def require_host():
+    """probe.check(), but an unusable environment ends the test as BLOCKED_ENV (exit 2,
+    one JSON status line) instead of a traceback that ./dev would count as FAIL."""
+    try:
+        return probe.check()
+    except RuntimeError as error:
+        if not str(error).startswith('BLOCKED_ENV'):
+            raise
+        print(json.dumps(dict(status='BLOCKED_ENV', reason=str(error))), flush=True)
+        raise SystemExit(2)
+
+
 def painted(bgra):
     """True when a BGRA frame has content: not every sampled pixel has the same value
     (a document's first, not yet painted frame is one flat colour)."""
     step = 4 * 211  # a prime stride samples across rows and columns
-    return len({bytes(bgra[i:i + 4]) for i in range(0, len(bgra) - 3, step)}) > 1
+    colours = {}
+    for i in range(0, len(bgra) - 3, step):
+        colour = bytes(bgra[i:i + 4])
+        colours[colour] = colours.get(colour, 0) + 1
+    # Content means more than a stray strip: the second colour covers at least 0.1%.
+    counts = sorted(colours.values(), reverse=True)
+    return len(counts) > 1 and sum(counts[1:]) * 1000 >= sum(counts)
 
 
 def png(path, width, height, bgra):
@@ -248,7 +266,7 @@ def check_accessibility(session, ready):
 
 
 def run():
-    probe.check()
+    require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-stream-', dir=probe.EVIDENCE))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), probe.FixtureHandler)
     server.request_log = directory / 'fixture-requests.jsonl'

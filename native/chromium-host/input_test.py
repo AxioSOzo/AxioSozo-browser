@@ -132,7 +132,7 @@ def check(results, name, condition, detail=None):
 
 
 def run():
-    probe.check()
+    stream.require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-input-', dir=probe.EVIDENCE))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
