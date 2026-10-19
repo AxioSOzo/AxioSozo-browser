@@ -136,6 +136,20 @@ navigation or showing a hidden target is full-size. If a pending frame is replac
 the new frame's damage includes the replaced frame's damage. Without the hello key
 frames are byte-identical to cef-v1.
 
+### 6.2 Damage payloads (optional, additive)
+
+`hello.damage_payload:true` (only together with `frame_damage:true`; otherwise the hello is
+malformed) makes `ready.capabilities.damage_payload` true. A frame's payload is then exactly
+the rows of its damage rectangle, tight: `damage.width*damage.height*4` bytes (metadata keeps
+the whole frame's `width`, `height` and `stride`). A whole-frame damage carries the whole frame.
+Zen keeps the last whole frame per `native_target_id` and size and patches each payload into
+it, presented or not, so §6.1's "previous frame delivered" stays the reference; a partial
+payload without a whole frame of that target and size before it is a protocol error. A
+replaced pending frame's payload is cut from the replacing frame's pixels with the merged
+damage. `capabilities.damage_payload` is false (or absent from older hosts) without the key.
+Zen negotiates it on Linux whenever it negotiates frame damage (docs/perf/pixel-path.md).
+Hosts enlarge their stdout pipe to 1 MiB on Linux (`F_SETPIPE_SZ`, best effort).
+
 ## 7. Fixture security policy (all profiles)
 
 Only the hello's loopback origin, only `GET` and only the synthetic paths

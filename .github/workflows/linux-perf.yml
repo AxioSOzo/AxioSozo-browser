@@ -1,0 +1,196 @@
+# Pixel-path performance of Chromium and WebKit tabs on Linux (cloud/perf-pixel-path,
+# docs/perf/pixel-path.md). Software rendering only (no GPU on runners); never E1/E2, never READY.
+#
+#   bench         linux-engine-bench.yml (reusable): presenter same-process A/B against
+#                 cloud/integration's CEFPresenter, component benches of both hosts built from this
+#                 checkout (1 MiB pipe, frame damage, damage_payload passes), compare.py vs 39330954155.
+#   ab-chromium   same-job A/B inside the Linux Zen app: cloud/integration (base) vs this branch
+#                 (cand), alternating rounds on one runner, 1x and 2x (TEST-ONLY devPixelsPerPx),
+#                 CEF host rebuilt per variant, chrome JS overlaid per variant (TEST-ONLY, labelled).
+#   ab-webkit     the same for WebKit tabs in the pinned debian:13 image (WPE host per variant).
+#
+# Results go to the ci-results branch (cloud sessions cannot read Actions logs/artifacts).
+name: linux-perf
+on:
+  push:
+    branches: [cloud/perf-pixel-path]
+    paths:
+      - apps/browser/chrome/**
+      - native/chromium-host/**
+      - native/webkit-host/**
+      - tools/engine-bench/**
+      - tools/pixel-path/**
+      - .github/workflows/linux-perf.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_REF: cloud/integration
+  WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+  AB_REPS: "3"
+  AB_ROUNDS: "2"
+
+jobs:
+  bench:
+    permissions: { contents: write, actions: read }
+    uses: ./.github/workflows/linux-engine-bench.yml
+    with:
+      jobs: presenter,chromium,webkit
+      presenter_baseline_ref: cloud/integration
+      baseline: '39330954155'
+
+  zen-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run_id: ${{ steps.pick.outputs.run_id }}
+      artifact: ${{ steps.pick.outputs.artifact }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=30" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          echo "$artifact"
+          echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"
+
+  ab-chromium:
+    needs: zen-source
+    if: needs.zen-source.outputs.run_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download the build artifact of another run
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-ab-chromium
+      RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Base tree (cloud/integration)
+        run: |
+          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT" "$RUNNER_TEMP/base"
+          git archive "origin/$BASE_REF" | tar -x -C "$RUNNER_TEMP/base"
+          git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
+          git rev-parse --short HEAD > .ab-commit
+          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"
+          cat "$EVIDENCE_OUT/ab-trees.json"
+      - name: GUI packages and the CEF build/runtime packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) cmake ninja-build g++ \
+            zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libxcb1 libxshmfence1 \
+            libpango-1.0-0 libcairo2 libglib2.0-0t64 libdbus-1-3 libexpat1
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: artifact
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Unpack (./dev fetch-build)
+        run: |
+          set -o pipefail
+          ./dev fetch-build --from-dir artifact --run "$RUN_ID" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+      - name: Restore pinned CEF archive (sha256-verified by probe.py)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-perf
+      - name: A/B (base vs cand, alternating rounds, 1x and 2x)
+        run: |
+          REPS="$AB_REPS" ROUNDS="$AB_ROUNDS" timeout 8000 bash tools/pixel-path/ci/zen_ab.sh chromium "$RUNNER_TEMP/base" "$PWD" "$EVIDENCE_OUT/ab"
+      - name: Save pinned CEF archive
+        if: always() && hashFiles('/home/runner/axiosozo-build/cef/*.tar.bz2') != ''
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-perf
+      - name: Keep evidence small
+        if: always()
+        run: |
+          [ -f "$EVIDENCE_OUT/ab/ab.md" ] && cat "$EVIDENCE_OUT/ab/ab.md" >> "$GITHUB_STEP_SUMMARY"
+          find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: ab-chromium
+
+  ab-webkit:
+    needs: zen-source
+    if: needs.zen-source.outputs.run_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: write
+      actions: read
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-ab-webkit
+      ZEN_RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Base tree (cloud/integration)
+        run: |
+          mkdir -p "$EVIDENCE_OUT" "$RUNNER_TEMP/base"
+          git archive "origin/$BASE_REF" | tar -x -C "$RUNNER_TEMP/base"
+          git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
+          git rev-parse --short HEAD > .ab-commit
+          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: A/B in debian:13 (pinned)
+        run: |
+          docker pull -q "$WEBKIT_IMAGE"
+          start=$(date +%s); set +e
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e REPS="$AB_REPS" -e ROUNDS="$AB_ROUNDS" \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$RUNNER_TEMP/base:/base:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
+            "$WEBKIT_IMAGE" sh /src/tools/pixel-path/ci/zen_ab_webkit_container.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/job.json"
+          tail -n 40 "$EVIDENCE_OUT/ab/steps.log" 2>/dev/null
+          exit $code
+      - name: Keep evidence small
+        if: always()
+        run: |
+          [ -f "$EVIDENCE_OUT/ab/ab.md" ] && cat "$EVIDENCE_OUT/ab/ab.md" >> "$GITHUB_STEP_SUMMARY"
+          sudo find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; sudo find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: ab-webkit

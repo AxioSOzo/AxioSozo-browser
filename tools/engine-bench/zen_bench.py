@@ -87,7 +87,9 @@ const n = probe?.diagnostics?.().native ?? {};
 return {engine: n.engine ?? null, frames: n.frames ?? null, title: n.title ?? gBrowser.selectedTab.label,
         tabEngine: probe?.engineOf?.(gBrowser.selectedTab) ?? null, renderPath: n.renderPath ?? null,
         meanDrawMilliseconds: n.meanDrawMilliseconds ?? null, uploadedPixelShare: n.uploadedPixelShare ?? null,
-        firstFrameMilliseconds: n.firstFrameMilliseconds ?? null};
+        firstFrameMilliseconds: n.firstFrameMilliseconds ?? null,
+        // Pipe presenters (EngineFrameSurface): frames replaced before a paint, and the render surface.
+        supersededFrames: n.supersededFrames ?? null, surface: n.surface ?? null};
 """
 # A 2 ms chrome timer records every change of the presenter's frame counter (the canvas got
 # a new engine frame) and every chrome keydown (keys routed to the presenter canvas).
@@ -453,6 +455,8 @@ def summarize(reps):
              'dom.timing.navigate_to_title_ms', 'dom.timing.navigate_to_visible_ms',
              'raf.window.fps_whole_window', 'scroll.window.fps_whole_window', 'image_scroll.window.fps_whole_window',
              'raf.window.presenter.meanDrawMilliseconds', 'scroll.window.presenter.meanDrawMilliseconds',
+             'raf.window.presenter.supersededFrames', 'scroll.window.presenter.supersededFrames',
+             'raf.window.presenter.uploadedPixelShare', 'scroll.window.presenter.uploadedPixelShare',
              'raf.window.multi_frame_updates', 'scroll.window.multi_frame_updates',
              'key.keydown_to_presented_frame_ms.median', 'key.keydown_to_presented_frame_ms.p95',
              'memory_after_switch_back.rss_mb', 'memory_after_switch_back.processes']
@@ -472,7 +476,13 @@ def main():
     parser.add_argument('--size', default='1280x800')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--launch-timeout', type=float, default=240)
+    parser.add_argument('--device-scale', type=float,
+                        help='TEST-ONLY: layout.css.devPixelsPerPx in the throwaway profile (e.g. 2 with --size 2304x1440 '
+                             'for a 2x content area like the component bench); recorded in the result')
     args = parser.parse_args()
+    if args.device_scale:
+        # A rendering-scale test pref only (no security, TLS, sandbox or isolation setting).
+        gui_test.TEST_PREFS['layout.css.devPixelsPerPx'] = str(args.device_scale)
     args.screenshot, args.hold = None, 0
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -497,6 +507,9 @@ def main():
         overlay = json.loads(Path(args.chrome_overlay).read_text())
         harness.result['chrome_overlay'] = {key: overlay.get(key) for key in ('label', 'overlay_commit', 'app_build_commit')} | {
             'replaced': len(overlay.get('replaced') or []), 'added': len(overlay.get('added') or [])}
+    if args.device_scale:
+        harness.result['device_scale_pref'] = {'layout.css.devPixelsPerPx': str(args.device_scale), 'size': args.size,
+                                               'label': 'TEST-ONLY rendering scale pref'}
     harness.result.update(status=status, schema='axiosozo-zen-bench-v1', label=label, E1='NOT_TESTED', E2='NOT_TESTED',
                           machine=bench.machine())
     (out / f'zen-bench-{label}.json').write_text(json.dumps(harness.result, indent=1) + '\n')

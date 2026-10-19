@@ -497,6 +497,10 @@ adds `damage: [[x, y, width, height]]` (one rectangle, physical px).
   and `capabilities.frame_damage` is false.
 - The adapter negotiates damage on Linux only. It presents the first frame after any
   gap in delivery whole. The presenter converts and uploads only the rectangle.
+- Optional `damage_payload:true` with `frame_damage:true` (engine-stream-v1 §6.2): the
+  payload of a damaged frame is only its rectangle's rows; `capabilities.damage_payload`
+  answers it. The adapter rebuilds the whole frame per native target before the presenter,
+  so "the payload is still the whole frame" above holds at the presenter. Linux only.
 
 ## Engine-preference hook (F6)
 
