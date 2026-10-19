@@ -61,7 +61,7 @@ export function readyEvent(overrides = {}, capabilities = {}) {
 }
 
 /** A scripted stand-in for AxioWebKitHost following engine-stream-v1 §8 (frames 2x2, damage on). */
-function fakeHost({ ready = readyEvent(), frameDamage = true, exitCode = 0 } = {}) {
+function fakeHost({ ready = readyEvent(), frameDamage = true, exitCode = 0, memfdFrames = false } = {}) {
   const pipe = new Pipe(), writes = [];
   let finish, current = null, frameId = 1, lastFrame = null;
   const exit = new Promise(resolve => { finish = resolve; });
@@ -71,7 +71,9 @@ function fakeHost({ ready = readyEvent(), frameDamage = true, exitCode = 0 } = {
     const metadata = { version: 1, target, frame_id: frameId++, width: 2, height: 2, stride: 8, device_scale: 1, format: "BGRA8" };
     if (frameDamage) metadata.damage = damage ?? [[0, 0, 2, 2]];
     lastFrame = metadata;
-    pipe.push(packet(2, metadata, new Uint8Array(16).fill(0xff)));
+    // §6.3 memfd frames name slot 0 (whole frame) and carry no pipe payload.
+    if (memfdFrames) pipe.push(packet(2, { ...metadata, slot: 0, payload_bytes: 16 }));
+    else pipe.push(packet(2, metadata, new Uint8Array(16).fill(0xff)));
   };
   const advance = () => {
     current = { ...current, document_generation: current.document_generation + 1, navigation_generation: current.navigation_generation + 1 };
@@ -498,4 +500,42 @@ test("the tab glyph installs for the three-engine controls and cycles through sw
   assert.equal(installEngineTabs(win, { engineProbe: { diagnostics: () => ({ browsingMode: "fixture" }) } }).diagnostics().enabled, false,
     "the fixture probe alone keeps no tab glyph");
   tabs.dispose();
+});
+
+test("memfd frames (§6.3): the pipe carries no pixels, the slot is read before the frame is acknowledged", async () => {
+  const memfd = { fd: 9, slot_bytes: 64, slots: 2 };
+  const fake = fakeHost({ ready: readyEvent({}, { frame_transport: "memfd", memfd, damage_payload: true }), memfdFrames: true });
+  const slots = [new Uint8Array(64).fill(0x11), new Uint8Array(64).fill(0x22)], reads = [];
+  // Frames name a slot; whole first frame, then a 1x1 damage rectangle (damage_payload).
+  const send = (slot, damage, bytes) => {
+    const metadata = { version: 1, target: fake.current, frame_id: reads.length + 100, width: 2, height: 2, stride: 8,
+      device_scale: 1, format: "BGRA8", damage, slot, payload_bytes: bytes };
+    fake.pipe.push(packet(2, metadata));
+  };
+  const host = new EngineStreamHost(fake.process, { profile: webkitProfile(), token, instance, identity: origin, timers,
+    frameDamage: true, damagePayload: true, frameTransport: "memfd", requestPrefix: "wk",
+    readSlot: async (ring, slot, bytes) => {
+      reads.push({ slot, bytes, acksBefore: fake.writes.filter(w => w.method === "frame_ack").length });
+      assert.deepEqual(ring, memfd);
+      return slots[slot].slice(0, bytes).buffer;
+    } });
+  await host.connect();
+  assert.equal(fake.writes[0].frame_transport, "memfd");
+  assert.deepEqual(host.memfd, memfd);
+  const frames = [];
+  const adapter = new WebKitEngineAdapter(host, { pendingTarget: pending, onFrame: (m, p) => frames.push({ m, p: new Uint8Array(p.slice(0)) }),
+    onEvent: () => {}, onFailure: () => {} });
+  const created = adapter.create(origin + "/engine.html", { width: 2, height: 2, device_scale: 1 });
+  await created; await tick();  // the fake's create frame: slot 0, whole
+  send(1, [[1, 1, 1, 1]], 4); await tick(); await tick();
+  assert.deepEqual(reads.map(r => [r.slot, r.bytes]), [[0, 16], [1, 4]]);
+  assert.ok(reads.every((r, i) => r.acksBefore === i), "each slot is read before its frame's ack");
+  assert.deepEqual([...frames.at(-1).p], [...new Array(12).fill(0x11), 0x22, 0x22, 0x22, 0x22], "patched into the whole frame");
+  // A host that answers with the pipe transport, or a bad ring, is refused.
+  for (const capabilities of [{}, { frame_transport: "memfd" }, { frame_transport: "memfd", memfd: { ...memfd, slots: 9 } }]) {
+    const other = fakeHost({ ready: readyEvent({}, capabilities) });
+    const refused = new EngineStreamHost(other.process, { profile: webkitProfile(), token, instance, identity: origin, timers,
+      frameDamage: true, frameTransport: "memfd", requestPrefix: "wk", readSlot: async () => new ArrayBuffer(0) });
+    await assert.rejects(refused.connect());
+  }
 });

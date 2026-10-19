@@ -479,7 +479,17 @@ def main():
     parser.add_argument('--device-scale', type=float,
                         help='TEST-ONLY: layout.css.devPixelsPerPx in the throwaway profile (e.g. 2 with --size 2304x1440 '
                              'for a 2x content area like the component bench); recorded in the result')
+    parser.add_argument('--pref', action='append', default=[], metavar='NAME=VALUE',
+                        help='TEST-ONLY extra pref in the throwaway profile (true/false/int/string), recorded in the result; '
+                             'only axiosozo.engines.* and layout.css.devPixelsPerPx are accepted')
     args = parser.parse_args()
+    extra_prefs = {}
+    for item in args.pref:
+        name, _, value = item.partition('=')
+        if not (name.startswith('axiosozo.engines.') or name == 'layout.css.devPixelsPerPx'):
+            parser.error(f'--pref {name}: not an engine/scale test pref')
+        extra_prefs[name] = {'true': True, 'false': False}.get(value, int(value) if value.isdigit() else value)
+    gui_test.TEST_PREFS.update(extra_prefs)
     if args.device_scale:
         # A rendering-scale test pref only (no security, TLS, sandbox or isolation setting).
         gui_test.TEST_PREFS['layout.css.devPixelsPerPx'] = str(args.device_scale)
@@ -507,6 +517,8 @@ def main():
         overlay = json.loads(Path(args.chrome_overlay).read_text())
         harness.result['chrome_overlay'] = {key: overlay.get(key) for key in ('label', 'overlay_commit', 'app_build_commit')} | {
             'replaced': len(overlay.get('replaced') or []), 'added': len(overlay.get('added') or [])}
+    if extra_prefs:
+        harness.result['test_prefs'] = {'prefs': extra_prefs, 'label': 'TEST-ONLY prefs (zen_bench --pref)'}
     if args.device_scale:
         harness.result['device_scale_pref'] = {'layout.css.devPixelsPerPx': str(args.device_scale), 'size': args.size,
                                                'label': 'TEST-ONLY rendering scale pref'}

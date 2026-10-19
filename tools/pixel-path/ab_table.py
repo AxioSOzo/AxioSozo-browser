@@ -27,7 +27,7 @@ METRICS = [
     ('static.timing.navigate_to_visible_ms', 'static page: navigate -> visible (ms)', -1),
     ('memory_all_processes.rss_mb', 'RSS, whole browser (MB)', -1),
 ]
-NAME = re.compile(r'^(base|cand)-r(\d+)-([0-9.]+)x$')
+NAME = re.compile(r'^(base|cand|memfd)-r(\d+)-([0-9.]+)x$')
 
 
 def load(directory):
@@ -63,28 +63,34 @@ def main():
     cpu = sorted({(d.get('machine') or {}).get('cpu_model') for d in runs.values()} - {None})
     lines.append(f'# Pixel-path A/B in one job: {engine} tabs in Zen')
     lines.append('')
-    lines.append(f'CPU: {", ".join(cpu) or "?"}. base = cloud/integration chrome JS + host, cand = this branch; '
-                 f'rounds alternate base/cand. Medians over repetitions; Δ = cand/base − 1.')
+    lines.append(f'CPU: {", ".join(cpu) or "?"}. base = cloud/integration chrome JS + host, cand = this branch, '
+                 f'memfd = this branch with the EXPERIMENTAL memfd frame pref (TEST-ONLY); rounds alternate. '
+                 f'Medians over repetitions; Δ = variant/base − 1.')
     lines.append('')
     for scale in scales:
         lines.append(f'## {scale}×')
         lines.append('')
-        header = '| Metric | ' + ' | '.join(f'base r{r} | cand r{r} | Δ r{r}' for r in rounds) + ' |'
-        lines += [header, '|' + ' --- |' * (1 + 3 * len(rounds))]
+        variants = [v for v in ('cand', 'memfd') if any((v, r, scale) in runs for r in rounds)]
+        header = '| Metric | ' + ' | '.join(f'base r{r} | ' + ' | '.join(f'{v} r{r} | Δ{v} r{r}' for v in variants) for r in rounds) + ' |'
+        lines += [header, '|' + ' --- |' * (1 + (1 + 2 * len(variants)) * len(rounds))]
         for key, label, sign in METRICS:
             cells, row = [], {}
             for r in rounds:
-                base, cand = runs.get(('base', r, scale)), runs.get(('cand', r, scale))
+                base = runs.get(('base', r, scale))
                 b = median(base, key) if base else None
-                c = median(cand, key) if cand else None
-                delta = (c / b - 1) if (b and c is not None) else None
-                row[f'r{r}'] = dict(base=b, cand=c, delta=None if delta is None else round(delta, 4))
-                mark = ''
-                if delta is not None and abs(delta) >= 0.05:
-                    mark = ' ✅' if delta * sign > 0 else ' ⚠️'
-                cells += [f'{b}' if b is not None else '—', f'{c}' if c is not None else '—',
-                          f'{delta:+.1%}{mark}' if delta is not None else '—']
-            if any(v['base'] is not None or v['cand'] is not None for v in row.values()):
+                row[f'r{r}'] = dict(base=b)
+                cells.append(f'{b}' if b is not None else '—')
+                for v in variants:
+                    run = runs.get((v, r, scale))
+                    c = median(run, key) if run else None
+                    delta = (c / b - 1) if (b and c is not None) else None
+                    row[f'r{r}'][v] = c
+                    row[f'r{r}'][f'delta_{v}'] = None if delta is None else round(delta, 4)
+                    mark = ''
+                    if delta is not None and abs(delta) >= 0.05:
+                        mark = ' ✅' if delta * sign > 0 else ' ⚠️'
+                    cells += [f'{c}' if c is not None else '—', f'{delta:+.1%}{mark}' if delta is not None else '—']
+            if any(value is not None for v in row.values() for k, value in v.items() if not k.startswith('delta')):
                 table.setdefault(scale, {})[key] = row
                 lines.append(f'| {label} | ' + ' | '.join(cells) + ' |')
         statuses = {f'{v}-r{r}': runs[(v, r, scale)].get('status') for v, r, s in sorted(runs) if s == scale}

@@ -14,6 +14,8 @@
 set -u
 ENGINE=$1 BASE=$2 CAND=$3 OUT=$4
 REPS=${REPS:-3} ROUNDS=${ROUNDS:-2} SCALES=${SCALES:-"1 2"}
+# memfd = the candidate with the EXPERIMENTAL memfd frame transport pref on (engine-stream-v1 §6.3).
+VARIANTS=${VARIANTS:-"base cand memfd"}
 SUDO=${SUDO-sudo}
 mkdir -p "$OUT"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/steps.log"; }
@@ -39,15 +41,21 @@ prepare() {  # $1 variant tree
 size_for() { if [ "$1" = 1 ]; then echo 1280x800; else echo 2304x1440; fi; }
 status=0
 for round in $(seq 1 "$ROUNDS"); do
-  for variant in base cand; do
-    tree=$BASE; [ "$variant" = cand ] && tree=$CAND
-    prepare "$tree" "$variant-r$round" || { status=1; continue; }
+  for variant in $VARIANTS; do
+    tree=$BASE; [ "$variant" != base ] && tree=$CAND
+    prefs=(); [ "$variant" = memfd ] && prefs=(--pref axiosozo.engines.linux.memfd_frames=true)
+    # The candidate's host and chrome serve both cand and memfd: prepare once per tree switch.
+    if [ "$variant" != memfd ] || [ "${prepared:-}" != "$CAND" ]; then
+      prepare "$tree" "$variant-r$round" || { status=1; continue; }
+      prepared=$tree
+    fi
+    overlay_name=$variant-r$round; [ "$variant" = memfd ] && overlay_name=cand-r$round
     for scale in $SCALES; do
       dir="$OUT/$variant-r$round-${scale}x"; mkdir -p "$dir"
       extra=(); [ "$scale" != 1 ] && extra=(--device-scale "$scale")
       log "zen_bench $ENGINE $variant round $round at ${scale}x ($REPS reps)"
       timeout -k 10 1800 python3 "$CAND/tools/engine-bench/zen_bench.py" --engine "$ENGINE" --app fetched --out "$dir" \
-        --reps "$REPS" --size "$(size_for "$scale")" --chrome-overlay "$OUT/chrome-overlay-$variant-r$round.json" "${extra[@]}" \
+        --reps "$REPS" --size "$(size_for "$scale")" --chrome-overlay "$OUT/chrome-overlay-$overlay_name.json" "${extra[@]}" "${prefs[@]}" \
         > "$dir/zen-bench.log" 2>&1 || status=1
       tail -n 3 "$dir/zen-bench.log" | tee -a "$OUT/steps.log"
     done

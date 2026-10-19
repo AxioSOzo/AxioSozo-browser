@@ -40,14 +40,19 @@ class Pipe {
 }
 function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRace=false,nativeInputError=null,
   nativeResizeUnsupported=false,holdInput=false,transformRead=buffer=>buffer,browsingMode='fixture',createStatus=200,
-  platform=null,capabilities={},frameFields={},damagePayload=false}={}) {
+  platform=null,capabilities={},frameFields={},damagePayload=false,memfd=null}={}) {
   const pipe = new Pipe(), writes=[], rendered=[], failures=[], events=[];
   let finished, current=full, frameID=1;
   const exit = new Promise(resolve => { finished=resolve; });
   const event = value => { if(value.event==='navigation')current=value.target;pipe.push(packet(1,{version:1,...value})); };
   // With damage_payload the payload is the damage rectangle's rows (filled with the frame id).
-  const sendFrame = (target=current,id=frameID++,fields=frameFields) => pipe.push(packet(2,{...frame(target,id),...fields},
-    damagePayload&&fields.damage?new Uint8Array(fields.damage[0][2]*fields.damage[0][3]*4).fill(id):new Uint8Array(16)));
+  const payloadOf = (id,fields) => damagePayload&&fields.damage?new Uint8Array(fields.damage[0][2]*fields.damage[0][3]*4).fill(id):new Uint8Array(16);
+  // memfd ({readSlot}): the payload goes into the frame's slot, the pipe carries none (engine-stream-v1 §6.3).
+  const slots=[],sendFrame = (target=current,id=frameID++,fields=frameFields) => {
+    if(!memfd) return pipe.push(packet(2,{...frame(target,id),...fields},payloadOf(id,fields)));
+    const data=payloadOf(id,fields),slot=id%2;slots[slot]=data;
+    pipe.push(packet(2,{...frame(target,id),...fields,slot,payload_bytes:data.length},new Uint8Array(0)));
+  };
   const process = { stdout:{read:async count=>transformRead(await pipe.read(count))}, wait:()=>exit,
     kill:async()=>{pipe.close();finished({exitCode:-15});},
     stdin:{close:async()=>{pipe.close();finished({exitCode:0});},write:async text=>{
@@ -97,9 +102,10 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
   const callbacks={onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)};
   // `platform`: an owned connection built the way launchHost builds one on that platform.
   const host=platform?new CEFHostConnection(process,{token,timers,deadline:1000,browsingMode,platform,damagePayload,
+    ...(memfd?{frameTransport:'memfd',readSlot:async(ring,slot,bytes)=>{memfd.reads.push([slot,bytes]);return slots[slot].slice(0,bytes).buffer;}}:{}),
     instance:pending.engine_instance,identity:pending.identity}):process;
   const adapter=new CEFEngineAdapter(host,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,...callbacks});
-  return {adapter,host,pipe,writes,rendered,failures,events,sendFrame,event};
+  return {adapter,host,pipe,writes,rendered,failures,events,sendFrame,event,slots};
 }
 
 test('AXCF is big endian, rejects dangerous lengths before metadata/pixel allocation', async()=>{
@@ -880,6 +886,24 @@ test('Linux damage_payload: rectangle-only payloads are rebuilt into whole frame
   // A host that does not announce it is refused.
   const ignored=fixture({platform:'linux64',overrideReady:{platform:'linux64'},capabilities:{frame_damage:true},damagePayload:true});
   await assert.rejects(ignored.host.connect());
+});
+
+test('Linux memfd frames: the slot is read and rebuilt, the pipe carries none; a host without the ring is refused',async()=>{
+  const ring={fd:12,slot_bytes:64,slots:2},memfd={reads:[]};
+  const f=fixture({platform:'linux64',overrideReady:{platform:'linux64'},damagePayload:true,memfd,frameFields:{damage:[[0,0,2,2]]},
+    capabilities:{frame_damage:true,damage_payload:true,frame_transport:'memfd',memfd:ring}});
+  await f.host.connect();await f.adapter.connect();await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  assert.equal(f.writes[0].frame_transport,'memfd');assert.deepEqual(f.host.memfd,ring);
+  f.sendFrame(undefined,undefined,{damage:[[1,1,1,1]]});await tick();await tick();
+  assert.deepEqual(memfd.reads,[[1,16],[0,4]]);
+  assert.deepEqual([...new Uint8Array(f.rendered.at(-1).pixels)],[1,1,1,1, 1,1,1,1, 1,1,1,1, 2,2,2,2]);
+  for(const capabilities of [{frame_damage:true,damage_payload:true},{frame_damage:true,damage_payload:true,frame_transport:'memfd'},
+    {frame_damage:true,damage_payload:true,frame_transport:'memfd',memfd:{...ring,fd:1}}]){
+    const refused=fixture({platform:'linux64',overrideReady:{platform:'linux64'},damagePayload:true,memfd:{reads:[]},capabilities});
+    await assert.rejects(refused.host.connect());
+  }
+  assert.throws(()=>new CEFHostConnection({wait:()=>new Promise(()=>{})},{token,timers,instance:'i',identity:origin,platform:'macosarm64',
+    frameTransport:'memfd'}),/INVALID_CEF_BOOTSTRAP/,'never on macOS');
 });
 
 test('presenter uploads only the damaged rectangle once its canvas is current',async()=>{

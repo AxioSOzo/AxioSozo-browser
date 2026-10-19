@@ -182,6 +182,7 @@ public:
     if (hello->has("frame_rate")) fields.push_back("frame_rate");
     if (hello->has("frame_damage")) fields.push_back("frame_damage");
     if (hello->has("damage_payload")) fields.push_back("damage_payload");
+    if (hello->has("frame_transport")) fields.push_back("frame_transport");
     if (!exactKeys(*hello, fields) || !integer(hello->get("version"), 1) || hello->get("version")->number != 1) return false;
     if (!hello->get("method")->isString() || hello->get("method")->string != "hello" || !tokenValue(hello->get("token"))) return false;
     if (!identifier(hello->get("engine_instance")) || !text(hello->get("fixture_origin"), 128)
@@ -195,6 +196,10 @@ public:
     if (auto payload = hello->get("damage_payload")) {
       if (!boolean(payload) || (payload->boolean && !frameDamage_)) return false;
       damagePayload_ = payload->boolean;
+    }
+    // §6.3 frame_transport "memfd": pixels in a sealed memfd slot (Linux only).
+    if (auto mode = hello->get("frame_transport")) {
+      if (!mode->isString() || mode->string != "memfd" || transport_.enableMemfd(2, MaxFrame) < 0) return false;
     }
     token_ = hello->get("token")->string;
     instance_ = hello->get("engine_instance")->string;
@@ -225,11 +230,14 @@ public:
       {"javascript_dialogs", false}, {"heartbeat_interval_ms", HeartbeatIntervalMs}, {"context_menu", false},
       {"http_auth", false}, {"find", false}, {"zoom", false}, {"popup_blocked", false}, {"media_capture", false},
       {"favicon", false}, {"text_input", false}, {"frame_damage", frameDamage_},
-      {"damage_payload", damagePayload_}};
+      {"damage_payload", damagePayload_}, {"frame_transport", transport_.memfd() >= 0 ? "memfd" : "pipe"}};
   }
   void ready() {
     Object caps = baseCapabilities();
     for (auto& [key, value] : engine_.capabilities()) caps[key] = value;
+    if (transport_.memfd() >= 0)
+      caps["memfd"] = Value(Object{{"fd", transport_.memfd()}, {"slot_bytes", double(transport_.memfdSlotBytes())},
+                                   {"slots", int(transport_.memfdSlots())}});
     Object fields = engine_.readyFields();
     fields["engine_instance"] = instance_;
     fields["capabilities"] = Value(std::move(caps));

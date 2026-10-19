@@ -394,6 +394,7 @@ bool streamHandshake() {
       if (hello.has("frame_rate")) fields.push_back("frame_rate");
       if (hello.has("frame_damage")) fields.push_back("frame_damage");
       if (hello.has("damage_payload")) fields.push_back("damage_payload");
+      if (hello.has("frame_transport")) fields.push_back("frame_transport");
       if (!keys(&hello, fields) || !integer(hello.get("version"), 1) || hello.num("version") != 1 ||
           hello.str("method") != "hello" || !hello.get("method")->isString() || !tokenValue(hello.get("token")) ||
           !identifier(hello.get("engine_instance")) || !textValue(hello.get("fixture_origin"), web ? 4096 : 128))
@@ -413,6 +414,11 @@ bool streamHandshake() {
       if (hello.has("damage_payload") && (!boolean(hello.get("damage_payload")) || !frameDamage)) return false;
       damagePayload = hello.has("damage_payload") && hello.flag("damage_payload");
       transport.setDamagePayload(damagePayload);
+      // frame_transport "memfd" (engine-stream-v1 §6.3): pixels in a sealed memfd, Linux only.
+      if (hello.has("frame_transport")) {
+        if (!hello.get("frame_transport")->isString() || hello.str("frame_transport") != "memfd") return false;
+        if (transport.enableMemfd(2, axio::MaxFrame) < 0) return false;
+      }
       streamToken = hello.str("token");
       streamInstance = hello.str("engine_instance");
       fixtureOrigin = claimed;
@@ -442,7 +448,11 @@ static void streamReadyEvent() {
       {"ax_actions", axActionNames()}, {"file_dialogs", webBrowsing}, {"javascript_dialogs", webBrowsing},
       {"heartbeat_interval_ms", HeartbeatIntervalMs}, {"context_menu", webBrowsing}, {"http_auth", webBrowsing},
       {"find", webBrowsing}, {"zoom", webBrowsing}, {"popup_blocked", webBrowsing}, {"media_capture", false},
-      {"frame_damage", frameDamage}, {"damage_payload", damagePayload}});
+      {"frame_damage", frameDamage}, {"damage_payload", damagePayload},
+      {"frame_transport", transport.memfd() >= 0 ? "memfd" : "pipe"}});
+  if (transport.memfd() >= 0)
+    capabilities["memfd"] = json::object({{"fd", transport.memfd()}, {"slot_bytes", double(transport.memfdSlotBytes())},
+                                          {"slots", int(transport.memfdSlots())}});
   event("ready", json::object({{"cef", CEF_VERSION}, {"chromium", runtimeChromium}, {"runtime_cef", runtimeCEF},
                                {"runtime_chromium", runtimeChromium}, {"platform", platform::name()},
                                {"sandbox_configured", true}, {"engine_instance", streamInstance},

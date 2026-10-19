@@ -150,6 +150,26 @@ damage. `capabilities.damage_payload` is false (or absent from older hosts) with
 Zen negotiates it on Linux whenever it negotiates frame damage (docs/perf/pixel-path.md).
 Hosts enlarge their stdout pipe to 1 MiB on Linux (`F_SETPIPE_SZ`, best effort).
 
+### 6.3 memfd frames (optional, additive, Linux, EXPERIMENTAL)
+
+`hello.frame_transport:"memfd"` asks the host to keep frame pixels out of the pipe. The host
+creates one `memfd` (`MFD_CLOEXEC`, sealed `F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_SEAL`, so helpers
+never inherit it and it cannot change size) of `slots × slot_bytes` and answers
+`ready.capabilities.frame_transport:"memfd"` with `capabilities.memfd: {fd, slot_bytes, slots}`
+(`fd` the host's descriptor number, `slot_bytes ≤ 33554432`, `1 ≤ slots ≤ 4`). Without the key,
+or on another platform, `frame_transport` is `"pipe"` (absent from older hosts) and nothing
+changes. A host that cannot create the ring rejects the hello.
+
+Every frame is then an AXCF kind-2 item with **payload length 0** whose metadata adds
+`slot` (integer < `slots`) and `payload_bytes`: exactly the bytes the pipe would have carried
+(the whole frame, or the damage rectangle's rows with §6.2), at offset `slot × slot_bytes`.
+Zen reads them with one positioned read of `/proc/<host pid>/fd/<fd>` (the host is Zen's own
+direct child; the fd number comes only from its authenticated ready event) before it sends the
+frame's `frame_ack`. One frame is in flight (§6), so the host rewrites a slot only after the
+frame that used it was acknowledged; slots alternate. Everything else (metadata validation,
+target binding, damage, coalescing) is unchanged. Zen negotiates it only with the pref
+`axiosozo.engines.linux.memfd_frames` (default false) and never on macOS or in surface mode.
+
 ## 7. Fixture security policy (all profiles)
 
 Only the hello's loopback origin, only `GET` and only the synthetic paths

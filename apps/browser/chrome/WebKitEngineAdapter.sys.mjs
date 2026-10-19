@@ -6,6 +6,7 @@
 // engine-neutral EngineStreamClient. Fixture mode only: the host loads nothing but
 // the loopback GET fixture, and general web mode is not offered (docs/CAPABILITY_MATRIX.md).
 import { EngineStreamHost, EngineStreamTarget, validFixtureOrigin } from "./EngineStreamClient.sys.mjs";
+import { MEMFD_FRAMES_PREF } from "./EngineFrameSurface.sys.mjs";
 
 // upstreams.lock.json `webkit` (Debian 13 packages); a test keeps these equal to the lockfile.
 export const WEBKIT_VERSION = "2.48.3";
@@ -141,7 +142,7 @@ export class WebKitEngineAdapter extends EngineStreamTarget {
  * every path and the fixture origin are re-validated here, at the spawn.
  */
 export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFailure, frameDamage = true,
-  damagePayload = frameDamage }) {
+  damagePayload = frameDamage, frameTransport = null }) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
   const platform = webkitPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI);
@@ -172,7 +173,9 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   process.wait().then(cleanup, cleanup).catch(() => {});
   const host = new EngineStreamHost(process, { profile: webkitProfile({ platform }), token, instance, identity: origin,
     // Rectangle-only payloads (engine-stream-v1 §6.2): the pipe carries the damage, not the frame.
-    timers, frameDamage, damagePayload, requestPrefix: "wk" });
+    timers, frameDamage, damagePayload, requestPrefix: "wk",
+    // engine-stream-v1 §6.3 memfd frames: EXPERIMENTAL, off unless the pref is set (Linux only here).
+    frameTransport: frameTransport ?? (Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe") });
   try { await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
   return new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: instance, identity: origin,

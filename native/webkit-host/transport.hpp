@@ -11,6 +11,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <deque>
 #include <map>
 #include <fcntl.h>
@@ -20,6 +22,10 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#endif
 #include <vector>
 #if defined(__linux__) && !defined(F_SETPIPE_SZ)
 #define F_SETPIPE_SZ 1031
@@ -51,6 +57,15 @@ class Transport {
   std::string outstandingTarget_;
   bool writing_ = false;
   void (*onInput_)() = nullptr;  // Set before start(); called on the reader thread.
+  // hello.frame_transport "memfd" (engine-stream-v1 §6.3, Linux): frame pixels go into a sealed
+  // memfd slot instead of the pipe; the AXCF frame names the slot and carries no payload. One
+  // frame is in flight, so a slot is rewritten only after Zen acknowledged the frame that used it.
+  // Set once (enableMemfd, after the hello, before any frame exists); read by the writer.
+  std::atomic<int> memfd_{-1};
+  std::atomic<uint8_t*> ring_{nullptr};
+  std::atomic<size_t> slotBytes_{0};
+  std::atomic<uint32_t> slots_{0};
+  uint32_t nextSlot_ = 0;
 
   void fail() { failed_ = true; changed_.notify_all(); }
   bool transfer(const uint8_t* data, size_t size) {
@@ -110,6 +125,16 @@ class Transport {
         } else continue;
         writing_ = true;
       }
+      if (packet.kind == 2 && ring_) {
+        if (packet.pixels.size() > slotBytes_) { fail(); break; }
+        memcpy(ring_.load() + size_t(nextSlot_) * slotBytes_, packet.pixels.data(), packet.pixels.size());
+        char member[64];
+        snprintf(member, sizeof(member), ",\"slot\":%u,\"payload_bytes\":%zu}", nextSlot_, packet.pixels.size());
+        packet.metadata.pop_back();
+        packet.metadata += member;
+        packet.pixels.clear();
+        nextSlot_ = (nextSlot_ + 1) % slots_;
+      }
       std::array<uint8_t, 16> h{'A','X','C','F',0,1,0,uint8_t(packet.kind)};
       uint32_t sizes[2] = {uint32_t(packet.metadata.size()), uint32_t(packet.pixels.size())};
       for (int j = 0; j < 2; ++j)
@@ -157,6 +182,29 @@ public:
     return 0;
 #endif
   }
+  // Linux only: creates the frame memfd (sealed against shrinking/growing, close-on-exec, so
+  // helper processes never inherit it). Call before start(); returns the descriptor or -1.
+  int enableMemfd(uint32_t slots, size_t slotBytes) {
+#ifdef __linux__
+    if (ring_.load() || !slots || slots > 4 || !slotBytes || slotBytes > MaxFrame) return -1;
+    int fd = int(syscall(SYS_memfd_create, "axio-frames", 1u /* MFD_CLOEXEC */ | 2u /* MFD_ALLOW_SEALING */));
+    if (fd < 0) return -1;
+    void* ring = MAP_FAILED;
+    if (ftruncate(fd, off_t(slotBytes * slots)) == 0 &&
+        fcntl(fd, 1033 /* F_ADD_SEALS */, 0x0002 | 0x0004 | 0x0001 /* SHRINK | GROW | SEAL */) == 0)
+      ring = mmap(nullptr, slotBytes * slots, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ring == MAP_FAILED) { close(fd); return -1; }
+    slotBytes_ = slotBytes; slots_ = slots; memfd_ = fd;
+    ring_ = static_cast<uint8_t*>(ring);  // last: the writer only uses a complete ring
+    return fd;
+#else
+    (void)slots; (void)slotBytes;
+    return -1;
+#endif
+  }
+  int memfd() const { return memfd_; }
+  size_t memfdSlotBytes() const { return slotBytes_; }
+  uint32_t memfdSlots() const { return slots_; }
   bool failed() const { return failed_; }
   bool eof() const { return eof_; }
   void reject() { fail(); }
@@ -199,6 +247,10 @@ public:
     if (writer_.joinable()) writer_.join();
     if (input_ >= 0) { close(input_); input_ = -1; }
     if (output_ >= 0) { close(output_); output_ = -1; }
+#ifdef __linux__
+    if (uint8_t* ring = ring_.exchange(nullptr)) munmap(ring, slotBytes_ * slots_);
+    if (memfd_ >= 0) { close(memfd_); memfd_ = -1; }
+#endif
   }
 };
 } // namespace axio

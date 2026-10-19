@@ -208,3 +208,43 @@ export class DamagePayloadAssembler {
   forget(nativeTargetId) { this.#frames.delete(nativeTargetId); }
   get size() { return this.#frames.size; }
 }
+
+/**
+ * `hello.frame_transport:"memfd"` (engine-stream-v1 §6.3, Linux): the host keeps frame pixels in
+ * a sealed memfd and the AXCF frame (payload size 0) names `{slot, payload_bytes}`. Zen reads the
+ * slot with one positioned read of /proc/<host pid>/fd/<fd> on IOUtils' background thread: no
+ * pixel bytes through the Subprocess pipe. The frame's ack is the slot's reuse barrier (one frame
+ * in flight), so the read completes before the credit returns.
+ */
+export const MEMFD_FRAMES_PREF = "axiosozo.engines.linux.memfd_frames";
+
+/** `ready.capabilities.memfd`: `{fd, slot_bytes, slots}` within the pipe frame bound. */
+export function validMemfdCapability(value, maxFrameBytes) {
+  return !!value && typeof value === "object" && Object.keys(value).length === 3
+    && Number.isInteger(value.fd) && value.fd >= 3 && value.fd <= 65535
+    && Number.isInteger(value.slot_bytes) && value.slot_bytes > 0 && value.slot_bytes <= maxFrameBytes
+    && Number.isInteger(value.slots) && value.slots >= 1 && value.slots <= 4;
+}
+
+/** Frame metadata of a memfd frame: a slot of the announced ring and exactly the expected bytes. */
+export function validMemfdFrame(metadata, capability, expectedBytes) {
+  return Number.isInteger(metadata.slot) && metadata.slot >= 0 && metadata.slot < capability.slots
+    && metadata.payload_bytes === expectedBytes && expectedBytes > 0 && expectedBytes <= capability.slot_bytes;
+}
+
+/**
+ * The slot reader: `read(path, {offset, maxBytes})` → Uint8Array (IOUtils.read). The pid is the
+ * spawned host's own (Subprocess `pid`), the fd the one its authenticated ready event announced.
+ */
+export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read?.bind(globalThis.IOUtils)) {
+  if (!Number.isInteger(pid) || pid <= 1 || typeof read !== "function") throw new Error("MEMFD_UNAVAILABLE");
+  const path = `/proc/${pid}/fd/${capability.fd}`;
+  return async (slot, bytes) => {
+    let data;
+    try { data = await read(path, { offset: slot * capability.slot_bytes, maxBytes: bytes }); }
+    catch { throw new Error("MEMFD_READ_FAILED"); }
+    if (!data || data.byteLength !== bytes) throw new Error("MEMFD_READ_FAILED");
+    // The presenter keeps a reference until its next paint: a tight, exclusive buffer.
+    return data.byteOffset === 0 && data.buffer.byteLength === bytes ? data.buffer : data.slice().buffer;
+  };
+}
