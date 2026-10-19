@@ -132,6 +132,7 @@
       "index_sha256": "7778d3e3f303b7ddb8ce0fe7c8d57473a076c6bf2e8f241f75421d2396352498",
       "pool": "https://deb.debian.org/debian/",
       "archive_fallback": "https://snapshot.debian.org/ keeps these exact versions after a point release",
+      "snapshot": "20261018T000000Z",
       "packages": {
         "runtime": {
           "libwpewebkit-2.0-1": "2.48.3-1",
@@ -239,6 +240,12 @@
         }
       }
     },
-    "security_note": "Debian trixie ships wpewebkit 2.48.3 without later security updates (trixie-security had none on 2026-10-18). Acceptable only for the loopback fixture profile; any web browsing first requires a current upstream stable release built from a pinned wpewebkit.org tarball."
+    "security_note": "Debian trixie ships wpewebkit 2.48.3 without later security updates (trixie-security had none on 2026-10-18). Acceptable only for the loopback fixture profile; any web browsing first requires a current upstream stable release built from a pinned wpewebkit.org tarball.",
+    "ci_image": {
+      "image": "docker.io/library/debian:trixie-20261005",
+      "index_digest": "sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5",
+      "amd64_manifest_digest": "sha256:bcf83fd8af414eda0c0a99d25a4e61dedd88e7aac7f7bc519d04555ff0c40ec5",
+      "note": "Debian 13.7; same digest as debian:13 and debian:13.7 on 2026-10-19. Used by .github/workflows/linux-webkit-host.yml."
+    }
   }
 }

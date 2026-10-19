@@ -119,14 +119,44 @@ def build():
     return round(time.monotonic() - started, 2)
 
 
+APT_ARCHIVES = Path('/var/cache/apt/archives')
+
+
+def verify_downloaded(missing):
+    """Every pinned .deb apt fetched must match the lockfile sha256 (on top of apt's signed-index check)."""
+    files = lock()['debian']['files']
+    checked = {}
+    for spec in missing:
+        name = spec.split('=', 1)[0]
+        entry = files[name]
+        # apt names cached files <name>_<version with ':' as %3a>_<arch>.deb.
+        prefix = f'{name}_{entry["version"].replace(":", "%3a")}_'
+        found = [p for p in APT_ARCHIVES.glob('*.deb') if p.name.startswith(prefix)]
+        if len(found) != 1:
+            raise RuntimeError(f'FAIL: apt did not download the pinned {Path(entry["filename"]).name}')
+        deb = found[0]
+        digest = hashlib.sha256(deb.read_bytes()).hexdigest()
+        if digest != entry['sha256']:
+            raise RuntimeError(f'FAIL: {deb.name} sha256 {digest} != pinned {entry["sha256"]}')
+        checked[name] = digest
+    return checked
+
+
+def apt_install(missing):
+    sudo = [] if os.geteuid() == 0 else ['sudo', '-n']
+    env = dict(os.environ, DEBIAN_FRONTEND='noninteractive')
+    run_command(sudo + ['apt-get', 'update'], timeout=900)
+    run_command(sudo + ['apt-get', 'install', '-y', '--no-install-recommends', '--download-only', *missing], timeout=3600, env=env)
+    checked = verify_downloaded(missing)
+    run_command(sudo + ['apt-get', 'install', '-y', '--no-install-recommends', *missing], timeout=3600, env=env)
+    emit('PASS', action='pinned_debs_verified', sha256=checked)
+
+
 def setup(apt=False):
     linux_check()
     report, missing = package_report()
     if missing and apt:
-        sudo = [] if os.geteuid() == 0 else ['sudo', '-n']
-        run_command(sudo + ['apt-get', 'update'], timeout=900)
-        run_command(sudo + ['apt-get', 'install', '-y', '--no-install-recommends', *missing], timeout=3600,
-                    env=dict(os.environ, DEBIAN_FRONTEND='noninteractive'))
+        apt_install(missing)
         report, missing = package_report()
     if missing:
         raise RuntimeError('BLOCKED_ENV: pinned Debian 13 packages missing or at another version: ' + ' '.join(missing)

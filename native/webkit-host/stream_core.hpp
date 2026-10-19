@@ -135,7 +135,8 @@ struct Tab {
 
 struct Rect { int x = 0, y = 0, width = 0, height = 0; bool empty() const { return width <= 0 || height <= 0; } };
 inline Rect unite(Rect a, Rect b) {
-  if (a.empty()) return b; if (b.empty()) return a;
+  if (a.empty()) return b;
+  if (b.empty()) return a;
   int x0 = std::min(a.x, b.x), y0 = std::min(a.y, b.y);
   int x1 = std::max(a.x + a.width, b.x + b.width), y1 = std::max(a.y + a.height, b.y + b.height);
   return {x0, y0, x1 - x0, y1 - y0};
