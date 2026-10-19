@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:dom</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). DOM-heavy: a 2000-row x 6-column styled table
+     (~26000 elements) built at load. -->
+<style>body{margin:0;font:14px system-ui,sans-serif;color:#163247;background:#fff}.badge{font:14px ui-monospace,monospace;color:#596772;padding:16px}
+table{border-collapse:collapse;margin:0 16px}td{border:1px solid #d5e3e8;padding:4px 8px}tr:nth-child(odd){background:#f3f8fa}
+.n{font-variant-numeric:tabular-nums;text-align:right}.tag{display:inline-block;padding:1px 6px;border-radius:9px;background:#e1f0ea;color:#257d65}</style>
+<p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · DOM-HEAVY · NO ACCOUNTS</p><table><tbody id="b"></tbody></table>
+<script>const b=document.getElementById('b');const f=document.createDocumentFragment();
+for(let i=0;i<2000;i++){const tr=document.createElement('tr');
+for(let j=0;j<6;j++){const td=document.createElement('td');if(j===0){td.className='n';td.textContent=i;}
+else if(j===3){const s=document.createElement('span');s.className='tag';s.textContent='tag-'+(i*j%17);td.appendChild(s);}
+else td.textContent='cell '+i+':'+j;tr.appendChild(td);}f.appendChild(tr);}
+b.appendChild(f);document.title='bench:dom|page='+(new URLSearchParams(location.search).get('page')||'1')+'|rows='+b.rows.length;</script></html>

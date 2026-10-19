@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:scroll</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). A long (~40000 CSS px) page of distinct rows, so every
+     scroll step changes most of the viewport. No animation: frames appear only because of input. -->
+<style>html{color-scheme:light;scroll-behavior:auto}body{margin:0;font:18px system-ui,sans-serif;color:#163247;background:#fff}
+.row{height:79px;border-bottom:1px solid #c4dfd8;display:flex;align-items:center;padding:0 24px;gap:24px}
+.sw{width:48px;height:48px;border-radius:8px;flex:none}.badge{font:14px ui-monospace,monospace;color:#596772;padding:16px 24px}</style>
+<p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · LONG SCROLL · NO ACCOUNTS</p><div id="rows"></div>
+<script>const rows=document.getElementById('rows');const parts=[];
+for(let i=0;i<500;i++){const h=(i*37)%360;parts.push(`<div class="row" style="background:hsl(${h} 40% 96%)"><div class="sw" style="background:hsl(${h} 60% 50%)"></div><b>Row ${i}</b><span>${'Lorem ipsum dolor sit amet '.repeat(1+i%3)}</span></div>`);}
+rows.innerHTML=parts.join('');
+document.title='bench:scroll|page='+(new URLSearchParams(location.search).get('page')||'1');</script></html>
