@@ -23,6 +23,7 @@ apt-get update >"$OUT/apt-update.log" 2>&1
 apt-get install -y --no-install-recommends python3 ca-certificates procps xz-utils git >"$OUT/apt-bootstrap.log" 2>&1
 
 useradd -m -u 1500 axio
+chown axio:axio "$OUT"   # the unprivileged steps write the overlay report and bench results here
 cp -a /src /home/axio/repo
 chown -R axio:axio /home/axio/repo
 REPO=/home/axio/repo
