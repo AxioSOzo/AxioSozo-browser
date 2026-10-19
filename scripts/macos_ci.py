@@ -181,6 +181,14 @@ class Lane:
         self.gate('cef:test-native', [py, probe, 'test-native'], requires=[probe], ci_root=True)
         self.gate('cef:test_probe.py', [py, 'native/chromium-host/test_probe.py'],
                   requires=['native/chromium-host/test_probe.py'], ci_root=True)
+        # Portable units shared with the macOS host (transport.hpp is linked into it).
+        cef_tests = self.build / 'cef-units'
+        cef_tests.mkdir(exist_ok=True)
+        for unit in ['transport_damage_test', 'core_test']:
+            source = f'native/chromium-host/tests/{unit}.cc'
+            self.gate('cef:' + unit, ['/bin/sh', '-c',
+                      f'xcrun clang++ -std=c++20 -Wall -Wextra -I native/chromium-host {source} -o "{cef_tests}/{unit}"'
+                      f' && "{cef_tests}/{unit}"'], requires=[source], timeout=300)
         # Real Chromium OSR on the runner (headless session): component evidence only.
         self.gate('cef:stream_test.py', [py, 'native/chromium-host/stream_test.py'],
                   requires=['native/chromium-host/stream_test.py'], ci_root=True, timeout=1200)
