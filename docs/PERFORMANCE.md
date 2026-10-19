@@ -86,7 +86,7 @@ Chromium on the runner (Xeon 8573C), WebKit and Gecko-on-Debian in debian:13 (Xe
 | rAF page: frame interval p99 | 17.2 ms | 17.2 ms | 36.0 ms [37.5] | 37.0 ms [40.8] |
 | rAF page: intervals > 25 ms | 0 % | 0 % | 7 % | 7 % [18] |
 | rAF page: CPU, whole browser | 30 % [39] | 22 % [25] | **151 %** [153] | **182 %** [187] |
-| Wheel scroll: fps (Gecko in-page) | 59.0, 13 300 px scrolled | 59.0 | input-bound, see bottleneck 3 | input-bound |
+| Wheel scroll: fps | 59.0, 13 300 px in 1.95 s | 59.0 | 47.1 (rep 1 only, run 39334729960; see bottleneck 3) | 29.6 (rep 1 only; see bottleneck 3) |
 | Key → paint | 9 ms [10.5] (keydown → 2nd rAF) | 8 ms [10] | **28.5 ms** [28.8] | **32.9 ms** [33.7] |
 | Gecko → engine switch | — | — | 385 ms [567] | 479 ms [614] |
 | Engine → Gecko switch | — | — | 129 ms [134] | 211 ms [211] |
@@ -160,15 +160,17 @@ dominant cost.
    swizzle in the shader, or `VideoFrame` with format `BGRA`) so no CPU swizzle remains — the
    WebGL candidate is SwiftShader-bound on these runners (10.6 ms) and must be judged on a GPU.
    This is what cloud/perf-pixel-path is working on; gate it with the A/B below.
-3. **Wheel input to engine tabs is slow to dispatch.** In engine tabs a 120-click wheel burst
-   produced ~77 (Chromium) / ~155 (WebKit) presented frames, but after the first repetition the
-   burst took ~17 s of wall time (frames ÷ `fps_whole_window`) instead of ~2 s (`fps_whole_window` 4.5 / 9.3 fps; Gecko
-   tabs: 59 fps, 13 300 px). The X11 wheel events queue behind the parent's frame handling
-   (bottleneck 1) and/or a per-wheel round trip in the presenter's input forwarding. Run
-   39330954155 lacks the input wall time; later runs record `input_wall_s` so this is measured
-   directly. **Fixes**: coalesce wheel deltas per animation frame in the presenter instead of one
-   host request per event; do not await a reply per wheel event; then re-measure (this item
-   probably shrinks with fix 1).
+3. **Scroll under wheel input in engine tabs: not yet measured cleanly (harness).** Run
+   39334729960 records the input window's wall time: a 120-click `xdotool` wheel burst takes
+   1.95 s on the Gecko scroll page but **17.03 s** on the Gecko image page (which every time ends
+   at its bottom, 7 829 px), and 17.03 s in Chromium/WebKit tabs from the second repetition on
+   (1.95 s in the first). The identical 17.03 s in Gecko shows this is an X input pacing
+   artefact of the harness, not engine render cost, so engine-tab scroll fps from those
+   windows (4–10 fps) is NOT a render measure. Valid first-repetition windows: Chromium 47.1 fps
+   (94 frames / 1.95 s), WebKit 29.6 fps (59 frames / 1.97 s) vs Gecko 59 fps — consistent with
+   bottleneck 1. NOT_VERIFIED beyond that. **Next**: inject wheel events with explicit per-event
+   timing (XTest via a small helper or `xdotool` per click with `--sync`-free timing checks),
+   record per-event dispatch time, and keep the first window's numbers until then.
 4. **WebKit host CPU at 2×.** WPE renders in software at ~230 % CPU of 4 vCPUs and drops to
    46 fps at 2× on slower runners (58 fps on faster ones); in-Zen WPEWebProcess takes ~74 % at
    1×. **Fixes**: confirm WPE's GPU path on real hardware (not available on runners); keep the
@@ -237,6 +239,8 @@ variance:
          baseline: '39330954155'
    ```
 
+   The called workflow's concurrency group is per ref, so on cloud/engine-bench itself a gate run
+   queues behind a running bench run; on another branch it does not.
    Add `zen-webkit` for WebKit tabs and `chromium,webkit` for the hosts if the change touches
    them. `zen_build_run_id` pins the Zen app artifact; by default the newest unexpired one is
    used and the branch's `apps/browser/chrome` is overlaid onto it (TEST-ONLY, labelled), so
@@ -259,6 +263,8 @@ variance:
 
 | Run | Result | Notes |
 | --- | --- | --- |
+| 39334995906 | green | `linux-engine-bench-gate.yml` self-test: reusable workflow via `workflow_call`, presenter A/B vs cloud/integration `6c05cac` (identical output; Firefox 1800×1300 bgraToRGBA 7.06 vs 6.44 ms), compare vs 39330954155 |
+| 39334729960 | all green | in-Zen 5/5 for all engines again, adds `input_wall_s` (bottleneck 3) |
 | 39330954155 | all green | **reference**: in-Zen Gecko/Chromium/WebKit PASS 5/5, Gecko on debian:13 PASS 5/5, integrated CEF, app run 39325384904 + chrome overlay |
 | 39328932408 | zen (chromium) FAIL 1/5 | first in-Zen Chromium PASS (rep 1); reps 2–5 hit a harness bug (closed tab), fixed |
 | 39327040692 | zen-webkit FAIL 1/5 | first in-Zen WebKit PASS (rep 1); same harness bug; Gecko on debian:13 PASS 5/5 |
