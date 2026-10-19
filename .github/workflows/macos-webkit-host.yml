@@ -65,12 +65,14 @@ jobs:
       contents: write
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-host
-      AXIOSOZO_BUILD_ROOT: ${{ runner.temp }}/build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Build the WKWebView host
         run: |
           set -euo pipefail
+          # Gitignored build output outside the checkout (normalized path: profile guards compare it).
+          export AXIOSOZO_BUILD_ROOT="$RUNNER_TEMP/build"
+          echo "AXIOSOZO_BUILD_ROOT=$AXIOSOZO_BUILD_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT/webkit"
           start=$(date +%s)
           native/webkit-host/mac/build.sh 2>&1 | tee "$EVIDENCE_OUT/build.log"
