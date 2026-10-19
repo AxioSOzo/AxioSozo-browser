@@ -2,8 +2,8 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // The engine, shown where the tab already is. Resting a pointer on a tab for a
-// moment turns its favicon into the engine's logo (Firefox or Chromium, or any
-// engine in EngineRegistry). On the selected tab that logo is the switch: one
+// moment turns its favicon into the engine's logo (Firefox, Chromium or WebKit,
+// any engine in EngineRegistry). On the selected tab that logo is the switch: one
 // click moves the tab to the next available engine (the other one, with two).
 // On other tabs it is information only, so clicking a favicon keeps selecting
 // its tab. At rest no tab carries an engine mark.
@@ -20,7 +20,9 @@ export const FAILURE_MS = 2600;
 const INERT = Object.freeze({ dispose() {}, diagnostics: () => ({ enabled: false }) });
 
 export function installEngineTabs(window, { engineProbe, timers = window } = {}) {
-  if (!engineProbe || engineProbe.diagnostics?.().browsingMode !== "web" || !window?.gBrowser) return INERT;
+  // Chromium web mode, or the three-engine controls (WebKitEngineControls) that switch tabs themselves.
+  const state = engineProbe?.diagnostics?.();
+  if (!engineProbe || (state?.browsingMode !== "web" && state?.tabSwitch !== true) || !window?.gBrowser) return INERT;
   const document = window.document;
   const gBrowser = window.gBrowser;
   const container = gBrowser.tabContainer;
@@ -83,9 +85,10 @@ export function installEngineTabs(window, { engineProbe, timers = window } = {})
     try {
       // The selected tab goes through the explicit switch, which owns the
       // pending state and Gecko action authority bookkeeping.
-      if (next === "chromium") await engineProbe.switchToChromium();
+      if (typeof engineProbe.switchTo === "function") await engineProbe.switchTo(next);
+      else if (next === "chromium") await engineProbe.switchToChromium();
       else if (next === "gecko") await engineProbe.switchToGecko();
-      else throw new Error("ENGINE_UNAVAILABLE"); // no presenter for this engine yet
+      else throw new Error("ENGINE_UNAVAILABLE"); // no presenter for this engine here
       if (!disposed) tab.removeAttribute(STATE_ATTRIBUTE);
     } catch {
       if (disposed) return;
