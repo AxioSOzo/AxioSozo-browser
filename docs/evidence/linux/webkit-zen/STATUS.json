@@ -1,12 +1,16 @@
 {
   "date": "2026-10-19",
-  "workstream": "webkit-zen (branch cloud/webkit-zen, mirror claude/webkit-zen-engine-b4zzio, PR #4)",
-  "overall": "PARTIAL: Zen-side WebKit engine implemented; unit and live-host adapter evidence PASS; Zen GUI E2E NOT_VERIFIED (no Linux Zen build artifact exists yet)",
+  "workstream": "webkit-zen (branch cloud/webkit-zen; PR #4 merged, follow-up draft PR #7)",
+  "overall": "PASS (EXPERIMENTAL, fixture-only, Linux x86_64): WebKit inside Zen E2E (runs 39325934205, 39337226571) and the three-engine round trip Gecko -> WebKit -> Gecko -> Chromium -> Gecko on one Zen tab (run 39337226571). macOS not built; never READY.",
   "workflow": ".github/workflows/linux-webkit-zen.yml (jobs unit, adapter, e2e)",
   "results": {
     "unit": {
       "label": "PASS",
-      "runs": [39303310867, 39305854779],
+      "runs": [
+        39303310867,
+        39305854779,
+        39337226571
+      ],
       "what": "node --test of webkit-engine (adapter/presenter/controls with a scripted host), engine-registry, engine-tabs, engine-preference, engine-probe-controls, chromium-tabs, cef-adapter, coordinator, console-errors-native: 0 failures; cargo test -p browser-core 11/11 (webkit enum)",
       "note": "scripted host packets are protocol fixtures, never WebKit rendering"
     },
@@ -29,16 +33,40 @@
       "curated": "run-39305854779-adapter/"
     },
     "zen_gui_e2e": {
-      "label": "NOT_VERIFIED",
-      "reason": "no unexpired axiosozo-zen-linux-x86_64 artifact; linux-zen-build run 39293018395 (cloud/linux-platform) was still building at 19:05Z",
-      "runs_recording_not_verified": [39303310867, 39305854779],
-      "pending_plan": "rerun linux-webkit-zen (push to cloud/webkit-zen) once the artifact exists: e2e job unpacks it in debian:13, overlays this commit's chrome JS (TEST-ONLY, labelled chrome-overlay), runs ./dev gui-test --engine webkit (launch, chrome, fixture, input) and scripts/webkit_zen_e2e.py (roundtrip)"
+      "label": "PASS (EXPERIMENTAL, fixture-only, Linux x86_64, WebRender software on Xvfb)",
+      "run": 39325934205,
+      "ci_results": "ci-results:cloud_webkit-zen/39325934205-1-webkit-zen-e2e/",
+      "where": "GitHub Actions ubuntu-24.04, pinned debian:trixie-20261005 container (unprivileged test user), WPE WebKit 2.48.3 host with bubblewrap sandbox on",
+      "app": "axiosozo-zen-linux-x86_64 artifact of linux-zen-build run 39319467610 (cloud/linux-platform, b0baccec) + TEST-ONLY chrome overlay of ed6b923 (chrome-overlay.json); compiled code is the artifact's",
+      "scenarios": {
+        "harness launch/chrome/fixture (--engine webkit)": "PASS",
+        "roundtrip": "PASS: Gecko fixture tab -> tab menu \"Open in WebKit\" (real right click) -> WebKit frames in Zen's content area, Gecko browser hidden -> xdotool typing \"webkit\" -> click Increment (count=1) -> fixture link to ?page=2 (generation 2->3, urlbar follows) -> Zen toolbar Back (generation 4, canGoForward) -> wheel scroll (77% pixels changed) -> \"Open in Firefox\" -> same Gecko content process (pid 8280), no host left",
+        "host_failure": "PASS: SIGKILL of the WebKit host while presenting -> ENGINE_EXIT_SIGNAL, same Gecko tab/URL/content process (pid 8368), typing \"kept\" reaches the Gecko page, no host left",
+        "three_engines": "PASS (run 39337226571, app artifact of linux-zen-build run 39325384904 / 832ac3e3 + TEST-ONLY chrome overlay d6b5542): one fixture tab, Zen tab menu \"Open in\" submenu opened and picked with real pointer clicks each time: Gecko -> WebKit (overlay canvas 939x704, tab engine attribute webkit) -> Gecko -> Chromium (CEF host 154.0.23 / Chromium 154.0.8037.17 in its namespace sandbox, render path native-osr-bgra, 2 frames, first frame 452 ms, tab title from host events, Gecko browser hidden) -> Gecko; the same Gecko content process (pid 8521) throughout"
+      },
+      "screenshots_inspected": "run-39325934205-e2e/*.png (curated 7 of 19): 01-gecko, 02-to-webkit-menu, 03-typed, 05-page2, 07-scrolled, 09-gecko-again, 12-gecko-typed-after-kill",
+      "not_verified": [
+        "the harness input scenario (types into the address bar: Linux parent SIGSEGV on Return, owned by cloud/linux-platform)",
+        "process-group cleanup (direct children reaped only)"
+      ],
+      "runs": [
+        39325934205,
+        39337226571
+      ],
+      "run_39337226571": {
+        "ci_results": "ci-results:cloud_webkit-zen/39337226571-1-webkit-zen-e2e/",
+        "harness": "PASS",
+        "roundtrip": "PASS (now through the three-engine submenu)",
+        "host_failure": "PASS",
+        "three_engines": "PASS",
+        "curated": "run-39337226571-e2e/ (20..24 screenshots inspected; the submenu popup itself is captured as a black rectangle by the Xvfb screenshot)"
+      }
     }
   },
   "not_claimed": [
-    "Zen E1/E2 with WebKit (no Zen run yet)",
-    "Chromium leg of Gecko -> WebKit -> Chromium -> Gecko on Linux (CEF on Linux is cloud/linux-cef; the facade switches via the Gecko tab, NOT_VERIFIED)",
+    "macOS E1/E2 (never READY without real macOS runs)",
     "WebKit web browsing (fixture only by design)",
-    "macOS WebKit (unavailable by design)"
+    "macOS WebKit (unavailable by design)",
+    "Chromium or WebKit web browsing inside Zen (fixture page only in this lineup)"
   ]
 }

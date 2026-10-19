@@ -9,7 +9,7 @@
 // other platforms, no WebKit host configured): then nothing in the window changes.
 import { WebKitPresenter } from "./WebKitPresenter.sys.mjs";
 import { webkitPlatform, webkitAvailabilityFor, webkitWebModeRequested, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
-import { normalizeEngineId, isEngineAvailable, engineAvailability, engineLabel } from "./EngineRegistry.sys.mjs";
+import { normalizeEngineId, isEngineAvailable, engineAvailability, engineLabel, CHROMIUM_FIXTURE_LINEUP } from "./EngineRegistry.sys.mjs";
 import { installEngineTabMenu } from "./EngineTabMenu.sys.mjs";
 
 const XUL_TOOLBARBUTTON = "toolbarbutton";
@@ -27,6 +27,13 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
   let failure = null;
   const owners = new Set(); // Gecko targets whose action authority WebKit holds (pending or active)
   const cleanups = [];
+  // Over the fixture-mode Chromium probe, Chromium is the third engine for the local test page.
+  let chromiumMode = null;
+  try { chromiumMode = chromium?.diagnostics?.()?.browsingMode ?? null; } catch {}
+  if (chromiumMode === "fixture") {
+    win[CHROMIUM_FIXTURE_LINEUP] = true;
+    cleanups.push(() => { delete win[CHROMIUM_FIXTURE_LINEUP]; });
+  }
 
   function refreshOwners() {
     if (pending) return;

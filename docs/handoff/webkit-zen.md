@@ -1,110 +1,74 @@
-Status: PARTIAL
+Status: DONE
 
-# Handoff: webkit-zen (WebKit as the third engine inside Zen)
+# webkit-zen handoff (19 Oct 2026, ~23:05Z)
 
-PR: https://github.com/AxioSOzo/AxioSozo-browser/pull/4 (draft, `cloud/webkit-zen` → `cloud/integration`).
-Branches: `cloud/webkit-zen` (PR branch, runs CI) and its identical mirror `claude/webkit-zen-engine-b4zzio`
-(the session's designated branch). Both were pushed with the same commits.
+PR: https://github.com/AxioSOzo/AxioSozo-browser/pull/7 (draft, `cloud/webkit-zen` → `cloud/integration`).
+PR #4 (the earlier webkit-zen PR) was already merged into cloud/integration, so this is a new draft PR.
+The branch is also mirrored to `claude/webkit-zen-e2e-kwfrgh`, the session branch. The workflow runs only on `cloud/webkit-zen`.
 
 ## Machine resources
-- Cloud session: Ubuntu 24.04, 4 vCPU, ~15 GiB RAM; no WPE, no Zen build, no Docker. Local runs: node unit
-  tests and `cargo test -p browser-core` only.
-- Linux evidence: GitHub Actions ubuntu-24.04 (4 vCPU, 16 GiB); WebKit work inside the pinned
-  `debian:trixie-20261005@sha256:913f6706…` image (lockfile `webkit.ci_image`).
+- Session: Claude Code cloud container (Ubuntu 24.04, 4 vCPU, ~15 GiB). Used only for node unit tests, git and the REST API.
+- Evidence: GitHub Actions `ubuntu-24.04` runners, inside the pinned `debian:trixie-20261005` container, as an unprivileged test user. Xvfb, WebRender software. WPE WebKit 2.48.3 host with bubblewrap. CEF 154.0.23 host with Chromium's namespace sandbox. Neither sandbox was disabled.
 
 ## What changed
-Zen side (apps/browser/chrome), all new unless noted; CEF files untouched:
-- `EngineStreamClient.sys.mjs`: engine-neutral engine-stream-v1 client: AXCF reader with optional §6.1
-  damage, exact target/generation adoption, one-credit frame acks (stale frames too), request ids
-  `<prefix>-<n>` ≤ 100,000, bounded in-flight requests and input queue (backpressure ends the engine),
-  heartbeat watchdog, fixed diagnostic codes, profile object for engine specifics. Written so CEF can later
-  become a profile (the planned engine-neutral extraction); nothing in CEF depends on it yet.
-- `WebKitEngineAdapter.sys.mjs`: WebKit fixture profile (§8.1): ready identity checked against the lockfile
-  pins (test keeps them equal), every web capability must be false, `target.engine:"webkit"`, no key verdicts,
-  `ime_commit_text` (≤1024), WebKit cursors default/pointer/text, history restore with HTTP 200 or 0, exit
-  codes reported as `ENGINE_EXIT_70/76`. `webkitAvailability()` reasons; `launchWebKit()` spawns
-  `$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost --stream <profile> <profile>` with exactly
-  PATH/HOME/TMPDIR/LANG, a fresh 0700 profile under the session runtime, removed on exit.
-- `WebKitPresenter.sys.mjs`: canvas overlay in the tab's own `browserStack` (Gecko browser kept loaded and
-  hidden); damage-rect conversion/upload (only the changed rectangle reaches `putImageData`); pointer, wheel
-  (rAF-coalesced, engine-stream sign), keys with XKB hardware codes (evdev+8 table by `KeyboardEvent.code`),
-  Zen keeps Ctrl/Alt/Super/F-key shortcuts (no verdicts), Ctrl+C/X/V/A/Z/Y → `edit`, unknown printable keys →
-  `ime_commit_text`; focus/visibility/resize; back/forward/reload/stop, `UpdateBackForwardCommands`,
-  `openTrustedLinkIn` (fixture URLs load in WebKit, anything else returns the tab to Firefox first), tab
-  label/title/URL bar. Failure, crash, protocol violation, failed fixture load or a Gecko navigation racing the
-  switch → overlay removed, Gecko tab shown unchanged. Switching back loads WebKit's current fixture address in
-  Gecko. Diagnostics: frames, damage frames, uploaded vs full pixels, draw time; `captureFixtureFrame()`.
-- `WebKitEngineControls.sys.mjs`: three-engine facade with the full `engineProbe` surface (`switchTo`,
-  `switchToWebKit/Chromium/Gecko`, `setTabEngine`, `applyEnginePreference`, `engineOf`, `isGeckoTargetActive`
-  (revokes Gecko authority for WebKit-owned tabs), `currentPage`, `navigate`, `focus`, `diagnostics`,
-  `captureWebKitFrame`, `dispose`). Chromium ↔ WebKit goes through Gecko. A toolbar indicator
-  (`#axiosozo-webkit-indicator`) shows while a tab is in WebKit and returns it to Firefox. Returns null on
-  macOS/other platforms or without `AXIOSOZO_WEBKIT_BINARY`, so nothing changes there.
-- `AxioSozoStartup.mjs` (3-line hook): `engineProbe = installWebKitEngine(..., {chromium}) ?? chromiumProbe`.
-- `EngineRegistry` webkit entry: label "WebKit" (was "Safari": WPE is not Safari), devLabel "WebKit (WPE)",
-  availability from `webkitAvailabilityFor(window)`. `EngineTabMenu`: one menu per window with a delegate
-  stack (the three-engine controls take over CEF's two-engine menu without editing CEFPresenter).
-  `EngineTabs`: installs for the facade (`tabSwitch`) and cycles via `switchTo`. `icons/engine-webkit.svg`
-  (own neutral glyph) + CSS rule. `BrowserCoordinator` target engine set gains `webkit`.
-- Contracts/core: `contracts/ipc-v1.schema.json` engine enums + `crates/browser-core` `Engine::Webkit`
-  (additive; test `webkit_engine_is_its_own_identity`).
-Tooling: `scripts/gui_engines/webkit.py` (standard harness hooks + `roundtrip()`), `scripts/webkit_zen_e2e.py`,
-`scripts/webkit_package.py` (`host`; `overlay-chrome` TEST-ONLY), `scripts/webkit_zen_container.sh`,
-`apps/browser/tests/webkit-engine.test.mjs`, `apps/browser/tests/webkit-host-live.test.mjs`,
-`.github/workflows/linux-webkit-zen.yml`, `docs/CAPABILITY_MATRIX.md` (WebKit column + gates),
-`docs/evidence/linux/webkit-zen/`.
+1. **Three engines in one Zen window** (commit d6b5542).
+   - Cause: run 39325934205 reported the three-engine leg as BLOCKED_ENV because `EngineRegistry` marked Chromium "not enabled" whenever `AXIOSOZO_ENGINE_PROBE=1`. Zen's tab menu therefore never offered Chromium, even though the fixture-mode Chromium probe was installed under the WebKit controls.
+   - Fix: `WebKitEngineControls` now sets `window[CHROMIUM_FIXTURE_LINEUP]` while it sits over a Chromium probe in `browsingMode: "fixture"`, and removes it on dispose. `EngineRegistry.chromiumAvailability()` then returns `{available: true, fixtureOnly: true}`, but only if the fixture probe env is also set.
+   - Unchanged: web mode, the Chromium fixture probe on its own (still toolbar-only) and macOS (no WebKit controls). Engine preferences still never apply in fixture mode (`EngineProbeControls` returns UNAVAILABLE).
+   - Files: `apps/browser/chrome/EngineRegistry.sys.mjs`, `apps/browser/chrome/WebKitEngineControls.sys.mjs`, and the tests `engine-registry.test.mjs` and `webkit-engine.test.mjs` (one new three-engine controls test).
+2. **E2E, three-engine submenu.** With three engines available, Zen's tab menu shows an "Open in" submenu. `scripts/gui_engines/webkit.py` `submenu_pick` opens it and clicks the entry with real xdotool pointer clicks.
+   - If the submenu does not open, it falls back to opening it by script and records `picked: "submenu (opened by script)"`. The fallback was not needed in run 39337226571, where every pick was `"submenu"`.
+3. **Evidence and docs.**
+   - `docs/evidence/linux/webkit-zen/STATUS.json`.
+   - Curated runs, all screenshots inspected: `run-39325934205-e2e/` (7 PNGs, result JSON, steps, overlay record, cef-check.log) and `run-39337226571-e2e/` (6 PNGs, result JSON).
+   - `docs/CAPABILITY_MATRIX.md`: new "Inside Zen on Linux" and "Three engines on one tab" rows, plus an evidence note.
 
 ## Commands / runs and results
-- Local: `node --test apps/browser/tests/*.test.mjs` → 2897 tests, 2872 pass, 5 fail; the same 5 fail on the
-  unmodified tree (project-reader integration, native-understand process: macOS helpers). Engine suites 0 fail.
-  `cargo test -p browser-core` 11/11. `cargo fmt --check` clean (after commit "rustfmt").
-- Actions `linux-webkit-zen` run **39305854779**: unit PASS, adapter PASS, e2e NOT_VERIFIED (no artifact).
-  Run 39303310867: unit PASS (182 node tests, 0 fail), adapter failed (Node permission, fixed).
-  Runs 39303695535 (cancelled) / 39305258878: adapter timed out in the test's own stdin shim (fixed; not an
-  adapter bug). Results: `ci-results:cloud_webkit-zen/<run>-1-webkit-zen-{unit,adapter,e2e}/`.
-- PR `Linux check and test` run 39303745122 failed on `cargo fmt` (my test; fixed) and the coordinator
-  lifecycle test gate, which fails the same way on `cloud/linux-cef` (39304094231): not this branch's.
+- Local: `node --test` on the nine workflow unit suites → 193 tests, 189 pass, 0 fail (the remaining 4 are skips). The whole `apps/browser/tests/*.test.mjs` suite had the same 5 pre-existing failures before and after my change (project-detection reader ×2, fake Node child ×3). The only difference is +1 passing test.
+- **Run 39325934205** (ed6b923; app artifact from run 39319467610, b0baccec, plus the TEST-ONLY chrome overlay):
+  - harness launch/chrome/fixture PASS
+  - roundtrip PASS
+  - host_failure PASS
+  - three_engines BLOCKED_ENV (registry, fixed above)
+- **Run 39337226571** (d6b5542; app artifact from linux-zen-build run 39325384904, 832ac3e3, plus the TEST-ONLY chrome overlay of d6b5542): unit, adapter and e2e jobs all succeeded.
+  - harness launch/chrome/fixture: PASS.
+  - roundtrip: PASS, now through the submenu. Gecko → WebKit, typing "webkit", Increment click, fixture link to ?page=2, Zen toolbar Back, wheel scroll, → Gecko.
+  - host_failure: PASS. The WebKit host was SIGKILLed while presenting; the same Gecko tab and content process survived and still accepted typing.
+  - three_engines: **PASS**. One fixture tab went Gecko → WebKit → Gecko → Chromium → Gecko.
+    - Chromium: native-osr-bgra, 2 frames, first frame 452 ms, title from host events, Gecko browser hidden.
+    - The Gecko content process stayed the same (pid 8521) throughout.
+  - Results: `ci-results:cloud_webkit-zen/39337226571-1-webkit-zen-{e2e,unit,adapter}/`.
 
 ## Verified vs NOT_VERIFIED
-- PASS (unit, scripted host): profile/ready validation, damage handling, generations, stale input, restore rules,
-  cursor set, exits 70/76, presenter (content-area overlay, damage-only upload, input routing, address bar, back,
-  return to Gecko, crash/failed-candidate/raced-navigation keep Gecko), facade (null on macOS, authority
-  revocation, preference refusal), registry/menu/glyph three-engine behaviour.
-- PASS (component, real WPE 2.48.3 host, run 39305854779; frames inspected): see
-  `docs/evidence/linux/webkit-zen/STATUS.json` (typed "wk" visible in the field, scroll, page 2, back restore 200,
-  resize, clean exit).
-- NOT_VERIFIED: Zen GUI E2E (WebKit pixels inside the Zen window, input through Zen, clean return) — waits on
-  the first Linux Zen build artifact (`linux-zen-build.yml` run 39293018395 on `cloud/linux-platform` was in its
-  mach build step at 19:05Z; run 39297942600 queued behind it). Chromium leg on Linux (needs cloud/linux-cef in
-  a Linux build). Per-context WebKit preference storage (context-v1 cannot carry `webkit`).
+- PASS (EXPERIMENTAL, fixture page only, Linux x86_64): WebKit inside Zen, and the three-engine round trip on one Zen tab.
+- This is the first verified Chromium-inside-Zen GUI run on Linux, but only in fixture mode under the three-engine lineup.
+- NOT_VERIFIED:
+  - the harness `input` scenario (address-bar typing; Linux parent SIGSEGV on Return, owned by cloud/linux-platform)
+  - Chromium web mode inside Zen on Linux
+  - process-group cleanup (only direct children were reaped)
+  - macOS (WebKit is unavailable there by design; never READY)
+- `three_engines` is still optional in `scripts/webkit_zen_e2e.py`, so it does not count toward the job's exit status. It passed, but a regression would not turn the job red.
 
-## Blockers
-- No Linux Zen build artifact yet (owned by cloud/linux-platform).
+## Blockers / notes for other workstreams
+- **cloud/linux-cef**: `native/chromium-host/probe.py check` exits 1 on Linux even when it passes (cef-check.log in run 39325934205 has the PASS JSON). `linux_check()` returns the sandbox dict and `main()` calls `sys.exit(commands[...]() or 0)`, so a dict exit value prints to stderr and exits 1. Fix: `linux_check()` should not return the dict, or `main` should exit 0 on a non-int result.
+  - Impact: `scripts/gui_engines/chromium.py prepare()` treats a non-zero exit as EngineUnavailable. The webkit-zen three-engine leg does not call it. I did not edit that file because it belongs to another workstream.
+- **Contract note**: `EngineRegistry.CHROMIUM_FIXTURE_LINEUP` (`Symbol.for("axiosozo.engines.chromium-fixture-lineup")`) is a window flag that only the three-engine controls set. Engine entries from `engineAvailability("chromium")` can now carry `fixtureOnly: true`, as WebKit's already did.
 
-## Interface / contract notes for other workstreams
-- Integration lead: AxioSozoStartup hook (3 lines); `BrowserCoordinator` accepts `webkit` targets;
-  ipc-v1/browser-core enum change is additive.
-- cloud/linux-cef: no CEF file was edited. `EngineStreamClient` duplicates the protocol core on purpose; the
-  later extraction can make CEF a profile (needs surface mode, web mode, UI delegation and a11y hooks).
-  `EngineTabMenu` now keeps one menu per window; a later installer takes over until it disposes.
-- cloud/linux-platform: `scripts/webkit_package.py overlay-chrome` is the TEST-ONLY way to run this commit's
-  chrome JS on a prebuilt artifact; `gui_test.py` is used unchanged (the WebKit plug-in appends its test pref
-  to the throwaway profile's user.js in `browser_environment`). Note `native/webkit-host/probe.py` defaults its
-  build root to `<checkout>/.local/build`, `storage.py` to `<checkout>/.build`: set `AXIOSOZO_BUILD_ROOT`.
-- cloud/webkit-host: no host change needed so far. Wished: a hello/ready field for the host's own build
-  fingerprint so Zen can bind to the exact binary; `frame_rate` hello from Gecko's vsync.
-- contexts: storing `engine_preference:"webkit"` needs a context contract version (readers reject it today).
+## Native-feel gaps seen in the screenshots (for the WebKit-feel / engine-feel workstreams)
+- **Tab favicon**: WebKit and Chromium tabs show a generic blue square instead of the page's favicon or an engine-marked favicon. The same square also stays on Gecko tabs after returning from another engine.
+- **Toolbar chips in Zen's narrow sidebar toolbar** (`browser-experience.css`):
+  - `#axiosozo-engine-probe` (the Chromium fixture probe) renders as an empty dashed placeholder next to the URL bar in Gecko and WebKit states.
+  - While a tab is in WebKit, the WebKit indicator ("WebKit 2.48.3 · test page only · back to Firefox"; diagnostics say it is not hidden) is not visible. `#axiosozo-webkit-indicator` is missing from the chip styling and has no `flex-shrink: 0`.
+  - While switching, "Switching engine…" overlaps the page heading.
+  - In Chromium state, the "Return to Gecko" chip spills from the sidebar onto the page content.
+- **Scrollbars**: WebKit shows none (no overlay scrollbar). Chromium draws classic scrollbars with arrows. Gecko draws a thin GTK one.
+- **Fonts**: the fixture's small-caps header renders serif in Gecko and Chromium but sans in WebKit (fontconfig fallback differs per engine). Form-control focus styles differ per engine (Chromium uses a 2px black focus ring).
+- **URL bar**: the narrow sidebar URL bar shows the middle of the URL ("7.0.0.1:33337/engin…").
+- **Screenshot capture**: the nested "Open in" submenu came out as a black rectangle in the Xvfb screenshot. The pick still worked through real clicks; this is either a capture-timing issue or popup painting under software WebRender.
+- **Performance**: tab-menu switch to WebKit took ≈4.3 s in CI, including host start; first WebKit frame ≈620 ms; first Chromium frame ≈450 ms.
 
 ## Next steps
-1. When an `axiosozo-zen-linux-x86_64` artifact exists (`gh api 'repos/AxioSOzo/AxioSozo-browser/actions/artifacts?name=axiosozo-zen-linux-x86_64'`),
-   push any change under the workflow paths to `cloud/webkit-zen` (or re-run the latest linux-webkit-zen run):
-   the e2e job runs `gui_test.py --engine webkit` and `webkit_zen_e2e.py`; read
-   `ci-results:cloud_webkit-zen/<run>-1-webkit-zen-e2e/{steps.log,harness/,roundtrip/}` and inspect the PNGs
-   (`roundtrip/02-webkit.png`, `03-typed.png`, `05-scrolled.png`, `06-page2.png`, `07-back.png`, `08-gecko-again.png`).
-2. Likely first fixes there: Zen runtime libraries on Debian 13 (`scripts/linux_packages.py gui` names),
-   omni.ja layout for the overlay, tab-menu geometry in Zen's sidebar, Alt+Left in Xvfb.
-3. Pin the Debian GUI package versions recorded in `dpkg-installed.tsv`/`deb-sha256.txt` of the first e2e run
-   into `upstreams.lock.json` (today only the WPE packages are pinned with sha256; GUI deps come from the signed
-   trixie index and are recorded per run).
-4. Then: Chromium leg once CEF runs in a Linux Zen build; context-v2 `webkit` preference; WebKit web mode only
-   after dialogs/permissions/downloads/TLS UI and a security-supported WebKit pin.
+1. Make `three_engines` required in `scripts/webkit_zen_e2e.py` (count it in the exit status) and have it wait for `pending: false` before the final screenshot.
+2. cloud/linux-cef: fix the `probe.py check` exit code (above).
+3. Engine-feel workstream: the toolbar-chip CSS for `#axiosozo-webkit-indicator` and the narrow-sidebar layout, favicons for out-of-process engine tabs, and scrollbar parity.
+4. Once Zen is rebuilt from a commit that contains d6b5542, drop the TEST-ONLY chrome overlay from the evidence (`CHROME_OVERLAY=0`).

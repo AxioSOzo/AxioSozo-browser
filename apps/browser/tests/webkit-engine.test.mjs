@@ -13,6 +13,8 @@ const webkit = await import("../chrome/WebKitEngineAdapter.sys.mjs");
 const { WebKitPresenter, linuxKeyboardRoute, streamKey, XKB_KEYS, bgraToRGBA, editAction } = await import("../chrome/WebKitPresenter.sys.mjs");
 const { installWebKitEngine } = await import("../chrome/WebKitEngineControls.sys.mjs");
 const { installEngineTabs } = await import("../chrome/EngineTabs.sys.mjs");
+const { isEngineAvailable } = await import("../chrome/EngineRegistry.sys.mjs");
+const engineAvailabilityOf = win => isEngineAvailable("chromium", win);
 const { EngineStreamHost, readStreamPacket, validateStreamInput, allowedFixtureURL, fitStreamSurface } = stream;
 const { WebKitEngineAdapter, webkitProfile, validateWebKitReady, webkitHostEnvironment, validWebKitSessionRuntime,
   webkitBinaryPath, WEBKIT_VERSION, LIBWPE_VERSION, WPEBACKEND_FDO_VERSION } = webkit;
@@ -436,7 +438,8 @@ test("controls are not installed on macOS or without a WebKit host; on Linux the
   assert.ok(controls);
   const state = controls.diagnostics();
   assert.equal(state.tabSwitch, true); assert.equal(state.pending, false); assert.equal(state.disposed, false);
-  assert.deepEqual(state.engines.map(e => [e.id, e.available]), [["gecko", true], ["chromium", false], ["webkit", true]]);
+  assert.deepEqual(state.engines.map(e => [e.id, e.available]), [["gecko", true], ["chromium", false], ["webkit", true]],
+    "the Chromium probe is not in fixture mode (AXIOSOZO_ENGINE_PROBE unset)");
   await controls.switchTo("webkit");
   assert.equal(controls.engineOf(f.tab), "webkit");
   const geckoTarget = f.gecko.target();
@@ -451,6 +454,35 @@ test("controls are not installed on macOS or without a WebKit host; on Linux the
   assert.ok(controlsWindowPresenter);
   await controls.dispose();
   assert.deepEqual(chromiumCalls, ["dispose"]);
+});
+
+test("over the fixture-mode Chromium probe the controls offer three engines: Gecko → WebKit → Gecko → Chromium → Gecko", async () => {
+  const f = controlsWindow();
+  const env = f.win.Services.env.get;
+  f.win.Services.env.get = name => (name === "AXIOSOZO_ENGINE_PROBE" ? "1" : env(name));
+  let chromiumEngine = "gecko";
+  const chromiumCalls = [];
+  const chromium = { engineOf: () => chromiumEngine, isGeckoTargetActive: () => chromiumEngine === "gecko",
+    switchToGecko: async () => { chromiumCalls.push("gecko"); chromiumEngine = "gecko"; },
+    switchToChromium: async () => { chromiumCalls.push("chromium"); chromiumEngine = "chromium"; },
+    diagnostics: () => ({ browsingMode: "fixture", pending: false }),
+    applyEnginePreference: async () => ({ applied: false }), currentPage: () => null, dispose: async () => chromiumCalls.push("dispose") };
+  const controls = installWebKitEngine(f.win, f.gecko, { chromium, Presenter: class extends WebKitPresenter {
+    constructor(win, gecko, options) { super(win, gecko, { ...options, launch: f.launch }); } } });
+  assert.deepEqual(controls.diagnostics().engines.map(e => [e.id, e.available, e.fixtureOnly ?? false]),
+    [["gecko", true, false], ["chromium", true, true], ["webkit", true, true]]);
+  await controls.switchTo("webkit");
+  assert.equal(controls.engineOf(f.tab), "webkit");
+  await controls.switchTo("gecko");
+  await controls.switchTo("chromium");
+  assert.equal(controls.engineOf(f.tab), "chromium");
+  await controls.switchTo("webkit");
+  assert.equal(controls.engineOf(f.tab), "webkit", "Chromium → WebKit leaves Chromium through the Gecko hub first");
+  await controls.switchTo("gecko");
+  assert.equal(controls.engineOf(f.tab), "gecko");
+  assert.deepEqual(chromiumCalls, ["chromium", "gecko"]);
+  await controls.dispose();
+  assert.equal(engineAvailabilityOf(f.win), false, "dispose removes the lineup marker");
 });
 
 test("the tab glyph installs for the three-engine controls and cycles through switchTo", async () => {
