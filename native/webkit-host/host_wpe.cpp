@@ -18,6 +18,7 @@
 #include <glib-unix.h>
 
 #include <atomic>
+#include <cmath>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -113,6 +114,7 @@ public:
   void reload() override { webkit_web_view_reload(view_); }
   void stop() override { webkit_web_view_stop_loading(view_); }
   void resize(int width, int height, double scale) override {
+    scale_ = scale;
     wpe_view_backend_dispatch_set_device_scale_factor(backend_, float(scale));
     wpe_view_backend_dispatch_set_size(backend_, uint32_t(width), uint32_t(height));
   }
@@ -155,6 +157,7 @@ private:
   guint frameTimer_ = 0;
   gint64 lastComplete_ = 0;
   int frameRate_ = 60;
+  double scale_ = 1;              // libwpe pointer/axis coordinates are device pixels
   uint32_t buttons_ = 0;          // wpe pointer button modifier mask while pressed
   std::string downText_;          // text the last keydown already inserted
   bool loadFailed_ = false, tlsFailed_ = false, detached_ = false;
@@ -229,6 +232,7 @@ const struct wpe_view_backend_exportable_fdo_client exportClient = {
 
 bool WpeView::create(int width, int height, double scale, int frameRate) {
   frameRate_ = frameRate;
+  scale_ = scale;
   box_ = new BackendBox();
   box_->owner = this;
   exportable_ = box_->exportable = wpe_view_backend_exportable_fdo_create(&exportClient, box_, uint32_t(width), uint32_t(height));
@@ -351,7 +355,8 @@ void WpeView::mouse(const MouseInput& mouse) {
   uint32_t button = mouse.button == "left" ? 1 : mouse.button == "right" ? 2 : 3;
   uint32_t mask = button == 1 ? wpe_input_pointer_modifier_button1 : button == 2 ? wpe_input_pointer_modifier_button2 : wpe_input_pointer_modifier_button3;
   struct wpe_input_pointer_event event {};
-  event.time = nowMs(); event.x = mouse.x; event.y = mouse.y;
+  // cef-v1 coordinates are CSS (view) pixels; WebKit divides libwpe's by the device scale.
+  event.time = nowMs(); event.x = int(std::lround(mouse.x * scale_)); event.y = int(std::lround(mouse.y * scale_));
   if (mouse.type == "move") {
     // Buttons held per cef-v1 flags or by an earlier `down` make this a drag.
     uint32_t held = buttons_;
@@ -374,7 +379,7 @@ void WpeView::wheel(const WheelInput& wheel) {
   // libwpe/libinput y_axis > 0 scrolls down.
   struct wpe_input_axis_2d_event event {};
   event.base.type = static_cast<wpe_input_axis_event_type>(wpe_input_axis_event_type_mask_2d | wpe_input_axis_event_type_motion_smooth);
-  event.base.time = nowMs(); event.base.x = wheel.x; event.base.y = wheel.y;
+  event.base.time = nowMs(); event.base.x = int(std::lround(wheel.x * scale_)); event.base.y = int(std::lround(wheel.y * scale_));
   event.base.modifiers = keyboardModifiers(wheel.modifiers) | buttons_;
   event.x_axis = -double(wheel.deltaX); event.y_axis = -double(wheel.deltaY);
   wpe_view_backend_dispatch_axis_event(backend_, &event.base);
