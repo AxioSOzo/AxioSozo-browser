@@ -165,6 +165,8 @@ class WebKitEngine(GuiEngine):
                       label: entry.getAttribute('label'), disabled: entry.getAttribute('disabled') === 'true'})) : null};
         """), 'tab context menu open', timeout=15)
         harness.screenshot(name + '-menu')
+        if opened.get('submenu') is not None:
+            return {'menu': opened, 'picked': self.submenu_pick(harness, label, name)}
         picked = harness.chrome_script("""
             const [label] = arguments;
             const menu = document.getElementById('tabContextMenu');
@@ -178,6 +180,39 @@ class WebKitEngine(GuiEngine):
         if not picked:
             raise AssertionError(f'tab menu has no enabled "{label}": ' + repr(opened))
         return {'menu': opened, 'picked': picked}
+
+    def submenu_pick(self, harness, label, name):
+        """Three engines: Zen's "Open in" submenu. Real pointer: hover the submenu, click the entry."""
+        def screen_box(selector):
+            return harness.chrome_script("""
+                const node = document.querySelector(arguments[0]);
+                if (!node || node.hidden) return null;
+                const r = node.getBoundingClientRect();
+                if (!(r.width > 0 && r.height > 0)) return null;
+                return {x: window.mozInnerScreenX + r.left + Math.min(r.width / 2, 40), y: window.mozInnerScreenY + r.top + r.height / 2,
+                        scale: window.devicePixelRatio, open: document.querySelector('#axiosozo-context-engine-menu > menupopup')?.state};
+            """, [selector])
+        menu_box = harness.wait(lambda: screen_box('#axiosozo-context-engine-menu'), '"Open in" submenu laid out', timeout=10)
+        harness.xdotool('mousemove', '--sync', round(menu_box['x'] * menu_box['scale']), round(menu_box['y'] * menu_box['scale']))
+        harness.xdotool('click', '1')
+        submenu_open = "return document.querySelector('#axiosozo-context-engine-menu > menupopup')?.state === 'open';"
+        how = 'submenu'
+        try:
+            harness.wait(lambda: harness.chrome_script(submenu_open) or None, '"Open in" submenu open', timeout=10)
+        except Exception:
+            # Recorded: the submenu was opened by script; the entry itself is still a real click.
+            how = 'submenu (opened by script)'
+            harness.chrome_script("document.getElementById('axiosozo-context-engine-menu').openMenu(true);")
+            harness.wait(lambda: harness.chrome_script(submenu_open) or None, '"Open in" submenu open (script)', timeout=10)
+        engine = label.removeprefix('Open in ')
+        selector = f'#axiosozo-context-engine-menu menuitem[label="{engine}"]:not([disabled="true"])'
+        entry = harness.wait(lambda: screen_box(selector), f'enabled "{engine}" entry in the submenu', timeout=10)
+        harness.screenshot(name + '-submenu')
+        harness.xdotool('mousemove', '--sync', round(entry['x'] * entry['scale']), round(entry['y'] * entry['scale']))
+        harness.xdotool('click', '1')
+        harness.wait(lambda: harness.chrome_script("return document.getElementById('tabContextMenu').state === 'closed';") or None,
+                     'tab menu closed after the pick', timeout=10)
+        return how
 
     # -- the full round trip -----------------------------------------------------------------
     def roundtrip(self, harness):

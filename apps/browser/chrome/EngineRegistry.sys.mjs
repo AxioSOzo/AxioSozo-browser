@@ -32,6 +32,22 @@ export function chromiumWebModeEnabled(window) {
   return envValue(window, "AXIOSOZO_ENGINE_PROBE") !== "1" && envValue(window, "AXIOSOZO_ENGINE_SWITCHING") === "1";
 }
 
+/**
+ * Set on a window (true) by the three-engine controls (WebKitEngineControls: Linux,
+ * WebKit host configured) while they sit over the fixture-mode Chromium probe. Chromium
+ * then joins the tab menu for the local test page only, beside fixture-only WebKit.
+ * The Chromium fixture probe on its own (no WebKit) stays a toolbar-only probe.
+ */
+export const CHROMIUM_FIXTURE_LINEUP = Symbol.for("axiosozo.engines.chromium-fixture-lineup");
+const fixtureOnlyYes = Object.freeze({ available: true, reason: null, fixtureOnly: true });
+
+/** {available, reason} for Chromium: web mode, or the fixture page inside the three-engine lineup. */
+export function chromiumAvailability(window) {
+  if (chromiumWebModeEnabled(window)) return yes;
+  if (window?.[CHROMIUM_FIXTURE_LINEUP] === true && envValue(window, "AXIOSOZO_ENGINE_PROBE") === "1") return fixtureOnlyYes;
+  return no("Chromium is not enabled in this browser");
+}
+
 const ENGINES = Object.freeze([
   Object.freeze({
     id: "gecko", label: "Firefox", devLabel: "Firefox (Gecko)", icon: `${ICON_BASE}engine-gecko.svg`,
@@ -43,7 +59,8 @@ const ENGINES = Object.freeze([
   Object.freeze({
     id: "chromium", label: "Chromium", devLabel: "Chromium (Blink)", icon: `${ICON_BASE}engine-chromium.svg`,
     experimental: true, contractValue: "chromium",
-    available: window => (chromiumWebModeEnabled(window) ? yes : no("Chromium is not enabled in this browser")),
+    // Web mode (AXIOSOZO_ENGINE_SWITCHING=1), or the fixture page inside the three-engine lineup.
+    available: window => chromiumAvailability(window),
   }),
   Object.freeze({
     // "WebKit", not "Safari": on Linux this is WPE WebKit, which is not Safari.
