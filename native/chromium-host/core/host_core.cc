@@ -451,10 +451,22 @@ static bool fitsSurface(const Value* w, const Value* h, const Value* scale) {
   double pw = std::ceil(w->number * scale->number), ph = std::ceil(h->number * scale->number);
   return pw <= 4096 && ph <= 4096 && pw * ph * 4 <= double(axio::MaxFrame);
 }
+// Diagnostics: the first few paints the host does not deliver, with the reason (stderr).
+static void paintDropped(Tab* tab, const char* reason) {
+  static int reported = 0;
+  if (reported >= 24) return;
+  reported++;
+  fprintf(stderr, "AXIO_CEF_PAINT_DROPPED reason=%s document_generation=%llu\n", reason,
+          static_cast<unsigned long long>(tab->target.num("document_generation")));
+}
 // `dirty` is the bounding box of the paint's dirty rectangles; null means the whole view.
 static void streamFrame(Tab* tab, const void* pixels, int w, int h, const cef_rect_t* dirty = nullptr) {
   // Any paint that is not delivered leaves the presenter's copy behind: the next is full.
-  if (!tab->live() || !tab->paintAllowed || tab->closing || streamClosing) { tab->fullDamage = true; return; }
+  if (!tab->live() || !tab->paintAllowed || tab->closing || streamClosing) {
+    paintDropped(tab, !tab->paintAllowed ? "not_committed" : "closing");
+    tab->fullDamage = true;
+    return;
+  }
   if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || uint64_t(w) * uint64_t(h) * 4 > axio::MaxFrame) {
     tabEvent(tab, "error", json::object({{"code", "unsupported_surface"}}));
     tab->paintAllowed = false;
@@ -463,6 +475,7 @@ static void streamFrame(Tab* tab, const void* pixels, int w, int h, const cef_re
   }
   // A queued old-size paint can arrive after WasResized; do not relabel it.
   if (w != int(std::ceil(tab->width * tab->scale)) || h != int(std::ceil(tab->height * tab->scale))) {
+    paintDropped(tab, "old_size");
     tab->fullDamage = true;
     return;
   }

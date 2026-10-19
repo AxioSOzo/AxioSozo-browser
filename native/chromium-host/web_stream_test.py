@@ -257,7 +257,10 @@ def run(interaction_timeout=15):
         if session:
             # Protocol events only (no pixels): the last few explain where it stopped.
             result['last_events'] = [{key: value for key, value in item.items() if key != 'target'}
-                                     for item in session.events[-12:]]
+                                     for item in session.events[-12:] if item.get('event') != 'heartbeat']
+            result['last_frame_targets'] = [dict(tab=target['tab_id'], doc=target['document_generation'])
+                                            for target in session.frame_targets[-8:]]
+            result['frames'] = session.frames
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if session:
