@@ -620,8 +620,14 @@ mod tests {
     #[test]
     fn webkit_engine_is_its_own_identity() {
         // Wire spelling and parsing: "webkit"; a Gecko grant never authorizes a WebKit target.
-        assert_eq!(serde_json::to_string(&Engine::Webkit).unwrap(), "\"webkit\"");
-        assert_eq!(serde_json::from_str::<Engine>("\"webkit\"").unwrap(), Engine::Webkit);
+        assert_eq!(
+            serde_json::to_string(&Engine::Webkit).unwrap(),
+            "\"webkit\""
+        );
+        assert_eq!(
+            serde_json::from_str::<Engine>("\"webkit\"").unwrap(),
+            Engine::Webkit
+        );
         assert!(serde_json::from_str::<Engine>("\"safari\"").is_err());
         let mut c = core();
         let t = target(&mut c, false);
