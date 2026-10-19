@@ -8,8 +8,11 @@
 // Chromium uses its user-namespace sandbox when the kernel allows it, otherwise
 // the SUID helper `chrome-sandbox` next to this executable (root:root, 4755); if
 // neither is usable Chromium refuses to start, which the probe reports.
+#include <dirent.h>
 #include <limits.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -64,6 +67,35 @@ static std::string ozonePlatform() {
   return display && *display ? "x11" : "headless";
 }
 
+// Chromium's ProcessSingleton binds <TMPDIR>/org.chromium.Chromium.XXXXXX/SingletonSocket
+// and aborts when that exceeds sockaddr_un.sun_path (108 bytes). Launchers pass the
+// private profile as TMPDIR, which is usually deeper than that allows, so the host
+// then moves TMPDIR to a fresh 0700 directory of its own under /tmp and removes it
+// after CEF shut down. Nothing else changes: the profile and caches stay where they were.
+static constexpr size_t SingletonSuffix = sizeof("/org.chromium.Chromium.XXXXXX/SingletonSocket");
+static std::string ownTemporary;
+static void removeTree(const std::string& path) {
+  if (DIR* directory = opendir(path.c_str())) {
+    while (dirent* entry = readdir(directory)) {
+      if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+      std::string child = path + "/" + entry->d_name;
+      struct stat info{};
+      if (lstat(child.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) removeTree(child);
+      else unlink(child.c_str());
+    }
+    closedir(directory);
+  }
+  rmdir(path.c_str());
+}
+static bool shortTemporaryDirectory() {
+  const char* current = getenv("TMPDIR");
+  if (current && *current && strlen(current) + SingletonSuffix <= sizeof(sockaddr_un::sun_path)) return true;
+  char path[] = "/tmp/axio-cef-XXXXXX";
+  if (!mkdtemp(path)) return false;
+  ownTemporary = path;
+  return setenv("TMPDIR", path, 1) == 0;
+}
+
 int main(int argc, char** argv) {
   bindCef();
   for (int i = 1; i < argc; ++i) {
@@ -103,8 +135,14 @@ int main(int argc, char** argv) {
     fprintf(stderr, "cannot resolve the host directory\n");
     return 70;
   }
+  if (!shortTemporaryDirectory()) {
+    fprintf(stderr, "cannot create a short private TMPDIR for Chromium's process singleton\n");
+    return 70;
+  }
   config.subprocessPath = directory + "/AxioCEFProbeHelper";
   config.switches.push_back("ozone-platform=" + ozonePlatform());
   fprintf(stderr, "AXIO_CEF_LINUX platform=%s ozone=%s\n", axio::platform::name(), ozonePlatform().c_str());
-  return axio::host::runBrowser(argc, argv, config);
+  int status = axio::host::runBrowser(argc, argv, config);
+  if (!ownTemporary.empty()) removeTree(ownTemporary);
+  return status;
 }
