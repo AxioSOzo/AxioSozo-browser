@@ -1,8 +1,8 @@
 # Linux CEF host evidence (cloud/linux-cef)
 
-This is a subset of the Actions run **39299854787** (`linux-cef-host`, commit
-`6a6ff57`). The full set is on the `ci-results` branch under
-`cloud_linux-cef/39299854787-1-linux-ubuntu-24.04{,-arm}/`.
+This is a subset of the Actions run **39303367159** (`linux-cef-host`, commit
+`7676eca`). The full set is on the `ci-results` branch under
+`cloud_linux-cef/39303367159-1-linux-ubuntu-24.04{,-arm}/`.
 
 | arch | runner | gates |
 | --- | --- | --- |
@@ -30,3 +30,6 @@ tests). **E1/E2 (inside Zen) are NOT_TESTED.** Nothing here is READY.
 - `cef-web-stream/*.png`: web mode, POST result (opaque white background) and a
   second tab.
 - `cef-damage/damage-last.png`: the frame-damage fixture.
+
+`zen-gui-chromium.json` is the GUI-harness job of the same run. It reports
+BLOCKED_ENV because no `linux-zen-build` run had produced a Linux Zen app artifact.
