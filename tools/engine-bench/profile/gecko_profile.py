@@ -105,7 +105,17 @@ class Symbols:
         self.report[Path(path).name if path else '?'] = len(entries)
         return self.cache[path]
 
-    def lookup(self, path, relative):
+    @staticmethod
+    def debug_file(path, code_id):
+        """Separate debug symbols by ELF build-id (e.g. libc6-dbg), else the library itself."""
+        if code_id and len(code_id) > 2:
+            candidate = Path('/usr/lib/debug/.build-id') / code_id[:2].lower() / (code_id[2:].lower() + '.debug')
+            if candidate.is_file():
+                return str(candidate)
+        return path
+
+    def lookup(self, path, relative, code_id=None):
+        path = self.debug_file(path, code_id)
         starts, entries = self.table(path)
         i = bisect.bisect_right(starts, relative) - 1
         if i >= 0:
@@ -156,7 +166,7 @@ def analyze_thread(thread, meta, libs, symbols, window=None):
             lib = libs.find(address)
             if lib:
                 relative = address - lib.get('start', 0) + lib.get('offset', 0)
-                name = symbols.lookup(lib.get('path') or lib.get('debugPath'), relative)
+                name = symbols.lookup(lib.get('path') or lib.get('debugPath'), relative, lib.get('codeId'))
                 text = f'{name} [{lib.get("name")}]' if name else f'[{lib.get("name")}]'
             else:
                 text = '[unknown]'

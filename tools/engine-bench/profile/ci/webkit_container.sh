@@ -21,7 +21,7 @@ export DEBIAN_FRONTEND=noninteractive
 rm -f /etc/apt/apt.conf.d/docker-clean
 log "apt bootstrap"
 apt-get update >"$OUT/apt-update.log" 2>&1
-apt-get install -y --no-install-recommends python3 ca-certificates procps xz-utils git binutils >"$OUT/apt-bootstrap.log" 2>&1
+apt-get install -y --no-install-recommends python3 ca-certificates procps xz-utils git binutils libc6-dbg >"$OUT/apt-bootstrap.log" 2>&1
 
 useradd -m -u 1500 axio
 chown axio:axio "$OUT"   # the unprivileged steps write the overlay report and bench results here
