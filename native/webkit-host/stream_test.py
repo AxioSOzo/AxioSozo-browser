@@ -92,6 +92,17 @@ def outside_damage_equal(previous, current, width, height, rect):
     return True
 
 
+def region(pixels, width, rect):
+    """Bytes of a physical-pixel rectangle (x, y, w, h) of a BGRA frame."""
+    x, y, w, h = rect
+    return b''.join(pixels[(row * width + x) * 4:(row * width + x + w) * 4] for row in range(y, y + h))
+
+
+# Interior of the fixture's text field at 2x (tests/fixtures/engine.html), right of the caret.
+INPUT_TEXT_2X = (240, 325, 530, 75)
+INPUT_FIELD_2X = (200, 318, 580, 90)
+
+
 class Session:
     def __init__(self, binary, origin, directory, frame_damage=False, timeout=30, hello_extra=None):
         self.origin, self.directory = origin, directory
@@ -101,7 +112,7 @@ class Session:
         (self.profile / 'tmp').mkdir(mode=0o700)
         self.error = (directory / 'stderr.log').open('wb')
         env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(self.profile), 'LANG': 'C.UTF-8',
-               'TMPDIR': str(self.profile / 'tmp')}
+               'TMPDIR': str(self.profile / 'tmp'), 'AXIOSOZO_WEBKIT_TRACE': '1'}
         self.started = time.monotonic()
         self.process = subprocess.Popen([str(binary), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.error,
@@ -125,6 +136,8 @@ class Session:
 
     def write(self, item):
         data = (json.dumps(item, separators=(',', ':')) + '\n').encode()
+        with (self.directory / 'commands.jsonl').open('a') as log:
+            log.write(json.dumps(dict(t=round(time.monotonic(), 4), method=item.get('method'), request_id=item.get('request_id'))) + '\n')
         if len(data) > 16384:
             raise ValueError('test request exceeds native bound')
         self.process.stdin.write(data)
@@ -150,6 +163,10 @@ class Session:
             else:
                 self.frames += 1
                 self.frame_log.append((time.monotonic(), item['frame_id'], item['width'], item['height'], item['device_scale']))
+                with (self.directory / 'frames.jsonl').open('a') as log:
+                    log.write(json.dumps(dict(t=round(time.monotonic(), 4), frame_id=item['frame_id'], width=item['width'],
+                                              generations=[item['target']['document_generation'], item['target']['navigation_generation']],
+                                              crc=zlib.crc32(pixels))) + '\n')
                 if self.frame_damage:
                     self.check_damage(item, pixels)
                 self.last = (item, bytes(pixels))
@@ -302,7 +319,10 @@ def scenario(session, origin, directory, engine, port='wpe'):
     count = session.frames
     session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='WPE')
     session.title('input=WPE |')
-    typed = session.frame_after(count, lambda item: session.last[1] != initial_pixels, capture=directory / 'input.png')
+    real = engine == 'webkit'
+    # The frame must show the typed text inside the field, not merely differ somewhere.
+    typed = session.frame_after(count, lambda item: region(session.last[1], 1800, INPUT_FIELD_2X) != region(initial_pixels, 1800, INPUT_FIELD_2X)
+                                if real else session.last[1] != initial_pixels, capture=directory / 'input.png', seconds=5)
     assert session.last[1] != initial_pixels, 'typed text changed no pixel'
     # CEF-style down/char/up inserts the character once.
     for key_type in ('down', 'char', 'up'):
@@ -328,7 +348,11 @@ def scenario(session, origin, directory, engine, port='wpe'):
     count = session.frames
     nav = session.command('navigate', url=origin + '/engine.html?page=2')
     session.title('page=2')
-    session.current_frame(count, capture=directory / 'page-2.png')
+    page2 = session.current_frame(count, capture=directory / 'page-2.png')
+    if real:
+        # A fresh document: its field is empty again. Old-document pixels never carry the new generation.
+        assert page2['width'] == 1800 and region(session.last[1], 1800, INPUT_TEXT_2X) == region(initial_pixels, 1800, INPUT_TEXT_2X), \
+            'page-2 frame shows the previous document'
     timings['navigate_to_frame_s'] = round(time.monotonic() - start, 3)
     assert session.completed(nav)['status'] == 'success'
     assert generations(session.target) == (before[0] + 1, before[1] + 1), (before, session.target)

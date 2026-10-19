@@ -92,6 +92,9 @@ uint32_t keysymForVirtualKey(uint32_t vk, bool shift) {
   }
 }
 uint32_t nowMs() { return uint32_t(g_get_monotonic_time() / 1000); }
+// Diagnostics only (AXIOSOZO_WEBKIT_TRACE=1): ordering of buffer exports and load events on stderr.
+bool tracing() { static const bool on = getenv("AXIOSOZO_WEBKIT_TRACE") != nullptr; return on; }
+#define AXIO_TRACE(...) do { if (tracing()) { fprintf(stderr, "AXIO_TRACE %lld ", (long long)(g_get_monotonic_time() / 1000)); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
 class WpeEngine;
 
@@ -282,6 +285,7 @@ void WpeView::exported(struct wpe_fdo_shm_exported_buffer* buffer) {
     wl_shm_buffer_begin_access(shm);
     uint32_t format = wl_shm_buffer_get_format(shm);
     int width = wl_shm_buffer_get_width(shm), height = wl_shm_buffer_get_height(shm), stride = wl_shm_buffer_get_stride(shm);
+    AXIO_TRACE("export %dx%d", width, height);
     auto* pixels = static_cast<const uint8_t*>(wl_shm_buffer_get_data(shm));
     if ((format == WL_SHM_FORMAT_ARGB8888 || format == WL_SHM_FORMAT_XRGB8888) && stride > 0)
       host_.frame(&tab_, pixels, width, height, size_t(stride),
@@ -403,6 +407,7 @@ void WpeView::connect() {
     WpeView* view = self(d);
     const char* uri = webkit_web_view_get_uri(v);
     std::string url = uri ? uri : "";
+    AXIO_TRACE("load-changed %d %s", int(event), url.c_str());
     if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; }
     else if (event == WEBKIT_LOAD_COMMITTED) view->host_.loadCommitted(&view->tab_, url);
     else if (event == WEBKIT_LOAD_FINISHED && !view->loadFailed_) {
