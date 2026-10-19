@@ -45,5 +45,6 @@ test('Jev refuses private/real context and stale schema', async () => {
   await assert.rejects(provider.decide({ ...input(), version: 2 }), { code: 'INVALID_INPUT' });
 });
 test('Keychain missing helper never falls back to plaintext storage', async () => {
-  await assert.rejects(new MacKeychain('/nonexistent/axiosozo-keychain').read(), { code: process.platform === 'darwin' ? 'KEYCHAIN_ERROR' : 'BLOCKED_ENV' });
+  // async wrapper: off macOS read() refuses synchronously (BLOCKED_ENV).
+  await assert.rejects(async () => new MacKeychain('/nonexistent/axiosozo-keychain').read(), { code: process.platform === 'darwin' ? 'KEYCHAIN_ERROR' : 'BLOCKED_ENV' });
 });

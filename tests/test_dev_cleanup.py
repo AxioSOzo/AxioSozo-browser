@@ -44,7 +44,7 @@ class FakeProcess:
 
 class OwnedRunCleanupTests(unittest.TestCase):
     def setUp(self):
-        names = ("signal", "subprocess", "os", "ROOT", "CARGO_HOME_DIR", "MOUNT")
+        names = ("signal", "subprocess", "os", "ROOT", "CARGO_HOME_DIR", "MOUNT", "LINUX")
         original = {name: getattr(candidate, name) for name in names}
         self.addCleanup(lambda: [setattr(candidate, name, value) for name, value in original.items()])
 
@@ -78,6 +78,9 @@ class OwnedRunCleanupTests(unittest.TestCase):
         candidate.ROOT = Path("/invented/owned/root")
         candidate.CARGO_HOME_DIR = SimpleNamespace(is_dir=lambda: False)
         candidate.MOUNT = "/invented/no-launch"
+        # Cleanup semantics are platform independent; the fake process has no
+        # stdout pipe, so exercise the inherited-stdio (macOS) path everywhere.
+        candidate.LINUX = False
 
     def test_normal_exit_has_no_cleanup_signal_or_extra_wait(self):
         self.configure([("exit", 0)])

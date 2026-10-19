@@ -651,8 +651,9 @@ class PackagingTests(unittest.TestCase):
 
     def test_materialization_copies_every_packaged_file_into_the_bundle(self):
         zen.overlay(self.upstream)
-        app = Path(self.directory.name) / 'AxioSozo Dev.app'
-        bundle = app / 'Contents/Resources/browser/chrome/browser/content/browser/axiosozo'
+        # Linux: dist/bin holds the resources directly; macOS: the .app bundle.
+        app = Path(self.directory.name) / ('bin' if zen.LINUX else 'AxioSozo Dev.app')
+        bundle = zen.resources_root(app) / 'browser/chrome/browser/content/browser/axiosozo'
         links = []
         for name, _ in zen.packaged_files():
             target = bundle / name

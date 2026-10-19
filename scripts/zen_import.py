@@ -93,15 +93,17 @@ ZEN_CONTENT_RESOURCES = {
 }
 
 
-def materialize_zen_content_resources(stage, app):
+def materialize_zen_content_resources(stage, app, resources=None):
     """Put reviewed Zen child resources inside the dev bundle, preserving sandbox.
 
     `mach build` uses symlinks for local development. The content sandbox can
     read the bundle but not the second symlink hop into `stage/src/zen`.
     Never broaden sandbox grants and never replace an unknown file or link.
+    `resources` is the packaged-chrome root: the macOS default is
+    `app/Contents/Resources`; Linux passes `dist/bin` (same layout below it).
     """
     source_root = stage / 'src'
-    bundle_root = app / 'Contents/Resources'
+    bundle_root = Path(resources) if resources is not None else app / 'Contents/Resources'
     if not source_root.is_dir() or not bundle_root.is_dir():
         raise RuntimeError('ZEN_CONTENT_BUNDLE_MISSING')
     replacements = []

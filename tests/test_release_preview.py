@@ -133,6 +133,11 @@ def make_repo(base):
     return repo
 
 
+# The macOS release flow stages on APFS under /Volumes (via /sbin/mount) and plans
+# codesign over a real .app; these cases have no Linux equivalent.
+MACOS_ONLY = unittest.skipUnless(sys.platform == 'darwin', 'macOS release staging/codesign (scripts/release/preview.py)')
+
+
 class Recorder:
     """Replaces preview.RUNNER. Local ditto/xattr run for real; Apple tools are simulated."""
 
@@ -218,6 +223,7 @@ class SourceGate(ReleaseTestCase):
 
 
 class SigningIdentity(ReleaseTestCase):
+    @MACOS_ONLY
     def test_missing_identity_blocks_after_identity_free_steps(self):
         apfs = self.apfs()
         repo, app, cef = make_repo(self.base), make_app(apfs / 'build'), make_cef(apfs / 'build')
@@ -243,6 +249,7 @@ class SigningIdentity(ReleaseTestCase):
         self.assertFalse(report['ready'])
         self.assertEqual(list(stage.glob('*.dmg')), [])
 
+    @MACOS_ONLY
     def test_ad_hoc_identity_is_not_accepted(self):
         apfs = self.apfs()
         repo, app = make_repo(self.base), make_app(apfs / 'build')
@@ -261,6 +268,7 @@ class SigningIdentity(ReleaseTestCase):
             preview.main(['--authorized'], repo=repo)
         self.assertEqual(raised.exception.code, 2)
 
+    @MACOS_ONLY
     def test_identity_path_signs_inside_out_without_contacting_apple(self):
         apfs = self.apfs()
         repo, app, cef = make_repo(self.base), make_app(apfs / 'build'), make_cef(apfs / 'build')
@@ -308,6 +316,7 @@ class DryRunPlan(ReleaseTestCase):
                          'cef-helper-jit.plist')
         self.assertTrue(all(step['command'][4:6] == ['--options', 'runtime'] for step in steps))
 
+    @MACOS_ONLY
     def test_dry_run_prints_every_codesign_and_modifies_nothing(self):
         apfs = self.apfs()
         repo, app, cef = make_repo(self.base), make_app(apfs / 'build'), make_cef(apfs / 'build')
@@ -398,6 +407,7 @@ class BundleChecks(ReleaseTestCase):
         codes = [item['code'] for item in bundle_checks.packaging(app)['findings']]
         self.assertEqual(codes, ['SYMLINKS_LEAVE_BUNDLE', 'TEST_ARTIFACTS_PRESENT'])
 
+    @MACOS_ONLY
     def test_exfat_stage_root_is_refused(self):
         repo, app = make_repo(self.base), make_app(self.base / 'build')
         if preview.filesystem_type(self.stage_root) in ('apfs', 'hfs'):
@@ -407,6 +417,7 @@ class BundleChecks(ReleaseTestCase):
         self.assertIn('STAGE_FILESYSTEM_UNSUPPORTED', output)
         self.assertEqual(self.stage_dirs(), [])
 
+    @MACOS_ONLY
     def test_stage_root_must_be_external(self):
         self.assertIsNotNone(preview.stage_root_problem('/tmp/release'))
         self.assertIsNotNone(preview.stage_root_problem(Path.home() / 'release'))

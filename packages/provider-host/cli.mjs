@@ -7,7 +7,7 @@ import path from 'node:path';
 import { discover, DRIVERS } from './src/discovery.mjs';
 import { livePreflight } from './src/adapters.mjs';
 import { DecisionProvider, DIAGNOSTIC_STATE } from './src/decision.mjs';
-import { MacKeychain } from './src/keychain.mjs';
+import { platformKeychain } from './src/keychain.mjs';
 import { providerBuildRoot } from './src/storage.mjs';
 import { SANDBOX_POLICY } from './src/sandbox.mjs';
 import { createLiveAdapter, LIVE_POLICY } from './src/live.mjs';
@@ -30,14 +30,23 @@ function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).filter(item => !item.name.startsWith('._')).flatMap(item => item.isDirectory() ? sourceFiles(path.join(directory, item.name)) : /\.(mjs|ts)$/.test(item.name) ? [path.join(directory, item.name)] : []);
 }
 function nativeRun(args) { return run('/Users/wout/.local/bin/dev-external', ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
+// Linux: no wrapper exists; storage.py exec routes temporary files into the build root.
+function linuxRun(args) { return run('/usr/bin/python3', [storageScript, 'exec', '--', '/usr/bin/cc', ...args]); }
+// libsecret compile/link flags; null when the development package is missing.
+function libsecretFlags() {
+  const result = spawnSync('pkg-config', ['--cflags', '--libs', 'libsecret-1'], { encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.trim().split(/\s+/u).filter(Boolean) : null;
+}
+const LINUX_POLICY = 'linux-secret-service-no-provider-sandbox-v1';
+const linuxBlocked = message => { throw Object.assign(new Error(message), { code: 'BLOCKED_ENV' }); };
 try {
   // Browser product AI calls are NOT_AUTHORIZED: the decision factory disables live
   // authorization before any Keychain read or fetch. OpenAI remains UNVERIFIED_SHAPE.
   // The understand runner likewise disables live CLIs (liveAuthorized: false).
   if (command === 'serve') await serveStdio({ createAdapter: createLiveAdapter,
-    createDecisionProvider: () => new DecisionProvider({ liveAuthorized: false, keyStore: { read: async () => new MacKeychain(helperPath()).read() },
-      openaiKeyStore: { read: async () => new MacKeychain(helperPath(), 'openai').read() } }),
-    createKeyStore: provider => new MacKeychain(helperPath(), provider),
+    createDecisionProvider: () => new DecisionProvider({ liveAuthorized: false, keyStore: { read: async () => platformKeychain(helperPath()).read() },
+      openaiKeyStore: { read: async () => platformKeychain(helperPath(), 'openai').read() } }),
+    createKeyStore: provider => platformKeychain(helperPath(), provider),
     createUnderstandRunner: () => new UnderstandRunner({ liveAuthorized: false }) });
   else if (command === 'discover') print({ version: 1, discovery: 'metadata-only; no client execution', providers: discover() });
   else if (command === 'clients') {
@@ -55,15 +64,27 @@ try {
       nativeRun(['-Wall', '-Wextra', '-Werror', '-fsyntax-only', '-fobjc-arc', path.join(root, 'native/keychain.m')]);
       if (!process.exitCode) nativeRun(['-Wall', '-Wextra', '-Werror', '-fsyntax-only', path.join(root, 'native/sandbox-launcher.c'), path.join(root, 'native/sandbox-probe.c')]);
     }
-    if (!process.exitCode) print({ status: 'PASS', check: 'Node syntax, TypeScript strip parsing, native Keychain and broker syntax' });
+    if (!process.exitCode && process.platform === 'linux') {
+      const flags = libsecretFlags();
+      if (!flags) linuxBlocked('libsecret-1 development files are missing (apt install libsecret-1-dev)');
+      for (const define of [[], ['-DAXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1']]) {
+        if (!process.exitCode) linuxRun(['-Wall', '-Wextra', '-Werror', '-fsyntax-only', ...define, path.join(root, 'native/secret-service.c'), ...flags.filter(flag => flag.startsWith('-I'))]);
+      }
+    }
+    if (!process.exitCode) print({ status: 'PASS', check: process.platform === 'linux'
+      ? 'Node syntax, TypeScript strip parsing, native Secret Service helper syntax (Linux has no provider sandbox broker: fail closed)'
+      : 'Node syntax, TypeScript strip parsing, native Keychain and broker syntax' });
   } else if (command === 'test') {
     const tests = readdirSync(path.join(root, 'tests')).filter(file => !file.startsWith('._') && file.endsWith('.test.mjs')).map(file => path.join(root, 'tests', file));
     run(process.execPath, ['--test', ...tests]);
   } else if (command === 'sandbox-test') {
-    run(process.execPath, ['--test', path.join(root, 'tests/sandbox.os.mjs')]);
+    // Linux has no provider sandbox broker yet: its test proves every launch path fails closed.
+    run(process.execPath, ['--test', path.join(root, process.platform === 'linux' ? 'tests/sandbox-linux.os.mjs' : 'tests/sandbox.os.mjs')]);
   } else if (command === 'keychain-negative-test') {
-    run(process.execPath, ['--test', path.join(root, 'tests/keychain.os.mjs')]);
+    run(process.execPath, ['--test', path.join(root, process.platform === 'linux' ? 'tests/secret-service.os.mjs' : 'tests/keychain.os.mjs')]);
   } else if (command === 'keychain-positive-setup') {
+    // Linux: the isolated positive fixture is part of tests/secret-service.os.mjs (private bus + keyring).
+    if (process.platform === 'linux') linuxBlocked('Linux has no separate positive Keychain fixture build; keychain-negative-test covers a private Secret Service');
     if (process.platform !== 'darwin') throw Object.assign(new Error('Isolated Keychain fixture requires macOS'), { code: 'BLOCKED_ENV' });
     if (run('/Users/wout/.local/bin/mount-dev-storage', [])) {
       const source = path.join(root, 'native/keychain-positive.m'); const binary = path.join(providerBuildRoot(), 'keychain-positive');
@@ -75,7 +96,27 @@ try {
       }
     }
   } else if (command === 'keychain-positive-test') {
+    if (process.platform === 'linux') linuxBlocked('macOS Keychain positive fixture; on Linux see keychain-negative-test (private Secret Service round trip)');
     run(process.execPath, ['--test', path.join(root, 'tests/keychain-positive.os.mjs')]);
+  } else if (command === 'setup' && process.platform === 'linux') {
+    // Secret Service helper (and its fixture-only negative build). No sandbox broker
+    // is built: Linux provider launches stay BLOCKED_ENV (sandbox.mjs, live.mjs, checks.mjs).
+    const flags = libsecretFlags();
+    if (!flags) linuxBlocked('libsecret-1 development files are missing (apt install libsecret-1-dev)');
+    const helper = helperPath(); mkdirSync(path.dirname(helper), { recursive: true, mode: 0o700 });
+    const source = path.join(root, 'native/secret-service.c');
+    const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+    const artifacts = {};
+    if (linuxRun(['-Wall', '-Wextra', '-Werror', '-O2', source, ...flags, '-o', helper])) artifacts.keychain = { binary_sha256: hash(helper), source_sha256: hash(source) };
+    const negative = path.join(providerBuildRoot(), 'keychain-negative');
+    if (!process.exitCode && linuxRun(['-Wall', '-Wextra', '-Werror', '-O2', '-DAXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1', source, ...flags, '-o', negative])) {
+      artifacts['keychain-negative'] = { binary_sha256: hash(negative), source_sha256: hash(source), define: 'AXIOSOZO_KEYCHAIN_NEGATIVE_TEST=1' };
+    }
+    if (!process.exitCode) {
+      writeFileSync(path.join(providerBuildRoot(), 'native-build.json'), JSON.stringify({ version: 1, policy: LINUX_POLICY, artifacts }, null, 2) + '\n', { mode: 0o600 });
+      print({ status: 'PASS', helper, key_store: 'Linux Secret Service (libsecret)', sandbox_artifacts: [],
+        provider_sandbox: 'UNSUPPORTED_ON_LINUX: provider clients are refused (fail closed)', keychain_credential_operations: 'not executed' });
+    }
   } else if (command === 'setup') {
     if (process.platform !== 'darwin') throw Object.assign(new Error('Keychain helper requires macOS'), { code: 'BLOCKED_ENV' });
     if (!run('/Users/wout/.local/bin/mount-dev-storage', [])) process.exitCode = 78;
@@ -137,7 +178,7 @@ try {
     if (![driver, ...flags].includes('--authorized')) throw Object.assign(new Error('Explicit Jev diagnostic authorization required; no Keychain/network access occurred'), { code: 'BLOCKED_AUTH' });
     const helper = helperPath();
     if (!existsSync(helper)) throw Object.assign(new Error('Run provider-host setup to build the Keychain helper'), { code: 'BLOCKED_ENV' });
-    const result = await new DecisionProvider({ liveAuthorized: true, keyStore: new MacKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
+    const result = await new DecisionProvider({ liveAuthorized: true, keyStore: platformKeychain(helper) }).decide({ version: 1, request_id: 'explicit-jev-diagnostic', context_version: 'synthetic-1', deadline_ms: Date.now() + 5000, state: DIAGNOSTIC_STATE });
     print(result); if (result.reason !== 'validated') process.exitCode = 78;
   } else {
     print({ status: 'UNSUPPORTED', command, usage: 'discover | clients [--refresh] | serve | check | test | setup | sandbox-test | keychain-negative-test | keychain-positive-setup | keychain-positive-test | live codex|claude-code|antigravity | jev-test --authorized', drivers: DRIVERS }); process.exitCode = 64;

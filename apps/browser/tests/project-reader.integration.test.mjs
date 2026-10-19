@@ -78,9 +78,16 @@ function realSubprocess() {
   return Subprocess;
 }
 
+// macOS: the workstation wrapper's external TMPDIR. Linux: scripts/storage.py
+// exec's TMPDIR inside the Linux build root (AXIOSOZO_BUILD_ROOT/tmp/).
+async function externalTemporaryPrefix() {
+  if (process.platform === "linux" && process.env.AXIOSOZO_BUILD_ROOT) return `${await realpath(process.env.AXIOSOZO_BUILD_ROOT)}/tmp/`;
+  return "/Volumes/AxioSozoBuild/workstation/tmp/";
+}
+
 async function syntheticFixture(t) {
   const externalTemporary = await realpath(process.env.TMPDIR ?? "");
-  assert.ok(externalTemporary.startsWith("/Volumes/AxioSozoBuild/workstation/tmp/"), "use external workstation wrapper TMPDIR");
+  assert.ok(externalTemporary.startsWith(await externalTemporaryPrefix()), "use external workstation wrapper TMPDIR");
   const base = await mkdtemp(join(externalTemporary, "reader-integration-"));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = join(base, "harbor-synthetic"), outside = join(base, "outside-synthetic");
