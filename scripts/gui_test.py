@@ -79,7 +79,19 @@ return {title: document.title, windowtype: document.documentElement.getAttribute
         appName: Services.appinfo.name, appVersion: Services.appinfo.version,
         platformVersion: Services.appinfo.platformVersion, os: Services.appinfo.OS,
         widget: Services.appinfo.widgetToolkit,
-        contentSandboxLevel: Services.prefs.getIntPref("security.sandbox.content.level", -1)};
+        contentSandboxLevel: Services.prefs.getIntPref("security.sandbox.content.level", -1),
+        compositor: (() => { try { return window.windowUtils.layerManagerType; } catch (e) { return String(e); } })(),
+        gfx: (() => {
+          const info = {};
+          try {
+            const gfx = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
+            for (const key of ["adapterDescription", "adapterVendorID", "adapterDriver", "adapterDriverVersion",
+                               "windowProtocol", "desktopEnvironment"]) {
+              try { info[key] = gfx[key]; } catch {}
+            }
+          } catch (e) { info.error = String(e); }
+          return info;
+        })()};
 """
 
 
