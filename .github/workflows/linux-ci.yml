@@ -1,0 +1,90 @@
+# Deterministic Linux gates: ./dev doctor (report only), ./dev check, ./dev test.
+# No browser build, no GUI, no provider/model calls, no secrets.
+name: Linux check and test
+
+on:
+  pull_request:
+    branches: [cloud/integration]
+  push:
+    branches: ['cloud/linux-**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash  # -eo pipefail: a piped ./dev keeps its exit status
+    env:
+      # Outside the checkout: storage.py refuses build roots inside tracked source.
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner resources
+        run: |
+          uname -a
+          nproc
+          free -h
+          df -h / /home/runner
+          cat /etc/os-release | head -2
+
+      - name: System packages (scripts/linux_packages.py test)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py test)
+
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json)
+        run: echo "$(python3 scripts/ci_tools.py node)" >> "$GITHUB_PATH"
+
+      - name: Rust 1.94.0 (rustup, signed channel manifest)
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.94.0
+          rustc --version
+          node --version
+
+      - name: Cargo dependencies (exact lockfile, project Cargo home)
+        run: ./dev setup --only cargo
+
+      - name: ./dev doctor (report; exits nonzero until a full build exists)
+        run: ./dev doctor || echo "doctor exit $? (expected without a Zen build)"
+
+      - name: ./dev check
+        run: ./dev check 2>&1 | tee check.log
+
+      - name: ./dev test
+        run: ./dev test 2>&1 | tee test.log
+
+      - name: Gate summaries
+        if: always()
+        run: |
+          for log in check.log test.log; do
+            [ -f "$log" ] || continue
+            echo "### $log" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            sed -n '/gate summary/,$p' "$log" | head -80 >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-check-test-logs
+          path: |
+            check.log
+            test.log
+          retention-days: 14
+          if-no-files-found: ignore

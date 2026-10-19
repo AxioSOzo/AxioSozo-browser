@@ -1,0 +1,79 @@
+# Re-run the Linux GUI harness against an already built Linux app artifact
+# (no rebuild): `./dev fetch-build` downloads the newest successful
+# linux-zen-build artifact (or the run given as input), then `./dev gui-test`.
+#
+# Triggers: manual dispatch (once this file is on the default branch), or a pull
+# request against cloud/integration carrying the `linux-gui` label (every push
+# re-runs it while the label is present).
+name: Linux GUI test
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: linux-zen-build run id (default newest successful)
+        required: false
+      engine:
+        description: Engine plug-in (scripts/gui_engines)
+        default: gecko
+  pull_request:
+    types: [labeled, synchronize]
+    branches: [cloud/integration]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: linux-gui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gui:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'linux-gui')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner resources
+        run: |
+          uname -a; nproc; free -h; df -h /
+
+      - name: GUI packages (scripts/linux_packages.py gui)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui)
+
+      - name: Fetch the newest Linux build artifact
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -n "$RUN_ID" ]; then
+            ./dev fetch-build --repo "$REPOSITORY" --run "$RUN_ID"
+          else
+            ./dev fetch-build --repo "$REPOSITORY"
+          fi
+
+      - name: GUI harness
+        env:
+          ENGINE: ${{ inputs.engine || 'gecko' }}
+        run: ./dev gui-test --app fetched --engine "$ENGINE" --scenario all --screenshot "gui/linux-$ENGINE-fixture.png" --evidence-dir gui/evidence
+
+      - name: Upload GUI evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: axiosozo-gui-linux-x86_64
+          path: gui/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -20,8 +20,29 @@ class EntrypointGates(unittest.TestCase):
     def test_browser_uses_volume_root_cef_from_any_build_root(self):
         environment = dev.browser_environment()
         self.assertEqual(environment["AXIOSOZO_CEF_ROOT"], str(dev.storage.VOLUME))
-        self.assertEqual(environment["AXIOSOZO_CEF_BINARY"],
-                         str(dev.storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"))
+        with patch.object(dev, "LINUX", False):
+            self.assertEqual(dev.cef_binary(),
+                             str(dev.storage.VOLUME / "cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe"))
+        with patch.object(dev, "LINUX", True), patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AXIOSOZO_CEF_BINARY", None)
+            self.assertEqual(dev.cef_binary(), str(dev.storage.VOLUME / "cef/linux/AxioCEFProbe"))
+
+    def test_linux_blocked_components_are_listed_but_not_failures(self):
+        dev.RESULTS.clear()
+        self.addCleanup(dev.RESULTS.clear)
+        with patch.object(dev, "LINUX", True), patch.dict(os.environ, {"AXIOSOZO_STRICT": "0"}):
+            dev.record("macOS-only fixture", 2, blocked=True)
+            self.assertFalse(dev.outcome([0, 2]))
+            # A nonzero result without a BLOCKED_ENV record still fails.
+            self.assertTrue(dev.outcome([0, 2, 1]))
+            dev.record("real failure", 1)
+            self.assertTrue(dev.outcome([0, 2, 1]))
+        with patch.object(dev, "LINUX", True), patch.dict(os.environ, {"AXIOSOZO_STRICT": "1"}):
+            dev.RESULTS[:] = [("macOS-only fixture", "BLOCKED_ENV", 2)]
+            self.assertTrue(dev.outcome([2]))
+        with patch.object(dev, "LINUX", False):
+            dev.RESULTS[:] = [("macOS gate", "BLOCKED_ENV", 2)]
+            self.assertTrue(dev.outcome([2]))  # macOS exit codes are unchanged
 
     def test_failed_build_does_not_test_stale_binary(self):
         with patch.object(dev, "run", return_value=0) as run, \

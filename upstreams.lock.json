@@ -98,5 +98,152 @@
       "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
       "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html"
     }
+  },
+  "zen_toolchain_linux_x86_64": {
+    "node": {
+      "version": "22.22.3",
+      "filename": "node-v22.22.3-linux-x64.tar.xz",
+      "url": "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-x64.tar.xz",
+      "sha256": "2e5d13569282d016861fae7c8f935e741693c269101a5bebcf761a5376d1f99f",
+      "checksum_source": "https://nodejs.org/dist/v22.22.3/SHASUMS256.txt"
+    },
+    "rust": {
+      "version": "1.95.0",
+      "filename": "rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "url": "https://static.rust-lang.org/dist/rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "2e0338f18ecbaa4a0f631b9e80e8b8e26bb6fe77dd5454fba8a70cf96c1e84a1",
+      "checksum_source": "https://static.rust-lang.org/dist/rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz.sha256",
+      "audited_installer_sha256": "3d5a09d2e414c74e2bb6df12b233c4f8ccc8af4e3dfc9fe38401947a1a1acadd",
+      "std_component": "rust-std-x86_64-unknown-linux-gnu"
+    },
+    "python": {
+      "version": "3.11.16",
+      "distribution": "astral-sh/python-build-standalone",
+      "release": "20260901",
+      "filename": "cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16%2B20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "faa0758583a63f14c5eee516af82738403b59c13edda6fc0a21d953febd89eed",
+      "checksum_source": "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+    },
+    "tar": {
+      "version": "1.35",
+      "filename": "tar-1.35.tar.xz",
+      "url": "https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz",
+      "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
+      "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html",
+      "audited_installer_sha256": "c01446d5f9e51df7754dbd9ea8a4b14f93ed876d27a319fe429633db3d7de7e5"
+    },
+    "wasi": {
+      "version": "34.0",
+      "filename": "wasi-sdk-34.0-x86_64-linux.tar.gz",
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz",
+      "sha256": "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4",
+      "checksum_source": "https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34",
+      "asset_id": 528366474,
+      "size": 192383077
+    },
+    "sccache": {
+      "version": "0.18.0",
+      "optional": true,
+      "note": "Compiler cache; downloaded and used only when AXIOSOZO_SCCACHE=1 (CI, repeat builds).",
+      "filename": "sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz",
+      "url": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89",
+      "checksum_source": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz.sha256"
+    }
+  },
+  "zen_toolchain_linux_aarch64": {
+    "node": {
+      "version": "22.22.3",
+      "filename": "node-v22.22.3-linux-arm64.tar.xz",
+      "url": "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-arm64.tar.xz",
+      "sha256": "1c4a9933a5e45bc88f54f70b5f91232c127ec49f1a5989d23fb85824c7adf9b7",
+      "checksum_source": "https://nodejs.org/dist/v22.22.3/SHASUMS256.txt"
+    },
+    "rust": {
+      "version": "1.95.0",
+      "filename": "rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz",
+      "url": "https://static.rust-lang.org/dist/rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "094c9c36531911c5cc7dd6ab2d3069ab8dcd744d6239b0bda1387b243dfc391e",
+      "checksum_source": "https://static.rust-lang.org/dist/rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "audited_installer_sha256": "3d5a09d2e414c74e2bb6df12b233c4f8ccc8af4e3dfc9fe38401947a1a1acadd",
+      "audit_note": "install.sh hash read from the x86_64 Linux archive (the same rust-installer script as the macOS pin); setup refuses to run this archive's install.sh if it differs.",
+      "std_component": "rust-std-aarch64-unknown-linux-gnu"
+    },
+    "python": {
+      "version": "3.11.16",
+      "distribution": "astral-sh/python-build-standalone",
+      "release": "20260901",
+      "filename": "cpython-3.11.16+20260901-aarch64-unknown-linux-gnu-install_only.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16%2B20260901-aarch64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "c1cca4af741e33d47871b298842e6c3272cd9e8f57daf8085359fcbfe2d1a5aa",
+      "checksum_source": "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+    },
+    "tar": {
+      "version": "1.35",
+      "filename": "tar-1.35.tar.xz",
+      "url": "https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz",
+      "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
+      "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html",
+      "audited_installer_sha256": "c01446d5f9e51df7754dbd9ea8a4b14f93ed876d27a319fe429633db3d7de7e5"
+    },
+    "wasi": {
+      "version": "34.0",
+      "filename": "wasi-sdk-34.0-arm64-linux.tar.gz",
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-arm64-linux.tar.gz",
+      "sha256": "f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971",
+      "checksum_source": "https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34",
+      "asset_id": 528366381,
+      "size": 192255247
+    },
+    "sccache": {
+      "version": "0.18.0",
+      "optional": true,
+      "note": "Compiler cache; downloaded and used only when AXIOSOZO_SCCACHE=1 (CI, repeat builds).",
+      "filename": "sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz",
+      "url": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz",
+      "sha256": "2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a",
+      "checksum_source": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz.sha256"
+    }
+  },
+  "ci_node": {
+    "version": "24.14.0",
+    "purpose": "Node for ./dev check and ./dev test on Linux CI (matches provider_host.node); installed by scripts/ci_tools.py",
+    "linux-x86_64": {
+      "filename": "node-v24.14.0-linux-x64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.xz",
+      "sha256": "41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df",
+      "checksum_source": "https://nodejs.org/dist/v24.14.0/SHASUMS256.txt"
+    },
+    "linux-aarch64": {
+      "filename": "node-v24.14.0-linux-arm64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-arm64.tar.xz",
+      "sha256": "e7adfca03d9173276114a6f2219df1a7d25e1bfd6bbd771d3f839118a2053094",
+      "checksum_source": "https://nodejs.org/dist/v24.14.0/SHASUMS256.txt"
+    }
+  },
+  "ci_rust": {
+    "version": "1.94.0",
+    "purpose": "Coordinator cargo fmt/clippy/test on Linux CI (matches coordinator.rust)",
+    "installer": "rustup toolchain install 1.94.0 --profile minimal; rustup verifies every component against the signed official channel manifest",
+    "channel_manifest": "https://static.rust-lang.org/dist/channel-rust-1.94.0.toml"
+  },
+  "ci_github_actions": {
+    "actions/checkout": {
+      "version": "v7.0.1",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    "actions/cache": {
+      "version": "v6.1.0",
+      "commit": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+    },
+    "actions/upload-artifact": {
+      "version": "v7.0.2",
+      "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+    },
+    "actions/download-artifact": {
+      "version": "v8.0.2",
+      "commit": "9000827ccba6bdab643e8b6fd33ac0654aef8333"
+    }
   }
 }

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Project-only APFS build volume on T9; never create, resize or detach disk images.
+"""Project-only build storage.
 
+macOS: the APFS build volume on T9; never create, resize or detach disk images.
 The build volume `AxioSozoBuild` lives inside the shared `Dev.sparsebundle`
 image next to the `AxioSozo` source volume. Detaching that image would take
 down the source volume, so this script only ever attaches and mounts.
+
+Linux: a plain, user-owned directory. By default the gitignored `.build/`
+directory of this checkout; `AXIOSOZO_BUILD_ROOT` may name another absolute
+directory (for example a larger disk). No volume, image, mount helper or
+macOS path is used or required.
 """
 import argparse
 import contextlib
@@ -11,15 +17,24 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import platform
 import plistlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+# Platform selection. Every macOS path below stays as it was; Linux uses
+# linux_build_root() and never calls a macOS helper, hdiutil or diskutil.
+LINUX = platform.system() == 'Linux'
+# Gitignored default Linux build root of this checkout (see .gitignore).
+LINUX_DEFAULT_ROOT = ROOT / '.build'
+# Linux build roots never live in kernel/virtual filesystems.
+LINUX_FORBIDDEN = (Path('/proc'), Path('/sys'), Path('/dev'))
 IMAGE = Path('/Volumes/T9/Dev.sparsebundle')
 # APFS volume name of the build volume inside IMAGE.
 VOLUME_NAME = 'AxioSozoBuild'
@@ -50,9 +65,28 @@ MOUNT_LOCK_WAIT = 120
 POLL_INTERVAL = 1
 
 
+def linux_build_root(value=None):
+    """Linux: AXIOSOZO_BUILD_ROOT (absolute, normalized, outside the source tree
+    except the gitignored default) or the default `<checkout>/.build`."""
+    raw = os.environ.get('AXIOSOZO_BUILD_ROOT') if value is None else value
+    if not raw:
+        return LINUX_DEFAULT_ROOT
+    path = Path(raw)
+    if (not path.is_absolute() or os.path.normpath(raw) != str(path) or path == Path('/')
+            or any(path == forbidden or forbidden in path.parents for forbidden in LINUX_FORBIDDEN)):
+        raise RuntimeError('INVALID_AXIOSOZO_BUILD_ROOT: ' + str(raw))
+    # Never put build output into tracked source, or make the checkout part of
+    # the build root; only the gitignored default lives inside the checkout.
+    if path != LINUX_DEFAULT_ROOT and (path == ROOT or ROOT in path.parents or path in ROOT.parents):
+        raise RuntimeError('INVALID_AXIOSOZO_BUILD_ROOT: ' + str(raw) + ' (inside or above the checkout)')
+    return path
+
+
 def build_root(value=None):
     """The volume root, or one named build root directly below it. Anything
     else (relative, nested, `..`, a shared top-level name) is refused."""
+    if LINUX:
+        return linux_build_root(value)
     raw = os.environ.get('AXIOSOZO_BUILD_ROOT') if value is None else value
     if not raw or Path(raw) == VOLUME:
         return VOLUME
@@ -64,6 +98,10 @@ def build_root(value=None):
 
 
 BUILD_ROOT = build_root()
+if LINUX:
+    # No shared volume on Linux: the build root also holds the pinned
+    # toolchains, the Cargo home and the engine components.
+    VOLUME = BUILD_ROOT
 
 
 def image_entities():
@@ -95,8 +133,27 @@ def volume_verified():
             and str(info.get('FilesystemType', '')).lower() == 'apfs')
 
 
+def linux_ready():
+    """Linux: the build root is an existing, user-owned real directory."""
+    try:
+        info = BUILD_ROOT.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+            and BUILD_ROOT.resolve() == BUILD_ROOT)
+
+
+def linux_free_gib():
+    existing = BUILD_ROOT
+    while not existing.exists() and existing != existing.parent:
+        existing = existing.parent
+    return round(shutil.disk_usage(existing).free / 2**30, 2)
+
+
 def mounted():
     """The verified project volume is mounted and this build root exists on it."""
+    if LINUX:
+        return linux_ready()
     if not volume_verified():
         return False
     if BUILD_ROOT != VOLUME:
@@ -107,6 +164,12 @@ def mounted():
 
 
 def report():
+    if LINUX:
+        ready = linux_ready()
+        return {'platform': 'linux', 'build_root': str(BUILD_ROOT),
+                'default_build_root': str(LINUX_DEFAULT_ROOT),
+                'configured_by': 'AXIOSOZO_BUILD_ROOT' if os.environ.get('AXIOSOZO_BUILD_ROOT') else 'default',
+                'mounted': ready, 'build_free_gib': linux_free_gib()}
     active = mounted()
     return {'image': str(IMAGE), 'volume_name': VOLUME_NAME, 'mountpoint': str(VOLUME),
             'build_root': str(BUILD_ROOT), 'mounted': active, 'image_exists': IMAGE.exists(),
@@ -241,7 +304,22 @@ def mount_lock():
         yield
 
 
+def linux_ensure():
+    """Create the Linux build root (private) and refuse links or foreign owners."""
+    BUILD_ROOT.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        BUILD_ROOT.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    if not linux_ready():
+        raise RuntimeError('UNSAFE_AXIOSOZO_BUILD_ROOT: ' + str(BUILD_ROOT)
+                           + ' must be a real directory owned by this user (no symlink)')
+    return report()
+
+
 def ensure():
+    if LINUX:
+        return linux_ensure()
     mount_shared()
     if mounted():
         return report()
@@ -290,8 +368,11 @@ def main():
     if args.command == 'setup':
         print(json.dumps(ensure(), indent=2))
         return 0
-    # Run this via dev-external. Its inherited defaults are overridden only for
-    # this owned command; no global helper or user configuration is modified.
+    # macOS: run this via dev-external. Its inherited defaults are overridden only
+    # for this owned command; no global helper or user configuration is modified.
+    # Linux: there is no wrapper; the build root is created on demand.
+    if LINUX:
+        linux_ensure()
     if not mounted():
         raise RuntimeError('Project APFS volume is not mounted; run storage.py setup')
     argv = args.argv[1:] if args.argv[:1] == ['--'] else args.argv
