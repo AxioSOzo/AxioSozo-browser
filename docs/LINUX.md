@@ -168,3 +168,66 @@ Engine plug-ins live in `scripts/gui_engines/<name>.py` and export
 WebKit (`cloud/webkit-host`) are stubs reporting BLOCKED_ENV until those
 workstreams implement them; `assert_rendered` must use engine-reported state
 and screenshots, never Gecko's DOM.
+
+## Native feel (workstream gecko-linux-feel)
+
+Goal: on GNOME and KDE, AxioSozo should behave like the stock Firefox those
+users know, not like a macOS app ported over. Every Linux change is gated on
+the platform; macOS text and behaviour stay byte-for-byte as they were.
+
+### What changed
+
+| Area | Linux behaviour | Where |
+| --- | --- | --- |
+| Wording | "this Mac" → "this computer", "the macOS Keychain" → "the system keyring (Secret Service)", `⌘K` → `Ctrl+K`, "press Return" → "press Enter" in about:axiosozo, the Lab, providers, site rules and toasts. Only authored strings are rewritten, never project names, titles or URLs. `platform-words.test.mjs` fails on any new unwrapped Mac-ism. | `apps/browser/chrome/overview/platform-words.mjs` (`words()`, `shortcutLabel()`, `data-platform-words`) |
+| Shortcuts | Browser actions and the Ask AI panel use Ctrl (Super belongs to the desktop). Region capture's Control-click-as-right-click is macOS-only; on Linux Ctrl+click still opens a link in a new tab. | `BrowserExperience.sys.mjs`, `ProviderPanel.sys.mjs`, `RegionCapture.sys.mjs` |
+| Scrolling | Firefox 156's own wheel and smooth-scroll defaults instead of Zen's "fastfox" tuning (Zen doubles `mousewheel.default.delta_multiplier_y` and raises `min_line_scroll_amount`). Kinetic scrolling (`apz.gtk.kinetic_scroll.enabled`) and overlay scrollbars stay on, as in Firefox. | `LinuxDesktop.sys.mjs` (default branch only, at startup) |
+| Window controls | `zen.view.hide-window-controls=false`: close/minimize/maximize stay visible when GTK draws client-side decorations (composited GNOME/KDE). Under a non-composited WM the WM frame draws them. | `LinuxDesktop.sys.mjs` |
+| First window | Firefox maximizes the first window on screens under 1280×1040 (browser-init.js). Zen's welcome locks the window to 1200×720 and left it so; on Linux it now gets Firefox's size when the welcome ends. | `installLinuxWindowSizing()` |
+| Welcome | Without an H.264 decoder (Fedora, minimal installs, CI) Zen's welcome video never paints and the white title was unreadable on light grey; a deep-green backdrop sits behind the video. | `linux-desktop.css` |
+| Desktop entry | `python3 scripts/linux_desktop.py install [--app PATH]` writes `AxioSozoDev.desktop` and hicolor icons under `$XDG_DATA_HOME`. `StartupWMClass=AxioSozoDev` is what Gecko puts in WM_CLASS (and the Wayland app id): the GTK program name from `RemotingName`. It never sets the default browser (`xdg-settings set default-web-browser AxioSozoDev.desktop` is the user's choice). | `scripts/linux_desktop.py` |
+
+Why the prefs are set at runtime and not in `defaults.yaml`: Zen's ffprefs
+sorts all YAML prefs by name and breaks ties by directory listing order, so a
+second entry for a pref Zen already defines would win or lose depending on the
+file system.
+
+### Kept as stock Firefox on Linux (checked by the harness)
+
+`middlemouse.paste=true`, `general.autoScroll=false`, overlay scrollbars,
+`widget.use-xdg-desktop-portal.file-picker=2` (GTK file chooser; the portal
+inside Flatpak/Snap; set it to 1 on KDE for the KDE dialog), fontconfig
+hinting/antialiasing (chrome uses the GTK "Sans" font), the system colour
+scheme (GTK dark → chrome, about:axiosozo and web content dark), WebRender with
+the GPU when available. On real desktops: hardware video decoding
+(`media.hardware-video-decoding.enabled`) and dmabuf are Firefox's defaults;
+`gfx.webrender.all` is not needed. CI runs WebRender software (llvmpipe).
+
+### The feel harness
+
+```sh
+python3 scripts/gui_gecko_feel.py --app fetched [--wm auto|metacity|openbox|none] \
+  [--desktop GNOME|KDE|none] [--theme light|dark] [--scale 1|2] [--first-run] [--strict]
+```
+
+Built on `scripts/gui_test.py` (same private Xvfb/D-Bus/profile and
+test-only Marionette switches). It adds a window manager (metacity, which also
+composites) to the private display, because a bare Xvfb has none: that is why
+the first Linux screenshots showed a 1152×720 window — Firefox asked for a
+maximized window and nobody executed it. It also sets `XDG_CURRENT_DESKTOP`
+for the app as a desktop session does: on X11 Gecko only uses client-side
+decorations (Zen's own titlebar buttons) when it is set
+(`nsWindow::GetSystemGtkWindowDecoration`); without it the WM draws a frame. `linux-gecko-feel.yml` runs six modes against
+the baseline artifact (before) and this branch's build (after, `--strict`).
+It never types into the address bar (WebRender crash, cloud/linux-platform).
+
+### What remains
+
+- A real GNOME/KDE session (mutter/KWin, Wayland) is NOT_VERIFIED: CI uses
+  Xvfb + metacity with `XDG_CURRENT_DESKTOP` set. Wayland app-id grouping follows from the same
+  prgname but was not observed.
+- No packaged .deb/.rpm/Flatpak: the tarball plus `linux_desktop.py` is the
+  development integration.
+- Zen's welcome still shows its own 1200×720 window during onboarding (Zen design).
+- GPU paths (dmabuf, VA-API, hardware WebRender) cannot be measured on the
+  CI runners.

@@ -220,7 +220,7 @@ class FeelHarness(Harness):
     def __init__(self, args, engine, evidence):
         super().__init__(args, engine, evidence)
         self.result.update({'harness': 'axiosozo-linux-gecko-feel', 'label': args.label,
-                            'mode': {'wm': args.wm, 'compositor': args.compositor, 'theme': args.theme, 'scale': args.scale,
+                            'mode': {'wm': args.wm, 'desktop': args.desktop, 'compositor': args.compositor, 'theme': args.theme, 'scale': args.scale,
                                      'first_run': args.first_run},
                             'checks': {}})
         self.wm = None
@@ -242,8 +242,7 @@ class FeelHarness(Harness):
         self.result['wm'] = self.wm or 'none'
         if self.args.wm not in ('none', 'auto') and not self.wm:
             raise Blocked(f'window manager {self.args.wm} not available')
-        # GNOME and KDE always composite; GTK only offers client-side
-        # decorations (Zen's own titlebar buttons) on a composited screen.
+        # metacity composites by itself; xcompmgr is for openbox.
         self.compositor = None
         if self.wm and self.args.compositor != 'none' and which('xcompmgr'):
             log = (self.evidence / 'compositor.log').open('w')
@@ -522,8 +521,11 @@ def main():
     parser.add_argument('--evidence-dir')
     parser.add_argument('--label', default='local', help='before/after (recorded only)')
     parser.add_argument('--wm', default='auto', choices=('auto', 'metacity', 'openbox', 'none'))
-    parser.add_argument('--compositor', default='auto', choices=('auto', 'xcompmgr', 'none'),
-                        help='composite the screen under the window manager (GTK client-side decorations)')
+    parser.add_argument('--compositor', default='none', choices=('auto', 'xcompmgr', 'none'),
+                        help='extra compositor (metacity composites by itself; for openbox)')
+    parser.add_argument('--desktop', default='GNOME', choices=('GNOME', 'KDE', 'none'),
+                        help='XDG_CURRENT_DESKTOP for the app, as a desktop session sets it; on X11 Gecko draws '
+                             'client-side decorations (Zen\'s titlebar buttons) only when it is set')
     parser.add_argument('--theme', default='light', choices=('system', 'light', 'dark'))
     parser.add_argument('--scale', type=int, default=1, choices=(1, 2))
     parser.add_argument('--first-run', action='store_true', help='keep the Zen welcome (do not mark it seen)')
@@ -540,6 +542,8 @@ def main():
     if any(item not in SCENARIOS for item in scenarios):
         parser.error('--scenario takes all or: ' + ','.join(SCENARIOS))
     extra_env = {'GSETTINGS_BACKEND': 'memory'}
+    if args.desktop != 'none' and args.wm != 'none':
+        extra_env['XDG_CURRENT_DESKTOP'] = args.desktop
     if args.theme != 'system':
         extra_env['GTK_THEME'] = 'Adwaita:dark' if args.theme == 'dark' else 'Adwaita'
     if args.scale != 1:
