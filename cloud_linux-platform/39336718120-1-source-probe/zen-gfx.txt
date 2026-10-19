@@ -1,0 +1,114 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:1:diff --git a/gfx/webrender_bindings/WebRenderAPI.cpp b/gfx/webrender_bindings/WebRenderAPI.cpp
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:2:--- a/gfx/webrender_bindings/WebRenderAPI.cpp
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:3:+++ b/gfx/webrender_bindings/WebRenderAPI.cpp
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-4-@@ -298,11 +298,13 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-5-                 panic_on_gl_error, picTileWidth, picTileHeight,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-6-                 gfx::gfxVars::WebRenderRequiresHardwareDriver(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:7:                 StaticPrefs::gfx_webrender_low_quality_pinch_zoom_AtStartup(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:8:                 StaticPrefs::gfx_webrender_max_shared_surface_size_AtStartup(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:9:                 StaticPrefs::gfx_webrender_enable_subpixel_aa_AtStartup(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-10--                compositor->ShouldUseLayerCompositor())) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-11-+                compositor->ShouldUseLayerCompositor(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-12-+                StaticPrefs::
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:13:+                    gfx_webrender_opaque_backdrop_fallback_AtStartup())) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-14-           // wr_window_new puts a message into gfxCriticalNote if it returns
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-15-           // false
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-16-           MOZ_ASSERT(errorMessage);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-17-           error.AssignASCII(errorMessage);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-18-           wr_api_free_error_msg(errorMessage);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:19:diff --git a/gfx/webrender_bindings/src/bindings.rs b/gfx/webrender_bindings/src/bindings.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:20:--- a/gfx/webrender_bindings/src/bindings.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:21:+++ b/gfx/webrender_bindings/src/bindings.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-22-@@ -1998,10 +1998,11 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-23-     reject_software_rasterizer: bool,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-24-     low_quality_pinch_zoom: bool,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-25-     max_shared_surface_size: i32,
+--
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-43-     };
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-44- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-45-     let window_size = DeviceIntSize::new(window_width, window_height);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-46-     let notifier = Box::new(CppNotifier { window_id });
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:47:diff --git a/gfx/wr/webrender/src/device/gl.rs b/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:48:--- a/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:49:+++ b/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-50-@@ -3982,10 +3982,14 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-51- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-52-     pub fn disable_color_write(&self) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-53-         self.gl.color_mask(false, false, false, false);
+--
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-61-         if enable {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-62-             self.gl.enable(gl::BLEND);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-63-         } else {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-64-             self.gl.disable(gl::BLEND);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:65:diff --git a/gfx/wr/webrender/src/renderer/init.rs b/gfx/wr/webrender/src/renderer/init.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:66:--- a/gfx/wr/webrender/src/renderer/init.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:67:+++ b/gfx/wr/webrender/src/renderer/init.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-68-@@ -204,6 +204,8 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-69-     pub low_quality_pinch_zoom: bool,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-70-     pub max_shared_surface_size: i32,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-71-     /// If true, open a debug socket to listen for remote debugger.
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-72-     /// Relies on `debugger` cargo feature being enabled.
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-73-     pub enable_debugger: bool,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:74:+    /// See explanation of `gfx.webrender.opaque-backdrop-fallback`.
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-75-+    pub opaque_backdrop_fallback: bool,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-76- }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-77-@@ -277,10 +279,11 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-78-             enable_instancing: true,
+--
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-98-         target_frame_publish_id: None,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-99-         pending_result_msg: None,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-100-         layer_compositor_frame_state_in_prev_frame: None,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-101-         external_composite_debug_items: Vec::new(),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:102:diff --git a/gfx/wr/webrender/src/renderer/mod.rs b/gfx/wr/webrender/src/renderer/mod.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:103:--- a/gfx/wr/webrender/src/renderer/mod.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:104:+++ b/gfx/wr/webrender/src/renderer/mod.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-105-@@ -867,13 +867,15 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-106-     buffer_damage_tracker: BufferDamageTracker,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-107- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-108-     max_primitive_instance_count: usize,
+--
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-159-   mirror: once
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-160- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-161-+# Make backdrop-filter treat its captured backdrop as if it had been
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-162-+# composited over an opaque-black background. (See bug 2036640)
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:163:+- name: gfx.webrender.opaque-backdrop-fallback
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-164-+  type: bool
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-165-+  value: true
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-166-+  mirror: once
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-167-+
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-168- # Disable wait of GPU execution completion
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:169: - name: gfx.webrender.wait-gpu-finished.disabled
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-170-   type: bool
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-171-   value: false
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-172-   mirror: once
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-173-
+--
+zen/src/widget/Theme-cpp.patch-6- #include "mozilla/gfx/Filters.h"
+zen/src/widget/Theme-cpp.patch-7- #include "mozilla/gfx/Rect.h"
+zen/src/widget/Theme-cpp.patch-8- #include "mozilla/gfx/Types.h"
+zen/src/widget/Theme-cpp.patch-9-+#include "mozilla/nsZenBoostsBackend.h"
+zen/src/widget/Theme-cpp.patch:10: #include "mozilla/webrender/WebRenderAPI.h"
+zen/src/widget/Theme-cpp.patch-11- #include "nsCSSColorUtils.h"
+zen/src/widget/Theme-cpp.patch-12- #include "nsCSSRendering.h"
+zen/src/widget/Theme-cpp.patch-13-@@ -671,10 +672,15 @@ template <typename PaintBackendData>
+zen/src/widget/Theme-cpp.patch-14- void Theme::PaintTextField(PaintBackendData& aPaintData,
+--
+zen/src/zen/@types/lib.gecko.glean.d.ts-8342-    scaling: GleanCustomDistribution;
+zen/src/zen/@types/lib.gecko.glean.d.ts-8343-  };
+zen/src/zen/@types/lib.gecko.glean.d.ts-8344-
+zen/src/zen/@types/lib.gecko.glean.d.ts-8345-  gfxFeature: {
+zen/src/zen/@types/lib.gecko.glean.d.ts:8346:    webrender: GleanString;
+zen/src/zen/@types/lib.gecko.glean.d.ts-8347-  };
+zen/src/zen/@types/lib.gecko.glean.d.ts-8348-
+zen/src/zen/@types/lib.gecko.glean.d.ts-8349-  gfxHdr: {
+zen/src/zen/@types/lib.gecko.glean.d.ts-8350-    windowsDisplayColorspaceBitfield: GleanQuantity;
+--
+zen/src/zen/@types/lib.gecko.glean.d.ts-16160-    gpuProcess: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts-16161-    hwCompositing: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts-16162-    omtp: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts-16163-    openglCompositing: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts:16164:    webrender: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts-16165-    wrCompositor: GleanObject;
+zen/src/zen/@types/lib.gecko.glean.d.ts-16166-  };
+zen/src/zen/@types/lib.gecko.glean.d.ts-16167-
+zen/src/zen/@types/lib.gecko.glean.d.ts-16168-  windowsSecurity: {

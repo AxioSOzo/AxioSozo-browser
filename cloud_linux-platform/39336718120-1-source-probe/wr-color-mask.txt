@@ -1,0 +1,55 @@
+ff/gfx/wr/swgl/src/swgl_fns.rs-1626-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1627-
+ff/gfx/wr/swgl/src/swgl_fns.rs-1628-    fn blend_equation(&self, mode: GLenum) {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1629-        unsafe {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1630-            BlendEquation(mode);
+ff/gfx/wr/swgl/src/swgl_fns.rs-1631-        }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1632-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1633-
+ff/gfx/wr/swgl/src/swgl_fns.rs-1634-    fn blend_equation_separate(&self, mode_rgb: GLenum, mode_alpha: GLenum) {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1635-        panic!();
+ff/gfx/wr/swgl/src/swgl_fns.rs-1636-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1637-
+ff/gfx/wr/swgl/src/swgl_fns.rs:1638:    fn color_mask(&self, r: bool, g: bool, b: bool, a: bool) {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1639-        panic!();
+ff/gfx/wr/swgl/src/swgl_fns.rs-1640-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1641-
+ff/gfx/wr/swgl/src/swgl_fns.rs-1642-    fn cull_face(&self, mode: GLenum) {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1643-        panic!();
+ff/gfx/wr/swgl/src/swgl_fns.rs-1644-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1645-
+ff/gfx/wr/swgl/src/swgl_fns.rs-1646-    fn front_face(&self, mode: GLenum) {
+ff/gfx/wr/swgl/src/swgl_fns.rs-1647-        panic!();
+ff/gfx/wr/swgl/src/swgl_fns.rs-1648-    }
+ff/gfx/wr/swgl/src/swgl_fns.rs-1649-
+ff/gfx/wr/swgl/src/swgl_fns.rs-1650-    fn enable(&self, cap: GLenum) {
+--
+ff/gfx/wr/webrender/src/device/gl.rs-3877-        );
+ff/gfx/wr/webrender/src/device/gl.rs-3878-    }
+ff/gfx/wr/webrender/src/device/gl.rs-3879-
+ff/gfx/wr/webrender/src/device/gl.rs-3880-    pub fn enable_scissor(&self) {
+ff/gfx/wr/webrender/src/device/gl.rs-3881-        self.gl.enable(gl::SCISSOR_TEST);
+ff/gfx/wr/webrender/src/device/gl.rs-3882-    }
+ff/gfx/wr/webrender/src/device/gl.rs-3883-
+ff/gfx/wr/webrender/src/device/gl.rs-3884-    pub fn disable_scissor(&self) {
+ff/gfx/wr/webrender/src/device/gl.rs-3885-        self.gl.disable(gl::SCISSOR_TEST);
+ff/gfx/wr/webrender/src/device/gl.rs-3886-    }
+ff/gfx/wr/webrender/src/device/gl.rs-3887-
+ff/gfx/wr/webrender/src/device/gl.rs-3888-    pub fn enable_color_write(&self) {
+ff/gfx/wr/webrender/src/device/gl.rs:3889:        self.gl.color_mask(true, true, true, true);
+ff/gfx/wr/webrender/src/device/gl.rs-3890-    }
+ff/gfx/wr/webrender/src/device/gl.rs-3891-
+ff/gfx/wr/webrender/src/device/gl.rs-3892-    pub fn disable_color_write(&self) {
+ff/gfx/wr/webrender/src/device/gl.rs:3893:        self.gl.color_mask(false, false, false, false);
+ff/gfx/wr/webrender/src/device/gl.rs-3894-    }
+ff/gfx/wr/webrender/src/device/gl.rs-3895-
+ff/gfx/wr/webrender/src/device/gl.rs-3896-    pub fn set_blend(&mut self, enable: bool) {
+ff/gfx/wr/webrender/src/device/gl.rs-3897-        if enable {
+ff/gfx/wr/webrender/src/device/gl.rs-3898-            self.gl.enable(gl::BLEND);
+ff/gfx/wr/webrender/src/device/gl.rs-3899-        } else {
+ff/gfx/wr/webrender/src/device/gl.rs-3900-            self.gl.disable(gl::BLEND);
+ff/gfx/wr/webrender/src/device/gl.rs-3901-        }
+ff/gfx/wr/webrender/src/device/gl.rs-3902-        #[cfg(debug_assertions)]
+ff/gfx/wr/webrender/src/device/gl.rs-3903-        {
+ff/gfx/wr/webrender/src/device/gl.rs-3904-            self.shader_is_ready = false;
+ff/gfx/wr/webrender/src/device/gl.rs-3905-        }

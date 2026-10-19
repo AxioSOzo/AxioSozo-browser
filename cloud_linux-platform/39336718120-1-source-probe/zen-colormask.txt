@@ -1,0 +1,37 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-47-diff --git a/gfx/wr/webrender/src/device/gl.rs b/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-48---- a/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-49-+++ b/gfx/wr/webrender/src/device/gl.rs
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-50-@@ -3982,10 +3982,14 @@
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-51- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-52-     pub fn disable_color_write(&self) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:53:         self.gl.color_mask(false, false, false, false);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-54-     }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-55- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:56:+    pub fn set_color_mask(&self, r: bool, g: bool, b: bool, a: bool) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:57:+        self.gl.color_mask(r, g, b, a);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-58-+    }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-59-+
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-60-     pub fn set_blend(&mut self, enable: bool) {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-61-         if enable {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-62-             self.gl.enable(gl::BLEND);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-63-         } else {
+--
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-133--                    dest * device_to_framebuffer,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-134-+                    dest_fb_rect,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-135-                     TextureFilter::Linear,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-136-                 );
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-137-+
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-138-+                if self.opaque_backdrop_fallback {
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:139:+                    self.device.set_color_mask(false, false, false, true);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-140-+                    self.device.clear_target(
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-141-+                        Some([0.0, 0.0, 0.0, 1.0]),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-142-+                        None,
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-143-+                        Some(dest_fb_rect),
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-144-+                    );
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch:145:+                    self.device.set_color_mask(true, true, true, true);
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-146-+                }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-147-             }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-148-         }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-149-     }
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-150- 
+zen/src/external-patches/firefox/allow_backdrop_to_work_on_transparency.patch-151-     fn draw_picture_cache_target(
