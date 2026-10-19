@@ -3,6 +3,11 @@
 name: Linux check and test
 
 on:
+  push:
+    branches: [cloud/linux-platform]
+    paths-ignore:
+      - docs/**
+      - '**/*.md'
   pull_request:
     branches: [cloud/integration]
   workflow_dispatch:
@@ -18,6 +23,8 @@ jobs:
   check-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: write  # publish-ci-results
     defaults:
       run:
         shell: bash  # -eo pipefail: a piped ./dev keeps its exit status
@@ -25,6 +32,7 @@ jobs:
       # Outside the checkout: storage.py refuses build roots inside tracked source.
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
       CARGO_TERM_COLOR: never
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,8 +89,15 @@ jobs:
             [ -f "$log" ] || continue
             echo "### $log" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            sed -n '/gate summary/,$p' "$log" | head -80 >> "$GITHUB_STEP_SUMMARY"
+            sed -n '/gate summary/,$p' "$log" > summary.tmp || true
+            head -80 summary.tmp >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+          mkdir -p "$EVIDENCE_OUT"
+          for log in check.log test.log; do
+            [ -f "$log" ] || continue
+            cp "$log" "$EVIDENCE_OUT/"
+            sed -n '/gate summary/,$p' "$log" > "$EVIDENCE_OUT/${log%.log}-summary.txt" || true
           done
 
       - name: Upload logs
@@ -95,3 +110,9 @@ jobs:
             test.log
           retention-days: 14
           if-no-files-found: ignore
+
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: check-test
