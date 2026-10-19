@@ -56,7 +56,7 @@ jobs:
         run: |
           set -uo pipefail
           while IFS='|' read -r name tree pattern ctx; do
-            case "$name" in ''|'#'*) continue ;; esac
+            case "$name" in ''|'#'*|file|patched) continue ;; esac
             grep -rnE -C "${ctx:-3}" "$pattern" "$SRC/$tree" | sed "s|$SRC/||" | head -c 400000 > "$OUT/$name.txt" || true
           done < scripts/source_probe.txt
           wc -l "$OUT"/*.txt
@@ -65,7 +65,7 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p "$OUT/files"
-          grep '^file|' scripts/source_probe.txt | while IFS='|' read -r _ path; do
+          { grep '^file|' scripts/source_probe.txt || true; } | while IFS='|' read -r _ path; do
             [ -f "$SRC/$path" ] && cp "$SRC/$path" "$OUT/files/$(echo "$path" | tr / _)" || echo "missing $path" >> "$OUT/files/missing.txt"
           done
 
@@ -85,6 +85,7 @@ jobs:
             sha256sum "$SRC/ff/$path" | sed "s|$SRC/ff/||" >> "$OUT/patched/sha256.txt"
             cp "$SRC/ff/$path" "$OUT/patched/$(echo "$path" | tr / _)"
           done < "$SRC/wanted.txt"
+          true
 
       - if: always()
         uses: ./.github/actions/publish-ci-results
