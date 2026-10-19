@@ -80,5 +80,16 @@
         "// AxioSozo engine-view: foreign children follow Gecko's own (see top of file).\n- (NSArray*)moxUnignoredChildren {\n  NSArray* children = [super moxUnignoredChildren];\n  if (nsIContent* content = AxioForeignContent(mGeckoAccessible)) {\n    if (NSArray* foreign = sAxioForeignAX->children(self, content)) {\n      return [children arrayByAddingObjectsFromArray:foreign];\n    }\n  }\n  return children;\n}\n\n- (NSValue*)moxPosition {\n"
       ]
     ]
+  },
+  {
+    "path": "gfx/webrender_bindings/WebRenderAPI.cpp",
+    "before_sha256": "0e6bc18d930da98ab7512b7381e190e7c32ab0e3795c5e2a754cabf751912fef",
+    "after_sha256": "545730cacdc01176c0e67f962250831ac471383082cff215d93820ffc4b7c52c",
+    "replacements": [
+      [
+        "                compositor->ShouldUseLayerCompositor(),\n                StaticPrefs::\n                    gfx_webrender_opaque_backdrop_fallback_AtStartup())) {\n",
+        "                compositor->ShouldUseLayerCompositor(),\n                // AxioSozo: Zen's opaque-backdrop fallback (bug 2036640\n                // backport) clears alpha through glColorMask, which SWGL\n                // does not implement (swgl color_mask panics on the\n                // Renderer thread). Software WebRender keeps Firefox's\n                // own backdrop behavior.\n                StaticPrefs::\n                        gfx_webrender_opaque_backdrop_fallback_AtStartup() &&\n                    !swgl)) {\n"
+      ]
+    ]
   }
 ]

@@ -118,16 +118,5 @@
         "@@ -353,8 +382,8 @@ var BrowserCommands = {"
       ]
     ]
-  },
-  {
-    "path": "prefs/firefox/performance.yaml",
-    "before_sha256": "9bdcb79eedc3b2a13885bafb76f3cc9653359ff3c201214997f2940bdcd74fd3",
-    "after_sha256": "5c1c81e7d45a0bf950b04dce3ef36244d8c0ed01127d67cf9d4db7a21c995fd3",
-    "replacements": [
-      [
-        "  condition: \"defined(XP_WIN) || defined(XP_DARWIN) || defined(MOZ_WIDGET_GTK)\"\n",
-        "  # AxioSozo: Linux keeps Firefox's own default (off on GTK). On X11 with\n  # software WebRender (llvmpipe, no GPU) the native-compositor path clears\n  # picture caches with quads, which SWGL does not implement (Rust panic in\n  # swgl color_mask; Actions run 39319467610). macOS/Windows keep Zen's value.\n  condition: \"defined(XP_WIN) || defined(XP_DARWIN)\"\n"
-      ]
-    ]
   }
 ]
