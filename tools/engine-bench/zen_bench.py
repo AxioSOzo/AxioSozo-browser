@@ -132,17 +132,24 @@ probe[{gecko: 'switchToGecko', chromium: 'switchToChromium', webkit: 'switchToWe
   () => done({ok: true, ms: performance.now() - t0}),
   error => done({ok: false, ms: performance.now() - t0, error: String(error?.message ?? error)}));
 """
-# Tab switch: select a tab and wait for Firefox's TabSwitchDone (its layers are shown), then
-# two chrome frames; also records how long until an engine presenter shows a frame again.
+# Tab switch: select a tab; records when Firefox's TabSwitchDone fires (the tab's content
+# layers are shown; vsync-quantized) and the first chrome MozAfterPaint after the selection
+# (what shows an engine presenter's canvas, which lives in the chrome document). TabSwitchDone
+# does not fire for a tab whose Gecko browser is hidden behind an engine presenter.
 TAB_SWITCH = """
 const [index, done] = arguments; const tab = gBrowser.tabs[index]; const t0 = performance.now();
+const out = {tabSwitchDone: null, chromePaint: null, engine: null};
 let settled = false;
-const finish = (how) => { if (settled) return; settled = true;
-  requestAnimationFrame(() => requestAnimationFrame(() => done({ms: performance.now() - t0, signal: how,
-    engine: window.AxioSozo?.engineProbe?.engineOf?.(tab) ?? 'gecko'}))); };
-gBrowser.addEventListener('TabSwitchDone', () => finish('TabSwitchDone'), {once: true});
-setTimeout(() => finish('timeout-3s'), 3000);
+const finish = how => { if (settled) return; settled = true; window.removeEventListener('MozAfterPaint', paint);
+  out.engine = window.AxioSozo?.engineProbe?.engineOf?.(tab) ?? 'gecko'; out.signal = how; done(out); };
+const paint = () => { if (out.chromePaint === null) out.chromePaint = performance.now() - t0;
+  if (out.engine === 'presented') finish('MozAfterPaint'); };
+gBrowser.addEventListener('TabSwitchDone', () => { out.tabSwitchDone = performance.now() - t0; finish('TabSwitchDone'); }, {once: true});
+window.addEventListener('MozAfterPaint', paint);
+setTimeout(() => finish('timeout-1s'), 1000);
+const presented = (window.AxioSozo?.engineProbe?.engineOf?.(tab) ?? 'gecko') !== 'gecko';
 gBrowser.selectedTab = tab;
+if (presented) out.engine = 'presented';
 """
 
 
@@ -177,6 +184,14 @@ class ZenBench(gui_test.Harness):
             raise AssertionError(f'switch to {engine} failed: {result}')
         return round(result['ms'], 1)
 
+    def close_bench_tab(self):
+        """Close the selected tab and re-attach Marionette to a remaining one."""
+        self.set_context('content')
+        self.marionette.call('WebDriver:CloseWindow')
+        handles = self.marionette.call('WebDriver:GetWindowHandles')
+        handles = handles.get('value', handles) if isinstance(handles, dict) else handles
+        self.marionette.call('WebDriver:SwitchToWindow', {'handle': handles[0], 'focus': True})
+
     def tab_switches(self, count=3):
         """Away to the first (Gecko, about:blank) tab and back, `count` times each way."""
         index = self.chrome_script('return gBrowser.tabs.indexOf(gBrowser.selectedTab);')
@@ -186,9 +201,13 @@ class ZenBench(gui_test.Harness):
             time.sleep(0.3)
             back.append(self.async_chrome(TAB_SWITCH, [index]))
             time.sleep(0.5)
-        return dict(to_gecko_blank_tab_ms=describe_list([r['ms'] for r in away]),
-                    back_to_bench_tab_ms=describe_list([r['ms'] for r in back]),
-                    signals=sorted({r['signal'] for r in away + back}), engine_after=back[-1]['engine'])
+        def ms(record):
+            return record['tabSwitchDone'] if record['tabSwitchDone'] is not None else record['chromePaint']
+        return dict(measured_in='zen-chrome: TabSwitchDone, else the first chrome MozAfterPaint (engine presenter tabs)',
+                    to_gecko_blank_tab_ms=describe_list([ms(r) for r in away]),
+                    back_to_bench_tab_ms=describe_list([ms(r) for r in back]),
+                    back_chrome_paint_ms=describe_list([r['chromePaint'] for r in back]),
+                    signals=sorted({r['signal'] for r in away + back}), engine_after=back[-1]['engine'], raw=away + back)
 
     def app_usage(self):
         return bench.Usage(self.browser.pid)
@@ -359,7 +378,7 @@ class ZenBench(gui_test.Harness):
                 rep['switch']['engine_to_gecko_switch_ms'] = self.switch_engine('gecko')
                 time.sleep(1)
                 rep['memory_after_switch_back'] = self.memory()
-                self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
+                self.close_bench_tab()
             rep['status'] = 'PASS'
         except EngineUnavailable as error:
             rep.update(status='BLOCKED_ENV', reason=str(error))
