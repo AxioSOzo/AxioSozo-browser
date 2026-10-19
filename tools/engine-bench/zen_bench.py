@@ -125,7 +125,10 @@ return mark;
 # engine shows the tab: for WebKit/Chromium, after the first presented frame).
 SWITCH = """
 const [engine, done] = arguments; const t0 = performance.now();
-window.AxioSozo.engineProbe.switchTo(engine).then(
+// switchToX exists on both facades: the Chromium-only one (EngineProbeControls) and the
+// three-engine one (WebKitEngineControls); switchTo(engine) only on the latter.
+const probe = window.AxioSozo.engineProbe;
+probe[{gecko: 'switchToGecko', chromium: 'switchToChromium', webkit: 'switchToWebKit'}[engine]]().then(
   () => done({ok: true, ms: performance.now() - t0}),
   error => done({ok: false, ms: performance.now() - t0, error: String(error?.message ?? error)}));
 """
