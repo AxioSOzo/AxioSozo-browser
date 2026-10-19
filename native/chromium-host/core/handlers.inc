@@ -585,7 +585,12 @@ static void tick() {
   }
   if (!streaming && browser && !closing) {
     auto* h = browser->get_host(browser);
-    if (stage == 0 && loaded && exerciseElapsed > 2) {
+    // Focus first, type one tick later: characters sent in the same task as the first
+    // set_focus can reach the widget before it is focused and are dropped (seen on Linux).
+    if (stage == 0 && loaded && exerciseElapsed > 1 && !e0Focused) {
+      h->set_focus(h, 1);
+      e0Focused = true;
+    } else if (stage == 0 && loaded && exerciseElapsed > 2) {
       captureName = "cef-e0-input.png";
       h->set_focus(h, 1);
       for (char c : std::string("CEF")) {

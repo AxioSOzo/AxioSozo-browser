@@ -64,7 +64,7 @@ static LaunchConfig config;
 static std::u16string initialURL;
 static cef_browser_t* browser = nullptr;  // E0 probe browser
 static cef_request_context_t* isolatedContext = nullptr;
-static bool closed = false, loaded = false, inputObserved = false, navigated = false;
+static bool closed = false, loaded = false, inputObserved = false, navigated = false, e0Focused = false;
 static int width = 900, height = 650, frames = 0;
 static double deviceScale = 2.0;
 static bool streaming = false, streamReady = false, streamClosing = false;

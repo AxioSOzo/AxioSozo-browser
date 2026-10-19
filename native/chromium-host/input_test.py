@@ -240,6 +240,13 @@ def run():
             check(checks, 'linux_altgr_text', '\u20ac' in state['v'] and len(state['v']) == len(before) + 1,
                   dict(value=state['v'], keydown_key=state['kd'][-1], keypress=state['kp'][-1:],
                        verdict=verdict.get('reason')))
+            # Information only: the DOM `key` of a char event sent with windows_key_code 0.
+            session.done(session.command('key', type='char', native_key_code=26, windows_key_code=0,
+                                         modifiers=ALTGR, text='\u20ac'))
+            with contextlib.suppress(TimeoutError):
+                session.page(lambda s: s['v'].count('\u20ac') == 2, 3)
+            checks['linux_char_without_windows_code_info'] = dict(passed=True, detail=dict(
+                value=session.state['v'], keypress=session.state['kp'][-1:]))
 
         # Wheel with trackpad phases; zero-delta boundary events are accepted and dropped.
         wheel = dict(x=450, y=500, modifiers=0, delta_x=0, precise=True)
@@ -266,6 +273,18 @@ def run():
         checks['wheel_notch_animation_info'] = dict(passed=True, detail=dict(
             start_scroll_y=start_y, samples_ms_scroll_y=samples[:40],
             distinct_positions=len({value for _, value in samples})))
+        if probe.IS_LINUX:
+            # The same delta marked precise (touchpad): expected to apply without animation.
+            time.sleep(0.3)
+            session.done(session.command('focus', focused=True))  # drain title events
+            start_y, samples, started = session.state['sy'], [], time.monotonic()
+            session.done(session.command('wheel', x=450, y=500, modifiers=0, delta_x=0, delta_y=-120,
+                                         phase='none', momentum_phase='none', precise=True))
+            with contextlib.suppress(TimeoutError):
+                session.until(sample, 2)
+            checks['wheel_precise_animation_info'] = dict(passed=True, detail=dict(
+                start_scroll_y=start_y, samples_ms_scroll_y=samples[:40],
+                distinct_positions=len({value for _, value in samples})))
 
         # Pinch: a two-point touch sequence zooms the visual viewport.
         session.done(session.command('pinch', x=450, y=325, modifiers=0, phase='began', magnification=0))

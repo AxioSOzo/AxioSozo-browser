@@ -285,6 +285,9 @@ static bool wheelCommand(Tab* tab, const Value& command, const std::string& requ
     cef_mouse_event_t mouse{};
     mouse.x = int(command.num("x")); mouse.y = int(command.num("y"));
     mouse.modifiers = uint32_t(command.num("modifiers"));
+    // Precise (touchpad) deltas scroll exactly as given; notch deltas keep Chromium's
+    // smooth-scroll animation. (This portable core serves Linux; macOS uses host.mm.)
+    if (phased && command.flag("precise")) mouse.modifiers |= EVENTFLAG_PRECISION_SCROLLING_DELTA;
     auto* host = tab->browser->get_host(tab->browser);
     host->send_mouse_wheel_event(host, &mouse, dx, dy);
     host->base.release(&host->base);

@@ -120,7 +120,9 @@ def run(interaction_timeout=15):
                 assert answer['status'] == 'success', answer
                 # The first frame of a new document can precede its first paint; evidence
                 # frames are the first painted (non-uniform) frame of the new document.
-                return session.until(lambda kind, _: kind == 2 and stream.painted(session.pixels), 15, capture=capture)
+                # (/animate is one flat colour, so only evidence captures wait for content.)
+                return session.until(lambda kind, _: kind == 2 and (not capture or stream.painted(session.pixels)), 15,
+                                     capture=capture)
 
             navigate(origin + '/page', directory / 'web-page.png')
             session.until(lambda _, item: item.get('event') == 'title' and item.get('title') == 'web cross-origin-data') if not any(item.get('title') == 'web cross-origin-data' for item in session.events) else None
