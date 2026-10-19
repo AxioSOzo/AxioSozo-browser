@@ -392,6 +392,8 @@ class ZenProfile(zen_bench.ZenBench):
                         print('  ->', passes[-1]['status'], passes[-1].get('reason', ''), flush=True)
                         if passes[-1]['status'] == 'BLOCKED_ENV':
                             break
+                    if self.hooks_installed:
+                        self.result['hooks_end'] = self.hooks('status')  # spawns > 0: the Subprocess wrapper saw the hosts
                     self.screenshot('zen-profile-' + self.label)
                 finally:
                     self.shutdown()

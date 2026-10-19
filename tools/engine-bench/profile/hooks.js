@@ -38,7 +38,11 @@ if (!S) {
   };
   const bytes = buffer => { try { return buffer.byteLength; } catch { return -1; } };
 
-  const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
+  // The shared-global instance the adapters import (a Marionette sandbox would otherwise get its own).
+  const url = "resource://gre/modules/Subprocess.sys.mjs";
+  let Subprocess;
+  try { ({ Subprocess } = ChromeUtils.importESModule(url, { global: "shared" })); S.module = "shared"; }
+  catch { ({ Subprocess } = ChromeUtils.importESModule(url)); S.module = "default"; }
   const originalCall = Subprocess.call;
   Subprocess.call = function (options, ...rest) {
     const t0 = now();
@@ -111,5 +115,5 @@ if (command === "drain") {
   S.events = []; S.dropped = 0;
   return out;
 }
-return { enabled: S.enabled, installed: S.installed, spawns: S.spawns, profiler: !!Services.profiler,
+return { enabled: S.enabled, installed: S.installed, module: S.module, spawns: S.spawns, profiler: !!Services.profiler,
          now: win.performance.now(), value: value ?? null };
