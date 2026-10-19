@@ -38,9 +38,9 @@ ARRIVAL_SUBPROCESS = ROOT / "scripts" / "arrival_subprocess.py"
 AGENT_SOCKET_INSTALL = ROOT / "scripts" / "agent_socket_install.py"
 AGENT_NOTIFY_INSTALL = ROOT / "scripts" / "agent_notify_install.py"
 AGENT_BRIDGE_INSTALL = ROOT / "scripts" / "agent_bridge_install.py"
-AGENT_BRIDGE_NODE = Path("/Volumes/AxioSozoBuild/toolchains/zen/node/bin/node")
+AGENT_BRIDGE_NODE = storage.VOLUME / "toolchains/zen/node/bin/node"
 MANIFEST_ACCEPT = ROOT / "scripts" / "manifest_accept.py"
-AGENT_SOCKET_PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
+AGENT_SOCKET_PYTHON = storage.VOLUME / "toolchains/zen/python/bin/python3.11"
 CEF = ROOT / "native" / "chromium-host" / "probe.py"
 PROVIDER = ROOT / "packages" / "provider-host" / "cli.mjs"
 RELEASE = ROOT / "scripts" / "release" / "preview.py"
@@ -50,18 +50,30 @@ LINUX_BUILD = ROOT / "scripts" / "linux_build.py"
 SETUP_COMPONENTS = ("upstreams", "cargo", "core", "provider", "cef", "zen", "tools")
 # Per-gate results of this invocation: (label, PASS | FAIL | BLOCKED_ENV, exit code).
 RESULTS = []
+# Linux gates that are blocked by design, with the reason. Only these may report
+# BLOCKED_ENV without failing a Linux run; any other BLOCKED_ENV report on Linux
+# (for example a missing setup step) is a failure like on macOS.
+LINUX_EXPECTED_BLOCKED = {
+    "native/chromium-host/probe.py": "macOS CEF probe; the Linux CEF host is the cloud/linux-cef workstream",
+    "packages/provider-host/cli.mjs keychain-positive-setup": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
+    "packages/provider-host/cli.mjs keychain-positive-test": "macOS Keychain positive fixture (Linux: keychain-negative-test runs a private Secret Service)",
+}
+
+
+def expected_block(label):
+    return next((reason for prefix, reason in LINUX_EXPECTED_BLOCKED.items() if label.startswith(prefix)), None)
 
 
 def gate_summary(title):
-    """Print every gate result. On Linux a component that reports BLOCKED_ENV for
-    its platform (for example a macOS-only fixture, or the CEF host before the
-    linux-cef workstream lands) is listed, never counted as a pass, and does not
-    fail the run unless AXIOSOZO_STRICT=1. macOS exit codes are unchanged."""
+    """Print every gate result. On Linux a component in LINUX_EXPECTED_BLOCKED that
+    reports BLOCKED_ENV is listed with its reason, never counted as a pass, and does
+    not fail the run unless AXIOSOZO_STRICT=1. macOS exit codes are unchanged."""
     if not RESULTS:
         return
     print(f"{title} gate summary ({platform.system()} {platform.machine()}):", flush=True)
     for label, status, code in RESULTS:
-        print(f"  {status:<11} exit={code:<3} {label}", flush=True)
+        reason = expected_block(label) if status == "BLOCKED_ENV" and LINUX else None
+        print(f"  {status:<11} exit={code:<3} {label}" + (f"  [{reason}]" if reason else ""), flush=True)
     counts = {name: sum(1 for _, status, _ in RESULTS if status == name) for name in ("PASS", "FAIL", "BLOCKED_ENV")}
     print(f"{title}: {counts['PASS']} PASS, {counts['FAIL']} FAIL, {counts['BLOCKED_ENV']} BLOCKED_ENV", flush=True)
 
@@ -71,8 +83,9 @@ def outcome(codes):
     BLOCKED_ENV gates are reported but tolerated unless AXIOSOZO_STRICT=1."""
     if not LINUX or os.environ.get("AXIOSOZO_STRICT") == "1":
         return any(codes)
-    failed = any(status == "FAIL" for _, status, _ in RESULTS)
-    blocked = sum(1 for _, status, _ in RESULTS if status == "BLOCKED_ENV")
+    failed = any(status == "FAIL" or status == "BLOCKED_ENV" and not expected_block(label)
+                 for label, status, _ in RESULTS)
+    blocked = sum(1 for label, status, _ in RESULTS if status == "BLOCKED_ENV" and expected_block(label))
     # A nonzero result without a matching BLOCKED_ENV record is always a failure.
     return failed or sum(1 for code in codes if code) > blocked
 

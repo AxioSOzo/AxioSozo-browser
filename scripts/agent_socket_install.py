@@ -17,7 +17,7 @@ import storage
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tools/axiosozo-agent/agent_socket.py"
 CONFIG = ROOT / "apps/browser/chrome/AgentChannelConfig.sys.mjs"
-PYTHON = Path("/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11")
+PYTHON = storage.VOLUME / "toolchains/zen/python/bin/python3.11"
 MAX_HELPER = 128 * 1024
 
 
@@ -164,4 +164,11 @@ def run(command):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("setup", "check"))
-    raise SystemExit(run(parser.parse_args().command))
+    command = parser.parse_args().command
+    # Not set up yet (no pinned interpreter in this build root): an environment
+    # state, reported as such; every other refusal keeps failing loudly.
+    if not PYTHON.exists():
+        print(json.dumps({"status": "BLOCKED_ENV", "error": "pinned interpreter not installed: " + str(PYTHON)
+                          + " (./dev setup installs the Zen toolchain)"}))
+        raise SystemExit(20)
+    raise SystemExit(run(command))

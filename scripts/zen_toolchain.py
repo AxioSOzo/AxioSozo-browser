@@ -186,7 +186,7 @@ def installed(name, pin):
     return True
 
 
-def fetch():
+def fetch(only=None):
     if LINUX:
         storage.ensure()
     if not storage.mounted():
@@ -198,6 +198,8 @@ def fetch():
     if not empty_npm_config.exists():
         empty_npm_config.write_bytes(b'')
     for name, pin in pins().items():
+        if only is not None and name not in only:
+            continue
         if not enabled(name, pin):
             continue
         archive = download(pin)
@@ -255,13 +257,19 @@ def setup():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['fetch', 'setup', 'host'])
+    parser.add_argument('--only', help='fetch: only these pins (comma separated), e.g. node,python for CI')
     args = parser.parse_args()
     try:
         if args.command == 'host':
             print(json.dumps({'host': host_tag(), 'pin_file': str(PIN_FILE.relative_to(ROOT)),
                               'tools': str(TOOLS), 'supported': PIN_FILE.is_file()}, indent=2))
             sys.exit(0 if PIN_FILE.is_file() else 20)
-        globals()[args.command]()
+        if args.only and args.command != 'fetch':
+            parser.error('--only applies to fetch')
+        if args.command == 'fetch':
+            fetch(set(args.only.split(',')) if args.only else None)
+        else:
+            globals()[args.command]()
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
         print('BLOCKED_ENV:', error, file=sys.stderr)
         sys.exit(20)

@@ -10,6 +10,7 @@ import { spawn as nodeSpawn, execFileSync } from "node:child_process";
 import {
   RUN_KINDS, SUPERVISOR, SUPERVISOR_NAME, LOG_LINES, STOP_DEADLINE_MS, RunnerError, runTargets, inferKind, targetKey, displayState,
   targetUrl, workdirFor, runEnvironment, cleanLine, printedUrl, createProjectRunner, approvalsOver, validateApprovals, EMPTY_APPROVALS,
+  supervisorShell,
 } from "../chrome/ProjectRunner.sys.mjs";
 
 const project = (services, extra = {}) => ({ id: "p_1", root: "/Users/dev/Code/acme", manifest: { name: "Acme", kind: "web", environments: [], services, surfaces: [] }, ...extra });
@@ -257,7 +258,9 @@ const alive = marker => { try { return execFileSync("/usr/bin/pgrep", ["-f", mar
 test("real supervisor: output and exit code come back; stop ends the whole process group", { skip: process.platform === "win32", timeout: 30000 }, async () => {
   const marker = `axiosozo-runner-test-${process.pid}-${Date.now()}`;
   const env = { ...runEnvironment({ get: name => process.env[name] ?? null }), SHELL: "/bin/sh" };
-  const runner = createProjectRunner({ spawn: nodeSubprocess, approvals: memoryApprovals(), environment: env });
+  // The interpreter the browser picks for this OS (Services.appinfo.OS).
+  const shell = supervisorShell(process.platform === "linux" ? "Linux" : "Darwin");
+  const runner = createProjectRunner({ spawn: nodeSubprocess, approvals: memoryApprovals(), environment: env, shell });
   const quick = { key: "quick", name: "quick", command: "echo hello; echo oops >&2; printf 'Local: http://localhost:4321/\\n'; exit 3", cwd: null };
   await runner.start({ projectId: "p_1", root: "/tmp", target: quick, approve: true });
   while (runner.get("p_1", "quick").status === "running") await new Promise(r => setTimeout(r, 20));

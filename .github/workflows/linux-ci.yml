@@ -5,8 +5,6 @@ name: Linux check and test
 on:
   pull_request:
     branches: [cloud/integration]
-  push:
-    branches: ['cloud/linux-**']
   workflow_dispatch:
 
 permissions:
@@ -58,13 +56,22 @@ jobs:
       - name: Cargo dependencies (exact lockfile, project Cargo home)
         run: ./dev setup --only cargo
 
+      - name: Pinned Zen Node 22 and Python 3.11 (subset of patches/zen/toolchains-linux-x86_64.json)
+        run: python3 scripts/zen_toolchain.py fetch --only node,python
+
+      - name: Product helpers and the Linux Secret Service helper (./dev setup --only tools,provider)
+        run: ./dev setup --only tools,provider
+
       - name: ./dev doctor (report; exits nonzero until a full build exists)
+        if: success() || failure()
         run: ./dev doctor || echo "doctor exit $? (expected without a Zen build)"
 
       - name: ./dev check
+        if: success() || failure()
         run: ./dev check 2>&1 | tee check.log
 
       - name: ./dev test
+        if: success() || failure()
         run: ./dev test 2>&1 | tee test.log
 
       - name: Gate summaries

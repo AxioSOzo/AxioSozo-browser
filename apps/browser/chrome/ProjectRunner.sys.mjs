@@ -52,6 +52,17 @@ export const SUPERVISOR = [
   "exit \"$code\"",
 ].join("\n");
 
+/**
+ * The interpreter of SUPERVISOR for an OS name (Services.appinfo.OS). macOS
+ * /bin/sh is bash, which keeps `set -m` process groups without a terminal.
+ * Linux /bin/sh is usually dash, which turns job control off without a tty:
+ * the command would share the supervisor's group and the watcher would read
+ * /dev/null and stop every run at once. Linux therefore uses bash.
+ */
+export function supervisorShell(os) {
+  return os === "Linux" ? "/bin/bash" : "/bin/sh";
+}
+
 export class RunnerError extends Error {
   constructor(code, message) { super(message ?? code); this.name = "RunnerError"; this.code = code; }
 }
@@ -233,7 +244,8 @@ export function printedUrl(line) {
  * - onChange(): called after every state or output change (coalesce it).
  */
 export function createProjectRunner({ spawn, timers = globalThis, clock = Date.now, environment = runEnvironment(),
-  approvals = null, onChange = () => {} } = {}) {
+  approvals = null, onChange = () => {}, shell = "/bin/sh" } = {}) {
+  if (!["/bin/sh", "/bin/bash"].includes(shell)) throw new TypeError("shell");
   if (typeof spawn !== "function") throw new TypeError("spawn");
   const runs = new Map(); // `${projectId}\u0000${key}` → run
   let serial = 0;
@@ -321,7 +333,7 @@ export function createProjectRunner({ spawn, timers = globalThis, clock = Date.n
     runs.set(runId, run);
     notify();
     try {
-      run.process = await spawn({ command: "/bin/sh", arguments: ["-c", SUPERVISOR, SUPERVISOR_NAME, environment.SHELL, target.command],
+      run.process = await spawn({ command: shell, arguments: ["-c", SUPERVISOR, SUPERVISOR_NAME, environment.SHELL, target.command],
         workdir, environment: { ...environment }, environmentAppend: false, stderr: "stdout" });
     } catch (error) {
       run.error = typeof error?.message === "string" ? error.message.slice(0, 200) : "SPAWN_FAILED";

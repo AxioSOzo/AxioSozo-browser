@@ -30,19 +30,23 @@ class EntrypointGates(unittest.TestCase):
     def test_linux_blocked_components_are_listed_but_not_failures(self):
         dev.RESULTS.clear()
         self.addCleanup(dev.RESULTS.clear)
+        fixture = "packages/provider-host/cli.mjs keychain-positive-test"
         with patch.object(dev, "LINUX", True), patch.dict(os.environ, {"AXIOSOZO_STRICT": "0"}):
-            dev.record("macOS-only fixture", 2, blocked=True)
-            self.assertFalse(dev.outcome([0, 2]))
+            dev.record(fixture, 78, blocked=True)
+            self.assertFalse(dev.outcome([0, 78]))
             # A nonzero result without a BLOCKED_ENV record still fails.
-            self.assertTrue(dev.outcome([0, 2, 1]))
-            dev.record("real failure", 1)
-            self.assertTrue(dev.outcome([0, 2, 1]))
+            self.assertTrue(dev.outcome([0, 78, 1]))
+            # BLOCKED_ENV outside the documented Linux list (e.g. missing setup) fails.
+            dev.RESULTS[:] = [(fixture, "BLOCKED_ENV", 78), ("scripts/project_reader.py check", "BLOCKED_ENV", 20)]
+            self.assertTrue(dev.outcome([78, 20]))
+            dev.RESULTS[:] = [(fixture, "BLOCKED_ENV", 78), ("real failure", "FAIL", 1)]
+            self.assertTrue(dev.outcome([78, 1]))
         with patch.object(dev, "LINUX", True), patch.dict(os.environ, {"AXIOSOZO_STRICT": "1"}):
-            dev.RESULTS[:] = [("macOS-only fixture", "BLOCKED_ENV", 2)]
-            self.assertTrue(dev.outcome([2]))
+            dev.RESULTS[:] = [(fixture, "BLOCKED_ENV", 78)]
+            self.assertTrue(dev.outcome([78]))
         with patch.object(dev, "LINUX", False):
-            dev.RESULTS[:] = [("macOS gate", "BLOCKED_ENV", 2)]
-            self.assertTrue(dev.outcome([2]))  # macOS exit codes are unchanged
+            dev.RESULTS[:] = [(fixture, "BLOCKED_ENV", 78)]
+            self.assertTrue(dev.outcome([78]))  # macOS exit codes are unchanged
 
     def test_failed_build_does_not_test_stale_binary(self):
         with patch.object(dev, "run", return_value=0) as run, \

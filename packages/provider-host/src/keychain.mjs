@@ -14,15 +14,20 @@ export function validKey(secret) {
 }
 
 export class MacKeychain {
+  /** Platform this store runs on, and its fixed helper environment. */
+  static platform = 'darwin';
+  static label = 'macOS Keychain';
+  static environment() { return { PATH: '/usr/bin:/bin' }; }
   constructor(executable, provider = 'jev') {
     requireValue(KEYCHAIN_PROVIDERS.includes(provider), 'INVALID_INPUT', 'Unknown Keychain provider');
     this.executable = executable; this.provider = provider;
   }
   #run(operation, secret) {
-    requireValue(process.platform === 'darwin', 'BLOCKED_ENV', 'macOS Keychain is required');
+    const kind = this.constructor;
+    requireValue(process.platform === kind.platform, 'BLOCKED_ENV', `${kind.label} is required`);
     const args = this.provider === 'jev' ? [operation] : [operation, this.provider];
     return new Promise((resolve, reject) => {
-      const child = spawn(this.executable, args, { shell: false, env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(this.executable, args, { shell: false, env: kind.environment(), stdio: ['pipe', 'pipe', 'pipe'] });
       let data = ''; let settled = false;
       const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
       const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new ProviderError('KEYCHAIN_ERROR', 'Keychain operation timed out')); }, 5000);
@@ -44,4 +49,29 @@ export class MacKeychain {
   exists() { return this.#run('exists'); }
   /** Resolves true when an item was deleted, false when none existed (helper exit 44). */
   remove() { return this.#run('remove'); }
+}
+
+/**
+ * Linux: the same contract through the Secret Service (libsecret helper built from
+ * native/secret-service.c). The helper only needs the session bus address; a
+ * missing service, a locked collection or item is KEYCHAIN_ERROR, never a
+ * plaintext fallback. No other environment reaches the helper.
+ */
+export class SecretServiceKeychain extends MacKeychain {
+  static platform = 'linux';
+  static label = 'Linux Secret Service';
+  static environment() {
+    const env = { PATH: '/usr/bin:/bin' };
+    for (const name of ['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR']) {
+      if (typeof process.env[name] === 'string' && process.env[name]) env[name] = process.env[name];
+    }
+    return env;
+  }
+}
+
+/** The platform's key store, or BLOCKED_ENV on any other platform. */
+export function platformKeychain(executable, provider = 'jev') {
+  if (process.platform === 'darwin') return new MacKeychain(executable, provider);
+  if (process.platform === 'linux') return new SecretServiceKeychain(executable, provider);
+  requireValue(false, 'BLOCKED_ENV', 'No supported key store on this platform');
 }

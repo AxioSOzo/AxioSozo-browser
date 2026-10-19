@@ -990,6 +990,24 @@ def validate_run_profile(profile):
     return path
 
 
+def source_check():
+    """Syntax of every packaged module plus the browser's DOM-free suites."""
+    # Every packaged module, including overview/ and the contexts core, must parse.
+    for _, path in packaged_files():
+        if path.suffix == '.mjs':
+            subprocess.run(['node', '--check', path], check=True)
+    # Keep new browser surfaces in the root check automatically. The actual
+    # Rust process tests run separately only after its build is verified.
+    tests = sorted(path for path in (ROOT / 'apps/browser/tests').glob('*.test.mjs')
+                   if not path.name.startswith('._') and path.name != 'coordinator.test.mjs')
+    # Linux: the suites run through storage exec, so their TMPDIR is inside the
+    # build root, the Linux counterpart of the macOS external-wrapper TMPDIR.
+    command = ['node', '--test', *tests]
+    subprocess.run(zen_toolchain.wrapped(command) if LINUX else command, check=True)
+    subprocess.run([sys.executable, '-B', ROOT / 'apps/browser/tests/test_bootstrap.py'], check=True)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['doctor', 'setup', 'setup-source', 'native-build', 'prepare', 'check', 'describe', 'ready', 'run', 'smoke', 'package'])
@@ -1012,17 +1030,13 @@ def main():
         print('PASS: privileged chrome overlay applied to pinned Zen source; native build not performed')
         return 0
     if args.command == 'check':
-        # Every packaged module, including overview/ and the contexts core, must parse.
-        for _, path in packaged_files():
-            if path.suffix == '.mjs':
-                subprocess.run(['node', '--check', path], check=True)
-        # Keep new browser surfaces in the root check automatically. The actual
-        # Rust process tests run separately only after its build is verified.
-        tests = sorted(path for path in (ROOT / 'apps/browser/tests').glob('*.test.mjs')
-                       if not path.name.startswith('._') and path.name != 'coordinator.test.mjs')
-        subprocess.run(['node', '--test', *tests], check=True)
-        subprocess.run([sys.executable, '-B', ROOT / 'apps/browser/tests/test_bootstrap.py'], check=True)
-        return 0
+        try:
+            return source_check()
+        except subprocess.CalledProcessError as error:
+            # A failing test is a FAIL, never an environment block.
+            print(json.dumps({'status': 'FAIL', 'error': f'check step exited {error.returncode}',
+                              'step': ' '.join(str(item) for item in error.cmd[:3])}), file=sys.stderr)
+            return 1
     if args.command == 'smoke':
         result = describe()
         if result['status'] == 'PASS':

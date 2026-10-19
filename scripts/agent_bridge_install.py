@@ -24,7 +24,7 @@ SOURCE_PINS = (
     ('src/jsonl.mjs', 'c08f37ba38b9c389b199005266e5eca28fb074cd8d70286c87317563eefe3125'),
     ('src/tools.mjs', 'ba8f64908ff3f80d3f3e0b60ea26ac77fbbd65d9ede43b59f0a51491fbdb5e0c'),
 )
-NODE_SOURCE = Path('/Volumes/AxioSozoBuild/toolchains/zen/node/bin/node')
+NODE_SOURCE = storage.VOLUME / 'toolchains/zen/node/bin/node'
 NODE_SHA256 = '5d9d3872911e2340a43b707962e68143de8a4e8d54628845c0c4f2de1fb7cd5c'
 BUNDLE_SHA256 = '9a03b23584b179763152186d19b954c5b06440fba07b006d935fece194e4daf0'
 MAX_SOURCE_BYTES = 64 * 1024
