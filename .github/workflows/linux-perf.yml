@@ -27,7 +27,7 @@ permissions:
 
 concurrency:
   group: linux-perf-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   BASE_REF: cloud/integration
@@ -86,8 +86,9 @@ jobs:
           fetch-depth: 0
       - name: Base tree (cloud/integration)
         run: |
-          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT" "$RUNNER_TEMP/base"
-          git archive "origin/$BASE_REF" | tar -x -C "$RUNNER_TEMP/base"
+          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT"
+          # A real checkout (scripts/zen.py lists the packaged chrome files with git).
+          git clone -q --no-checkout . "$RUNNER_TEMP/base" && git -C "$RUNNER_TEMP/base" checkout -q "$(git rev-parse "origin/$BASE_REF")"
           git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
           git rev-parse --short HEAD > .ab-commit
           echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"
@@ -156,8 +157,9 @@ jobs:
           fetch-depth: 0
       - name: Base tree (cloud/integration)
         run: |
-          mkdir -p "$EVIDENCE_OUT" "$RUNNER_TEMP/base"
-          git archive "origin/$BASE_REF" | tar -x -C "$RUNNER_TEMP/base"
+          mkdir -p "$EVIDENCE_OUT"
+          # A real checkout (scripts/zen.py lists the packaged chrome files with git).
+          git clone -q --no-checkout . "$RUNNER_TEMP/base" && git -C "$RUNNER_TEMP/base" checkout -q "$(git rev-parse "origin/$BASE_REF")"
           git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
           git rev-parse --short HEAD > .ab-commit
           echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"

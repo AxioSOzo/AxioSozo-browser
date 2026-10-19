@@ -23,6 +23,8 @@ prepare() {  # $1 variant tree
   local tree=$1 name=$2
   log "$name: host + chrome from $(cat "$tree/.ab-commit" 2>/dev/null || git -C "$tree" rev-parse --short HEAD)"
   if [ "$ENGINE" = chromium ]; then
+    # CMake refuses a cache made from the other variant's source directory.
+    rm -rf "$AXIOSOZO_BUILD_ROOT/cef/cmake-linux64"
     python3 "$tree/native/chromium-host/probe.py" setup > "$OUT/setup-$name.log" 2>&1 || { log "setup FAILED"; tail -30 "$OUT/setup-$name.log"; return 1; }
     if [ -n "$SUDO" ]; then python3 "$tree/native/chromium-host/probe.py" install-sandbox >> "$OUT/setup-$name.log" 2>&1 || true; fi
     python3 "$tree/native/chromium-host/probe.py" check >> "$OUT/setup-$name.log" 2>&1 || true
