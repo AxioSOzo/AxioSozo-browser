@@ -177,6 +177,31 @@ const editable = e && (e.isContentEditable || e.tagName === 'TEXTAREA' || e.tagN
 if (editable && document.activeElement !== e) e.focus();
 return editable ? 'editable' : 'none';
 )JS";
+// WPE 2.48 shows no context menu for libwpe pointer input (no `context-menu` signal). This
+// isolated-world listener notes the page's own (trusted) contextmenu event and whether the
+// page cancelled it; ContextMenuFunction then runs the DOM event itself if WebKit did not,
+// honours preventDefault, and reports what is under the pointer for Zen's menu.
+constexpr const char* ContextWatchScript =
+  "addEventListener('contextmenu', e => { if (!e.isTrusted) return; const t = performance.now();"
+  " setTimeout(() => { window.__axioContextMenu = {t, prevented: e.defaultPrevented}; }, 0); }, true);";
+constexpr const char* ContextMenuFunction = R"JS(
+const seen = window.__axioContextMenu;
+const e = document.elementFromPoint(x, y) || document.documentElement;
+let prevented;
+if (seen && performance.now() - seen.t < 1500) prevented = seen.prevented;
+else prevented = !e.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, composed: true,
+  clientX: x, clientY: y, button: 2, buttons: 2, view: window}));
+window.__axioContextMenu = null;
+if (prevented) return JSON.stringify({prevented: true});
+const link = e.closest('a[href],area[href]'), image = e.closest('img');
+const a = document.activeElement;
+let text = '', editable = !!(e.isContentEditable || e.closest('textarea,input'));
+if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) {
+  if (a.type !== 'password') try { text = a.value.slice(a.selectionStart, a.selectionEnd); } catch {}
+} else text = String(getSelection());
+return JSON.stringify({prevented: false, link: link ? link.href : '', label: link ? link.textContent.trim().slice(0, 128) : '',
+  image: image ? (image.currentSrc || image.src) : '', editable, text});
+)JS";
 const std::set<std::string>& cssCursors() {
   static const std::set<std::string> cursors{"default", "none", "context-menu", "help", "pointer", "progress", "wait", "cell",
     "crosshair", "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing", "e-resize",
@@ -280,6 +305,9 @@ public:
   bool uiCommand(const std::string& method, const Value& command) override;
   bool scriptDialog(WebKitScriptDialog* dialog);
   void contextMenu(WebKitHitTestResult* hit);
+  void contextMenuFallback(double x, double y);
+  struct MenuInfo { std::string link, label, image, selection; bool editable = false; };
+  void openContextMenu(const MenuInfo& info, double x, double y);
   bool optionMenu(WebKitOptionMenu* menu, WebKitRectangle* rectangle);
   bool permission(WebKitPermissionRequest* request);
   bool fileChooser(WebKitFileChooserRequest* request);
@@ -330,7 +358,7 @@ private:
   };
   std::map<std::string, Native> natives_;
   double pointerX_ = 0, pointerY_ = 0, contextX_ = 0, contextY_ = 0;  // CSS px
-  bool composing_ = false, cursorQuery_ = false, cursorDirty_ = false;
+  bool composing_ = false, cursorQuery_ = false, cursorDirty_ = false, contextSignaled_ = false;
   std::string lastSelection_;
   std::string findText_; guint findCount_ = 0, findActive_ = 0, findIdentifier_ = 0; bool findCounted_ = false, findFound_ = false;
   bool findPending_ = false, findForward_ = true;
@@ -443,6 +471,12 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
     delete box;
   }, box_);
   content_ = engine_.newContentManager();
+  if (host_.browserUI()) {
+    WebKitUserScript* watch = webkit_user_script_new_for_world(ContextWatchScript, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                                                               WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, UiWorld, nullptr, nullptr);
+    webkit_user_content_manager_add_script(content_, watch);
+    webkit_user_script_unref(watch);
+  }
   view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
                                        "network-session", engine_.session(), "settings", engine_.settings(),
                                        "user-content-manager", content_, nullptr));
@@ -631,7 +665,7 @@ void WpeView::mouse(const MouseInput& mouse) {
   // cef-v1 coordinates are CSS (view) pixels; WebKit divides libwpe's by the device scale.
   event.time = nowMs(); event.x = int(std::lround(mouse.x * scale_)); event.y = int(std::lround(mouse.y * scale_));
   pointerX_ = mouse.x; pointerY_ = mouse.y;
-  if (mouse.type == "down" && button == 2) { contextX_ = mouse.x; contextY_ = mouse.y; }
+  if (mouse.type == "down" && button == 2) { contextX_ = mouse.x; contextY_ = mouse.y; contextSignaled_ = false; }
   if (mouse.type == "move") {
     // Buttons held per cef-v1 flags or by an earlier `down` make this a drag.
     uint32_t held = buttons_;
@@ -649,6 +683,11 @@ void WpeView::mouse(const MouseInput& mouse) {
   wpe_view_backend_dispatch_pointer_event(backend_, &event);
   // A finished left click or drag may have selected text: X11 PRIMARY (§8.2).
   if (host_.browserUI() && mouse.type == "up" && button == 1) selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
+  // A right press opens the context menu (the engine's own signal if it fires, else the fallback).
+  if (host_.browserUI() && mouse.type == "down" && button == 2) {
+    double x = mouse.x, y = mouse.y;
+    later(80, [x, y](WpeView& view) { if (!view.contextSignaled_) view.contextMenuFallback(x, y); });
+  }
 }
 
 void WpeView::wheel(const WheelInput& wheel) {
@@ -988,32 +1027,51 @@ bool WpeView::scriptDialog(WebKitScriptDialog* dialog) {
 }
 
 void WpeView::contextMenu(WebKitHitTestResult* hit) {
-  struct Hit { std::string link, label, image; bool editable, selection; };
-  auto info = std::make_shared<Hit>();
+  contextSignaled_ = true;
+  auto info = std::make_shared<MenuInfo>();
   auto copy = [](const char* value) { return std::string(value ? value : ""); };
   if (webkit_hit_test_result_context_is_link(hit)) { info->link = copy(webkit_hit_test_result_get_link_uri(hit)); info->label = copy(webkit_hit_test_result_get_link_label(hit)); }
   if (webkit_hit_test_result_context_is_image(hit)) info->image = copy(webkit_hit_test_result_get_image_uri(hit));
   info->editable = webkit_hit_test_result_context_is_editable(hit);
-  info->selection = webkit_hit_test_result_context_is_selection(hit);
   double x = contextX_, y = contextY_;
   script(SelectionFunction, nullptr, [info, x, y](WpeView& view, const std::string& answer) {
     auto parsed = json::parse(answer);
-    std::string selection = parsed && parsed->get("text") && parsed->get("text")->isString() ? parsed->get("text")->string : "";
-    bool editable = info->editable || (parsed && parsed->get("editable") && parsed->get("editable")->isBool() && parsed->get("editable")->boolean);
-    bool link = !info->link.empty(), image = !info->image.empty() && resourceLink(info->image);
-    int type = 1 | (link ? 4 : 0) | (image ? 8 : 0) | (!selection.empty() ? 16 : 0) | (editable ? 32 : 0);
-    int flags = 64 | (!selection.empty() ? 8 : 0);
-    if (editable) flags |= 1 | 2 | 16 | (!selection.empty() ? 4 | 32 : 0);
-    const char* uri = view.view_ ? webkit_web_view_get_uri(view.view_) : nullptr;
-    std::string frame = uri && webLink(uri) && strlen(uri) <= 1024 ? uri : "";
-    Object details{{"x", int(std::clamp(x, 0.0, 16384.0))}, {"y", int(std::clamp(y, 0.0, 16384.0))}, {"type_flags", type},
-      {"link_url", link && webLink(info->link) ? info->link : ""}, {"source_url", image ? info->image : ""}, {"frame_url", frame},
-      {"selection_text", json::utf16Prefix(selection, 256)}, {"link_text", json::utf16Prefix(info->label, 128)},
-      {"editable", editable}, {"edit_flags", flags}, {"media_type", image ? "image" : "none"}, {"media_flags", 0},
-      {"misspelled_word", ""}, {"suggestions", json::Array{}}, {"spellcheck", false}};
-    std::string id = view.host_.openPrompt(&view.tab_, "context_menu", std::move(details), 120000);
-    if (!id.empty()) { Native native; native.kind = "context_menu"; view.natives_[id] = native; }
+    info->selection = parsed && parsed->get("text") && parsed->get("text")->isString() ? parsed->get("text")->string : "";
+    if (parsed && parsed->get("editable") && parsed->get("editable")->isBool() && parsed->get("editable")->boolean) info->editable = true;
+    view.openContextMenu(*info, x, y);
   });
+}
+
+void WpeView::contextMenuFallback(double x, double y) {
+  AXIO_TRACE("context menu fallback at %.0f,%.0f", x, y);
+  script(ContextMenuFunction, point(x, y), [x, y](WpeView& view, const std::string& answer) {
+    auto parsed = json::parse(answer);
+    if (!parsed || !parsed->isObject() || view.contextSignaled_) return;
+    const Value* prevented = parsed->get("prevented");
+    if (!prevented || !prevented->isBool() || prevented->boolean) return;  // the page handles its own menu
+    auto text = [&](const char* key) { const Value* v = parsed->get(key); return v && v->isString() ? v->string : std::string(); };
+    MenuInfo info{text("link"), text("label"), text("image"), text("text"), false};
+    if (const Value* editable = parsed->get("editable"); editable && editable->isBool()) info.editable = editable->boolean;
+    view.openContextMenu(info, x, y);
+  });
+}
+
+void WpeView::openContextMenu(const MenuInfo& info, double x, double y) {
+  const std::string& selection = info.selection;
+  bool editable = info.editable;
+  bool link = !info.link.empty(), image = !info.image.empty() && resourceLink(info.image);
+  int type = 1 | (link ? 4 : 0) | (image ? 8 : 0) | (!selection.empty() ? 16 : 0) | (editable ? 32 : 0);
+  int flags = 64 | (!selection.empty() ? 8 : 0);
+  if (editable) flags |= 1 | 2 | 16 | (!selection.empty() ? 4 | 32 : 0);
+  const char* uri = view_ ? webkit_web_view_get_uri(view_) : nullptr;
+  std::string frame = uri && webLink(uri) && strlen(uri) <= 1024 ? uri : "";
+  Object details{{"x", int(std::clamp(x, 0.0, 16384.0))}, {"y", int(std::clamp(y, 0.0, 16384.0))}, {"type_flags", type},
+    {"link_url", link && webLink(info.link) ? info.link : ""}, {"source_url", image ? info.image : ""}, {"frame_url", frame},
+    {"selection_text", json::utf16Prefix(selection, 256)}, {"link_text", json::utf16Prefix(info.label, 128)},
+    {"editable", editable}, {"edit_flags", flags}, {"media_type", image ? "image" : "none"}, {"media_flags", 0},
+    {"misspelled_word", ""}, {"suggestions", json::Array{}}, {"spellcheck", false}};
+  std::string id = host_.openPrompt(&tab_, "context_menu", std::move(details), 120000);
+  if (!id.empty()) { Native native; native.kind = "context_menu"; natives_[id] = native; }
 }
 
 bool WpeView::optionMenu(WebKitOptionMenu* menu, WebKitRectangle* rectangle) {
