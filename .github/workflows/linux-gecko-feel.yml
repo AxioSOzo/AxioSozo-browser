@@ -19,7 +19,20 @@
 name: linux-gecko-feel
 on:
   push:
-    branches: [cloud/gecko-linux-feel]
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/**
+      - apps/browser/tests/**
+      - scripts/gui_gecko_feel.py
+      - scripts/gui_test.py
+      - scripts/gui_engines/**
+      - scripts/linux_desktop.py
+      - patches/zen/**
+      - .github/gecko-feel.json
+      - .github/workflows/linux-gecko-feel.yml
+      - .github/workflows/linux-zen-reusable.yml
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - apps/browser/chrome/**
       - apps/browser/tests/**

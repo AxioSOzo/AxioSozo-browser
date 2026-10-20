@@ -14,7 +14,12 @@
 name: linux-engine-profile
 on:
   push:
-    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile]
+    branches: [cloud/integration, dev]
+    paths:
+      - tools/engine-bench/profile/**
+      - .github/workflows/linux-engine-profile.yml
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - tools/engine-bench/profile/**
       - .github/workflows/linux-engine-profile.yml

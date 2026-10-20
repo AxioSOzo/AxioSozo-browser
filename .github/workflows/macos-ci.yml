@@ -7,12 +7,12 @@ name: macOS CI
 
 on:
   push:
-    branches: [cloud/macos-ci]  # the session branch carries the same commits; one run per push
+    branches: [cloud/integration, dev]
     paths-ignore:
       - docs/**
       - '**/*.md'
   pull_request:
-    branches: [cloud/integration]
+    branches: [cloud/integration, dev]
   workflow_dispatch:
 
 permissions:

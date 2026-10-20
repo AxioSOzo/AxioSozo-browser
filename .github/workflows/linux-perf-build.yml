@@ -12,7 +12,14 @@ name: linux-perf-build
 
 on:
   push:
-    branches: [cloud/perf-phase2, claude/perf-phase3-uvmfis]
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/native/**
+      - patches/zen/**
+      - .github/workflows/linux-perf-build.yml
+      - .github/workflows/linux-zen-reusable.yml
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - apps/browser/native/**
       - patches/zen/**

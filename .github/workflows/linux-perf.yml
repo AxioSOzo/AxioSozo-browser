@@ -17,7 +17,16 @@
 name: linux-perf
 on:
   push:
-    branches: [cloud/perf-phase2, claude/perf-phase3-uvmfis]
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/**
+      - native/chromium-host/**
+      - native/webkit-host/**
+      - tools/engine-bench/**
+      - tools/pixel-path/**
+      - .github/workflows/linux-perf.yml
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - apps/browser/chrome/**
       - native/chromium-host/**

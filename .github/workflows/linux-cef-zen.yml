@@ -16,7 +16,26 @@
 name: linux-cef-zen
 on:
   push:
-    branches: [cloud/integration, dev, cloud/final-review]
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/CEF*.sys.mjs
+      - apps/browser/chrome/Chromium*.sys.mjs
+      - apps/browser/chrome/EngineProbeControls.sys.mjs
+      - apps/browser/chrome/EngineTabMenu.sys.mjs
+      - apps/browser/tests/cef-adapter.test.mjs
+      - apps/browser/tests/chromium-*.test.mjs
+      - native/chromium-host/**
+      - scripts/gui_engines/chromium.py
+      - scripts/gui_test.py
+      - scripts/cef_zen_e2e.py
+      - scripts/atspi_probe.py
+      - tests/fixtures/cef-zen-feel.html
+      - tests/fixtures/engine.html
+      - apps/browser/chrome/browser-experience.css
+      - .github/workflows/linux-cef-zen.yml
+      - .github/actions/publish-ci-results/**
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - apps/browser/chrome/CEF*.sys.mjs
       - apps/browser/chrome/Chromium*.sys.mjs

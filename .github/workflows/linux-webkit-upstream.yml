@@ -5,10 +5,16 @@
 name: linux-webkit-upstream
 on:
   push:
-    branches: [cloud/webkit-host, cloud/webkit-feel]   # webkit-feel re-runs 2.54.1 only (ADR 004 results)
+    branches: [cloud/integration, dev]
     paths:
       - native/webkit-host/upstream/**
       - .github/workflows/linux-webkit-upstream.yml
+  # Evidence only and up to ~6 h: a PR runs it only when the upstream inputs change, not for
+  # edits of this file alone (those run on the push to cloud/integration or dev).
+  pull_request:
+    branches: [cloud/integration, dev]
+    paths:
+      - native/webkit-host/upstream/**
 
 env:
   IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5

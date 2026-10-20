@@ -9,7 +9,17 @@
 name: macos-webkit-host
 on:
   push:
-    branches: [claude/webkit-macos-host-ud7z1k, cloud/webkit-macos, cloud/merge-webkit-macos]  # cloud/merge-webkit-macos: merge verification
+    branches: [cloud/integration, dev]
+    paths:
+      - native/webkit-host/**
+      - '!native/webkit-host/upstream/**'
+      - native/chromium-host/engine_surface_v1.h
+      - contracts/engine-stream-v1.md
+      - contracts/engine-surface-v1.md
+      - tests/fixtures/engine.html
+      - .github/workflows/macos-webkit-host.yml
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - native/webkit-host/**
       - '!native/webkit-host/upstream/**'
@@ -59,7 +69,7 @@ jobs:
       - name: Publish results (ci-results branch)
         if: always()
         env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: capture-bench, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
-               REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
+               REF: "${{ github.head_ref || github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.event.pull_request.head.sha || github.sha }}" }
         run: bash native/webkit-host/mac/ci/publish.sh
 
   host:
@@ -106,7 +116,7 @@ jobs:
       - name: Publish results (ci-results branch)
         if: always()
         env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: host, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
-               REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
+               REF: "${{ github.head_ref || github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.event.pull_request.head.sha || github.sha }}" }
         run: bash native/webkit-host/mac/ci/publish.sh
 
   # The shared core (stream_core.hpp) also builds the Linux WPE host: rerun its full suite

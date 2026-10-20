@@ -4,7 +4,10 @@
 name: linux-webkit-feel-api
 on:
   push:
-    branches: [cloud/webkit-feel]
+    branches: [cloud/integration, dev]
+    paths: [.github/workflows/linux-webkit-feel-api.yml, native/webkit-host/ci/api_*, native/webkit-host/host_wpe.cpp, native/webkit-host/stream_core.hpp]
+  pull_request:
+    branches: [cloud/integration, dev]
     paths: [.github/workflows/linux-webkit-feel-api.yml, native/webkit-host/ci/api_*, native/webkit-host/host_wpe.cpp, native/webkit-host/stream_core.hpp]
 permissions:
   contents: read

@@ -5,7 +5,12 @@ name: Linux source probe
 
 on:
   push:
-    branches: [cloud/linux-platform]
+    branches: [cloud/integration, dev]
+    paths:
+      - .github/workflows/linux-source-probe.yml
+      - scripts/source_probe.txt
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - .github/workflows/linux-source-probe.yml
       - scripts/source_probe.txt

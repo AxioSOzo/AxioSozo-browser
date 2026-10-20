@@ -29,7 +29,13 @@
 name: linux-engine-bench
 on:
   push:
-    branches: [cloud/engine-bench]
+    branches: [cloud/integration, dev]
+    paths:
+      - tools/engine-bench/**
+      - .github/workflows/linux-engine-bench.yml
+      - .github/actions/publish-ci-results/**
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - tools/engine-bench/**
       - .github/workflows/linux-engine-bench.yml

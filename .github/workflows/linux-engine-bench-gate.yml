@@ -4,7 +4,13 @@
 name: linux-engine-bench-gate
 on:
   push:
-    branches: [cloud/engine-bench]
+    branches: [cloud/integration, dev]
+    paths:
+      - .github/workflows/linux-engine-bench-gate.yml
+      - tools/engine-bench/presenter/**
+      - tools/engine-bench/compare.py
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - .github/workflows/linux-engine-bench-gate.yml
       - tools/engine-bench/presenter/**

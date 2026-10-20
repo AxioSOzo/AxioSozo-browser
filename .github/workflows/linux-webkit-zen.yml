@@ -22,7 +22,27 @@
 name: linux-webkit-zen
 on:
   push:
-    branches: [cloud/webkit-zen, cloud/perf-pixel-path, cloud/perf-phase2, cloud/webkit-feel, claude/perf-phase3-uvmfis, cloud/merge-webkit-macos]   # PR branches only; their claude/* mirrors do not run twice (perf-phase3 runs on its session branch)
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/**
+      - apps/browser/tests/**
+      - crates/browser-core/**
+      - contracts/ipc-v1.schema.json
+      - contracts/engine-stream-v1.md
+      - native/webkit-host/**
+      - native/chromium-host/**
+      - scripts/gui_engines/**
+      - scripts/gui_test.py
+      - scripts/webkit_package.py
+      - scripts/webkit_zen_e2e.py
+      - scripts/webkit_feel_e2e.py
+      - tests/fixtures/webkit-feel.html
+      - scripts/webkit_zen_container.sh
+      - upstreams.lock.json
+      - .github/workflows/linux-webkit-zen.yml
+      - .github/actions/publish-ci-results/**
+  pull_request:
+    branches: [cloud/integration, dev]
     paths:
       - apps/browser/chrome/**
       - apps/browser/tests/**

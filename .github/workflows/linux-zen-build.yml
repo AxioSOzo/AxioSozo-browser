@@ -11,7 +11,7 @@ name: Linux Zen build
 
 on:
   push:
-    branches: [cloud/linux-platform]
+    branches: [cloud/integration, dev]
     paths:
       - .github/workflows/linux-zen-build.yml
       - .github/workflows/linux-zen-reusable.yml
@@ -36,7 +36,7 @@ on:
         default: gecko
   pull_request:
     types: [labeled]
-    branches: [cloud/integration]
+    branches: [cloud/integration, dev]
 
 permissions:
   contents: read
