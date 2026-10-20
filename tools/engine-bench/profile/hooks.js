@@ -17,6 +17,8 @@
 //     .prototype.accept/paint     (rAF-paced convert + upload) start/end and uploaded pixels
 //   DamagePayloadAssembler        damage payload patched into the target's whole frame
 //     .prototype.apply
+//   NativeFrameSinks              native receiver (memfd): slot applied off the main thread,
+//     .prototype.apply            resolved back on it (call / resolve time, payload bytes)
 //   putImageData                  canvas upload start/end and pixel count
 //   MozAfterPaint, keydown        chrome paints and chrome key events
 //
@@ -86,18 +88,28 @@ if (!S) {
   };
   S.installed.push(Object.isFrozen(Subprocess) || Subprocess.call === originalCall ? "SubprocessImpl.call FAILED" : "SubprocessImpl.call");
 
-  // The shared pixel path of both presenters (perf-pixel-path). Same module instance as the
-  // presenters' (same URL, shared global); methods are wrapped on the prototype.
-  try {
-    const { EngineFrameSurface, DamagePayloadAssembler } =
-      ChromeUtils.importESModule("chrome://browser/content/axiosozo/EngineFrameSurface.sys.mjs");
+  // The shared pixel path of both presenters (perf-pixel-path, perf-phase2). The presenters
+  // import EngineFrameSurface statically from the browser window's module graph, which is not
+  // the shared system global's instance: each reachable instance (shared / current / contextual
+  // global) is wrapped once, and every event names the instance it came from, so the report
+  // shows which one the presenters use. Methods are wrapped on the prototypes.
+  const wrapped = new WeakSet();
+  const instances = [];
+  for (const global of ["shared", "current", "contextual"]) {
+    let module;
+    try { module = ChromeUtils.importESModule("chrome://browser/content/axiosozo/EngineFrameSurface.sys.mjs", { global }); }
+    catch (error) { S.installed.push(`EngineFrameSurface[${global}] FAILED: ` + String(error).slice(0, 100)); continue; }
+    const { EngineFrameSurface, DamagePayloadAssembler, NativeFrameSinks } = module;
+    if (!EngineFrameSurface || wrapped.has(EngineFrameSurface.prototype)) { S.installed.push(`EngineFrameSurface[${global}] same instance`); continue; }
+    wrapped.add(EngineFrameSurface.prototype);
+    const which = instances.push(global) - 1;
     const surface = EngineFrameSurface.prototype;
     const accept = surface.accept, paint = surface.paint;
     surface.accept = function (metadata, pixels) {
       if (S.enabled) {
         const damage = metadata?.damage?.[0];
         push(["accept", now(), damage ? damage[2] * damage[3] : (metadata?.width * metadata?.height || 0),
-              metadata?.width * metadata?.height || 0]);
+              metadata?.width * metadata?.height || 0, which]);
       }
       return accept.call(this, metadata, pixels);
     };
@@ -107,21 +119,39 @@ if (!S) {
       let painted = false;
       try { painted = paint.apply(this, args); return painted; }
       finally {
-        push(["fpaint", t, now(), painted ? 1 : 0]);
+        push(["fpaint", t, now(), painted ? 1 : 0, which]);
         if (painted) marker("AxioSozoSurfacePaint", t, "");
       }
     };
-    const apply = DamagePayloadAssembler.prototype.apply;
-    DamagePayloadAssembler.prototype.apply = function (metadata, payload) {
-      if (!S.enabled) return apply.call(this, metadata, payload);
-      const t = now();
-      try { return apply.call(this, metadata, payload); }
-      finally { push(["assemble", t, now(), bytes(payload)]); }
-    };
-    S.installed.push("EngineFrameSurface.accept/paint", "DamagePayloadAssembler.apply");
-  } catch (error) {
-    S.installed.push("EngineFrameSurface FAILED: " + String(error).slice(0, 120));
+    if (DamagePayloadAssembler) {
+      const apply = DamagePayloadAssembler.prototype.apply;
+      DamagePayloadAssembler.prototype.apply = function (metadata, payload) {
+        if (!S.enabled) return apply.call(this, metadata, payload);
+        const t = now();
+        try { return apply.call(this, metadata, payload); }
+        finally { push(["assemble", t, now(), bytes(payload), which]); }
+      };
+    }
+    // Native receiver (memfd, perf-phase2): the slot is applied on the AxioFrameRing task queue;
+    // apply() resolves on the main thread after that, then the presenter presents and acks.
+    if (NativeFrameSinks) {
+      const napply = NativeFrameSinks.prototype.apply;
+      NativeFrameSinks.prototype.apply = function (metadata) {
+        if (!S.enabled) return napply.call(this, metadata);
+        const t = now();
+        const damage = metadata?.damage?.[0];
+        const result = napply.call(this, metadata);
+        result.then(() => {
+          push(["napply", t, now(), metadata?.payload_bytes ?? 0,
+                damage ? damage[2] * damage[3] : (metadata?.width * metadata?.height || 0), metadata?.width * metadata?.height || 0, which]);
+          marker("AxioSozoNativeApply", t, `${metadata?.payload_bytes ?? 0} B`);
+        }, () => {});
+        return result;
+      };
+    }
+    S.installed.push(`EngineFrameSurface[${global}]#${which}` + (NativeFrameSinks ? " +NativeFrameSinks" : ""));
   }
+  S.instances = instances;
 
   const OriginalImageData = win.ImageData;
   const WrappedImageData = new Proxy(OriginalImageData, {
@@ -158,5 +188,5 @@ if (command === "drain") {
   S.events = []; S.dropped = 0;
   return out;
 }
-return { enabled: S.enabled, installed: S.installed, module: S.module, spawns: S.spawns, profiler: !!Services.profiler,
+return { enabled: S.enabled, installed: S.installed, instances: S.instances, module: S.module, spawns: S.spawns, profiler: !!Services.profiler,
          now: win.performance.now(), value: value ?? null };

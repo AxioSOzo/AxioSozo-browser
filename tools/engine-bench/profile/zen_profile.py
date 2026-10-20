@@ -58,8 +58,10 @@ PASSES = ('plain', 'trace', 'profile')
 # ChromeWorker (DOM Worker), IPC I/O, the compositor and WebRender threads (software WR:
 # Renderer, WRSceneBuilder, WRRenderBackend, WRWorker, SwComposite), image decoding, sockets.
 PROFILER_FEATURES = ['js', 'stackwalk', 'cpu', 'processcpu', 'ipcmessages']
+# BackgroundThreadPool / BgIOThr: background task queues, incl. the native receiver's AxioFrameRing
+# queue (apps/browser/native/engine-view/linux); ImageBridgeChld: async ImageContainer forwarding.
 PROFILER_THREADS = ['GeckoMain', 'DOM Worker', 'IPC I/O', 'Compositor', 'Renderer', 'WR', 'SwComposite',
-                    'Canvas', 'ImageIO', 'Socket Thread', 'Timer', 'BackgroundThreadPool']
+                    'Canvas', 'ImageIO', 'Socket Thread', 'Timer', 'BackgroundThreadPool', 'BgIOThr', 'ImageBridgeChld']
 PROFILER_ENTRIES = 16 * 1024 * 1024  # 8-byte entries: 128 MiB, enough for the longest window at 1 ms
 PROFILER_INTERVAL_MS = 1.0
 
@@ -78,6 +80,14 @@ Services.profiler.dumpProfileToFileAsync(path).then(() => Services.profiler.Stop
   error => { try { Services.profiler.StopProfiler(); } catch {} done({ok: false, error: String(error)}); });
 """
 EPOCH = 'return performance.timeOrigin + performance.now();'
+# The active engine presenter's frame path (perf-phase2 diagnostics): transport, upload and the
+# native receiver's own counters (nsIAxioFrameSink.statsJSON: applied/presented frames, apply and
+# present microseconds on the AxioFrameRing task queue / main thread).
+FRAME_PATH = '''
+const n = window.AxioSozo?.engineProbe?.diagnostics?.().native ?? {};
+return {engine: n.engine ?? null, frameTransport: n.frameTransport ?? null, frameUpload: n.frameUpload ?? null,
+        memfdFallback: n.memfdFallback ?? null, nativeReceiver: n.nativeReceiver ?? null, frames: n.frames ?? null};
+'''
 NOW = 'return performance.now();'
 
 
@@ -156,6 +166,7 @@ def frames_from_events(events):
     accept_damage = {e[1]: (e[2], e[3]) for e in events if e[0] == 'accept'}
     fpaints = sorted((e[1], e[2]) for e in events if e[0] == 'fpaint' and e[3])
     assembles = sorted((e[1], e[2]) for e in events if e[0] == 'assemble')
+    napplies = sorted((e[1], e[2]) for e in events if e[0] == 'napply')
     images = sorted(e[1] for e in events if e[0] == 'imagedata')
     puts = sorted((e[1], e[2], e[3]) for e in events if e[0] == 'put')
     paints = sorted(e[1] for e in events if e[0] == 'paint')
@@ -179,6 +190,14 @@ def frames_from_events(events):
         assemble = next((a for a in assembles if a[0] >= received - 0.01 and a[0] <= ack_time), None)
         if assemble:
             frame['assemble_ms'] = assemble[1] - assemble[0]
+        napply = next((a for a in napplies if a[0] >= received - 0.01 and a[1] <= ack_time + 0.01), None)
+        if napply:
+            # Native receiver: AxioFrameRing task queue apply + resolve hop; the presenter then
+            # presents to the canvas's ImageContainer synchronously before the ack.
+            frame['native_apply_ms'] = napply[1] - napply[0]
+            frame['native_resolved_to_ack_ms'] = ack_time - napply[1]
+            frame['paint_end'] = ack_time
+            frame['paint_end_is_ack'] = True
         accept = next((t for t in accepts if received - 0.01 <= t <= ack_time), None)
         if accept is not None:
             frame['accept'] = accept
@@ -215,6 +234,23 @@ def frames_from_events(events):
     return frames
 
 
+def frame_path_window(before, after, seconds):
+    """The presenter's frame path at the window end, with native receiver counter deltas."""
+    out = {k: after.get(k) for k in ('engine', 'frameTransport', 'frameUpload', 'memfdFallback') if isinstance(after, dict)}
+    a, b = (before or {}).get('nativeReceiver'), (after or {}).get('nativeReceiver')
+    if isinstance(b, dict):
+        same = isinstance(a, dict) and all(b.get(k, 0) >= a.get(k, 0) for k in ('applied', 'presented'))
+        base = a if same else {}
+        delta = {k: b.get(k, 0) - base.get(k, 0) for k in ('applied', 'presented', 'skipped', 'failed', 'applyMicros', 'presentMicros')}
+        delta['apply_ms_per_frame'] = round(delta['applyMicros'] / 1000 / delta['applied'], 3) if delta['applied'] else None
+        delta['present_ms_per_frame'] = round(delta['presentMicros'] / 1000 / delta['presented'], 3) if delta['presented'] else None
+        delta['apply_share_of_one_core'] = round(delta['applyMicros'] / 1e6 / seconds, 4) if seconds else None
+        delta['present_share_of_one_core'] = round(delta['presentMicros'] / 1e6 / seconds, 4) if seconds else None
+        delta['same_sink'] = same
+        out['native_receiver'] = delta
+    return out
+
+
 def frame_summary(events, seconds):
     frames = frames_from_events(events)
     if not frames:
@@ -225,7 +261,7 @@ def frame_summary(events, seconds):
     reads = [e for e in events if e[0] == 'read']
     total_bytes = sum(max(0, e[5]) for e in reads)
     paint_ms = [e[2] - e[1] for e in events if e[0] == 'fpaint' and e[3]]
-    pipeline = [f['pixel_read_ms'] + f.get('assemble_ms', 0) for f in frames] + paint_ms
+    pipeline = [f['pixel_read_ms'] + f.get('assemble_ms', 0) + f.get('native_resolved_to_ack_ms', 0) for f in frames] + paint_ms
     def share(values):
         return round(sum(v for v in values if v) / (seconds * 1000), 4) if seconds else None
     return dict(measured_in='zen-chrome TEST-ONLY hooks (hooks.js)', frames_received=len(frames),
@@ -240,6 +276,9 @@ def frame_summary(events, seconds):
                 header_wait_ms=describe([f['header_wait_ms'] for f in frames]),
                 pixel_read_ms=describe([f['pixel_read_ms'] for f in frames]),
                 assemble_ms=describe([f.get('assemble_ms') for f in frames]),
+                native_frames=sum(1 for f in frames if 'native_apply_ms' in f),
+                native_apply_ms=describe([f.get('native_apply_ms') for f in frames]),
+                native_resolved_to_ack_ms=describe([f.get('native_resolved_to_ack_ms') for f in frames]),
                 received_to_ack_ms=describe([f['received_to_ack_ms'] for f in frames]),
                 accept_to_paint_start_ms=describe([f.get('accept_to_paint_start_ms') for f in painted]),
                 surface_paint_ms=describe(paint_ms),
@@ -273,7 +312,9 @@ def key_breakdown(events):
         row['pixel_transport_ms'] = frame['pixel_done'] - frame['header_done']
         if 'accept' in frame:
             row['received_to_accept_ms'] = frame['accept'] - frame['pixel_done']
-        for field in ('accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms', 'paint_to_chrome_paint_ms'):
+        if 'native_apply_ms' in frame:
+            row['received_to_ack_ms'] = frame['received_to_ack_ms']
+        for field in ('native_apply_ms', 'accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms', 'paint_to_chrome_paint_ms'):
             if field in frame:
                 row[field] = frame[field]
         if 'paint_end' in frame:
@@ -282,6 +323,7 @@ def key_breakdown(events):
             row['keydown_to_chrome_paint_ms'] = frame['chrome_paint'] - stamp
         rows.append(row)
     fields = ['chrome_handler_ms', 'keydown_to_send_ms', 'send_to_frame_header_ms', 'pixel_transport_ms', 'received_to_accept_ms',
+              'native_apply_ms', 'received_to_ack_ms',
               'accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms', 'paint_to_chrome_paint_ms',
               'keydown_to_surface_paint_end_ms', 'keydown_to_chrome_paint_ms']
     return dict(measured_in='zen-chrome TEST-ONLY hooks (hooks.js); chrome event timeStamp and performance.now share one clock',
@@ -308,6 +350,8 @@ def switch_timeline(events, start):
             note('first stdout read resolved' if event[5] < 65536 else 'first large (>=64 KiB) read resolved', event[4])
         elif kind == 'accept':
             note('first frame accepted (EngineFrameSurface)', event[1])
+        elif kind == 'napply':
+            note('first frame applied (native receiver)', event[2])
         elif kind == 'fpaint' and event[3]:
             note('first surface paint end', event[2])
         elif kind == 'imagedata':
@@ -336,6 +380,12 @@ class ZenProfile(zen_bench.ZenBench):
             self.result['hooks'] = self.hooks('install')
             self.hooks_installed = True
 
+    def frame_path(self):
+        try:
+            return self.chrome_script(FRAME_PATH)
+        except Exception as error:  # diagnostics are best effort; never fail a window on them
+            return dict(error=f'{type(error).__name__}: {error}'[:200])
+
     def measured(self, name, fn):
         """Run fn() as one measured window of the current pass."""
         record = dict(window=name, pass_=self.pass_name)
@@ -349,6 +399,7 @@ class ZenProfile(zen_bench.ZenBench):
             self.hooks('enable')
         chrome_t0 = self.chrome_script(NOW)
         epoch0 = self.chrome_script(EPOCH)
+        path0 = self.frame_path()
         snap0 = thread_snapshot(self.browser.pid)
         try:
             record['result'] = fn()
@@ -357,6 +408,7 @@ class ZenProfile(zen_bench.ZenBench):
             epoch1 = self.chrome_script(EPOCH)
             record['window_epoch_ms'] = [round(epoch0, 3), round(epoch1, 3)]
             record['threads'] = thread_window(snap0, snap1)
+            record['frame_path'] = frame_path_window(path0, self.frame_path(), (epoch1 - epoch0) / 1000)
             if tracing:
                 self.hooks('disable')
                 drained = self.hooks('drain')
@@ -409,6 +461,9 @@ class ZenProfile(zen_bench.ZenBench):
             self.measured('idle', lambda: self.raf_window(2.0))
             out['raf_load'] = self.load(server, 'raf')
             self.measured('raf', lambda: self.raf_window(3.0))
+            # Control for the harness itself: the same rAF fixture with zen_bench's 2 ms chrome sampler
+            # (which calls the presenter's diagnostics() 500x/s) off; only /proc CPU and hooks/profile.
+            self.measured('raf-nosampler', lambda: (time.sleep(3.0), dict(sampler='off', seconds=3.0))[1])
             out['scroll_load'] = self.load(server, 'scroll')
             self.measured('scroll', lambda: self.raf_window(0, during=self.wheel))
             out['text_load'] = self.load(server, 'text')
@@ -487,6 +542,7 @@ def compact(windows):
             row['frames'] = {k: (f[k].get('median') if isinstance(f[k], dict) else f[k]) for k in
                              ('received_fps', 'painted_fps', 'frames_superseded', 'received_mb_per_s', 'stdout_reads',
                               'payload_bytes_per_frame', 'damage_share', 'header_wait_ms', 'pixel_read_ms', 'assemble_ms',
+                              'native_frames', 'native_apply_ms', 'native_resolved_to_ack_ms',
                               'received_to_ack_ms', 'accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms',
                               'paint_to_chrome_paint_ms', 'main_thread_frame_work_share') if k in f}
         if 'key_breakdown' in w:
@@ -494,6 +550,8 @@ def compact(windows):
             row['key_breakdown_median'] = {key: value.get('median') for key, value in k.items() if isinstance(value, dict)}
         if 'switch_timeline' in w:
             row['switch_timeline'] = {key: value['first_ms'] for key, value in w['switch_timeline'].items()}
+        if w.get('frame_path'):
+            row['frame_path'] = w['frame_path']
         if w.get('profiler'):
             row['profile'] = w['profiler'].get('file')
         rows.append(row)

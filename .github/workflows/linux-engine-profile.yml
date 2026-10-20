@@ -14,7 +14,7 @@
 name: linux-engine-profile
 on:
   push:
-    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, cloud/engine-profile]
+    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile]
     paths:
       - tools/engine-bench/profile/**
       - .github/workflows/linux-engine-profile.yml
@@ -37,9 +37,11 @@ concurrency:
 env:
   # upstreams.lock.json webkit.ci_image
   WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
-  # Default: the newest prebuilt app on the cloud/integration line (gecko-linux-feel linux-zen-build
-  # 39346931130, 6ea1bde; it also published the unstripped libxul used to symbolize profiles).
-  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39346931130' }}
+  # Default: the newest prebuilt app with the perf-phase2 native frame receiver compiled in
+  # (linux-perf-build 39362552105, cloud/perf-phase2, merged into cloud/integration; it also
+  # published the unstripped libxul used to symbolize profiles). With this checkout's chrome JS
+  # (TEST-ONLY overlay) and hosts, the defaults are memfd frames + native receiver.
+  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39362552105' }}
   PROFILE_PASSES: ${{ inputs.passes || 'plain,trace,profile' }}
 
 jobs:

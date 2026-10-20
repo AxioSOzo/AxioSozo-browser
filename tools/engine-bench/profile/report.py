@@ -21,7 +21,9 @@ _spec.loader.exec_module(gp)
 
 THREAD_GROUPS = [('GeckoMain', 'main'), ('DOM Worker', 'DOM Worker'), ('Renderer', 'Renderer'), ('WRSceneBuilder', 'WRSceneBuilder'),
                  ('WRRenderBackend', 'WRRenderBackend'), ('WRWorker', 'WRWorker'), ('SwComposite', 'SwComposite'),
-                 ('Compositor', 'Compositor'), ('IPC I/O', 'IPC I/O'), ('Socket', 'Socket'), ('Canvas', 'Canvas'), ('ImageIO', 'ImageIO')]
+                 ('Compositor', 'Compositor'), ('IPC I/O', 'IPC I/O'), ('Socket', 'Socket'), ('Canvas', 'Canvas'), ('ImageIO', 'ImageIO'),
+                 # Background task queues (the native receiver's AxioFrameRing queue runs on these).
+                 ('BackgroundThreadPool', 'BgPool'), ('BgIOThr', 'BgPool'), ('ImageBridgeChld', 'ImageBridge')]
 
 
 def group(name):
@@ -60,6 +62,9 @@ def profile_digest(summary):
         render = [t for t in proc['threads'] if group(t['name']) in ('Renderer', 'WRSceneBuilder', 'WRRenderBackend', 'WRWorker', 'SwComposite')]
         if render:
             entry['webrender'] = {t['name']: dict(cpu_ms=t['cpu_ms'], top_self=t['top_self'][:5]) for t in render[:6]}
+        pool = sorted((t for t in proc['threads'] if group(t['name']) in ('BgPool', 'ImageBridge')), key=lambda t: -t['cpu_ms'])
+        if pool:
+            entry['background'] = {t['name']: dict(cpu_ms=t['cpu_ms'], top_self=t['top_self'][:5]) for t in pool[:4]}
         out[key] = entry
         if len(out) >= 4:
             break
@@ -140,29 +145,44 @@ def render(reports):
         if traced:
             lines += ['Frame path (median ms per frame; hooks). recv/paint fps = frames read / surface paints per s; '
                       'header wait = idle until the next AXCF header; payload read = Subprocess read(size) call → resolve; '
-                      'assemble = damage payload → whole frame; tick wait = accept → rAF paint start; paint = convert + putImageData '
+                      'assemble = damage payload → whole frame; native apply = NativeFrameSinks.apply call → resolve (AxioFrameRing queue + main-thread hop); '
+                      'native resolve→ack = presenter present + ack write; tick wait = accept → rAF paint start; paint = convert + putImageData '
                       'of the damage union; main-thread share = (payload reads + assembly + paints) / window.', '',
-                      '| pass | window | recv fps | paint fps | superseded | MB/s | payload KB | damage share | header wait | payload read | assemble | tick wait | paint | convert | put | paint→MozAfterPaint | main-thread share |',
-                      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+                      '| pass | window | recv fps | paint fps | superseded | MB/s | payload KB | damage share | header wait | payload read | assemble | native apply | native resolve→ack | tick wait | paint | convert | put | paint→MozAfterPaint | main-thread share |',
+                      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
             for row in traced:
                 f = row['metrics']['frames']
                 kb = f.get('payload_bytes_per_frame')
                 lines.append(f"| {row['pass_']} | {row['window']} | {fmt(f.get('received_fps'))} | {fmt(f.get('painted_fps'))} | "
                              f"{fmt(f.get('frames_superseded'))} | {fmt(f.get('received_mb_per_s'))} | {fmt(kb / 1024 if kb else None)} | "
                              f"{fmt(f.get('damage_share'), 2)} | {fmt(f.get('header_wait_ms'))} | {fmt(f.get('pixel_read_ms'))} | "
-                             f"{fmt(f.get('assemble_ms'), 2)} | {fmt(f.get('accept_to_paint_start_ms'))} | {fmt(f.get('surface_paint_ms'), 2)} | "
+                             f"{fmt(f.get('assemble_ms'), 2)} | {fmt(f.get('native_apply_ms'), 2)} | {fmt(f.get('native_resolved_to_ack_ms'), 2)} | "
+                             f"{fmt(f.get('accept_to_paint_start_ms'))} | {fmt(f.get('surface_paint_ms'), 2)} | "
                              f"{fmt(f.get('convert_ms'), 2)} | {fmt(f.get('put_ms'), 2)} | {fmt(f.get('paint_to_chrome_paint_ms'))} | "
                              f"{fmt(f.get('main_thread_frame_work_share'), 3)} |")
+            lines.append('')
+        pathed = [r for r in report['windows'] if (r.get('metrics') or {}).get('frame_path')]
+        if pathed:
+            lines += ['Presenter frame path (diagnostics at the window end; native receiver = nsIAxioFrameSink.statsJSON deltas: '
+                      'apply on the AxioFrameRing task queue, present on the main thread):', '',
+                      '| pass | window | transport | upload | applied | presented | apply ms/frame | present ms/frame | apply core share | present core share |',
+                      '| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |']
+            for row in pathed:
+                fp = row['metrics']['frame_path']
+                nr = fp.get('native_receiver') or {}
+                lines.append(f"| {row['pass_']} | {row['window']} | {fp.get('frameTransport') or '—'} | {fp.get('frameUpload') or '—'} | "
+                             f"{fmt(nr.get('applied'), 0)} | {fmt(nr.get('presented'), 0)} | {fmt(nr.get('apply_ms_per_frame'), 3)} | "
+                             f"{fmt(nr.get('present_ms_per_frame'), 3)} | {fmt(nr.get('apply_share_of_one_core'), 4)} | {fmt(nr.get('present_share_of_one_core'), 4)} |")
             lines.append('')
         keyed = [r for r in report['windows'] if (r.get('metrics') or {}).get('key_breakdown_median')]
         if keyed:
             lines += ['Key → paint breakdown (median ms; hooks):', '',
-                      '| pass | keydown→send | send→frame header (host) | payload transport | received→accept | tick wait | surface paint | paint→MozAfterPaint | keydown→surface paint end | keydown→MozAfterPaint |',
-                      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+                      '| pass | keydown→send | send→frame header (host) | payload transport | received→accept | native apply | received→ack (native present) | tick wait | surface paint | paint→MozAfterPaint | keydown→surface paint end | keydown→MozAfterPaint |',
+                      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
             for row in keyed:
                 k = row['metrics']['key_breakdown_median']
                 lines.append(f"| {row['pass_']} | {fmt(k.get('keydown_to_send_ms'))} | {fmt(k.get('send_to_frame_header_ms'))} | "
-                             f"{fmt(k.get('pixel_transport_ms'))} | {fmt(k.get('received_to_accept_ms'))} | {fmt(k.get('accept_to_paint_start_ms'))} | "
+                             f"{fmt(k.get('pixel_transport_ms'))} | {fmt(k.get('received_to_accept_ms'))} | {fmt(k.get('native_apply_ms'), 2)} | {fmt(k.get('received_to_ack_ms'), 2)} | {fmt(k.get('accept_to_paint_start_ms'))} | "
                              f"{fmt(k.get('surface_paint_ms'))} | {fmt(k.get('paint_to_chrome_paint_ms'))} | "
                              f"{fmt(k.get('keydown_to_surface_paint_end_ms'))} | {fmt(k.get('keydown_to_chrome_paint_ms'))} |")
             lines.append('')
@@ -202,6 +222,11 @@ def render(reports):
                     lines.append('  - WebRender/compositor threads: ' + '; '.join(
                         f"{name} {v['cpu_ms']:.0f} ms (top self: " + ', '.join(f"`{f['frame'][:50]}` {f['ms']:.0f}" for f in v['top_self'][:3]) + ')'
                         for name, v in list(render.items())[:3]))
+                background = entry.get('background')
+                if background:
+                    lines.append('  - background pools (native receiver queue): ' + '; '.join(
+                        f"{name} {v['cpu_ms']:.0f} ms (top self: " + ', '.join(f"`{f['frame'][:50]}` {f['ms']:.0f}" for f in v['top_self'][:3]) + ')'
+                        for name, v in list(background.items())[:3]))
                 worker = entry.get('busiest_worker')
                 if worker:
                     buckets = ', '.join(f'{k} {v:.0f}' for k, v in list(worker['buckets_inclusive_ms'].items())[:6])
