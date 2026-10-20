@@ -1,0 +1,38 @@
+✔ today's methods take closed params: times, a boolean, an errand id and one of three actions (1.216833ms)
+✔ getToday: only while the sheet is on, only from a normal window; a look moves 'since' but this visit keeps its own (15.015167ms)
+✔ the reply is rebuilt from closed primitives: a strange line, field or count does not cross (0.237958ms)
+✔ an errand's Done, Tomorrow and Undo, and its page in its space, need Errands on too (0.934ms)
+✔ Suggest a first thing: one turn with the numbered lines and no address; a bad pick or a failure is said plainly (1.723917ms)
+✔ #today is the sheet while its switch is on, with a Today link; off, the address shows Projects and there is no link (49.089542ms)
+✖ the sheet: a date, one sentence, lines grouped by what they need, each a link, and what it is made of (22.01825ms)
+✔ errand lines: the title opens its page in its space; Done and Tomorrow, then Undo (63.736041ms)
+✔ Suggest a first thing: on the click only, it marks one line and says who suggested it and that it can be wrong (69.140417ms)
+✔ an empty day says so, without the AI button; a refused sheet says why (39.207958ms)
+✔ the model: summary sentences, the route and where a line leads (0.21725ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3410.647916
+
+✖ failing tests:
+
+test at apps/browser/tests/lab-today-page.test.mjs:231:1
+✖ the sheet: a date, one sentence, lines grouped by what they need, each a link, and what it is made of (22.01825ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^Finished since \d\d:\d\d (yesterday|today)/u. Input:
+  
+  'Finished since Thursday 8 Oct 22:301'
+  
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/lab-today-page.test.mjs:240:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Finished since Thursday 8 Oct 22:301',
+    expected: /^Finished since \d\d:\d\d (yesterday|today)/u,
+    operator: 'match',
+    diff: 'simple'
+  }

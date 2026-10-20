@@ -1,0 +1,47 @@
+✔ creation, unsupported methods, invalid params and pre-abort never spawn (2.175417ms)
+✔ fixed host launch uses minimal env, inherited stdio only and result-only replies (4.901625ms)
+✔ unsafe runtime paths fail closed without a process (0.538959ms)
+✔ default 180-second and explicit 300-second run requests outlast 30-second RPCs (0.936ms)
+✔ adapter run deadline starts after bounded startup (0.45675ms)
+✔ signal plus explicit cancel share an ACK while the original run waits for terminal (0.585334ms)
+✔ direct cancel without signal also bounds a missing original terminal reply (0.457042ms)
+✔ graceful close is idempotent and waits without killing an exited host (0.320458ms)
+✔ ignored graceful shutdown waits one second, kills, and bounds hostile wait (3.142208ms)
+✔ startup timeout rejects promptly and cleans a late child without writing (1.388333ms)
+✔ immediate close suppresses a queued startup before spawn begins (0.288375ms)
+✔ abort during sole deferred startup does not spawn again just to cancel (0.42825ms)
+✔ one aborted startup waiter does not discard another caller sharing startup (0.3155ms)
+✔ startup failure disposes malformed returned child interfaces (0.221583ms)
+✔ partial frames and envelopes with missing, extra or unexpected IDs retire all pending (1.414125ms)
+✔ split JSON replies and buffered stdout preceding process exit are consumed (0.367458ms)
+✔ exited host with a pipe held open settles all pending after a bounded drain (1.180709ms)
+✔ UTF-8 request cap is enforced before spawn, including multibyte data (0.9745ms)
+✔ output caps count UTF-8 bytes, cover complete whitespace frames, and honor caller result limits (9.755708ms)
+✔ frame cap applies per line rather than to a combined valid read chunk (6.691792ms)
+✔ seventh outstanding call is rejected before write; concurrent run IDs cannot collide (1.660833ms)
+✔ host envelope errors expose typed code without diagnostic text; write failure retires (0.44325ms)
+✔ close and abort microtasks cannot write after retiring a ready host (0.610208ms)
+✔ host request budget retires before sending a 1025th envelope and a later call can restart (38.747875ms)
+✔ typed run faults disclose false before writes and conservatively true after an attempt (0.946416ms)
+✔ byte-shaped pipes are required; readString-only children are retired without writes (0.275041ms)
+✔ split UTF-8 lead chunks are not EOF and Unicode following frames remain bound to their RPC IDs (0.462291ms)
+✔ invalid or EOF-truncated raw UTF-8 retires all pending without replacement decoding (0.626291ms)
+✔ raw frame flooding counts incomplete bytes before they produce decoded text (1.882125ms)
+✔ stderr has independent fatal decoding and a raw-byte budget without exposing diagnostics (0.615833ms)
+✔ late cancellation followed by fragmented Unicode success retains no controller document (12.383084ms)
+✔ retirement force-closes descendant-held raw output pipes even after host wait resolves (0.281167ms)
+✔ a throwing output close cannot prevent the other close; hanging closes remain bounded (0.3305ms)
+✔ trusted inactive or throwing authority performs zero spawn/write (0.189833ms)
+✔ authority revoked before deferred startup suppresses spawn (0.249125ms)
+✔ delayed startup propagates initiating authority and cleans a revoked late child without writes (0.173875ms)
+✔ ready host checks each owner after ensureHost and immediately before write; another owner can reuse it (0.352542ms)
+✔ revoked initiating owner does not bind a reused host; cancel still reaches the already-owned run (0.300208ms)
+✔ default Subprocess adapter consumes private authority and passes only Gecko options (0.347209ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 178.328833
