@@ -4,7 +4,7 @@ Status: DONE
 
 PR (draft, into `cloud/integration`): https://github.com/AxioSOzo/AxioSozo-browser/pull/18
 (supersedes #17, which was the first session's branch `claude/cef-feel-2-xrbczc`).
-Branch: `claude/cef-feel-2-xrbczc-rgjgez`, merged with `origin/cloud/integration` at 15e20bf6.
+Branch: `claude/cef-feel-2-xrbczc-rgjgez`, merged with `origin/cloud/integration` at 8c2aa118, which had already merged this branch.
 
 **Read this first.** All gates below pass with one TEST-ONLY profile pref,
 `axiosozo.engines.linux.memfd_frames=false`. With the product default (memfd frames, perf round 2),
@@ -71,13 +71,13 @@ path belongs to cloud/perf-phase2, not this workstream. Details are under "Block
 | 39387935674 | 22b6aed9 | devtools PASS. The find log shows the missing ordinal; the download gets stuck (race). |
 | 39393555837 | 72286d26 | Find PASS (1→2→3 of 3) and AT-SPI PASS (press 0→1); download stuck again. |
 | **39399390970** | 8893cf18 | **Verdict PASS**: harness, fixture, web, web-2x and a11y. Only `ime_dead_keys_compose` is BLOCKED_ENV, and the Gecko baseline doesn't compose under Xvfb either. |
-| (pending at time of writing) | 19168a04 | Matrix and evidence commit, plus the devtools shot taken before the 4 s notice fades. |
+| **39404959733** | 19168a04 | **Verdict PASS** again (same BLOCKED_ENV only). The devtools shot now shows Zen's notice (`web/38-devtools-chromium.png`, inspected). |
 
 Linux check-and-test (PR): green on 22b6aed9 (39387943035). It had failed on dc253a2d
 (39379426485) because of the CSS scoping test, which is fixed.
 
 macOS CI (PR): 39382644091 on 936a411b reports no REGRESSION rows. It shows 8 PRE_EXISTING
-failures and two NEW_GATE_NOT_PASSING WebKit gates that came from integration. The macOS run on 19168a04 was pending at time of writing.
+failures and two NEW_GATE_NOT_PASSING WebKit gates that came from integration. Final: **39405085368 on 2000081f (head with all code): 0 REGRESSION** (2 NEW_GATE_NOT_PASSING WebKit gates from integration, 10 PRE_EXISTING). Run 39399396226 on 8893cf18 showed one REGRESSION, `cef:test_probe.py`: a `killpg` EPERM in a process-group cleanup test. Neither file differs from integration, the test passed on the other macOS runs of this branch, and it did not recur on the final head, so this was a runner flake.
 
 ## Screenshots inspected (run 39399390970 unless noted)
 - Fonts: identical in both engines (crop compared); sans and system-ui render in DejaVu Sans.
