@@ -176,6 +176,14 @@ def scenario(session, origin, directory):
     for kind in ('down', 'up'):
         session.command('key', type=kind, native_key_code=22, windows_key_code=8, modifiers=0, text='')
     results['click_then_select_all'] = wait_state(session, lambda s: s.get('t') == '')['t']
+    # Back to a tab whose field kept page focus: the view loses and regains focus, then the
+    # user clicks the same field. Zen must be told about the editable again (IME proxy).
+    forget(session)
+    session.completed(session.command('focus', focused=False))
+    event(session, 'text_input', lambda item: item['mode'] == 'none')
+    session.completed(session.command('focus', focused=True))
+    click(session, *AT['t'])
+    results['text_input_after_refocus'] = event(session, 'text_input', lambda item: item['mode'] == 'text')['mode']
 
     # CSS cursors from the element's computed style.
     session.command('mouse', type='move', x=AT['mv'][0], y=AT['mv'][1], modifiers=0, button='left', click_count=1, mouse_leave=False)

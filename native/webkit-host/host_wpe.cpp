@@ -320,6 +320,7 @@ public:
   void setFocus(bool focused) override {
     if (focused) wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_focused);
     else wpe_view_backend_remove_activity_state(backend_, wpe_view_activity_state_focused);
+    if (focused && host_.browserUI()) later(60, [](WpeView& view) { view.refreshInputMethod(); });
   }
   void setVisible(bool visible) override {
     if (visible) wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_visible);
@@ -452,6 +453,14 @@ private:
   GVariant* point(double x, double y, int count = 0);
   void releaseNative(Native& native);
   void emitTextInput();
+  // The page's editable can keep focus while WebKit's input-method context does not get it
+  // back (a refocused view, a click into the already focused field). Re-attaching the context
+  // makes WebKit announce its current state again: focus-in for an editable, nothing otherwise.
+  void refreshInputMethod() {
+    if (!im_ || !view_ || im_->focused) return;
+    webkit_web_view_set_input_method_context(view_, nullptr);
+    webkit_web_view_set_input_method_context(view_, WEBKIT_INPUT_METHOD_CONTEXT(im_));
+  }
   void selectionToPrimary(double x, double y, int count);
   void clipboardThen(const char* command);
   void setPreedit(const std::string& text, guint cursor);
@@ -783,7 +792,10 @@ void WpeView::mouse(const MouseInput& mouse) {
   }
   if (button == 1 && mouse.type == "up") dragArmed_ = false;
   // A finished left click or drag may have selected text: X11 PRIMARY (§8.2).
-  if (host_.browserUI() && mouse.type == "up" && button == 1) selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
+  if (host_.browserUI() && mouse.type == "up" && button == 1) {
+    selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
+    later(120, [](WpeView& view) { view.refreshInputMethod(); });
+  }
   // A right press opens the context menu (the engine's own signal if it fires, else the fallback).
   if (host_.browserUI() && mouse.type == "down" && button == 2) {
     double x = mouse.x, y = mouse.y;
