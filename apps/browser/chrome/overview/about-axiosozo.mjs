@@ -10,6 +10,7 @@
 // type; the contracts call the same thing a context.
 
 import * as M from "./overview-model.mjs";
+import { localizeMarked, words } from "./platform-words.mjs";
 
 const api = window.AxioSozoOverview ?? null;
 const $ = id => document.getElementById(id);
@@ -654,7 +655,7 @@ function firstRunGuide() {
   return h("section", { class: "guide", "aria-labelledby": "guide-heading" },
     h("div", { class: "guide-head" },
       h("h3", { id: "guide-heading" }, "Add your first project"),
-      h("p", {}, "Use Add project above. Everything stays on this Mac.")),
+      h("p", {}, words("Use Add project above. Everything stays on this Mac."))),
     h("ol", { class: "steps" }, steps.map(([title, text], index) => h("li", { class: "step" },
       h("span", { class: "step-mark", "aria-hidden": "true" }, String(index + 1)),
       h("span", { class: "step-title" }, title),
@@ -2695,7 +2696,7 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
   // No screenshot can be taken in this build, so Screenshot is not offered for a
   // new choice. A rule that already has it keeps it (and can keep it) unchanged.
   const savedScreen = form.observation === "screen";
-  const observationField = h("fieldset", {}, h("legend", {}, "What may leave this Mac (for optional judgement)"),
+  const observationField = h("fieldset", {}, h("legend", {}, words("What may leave this Mac (for optional judgement)")),
     M.OBSERVATIONS.map(level => choice({ type: "radio", name: "observation", value: level, checked: form.observation === level,
       disabled: level === "screen" && !savedScreen,
       label: M.OBSERVATION_LABELS[level], help: M.OBSERVATION_TEXT[level],
@@ -2749,7 +2750,7 @@ function openRuleEditor(rule, { hosts = "" } = {}) {
         placeholder: "I come here to post and answer mentions. If I drift into the feed, nudge me.",
         oninput: event => { form.instruction = event.target.value; } }),
       help: "Your words. Shown back to you as written; only used as text for optional judgement." }),
-      h("fieldset", {}, h("legend", {}, "Limits (checked on this Mac)"),
+      h("fieldset", {}, h("legend", {}, words("Limits (checked on this Mac)")),
         field({ label: "Minutes per day", control: minutesInput, help: "Empty means no daily limit. Counts time the site is in front, in the spaces this rule covers." }),
         h("h4", {}, "Allowed hours"),
         windowsBox, h("div", {}, addWindowButton)),
@@ -2965,7 +2966,7 @@ async function removeDecisionKeyFlow(provider) {
   if (slot.busy || !state.active) return;
   const label = M.PROVIDER_LABELS[provider];
   const ok = await confirmDialog({ title: `Remove the ${label} key?`,
-    message: `The key is deleted from the macOS Keychain. Site rules keep working on this Mac without ${label}.`,
+    message: words(`The key is deleted from the macOS Keychain. Site rules keep working on this Mac without ${label}.`),
     accept: "Remove key", destructive: true });
   if (!ok || slot.busy || !state.active) return;
   await keyChange(provider, "remove", () => call("removeDecisionKey", { provider }));
@@ -3248,7 +3249,7 @@ async function exportLedgerFlow() {
 
 async function clearLedgerFlow() {
   const ok = await confirmDialog({ title: "Delete all screen time?",
-    message: "All recorded time is deleted from this Mac. Site rules keep working and start counting again from now.",
+    message: words("All recorded time is deleted from this Mac. Site rules keep working and start counting again from now."),
     accept: "Delete screen time", destructive: true });
   if (ok) await act("clearLedger", {}, "Screen time deleted.").then(loadLedger);
 }
@@ -3376,13 +3377,13 @@ function labCard(experiment) {
         h("h4", { class: "card-title", id: titleId }, experiment.title,
           experiment.graduated ? h("span", { class: "tag accent" }, "On by default") : null)),
       toggle),
-    h("p", { class: "lab-pitch", id: pitchId }, experiment.pitch),
+    h("p", { class: "lab-pitch", id: pitchId }, words(experiment.pitch)),
     experiment.howToTry.length ? h("div", { class: "lab-try" },
       h("h5", {}, "How to try"),
-      h("ol", { class: "lab-steps" }, experiment.howToTry.map(step => h("li", {}, step)))) : null,
+      h("ol", { class: "lab-steps" }, experiment.howToTry.map(step => h("li", {}, words(step))))) : null,
     h("div", { class: "lab-foot" },
       h("p", { class: "lab-needs" }, M.labNeedsText(experiment)),
-      clients.length ? h("ul", { class: "lab-clients", "aria-label": "Assistants on this Mac" },
+      clients.length ? h("ul", { class: "lab-clients", "aria-label": words("Assistants on this Mac") },
         clients.map(client => h("li", { class: "tag", "data-state": client.state },
           h("span", { class: "dot", "data-status": client.dot }), client.text))) : null),
     experiment.graduated && !experiment.live ? h("p", { class: "lab-note" }, "Part of AxioSozo. Turning it off applies to new windows.") : null,
@@ -3903,6 +3904,8 @@ function setupSkipLink() {
 }
 
 async function init() {
+  // The page's fixed sentences say "this Mac"; other platforms get their own words.
+  localizeMarked(document);
   setupDialog();
   setupSheet();
   setupStatus();

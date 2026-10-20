@@ -12,6 +12,7 @@ const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/u;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
 const OPTION_NAME = /^[a-z0-9_.]{1,80}$/u;
 import { DECISION_KEY_PROVIDERS, validateDecisionKey } from "./ProviderKeys.sys.mjs";
+import { localizeMarked, words } from "./overview/platform-words.mjs";
 const SETTINGS_URI = "chrome://browser/content/axiosozo/providers-settings.xhtml";
 const PREF = "axiosozo.providers.instances.v1";
 const DRIVERS = Object.freeze(["codex", "claude-code", "antigravity"]);
@@ -449,8 +450,8 @@ export function initializeProviderSettings(win) {
     const label = KEY_LABELS[provider];
     if (code) { error.textContent = keychainErrorText(code); status(error.textContent); }
     else status(kind === "store"
-      ? `${label} key stored in the macOS Keychain. It will not be shown again. Nothing was sent and consent did not change.`
-      : `${label} key removed from the macOS Keychain.`);
+      ? words(`${label} key stored in the macOS Keychain. It will not be shown again. Nothing was sent and consent did not change.`)
+      : words(`${label} key removed from the macOS Keychain.`));
     renderKey(provider);
     keepKeyFocus(provider, focused);
     if (KEY_RECHECK.has(code)) await checkKey(provider);
@@ -501,7 +502,7 @@ export function openProviderSettings(browserWindow) {
   const closeWithParent = () => { if (!win.closed) win.close(); };
   browserWindow.addEventListener("unload", closeWithParent, { once: true });
   win.addEventListener("unload", () => browserWindow.removeEventListener("unload", closeWithParent), { once: true });
-  const initialize = () => initializeProviderSettings(win);
+  const initialize = () => { localizeMarked(win.document); initializeProviderSettings(win); };
   if (win.document.readyState === "complete" && win.document.documentURI === SETTINGS_URI) initialize();
   else win.addEventListener("DOMContentLoaded", initialize, { once: true });
   return win;
