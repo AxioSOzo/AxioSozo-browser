@@ -26,10 +26,12 @@ screenshots), EXPERIMENTAL, NOT_VERIFIED, BLOCKED_ENV. The host-level evidence i
 E2E is `scripts/webkit_feel_e2e.py` (linux-webkit-zen `e2e` job, `FEEL=1`). Its evidence is in
 `docs/evidence/linux/webkit-feel/` and `ci-results:cloud_webkit-feel/<run>-1-webkit-zen-e2e/feel/`.
 
-Final run: linux-webkit-zen **39376244911** (merged head 911eb7ed, Zen app build 39337785340, WPE 2.48.3),
-roundtrip/host_failure/three_engines PASS, all feel scenarios PASS. Host suites incl. `ui_test.py`:
-linux-webkit-host 39376244778 PASS. Earlier full-feel runs: 39370679857 (beforeunload PASS) and
-39365113915.
+Final run: linux-webkit-zen **39384321863** (cd54e4e6, Zen app build 39337785340, WPE 2.48.3):
+roundtrip/host_failure/three_engines PASS, all 21 feel scenarios PASS. Host suites incl. `ui_test.py`:
+linux-webkit-host 39384321774 PASS. The table's measurements and the curated screenshots come from
+the previous full-green run 39376244911. Between the two, run 39381493587 failed the IME gate: the
+input method was not re-announced after returning to a tab, fixed in cd54e4e6 and covered by
+`ui_test.py` `text_input_after_refocus`.
 
 | Gate | WebKit (Linux) | Evidence / measured |
 | --- | --- | --- |

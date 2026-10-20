@@ -40,6 +40,7 @@ Fixture page only and Linux only. Not READY.
   - motion events carry no button, so drag selection is emulated in an isolated script world;
   - double and triple click are emulated where WebKit does not select;
   - an editing command right after a click waits for that click (fixes Ctrl+A racing it).
+  - the input-method context is re-attached after a click or view refocus when WebKit left it unfocused (IME after returning to a tab).
 - `ui_test.py` with `fixtures/ui.html` is a new real-WPE suite in `probe.py full_test`.
 - `upstream/build.sh` registers the upstream prefix with `ldconfig`, so the sandboxed helper processes can load it.
 
@@ -73,20 +74,22 @@ Fixture page only and Linux only. Not READY.
 
 | What | Run | Result |
 | --- | --- | --- |
-| Zen E2E: roundtrip + feel, merged head 911eb7ed | linux-webkit-zen **39376244911** | PASS: roundtrip/host_failure/three_engines PASS; all 21 feel scenarios PASS; gates PASS except datalist NOT_VERIFIED |
-| Host suites, real WPE 2.48.3, incl. `ui_test.py` | linux-webkit-host **39376244778** (911eb7ed), 39375996623 (9bc833eb) | PASS (`click_then_select_all` "") |
-| Host compile check against the pinned headers | linux-webkit-feel-api 39376244822 | PASS |
+| Zen E2E: roundtrip + feel, final code cd54e4e6 | linux-webkit-zen **39384321863** | PASS: roundtrip/host_failure/three_engines PASS; all 21 feel scenarios PASS; gates PASS except datalist NOT_VERIFIED |
+| Host suites, real WPE 2.48.3, incl. `ui_test.py`, cd54e4e6 | linux-webkit-host **39384321774** | PASS (`click_then_select_all` "", `text_input_after_refocus` "text") |
+| Host compile check against the pinned headers | linux-webkit-feel-api 39384322060 | PASS |
+| Zen E2E, merged head 911eb7ed; source of the curated screenshots | linux-webkit-zen 39376244911, host 39376244778 | PASS (all scenarios) |
+| Zen E2E, 529d9d3f | linux-webkit-zen 39381493587 | FAIL: IME gate only (input method not re-announced after returning to a tab). Fixed in cd54e4e6 |
 | Unit tests (local, `node --test apps/browser/tests/*.test.mjs`) | this session | 2937 pass, 5 fail. The 5 also fail on cloud/integration: secure-helper detection ×2, fake Node child ×3 |
 | Earlier feel runs (history) | 39370679857, 39368134601, 39365113915 | FAIL at beforeunload / crash_retry / ime / shortcuts, each fixed afterwards (see commits) |
 | Upstream WPE: first run | linux-webkit-upstream 39296934153 | 2.54.1 and 2.52.6 builds PASS; suites NOT_VERIFIED (setup) |
 | Upstream WPE 2.54.1, re-run 1 | 39352196059 | build PASS; real-WPE suites FAIL: helpers could not load libWPEWebKit (fixed by ldconfig) |
 | Upstream WPE 2.54.1, re-run 2 | 39370679848 | stream/input/security PASS against 2.54.1; `ui_test.py` FAIL at double-click → `text_selection` |
 
-A covering re-run on the final head is triggered by the commit carrying this file. Its run ids are in the PR's checks.
+The final merge of `origin/cloud/integration` (3ac67b69) brings only engine-profile tooling and docs. `apps/`, `native/`, `scripts/`, `tests/`, `contracts/` and the WebKit workflows are identical to cd54e4e6, so runs 39384321863 and 39384321774 cover the shipped code.
 
 ## Verified vs NOT_VERIFIED
 
-Verified (PASS, run 39376244911, screenshots inspected):
+Verified (PASS in run 39384321863; measurements and inspected screenshots from run 39376244911):
 - **Chrome and tabs:**
   - favicon + title;
   - the URL-bar indicator;
