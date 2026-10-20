@@ -786,6 +786,10 @@ class FeelHarness(gui_test.Harness):
 
     def scenario_beforeunload(self):
         self.require_webkit()
+        # Marionette's recommended prefs set dom.disable_beforeunload, which makes Firefox's own
+        # "leave page?" prompt answer itself (for any engine). TEST-ONLY: restored for this step.
+        self.chrome_script('Services.prefs.setBoolPref("dom.disable_beforeunload", false); return true;')
+        self.result['test_only_switches'].append('dom.disable_beforeunload=false (undoes Marionette\'s recommended pref)')
         time.sleep(3.5)
         self.click_at(*AT['d-unload'])
         self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed')

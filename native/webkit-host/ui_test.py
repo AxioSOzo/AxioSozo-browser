@@ -232,6 +232,10 @@ def scenario(session, origin, directory):
     results['beforeunload'] = {'stayed_input': stayed, 'left_generation': session.target['document_generation'],
                                'before_generation': before['document_generation']}
     assert session.target['document_generation'] == before['document_generation'] + 1, results
+    # The editable of the new document still reports its caret (Zen's IME proxy follows it).
+    forget(session)
+    click(session, *AT['t'])
+    results['text_input_after_navigation'] = event(session, 'text_input', lambda item: item['mode'] == 'text', seconds=5)['caret_y']
 
     # A navigation closes an open prompt with its safe default before generations advance.
     click(session, *AT['alert'])
