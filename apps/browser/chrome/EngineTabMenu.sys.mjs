@@ -15,8 +15,9 @@ const MENU_SLOT = Symbol.for("axiosozo.engine-tab-menu");
  * `engineOf(tab)` → engine id; `setTabEngine(tab, id)` → Promise. Returns
  * `{ dispose() }`, or null when the tab menu does not exist.
  */
-export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure = () => {} }) {
-  const delegate = { engineOf, setTabEngine, onFailure };
+export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure = () => {}, availability = null }) {
+  // `availability(tab, id)` → null, or {available:false, reason} for an engine this tab cannot use now.
+  const delegate = { engineOf, setTabEngine, onFailure, availability };
   const existing = window[MENU_SLOT];
   if (existing) {
     existing.delegates.push(delegate);
@@ -50,11 +51,18 @@ export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure
     const tab = contextTab();
     const usable = tab && !window.PrivateBrowsingUtils?.isWindowPrivate?.(window);
     const model = usable ? tabMenuModel(current().engineOf(tab), window) : { mode: "hidden", items: [] };
+    for (const entry of model.items) {
+      let state = null;
+      try { state = current().availability?.(tab, entry.id) ?? null; } catch {}
+      if (state && state.available === false && !entry.checked) Object.assign(entry, { disabled: true, reason: state.reason, note: state.reason });
+    }
     item.hidden = model.mode !== "toggle";
     submenu.hidden = model.mode !== "submenu";
     toggleTarget = null;
     if (model.mode === "toggle") {
       item.setAttribute("label", model.label);
+      if (model.items[0].note) item.setAttribute("acceltext", model.items[0].note); else item.removeAttribute?.("acceltext");
+      if (model.items[0].disabled) item.setAttribute("disabled", "true"); else item.removeAttribute?.("disabled");
       toggleTarget = model.items[0].id;
     } else if (model.mode === "submenu") {
       submenu.setAttribute("label", model.label);
@@ -67,6 +75,7 @@ export function installEngineTabMenu(window, { engineOf, setTabEngine, onFailure
         if (entry.checked) entryItem.setAttribute("checked", "true");
         if (entry.disabled) entryItem.setAttribute("disabled", "true");
         if (entry.reason && entry.disabled && !entry.checked) entryItem.setAttribute("tooltiptext", entry.reason);
+        if (entry.note && !entry.checked) entryItem.setAttribute("acceltext", entry.note);
         return entryItem;
       }));
     }

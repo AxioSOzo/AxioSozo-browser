@@ -973,3 +973,32 @@
   font-weight: 500 !important;
 }
 #axiosozo-engine-badge:hover { background: color-mix(in srgb, var(--text-color-error, rgb(217 48 37)) 24%, transparent) !important; }
+
+/* ---- WebKit engine indicator in the address bar (WebKitEngineControls) -------------
+ * Before the site identity, like Chromium's badge: a compact "WebKit" pill while the
+ * selected tab runs in WebKit (a click returns it to Firefox). The three-engine window
+ * switches through the tab menu, so the Chromium fixture probe's resting placeholder
+ * (a dashed chip that spilled out of Zen's narrow sidebar toolbar) is not shown there. */
+#axiosozo-webkit-indicator {
+  appearance: none; flex: none; align-self: center; height: 20px; box-sizing: border-box;
+  margin-inline: 2px 4px; padding: 0 7px; border: 1px solid light-dark(rgb(29 78 216 / .35), rgb(147 197 253 / .4));
+  border-radius: 999px; background: light-dark(rgb(37 99 235 / .1), rgb(96 165 250 / .16));
+  color: light-dark(#1d4ed8, #bfdbfe); font: 600 11px/1 system-ui, sans-serif; letter-spacing: .01em;
+  white-space: nowrap; cursor: default;
+}
+#axiosozo-webkit-indicator:hover { background: light-dark(rgb(37 99 235 / .18), rgb(96 165 250 / .26)); }
+#axiosozo-webkit-indicator:focus-visible { outline: 2px solid var(--focus-outline-color, AccentColor); outline-offset: 1px; }
+#axiosozo-webkit-indicator[hidden] { display: none; }
+#axiosozo-webkit-indicator[pending] { opacity: .7; border-style: dashed; }
+toolbarbutton#axiosozo-webkit-indicator > .toolbarbutton-icon { display: none; }
+toolbarbutton#axiosozo-webkit-indicator > .toolbarbutton-text { display: block; }
+:root[axiosozo-webkit-controls] #axiosozo-engine-probe:not([engine="chromium"]) { display: none; }
+@media (forced-colors: active) {
+  #axiosozo-webkit-indicator { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+}
+
+/* ---- <select> popups of WebKit pages (WebKitBrowserUI), drawn by Zen ---------------- */
+#axiosozo-webkit-select-popup { --menuitem-padding: 4px 10px; }
+#axiosozo-webkit-select-popup menuitem.axiosozo-select-child { padding-inline-start: 22px; }
+#axiosozo-webkit-select-popup menuitem[selected="true"]:not([_moz-menuactive]) { font-weight: 600; }
+#axiosozo-webkit-select-popup menucaption { font-weight: 600; padding: 4px 10px 2px; }
