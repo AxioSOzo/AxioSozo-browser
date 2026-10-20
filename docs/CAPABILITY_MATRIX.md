@@ -1,5 +1,18 @@
 # First-experience capability matrix
 
+## Consolidated status per engine and platform (final-review, 20 Oct 2026)
+
+One line per engine × platform; labels as in docs/CLOUD_PROGRAM_SUMMARY.md (PASS = a cited run,
+EXPERIMENTAL = works but fixture-only or behind a developer gate, NOT_VERIFIED = not run). Not READY.
+Final-round run ids on one integration head: docs/handoff/final-review.md.
+
+| Engine | macOS (Apple silicon) | Linux x86_64 (Xvfb, software WebRender) |
+| --- | --- | --- |
+| Gecko (Zen) | Builds and runs on the owner's Mac (September baseline); macos-ci regression lane vs dev on every PR (no Zen build in CI) | PASS: app build + GUI harness launch/chrome/about/fixture/input (39337785340), native feel (39346931130), pixel-content gate in the harness fixture shot |
+| Chromium (CEF 154) | IOSurface engine view; E0 PASS (September), live E1/E2 blocked by the Keychain gate; macOS compile check on every linux-cef-host run | PASS, EXPERIMENTAL: host E0/stream/security/input/web/damage x86_64 + aarch64 (39303367159); in Zen E1/E2 fixture + loopback web, 1× and 2×, feel matrix (39399390970), now on product defaults with pixel gates (final-review) |
+| WebKit | WKWebView host component suites PASS (39345979318, 39346635281); **in-Zen E2E NOT_VERIFIED** | PASS, EXPERIMENTAL, fixture page only: WPE 2.48.3 host (bubblewrap), in-Zen round trip + host kill (39325934205), three engines on one tab (39337226571), 21-scenario feel matrix (39384321863) |
+
+
 | Capability | Gecko | Chromium/CEF | WebKit (WPE, Linux) | Provider agent | Jev |
 | --- | --- | --- | --- | --- | --- |
 | Navigate ordinary web URL/search | Implemented; fixture UI tested | Blocked outside local GET fixture | Blocked: loopback GET fixture only (`/engine.html`, `?page=2`); every other URL is refused by Zen and by the host | No automatic route | Off |
@@ -68,9 +81,9 @@ Not READY: fixture page only, Linux only, no general web browsing.
 WebKit is the third engine of a Zen tab (EngineRegistry `webkit`, label "WebKit";
 `apps/browser/chrome/WebKit*.sys.mjs`). It is EXPERIMENTAL and fixture-only.
 
-1. Platform: Linux x86_64 (`ready.platform` `linux-x86_64`, Debian 13 WPE 2.48.3 pins).
-   macOS: "WebKit is not available on macOS yet" (ADR 004 macOS plan, not built);
-   other platforms: "WebKit is not available on this platform yet".
+1. Platform: Linux x86_64 (`ready.platform` `linux-x86_64`, Debian 13 WPE 2.48.3 pins) or an
+   Apple-silicon Mac (WKWebView host, `native/webkit-host/mac`; Intel Macs: "WebKit is available on
+   Apple silicon Macs only"); other platforms: "WebKit is not available on this platform yet".
 2. Pref `axiosozo.engines.webkit.enabled` (default false): "WebKit is not enabled in this browser".
 3. Host installed: `AXIOSOZO_WEBKIT_BINARY` must equal `$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost`
    (`native/webkit-host/probe.py setup`): "The WebKit engine is not installed".
