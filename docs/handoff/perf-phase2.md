@@ -29,7 +29,11 @@ memfd frames ON; frame worker ON (memfd only, probe-gated); main-thread upload B
   three engines) with transport memfd + upload worker.
 - linux-cef-host 39355570129 (9bf9fea): x86_64 + arm64 PASS, macOS compile PASS (zen-gui-chromium known setup failure).
 - linux-perf-build 39350827997 (cold, daf88cf): Zen build FAILED in mach build (error not captured: the
-  evidence error list filled with Rust lint lines); rebuild with a C/C++/IDL error capture: 39360822222.
+  evidence error list filled with Rust lint lines); 39360822222 captured it (most vexing parse of an
+  IntSize, 4 errors in AxioFrameReceiver.cpp); **39362552105 (35782ef): build + Gecko GUI smoke PASS** (warm, ~16 min
+  setup). Its artifact `axiosozo-zen-linux-x86_64` is the newest in the repo: other workstreams' "newest artifact"
+  jobs may pick it up (native receiver compiled in, pref off by default = cloud/integration behaviour).
+- linux-perf 39364874251: A/B base / cand / native on that app (running).
 - linux-perf 39352857399: presenter bench (VideoFrame identical output, Firefox 158 damage band 0.60 → 0.12 ms);
   A/B base/cand/worker/imagedata both engines — worker: 2× parent CPU −40 %, Chromium key → frame −44 %
   (tables in docs/perf/pixel-path.md).
