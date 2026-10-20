@@ -51,7 +51,7 @@ input,button,select,textarea{font:16px/20px monospace;margin:0}
 <button class="a dlg" id="d-prompt">prompt</button><button class="a dlg" id="d-unload">arm unload</button>
 <div class="a" id="edit" contenteditable="true"></div>
 <p class="a" id="find">find the needle here; another needle there; a third needle.</p>
-<button class="a" id="perm">notifications</button>
+<button class="a" id="perm">location</button>
 <input class="a" id="file" type="file">
 <a class="a" id="dl-link" download="feel.txt" href="data:text/plain,feel">download</a>
 <img class="a" id="img" alt="feel image" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 48 48%22%3E%3Ccircle cx=%2224%22 cy=%2224%22 r=%2220%22 fill=%22%231a73e8%22/%3E%3C/svg%3E">
@@ -111,8 +111,8 @@ $('d-unload').addEventListener('click', () => {
 });
 $('perm').addEventListener('click', () => {
   const done = value => { state.perm = String(value); report(); };
-  if (typeof Notification !== 'undefined') Notification.requestPermission().then(done, error => done('error:' + error.name));
-  else if (navigator.geolocation) navigator.geolocation.getCurrentPosition(() => done('granted'), error => done('geo:' + error.code));
+  // Geolocation always asks the browser (WebKit may refuse a notification request by itself).
+  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(() => done('granted'), error => done('geo:' + error.code));
   else done('unsupported');
 });
 $('file').addEventListener('change', () => { state.file = [...$('file').files].map(file => file.name).join(',') || 'none'; report(); });

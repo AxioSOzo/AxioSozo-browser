@@ -186,7 +186,7 @@ def scenario(session, origin, directory):
     assert permission['details']['origin'] == origin, permission
     session.completed(session.command('permission_reply', prompt_id=permission['prompt_id'], decision='deny'))
     results['permission'] = {'asked': permission['details']['permissions'], 'page': wait_state(session, lambda s: s.get('perm') != '')['perm']}
-    assert results['permission']['page'] == 'denied', results
+    assert results['permission']['asked'] == ['geolocation'] and results['permission']['page'] == 'geo:1', results
 
     # Context menu over a selection (WebKit's signal or the host's fallback), then Copy.
     click(session, round(20 + CHAR * 2.5), P_TOP, clicks=2)

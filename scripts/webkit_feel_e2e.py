@@ -826,10 +826,10 @@ class FeelHarness(gui_test.Harness):
         self.screenshot('13-permission', settle=False)
         self.click_screen(hanger['secondary']['box'], hanger['scale'])
         result = self.wait_page(lambda page: page['perm'] not in ('',), 'the page saw the decision', timeout=10)['perm']
-        self.gate('permission_prompt', 'PASS' if result == 'denied' else 'FAIL', screenshot='13-permission.png', doorhanger={
+        self.gate('permission_prompt', 'PASS' if result == 'geo:1' else 'FAIL', screenshot='13-permission.png', doorhanger={
             k: hanger[k] for k in ('message', 'name')}, buttons=[hanger['primary']['label'], hanger['secondary']['label']], page=result,
-            note='fixture mode: decisions are never remembered; Block → denied')
-        if result != 'denied':
+            note='fixture mode: decisions are never remembered; Block → PERMISSION_DENIED (code 1)')
+        if result != 'geo:1':
             raise AssertionError('permission result ' + repr(result))
         return {'result': result, 'doorhanger': hanger}
 

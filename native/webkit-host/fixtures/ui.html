@@ -25,8 +25,8 @@ $('confirm').onclick = () => { s.d = 'confirm=' + confirm('ui confirm?'); out();
 $('prompt').onclick = () => { s.d = 'prompt=' + prompt('ui prompt', 'dflt'); out(); };
 $('perm').onclick = () => {
   const done = v => { s.perm = String(v); out(); };
-  if (typeof Notification !== 'undefined') Notification.requestPermission().then(done, e => done('error:' + e.name));
-  else navigator.geolocation.getCurrentPosition(() => done('granted'), e => done('geo:' + e.code));
+  // Geolocation always asks the embedder (WebKit may refuse a notification request by itself).
+  navigator.geolocation.getCurrentPosition(() => done('granted'), e => done('geo:' + e.code));
 };
 $('unload').onclick = () => { addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; }); s.d = 'armed'; out(); };
 $('t').oninput = () => { s.t = $('t').value; out(); };
