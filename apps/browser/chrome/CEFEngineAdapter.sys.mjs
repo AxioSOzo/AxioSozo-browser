@@ -403,6 +403,10 @@ export function surfaceFrameRate(service) {
 /** cef-v1 `frame_rate` command values. */
 export const FRAME_RATES = Object.freeze([60, 120]);
 
+// Request lines are bounded (16 KiB of UTF-8).
+const utf8Encoder = new TextEncoder();
+const utf8Length = text => utf8Encoder.encode(text).length;
+
 /**
  * One authenticated native process. A web host serves every Chromium tab of a
  * Zen profile; each tab is a CEFEngineAdapter registered by its tab_id.
@@ -593,7 +597,8 @@ export class CEFHostConnection {
   }
   async #write(value) {
     const text = JSON.stringify(value) + "\n";
-    if (new TextEncoder().encode(text).length > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
+    // A UTF-16 unit is at most 3 UTF-8 bytes: only a long line is measured (frame acks, input: never).
+    if (text.length > 5461 && utf8Length(text) > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
     try { await this.#process.stdin.write(text); }
     catch (error) { this.fail("CEF_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }

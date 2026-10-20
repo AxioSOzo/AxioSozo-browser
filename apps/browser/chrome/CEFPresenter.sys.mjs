@@ -1200,7 +1200,8 @@ export class CEFPresenter {
   }
   /** Sum wheel (or pinch) deltas per frame; a phase or modifier change flushes first. */
   #coalesce(record, method, fields, sums) {
-    const key = JSON.stringify([method, fields.modifiers, fields.phase ?? null, fields.momentum_phase ?? null, fields.precise ?? null]);
+    // Per wheel event: a plain string key (no JSON array per event).
+    const key = `${method}|${fields.modifiers}|${fields.phase ?? ""}|${fields.momentum_phase ?? ""}|${fields.precise ?? ""}`;
     if (record.pendingWheel && record.pendingWheel.key !== key) this.#flushWheel(record);
     if (record.pendingWheel) {
       record.pendingWheel.fields = fields; // the latest position

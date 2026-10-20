@@ -205,6 +205,10 @@ class TargetError extends Error {}
 const targetError = code => new TargetError(code);
 const HOST_BRAND = Symbol.for("axiosozo.engine-stream.host-connection");
 
+// Request lines are bounded (16 KiB of UTF-8).
+const utf8Encoder = new TextEncoder();
+const utf8Length = text => utf8Encoder.encode(text).length;
+
 /**
  * `profile`: { engine, readyFields: [...], validateReady(ready, {instance, frameDamage}) (throws),
  * restoreStatuses: [...], cursors: Set, imeLimit }.
@@ -284,7 +288,8 @@ export class EngineStreamHost {
   }
   async #write(value) {
     const text = JSON.stringify(value) + "\n";
-    if (new TextEncoder().encode(text).length > 16384) throw new Error("ENGINE_REQUEST_TOO_LARGE");
+    // A UTF-16 unit is at most 3 UTF-8 bytes: only a long line is measured (frame acks, input: never).
+    if (text.length > 5461 && utf8Length(text) > 16384) throw new Error("ENGINE_REQUEST_TOO_LARGE");
     try { await this.#process.stdin.write(text); }
     catch (error) { this.fail("ENGINE_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }
