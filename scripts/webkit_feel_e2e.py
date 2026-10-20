@@ -249,6 +249,10 @@ class FeelHarness(gui_test.Harness):
         super().launch(session, executable, profile)
         # Zen's dialogs over the page must stay open for the user (and this test).
         self.marionette.call('WebDriver:DeleteSession')
+        self.new_session()
+        self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
+
+    def new_session(self):
         try:
             session = self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True,
                                                                     'unhandledPromptBehavior': {'default': 'ignore', 'beforeUnload': 'ignore'}})
@@ -259,7 +263,6 @@ class FeelHarness(gui_test.Harness):
         self.result['marionette_prompt_behavior'] = caps.get('unhandledPromptBehavior')
         self.result['browser_version'] = caps.get('browserVersion')
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
-        self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
 
     def run_one(self, name):
         outcome = super().run_one(name)
@@ -798,45 +801,58 @@ class FeelHarness(gui_test.Harness):
                   via={k: v['via'] for k, v in out.items()}, results=self.page()['d'])
         return out
 
+    def unload_round(self, link, answer, shot):
+        """One beforeunload prompt, driven with no Marionette session open.
+
+        WebDriver classic accepts every beforeunload prompt as it opens (the beforeUnload
+        prompt behavior applies to BiDi sessions only), so the session is closed while the
+        prompt is up: X input and xwd only. The reply's timing in the presenter's uiLog then
+        shows the Zen dialog stayed open until the key."""
+        self.marionette.call('WebDriver:DeleteSession')
+        try:
+            self.xdotool('mousemove', '--sync', *link)
+            time.sleep(0.05)
+            self.xdotool('click', 1)
+            time.sleep(2.5)
+            self.screenshot(shot, settle=False)
+            self.key(answer)
+            time.sleep(2.0)
+        finally:
+            self.new_session()
+        log = (self.state()['native'] or {}).get('uiLog') or []
+        opened = max((i for i, e in enumerate(log) if e[:2] == ['prompt', 'before_unload']), default=None)
+        if opened is None:
+            raise AssertionError(f'no before_unload prompt reached Zen; uiLog {log!r}')
+        reply = next((e for e in log[opened + 1:] if e[0] == 'dialog_reply'), None)
+        if reply is None:
+            raise AssertionError(f'the beforeunload prompt was never answered; uiLog {log[opened:]!r}')
+        return {'accept': reply[1], 'open_ms': reply[2] - log[opened][2]}
+
     def scenario_beforeunload(self):
         self.require_webkit()
-        # Marionette's recommended prefs set dom.disable_beforeunload, which makes Firefox's own
-        # "leave page?" prompt answer itself (for any engine). TEST-ONLY: restored for this step.
+        # Marionette's recommended prefs set dom.disable_beforeunload (Gecko's own prompt path). TEST-ONLY: restored.
         self.chrome_script('Services.prefs.setBoolPref("dom.disable_beforeunload", false); return true;')
         self.result['test_only_switches'].append('dom.disable_beforeunload=false (undoes Marionette\'s recommended pref)')
-        time.sleep(3.5)
+        self.result['test_only_switches'].append('no Marionette session while a beforeunload prompt is open (classic WebDriver auto-accepts it)')
         self.click_at(*AT['d-unload'])
         self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed')
-        self.click_at(*AT['link'])
-        time.sleep(0.4)
-        self.screenshot('12-beforeunload-after-click', settle=False)
-        try:
-            shown = self.wait(lambda: self.alert_text() is not None or None, 'Zen beforeunload dialog', timeout=12)
-        except AssertionError:
-            shown = None
-        if not shown:
-            page = self.page()
-            self.gate('beforeunload', 'FAIL', reason='no dialog', page=page)
-            raise AssertionError('no beforeunload dialog; page ' + repr(page))
-        time.sleep(0.6)
-        self.screenshot('12-beforeunload', settle=False)
-        via = self.answer_prompt(['Escape'], False)
-        time.sleep(1.5)
-        stayed = self.page()
-        frames_before = (self.state()['native'] or {}).get('frames', 0)
+        link = self.at(*AT['link'])
+        stay = self.unload_round(link, 'Escape', '12-beforeunload')
+        stayed = self.wait_page(lambda page: page['p'] == '1', 'Stay keeps page 1', timeout=10)
         self.click_at(*AT['count'])
         live = self.wait_page(lambda page: page['c'] > stayed['c'], 'the page still renders after Stay', timeout=10)
-        frames_after = (self.state()['native'] or {}).get('frames', 0)
-        self.click_at(*AT['link'])
-        self.wait(lambda: self.alert_text() is not None or None, 'beforeunload dialog again', timeout=12)
-        self.answer_prompt(['Return'], True)
+        leave = self.unload_round(self.at(*AT['link']), 'Return', '12-beforeunload-leave')
         left = self.wait_page(lambda page: page['p'] == '2', 'Leave goes to page 2', timeout=20)
-        self.gate('beforeunload', 'PASS' if stayed['p'] == '1' and left['p'] == '2' else 'FAIL', screenshot='12-beforeunload.png',
-                  via=via, stayed_on=stayed['p'], frames_after_stay=[frames_before, frames_after], left_to=left['p'])
+        ok = stay['accept'] is False and leave['accept'] is True and stay['open_ms'] >= 2000 and leave['open_ms'] >= 2000
+        self.gate('beforeunload', 'PASS' if ok else 'FAIL', screenshots=['12-beforeunload.png', '12-beforeunload-leave.png'],
+                  stay=stay, leave=leave, stayed_on=stayed['p'], live_count=live['c'], left_to=left['p'],
+                  note='Stay by Escape, Leave by Enter in Zen\'s tab-modal "Leave page?" dialog; driven without a Marionette session')
         # Back to page 1 for the next scenarios.
         self.chrome_script('BrowserCommands.back(); return true;')
         self.wait_page(lambda page: page['p'] == '1', 'back to page 1', timeout=20)
-        return {'stayed': stayed['p'], 'live_count': live['c'], 'left': left['p']}
+        if not ok:
+            raise AssertionError(f'beforeunload: stay {stay!r} leave {leave!r}')
+        return {'stay': stay, 'leave': leave, 'left': left['p']}
 
     def scenario_permission(self):
         self.require_webkit()
