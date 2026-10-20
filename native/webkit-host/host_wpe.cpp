@@ -1052,6 +1052,7 @@ void WpeView::contextMenu(WebKitHitTestResult* hit) {
 void WpeView::contextMenuFallback(double x, double y) {
   AXIO_TRACE("context menu fallback at %.0f,%.0f", x, y);
   script(ContextMenuFunction, point(x, y), [x, y](WpeView& view, const std::string& answer) {
+    AXIO_TRACE("context menu fallback answer %s", answer.c_str());
     auto parsed = json::parse(answer);
     if (!parsed || !parsed->isObject() || view.contextSignaled_) return;
     const Value* prevented = parsed->get("prevented");
