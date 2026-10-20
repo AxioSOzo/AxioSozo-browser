@@ -1,0 +1,71 @@
++ g++ -std=c++20 -O2 -g -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now /home/axio/repo/native/webkit-host/host_wpe.cpp -o /home/axio/build/webkit/AxioWebKitHost -I/usr/include/wpe-webkit-2.0 -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/sysprof-6 -I/usr/include/libsoup-3.0 -I/usr/include/libmount -I/usr/include/blkid -pthread -isystem /usr/include/mit-krb5 -I/usr/include/wpe-1.0 -I/usr/include/wpe-fdo-1.0 -DWPE_ENABLE_XKB=1 -lWPEWebKit-2.0 -lsoup-3.0 -lgmodule-2.0 -pthread -lglib-2.0 -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lWPEBackend-fdo-1.0 -lwpe-1.0 -lwayland-server -pthread
+/home/axio/repo/native/webkit-host/host_wpe.cpp:429:37: error: redeclaration of ‘std::deque<std::function<void()> > {anonymous}::WpeView::held_’
+  429 |   std::deque<std::function<void()>> held_;
+      |                                     ^~~~~
+/home/axio/repo/native/webkit-host/host_wpe.cpp:404:24: note: previous declaration ‘std::vector<unsigned char> {anonymous}::WpeView::held_’
+  404 |   std::vector<uint8_t> held_;
+      |                        ^~~~~
+/home/axio/repo/native/webkit-host/host_wpe.cpp: In member function ‘virtual bool {anonymous}::WpeView::edit(const std::string&)’:
+/home/axio/repo/native/webkit-host/host_wpe.cpp:345:22: error: no matching function for call to ‘std::vector<unsigned char>::push_back({anonymous}::WpeView::edit(const std::string&)::<lambda()>)’
+  345 |       held_.push_back([this, action] { runEdit(action); });
+      |       ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/include/c++/14/vector:66,
+                 from /home/axio/repo/native/webkit-host/json.hpp:17,
+                 from /home/axio/repo/native/webkit-host/stream_core.hpp:10,
+                 from /home/axio/repo/native/webkit-host/host_wpe.cpp:12:
+/usr/include/c++/14/bits/stl_vector.h:1283:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(const value_type&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1283 |       push_back(const value_type& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1283:35: note:   no known conversion for argument 1 from ‘{anonymous}::WpeView::edit(const std::string&)::<lambda()>’ to ‘const std::vector<unsigned char>::value_type&’ {aka ‘const unsigned char&’}
+ 1283 |       push_back(const value_type& __x)
+      |                 ~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/14/bits/stl_vector.h:1300:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1300 |       push_back(value_type&& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1300:30: note:   no known conversion for argument 1 from ‘{anonymous}::WpeView::edit(const std::string&)::<lambda()>’ to ‘std::vector<unsigned char>::value_type&&’ {aka ‘unsigned char&&’}
+ 1300 |       push_back(value_type&& __x)
+      |                 ~~~~~~~~~~~~~^~~
+/home/axio/repo/native/webkit-host/host_wpe.cpp: In member function ‘bool {anonymous}::WpeView::hold(std::function<void()>)’:
+/home/axio/repo/native/webkit-host/host_wpe.cpp:432:20: error: no matching function for call to ‘std::vector<unsigned char>::push_back(std::remove_reference<std::function<void()>&>::type)’
+  432 |     held_.push_back(std::move(run));
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1283:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(const value_type&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1283 |       push_back(const value_type& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1283:35: note:   no known conversion for argument 1 from ‘std::remove_reference<std::function<void()>&>::type’ {aka ‘std::function<void()>’} to ‘const std::vector<unsigned char>::value_type&’ {aka ‘const unsigned char&’}
+ 1283 |       push_back(const value_type& __x)
+      |                 ~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/14/bits/stl_vector.h:1300:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1300 |       push_back(value_type&& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1300:30: note:   no known conversion for argument 1 from ‘std::remove_reference<std::function<void()>&>::type’ {aka ‘std::function<void()>’} to ‘std::vector<unsigned char>::value_type&&’ {aka ‘unsigned char&&’}
+ 1300 |       push_back(value_type&& __x)
+      |                 ~~~~~~~~~~~~~^~~
+/home/axio/repo/native/webkit-host/host_wpe.cpp: In member function ‘void {anonymous}::WpeView::releaseHeld()’:
+/home/axio/repo/native/webkit-host/host_wpe.cpp:438:15: error: cannot convert ‘std::vector<unsigned char>’ to ‘std::deque<std::function<void()> >&’
+  438 |     runs.swap(held_);
+      |               ^~~~~
+      |               |
+      |               std::vector<unsigned char>
+In file included from /usr/include/c++/14/deque:66,
+                 from /home/axio/repo/native/webkit-host/transport.hpp:16,
+                 from /home/axio/repo/native/webkit-host/stream_core.hpp:11:
+/usr/include/c++/14/bits/stl_deque.h:1817:19: note:   initializing argument 1 of ‘void std::deque<_Tp, _Alloc>::swap(std::deque<_Tp, _Alloc>&) [with _Tp = std::function<void()>; _Alloc = std::allocator<std::function<void()> >]’
+ 1817 |       swap(deque& __x) _GLIBCXX_NOEXCEPT
+      |            ~~~~~~~^~~
+/home/axio/repo/native/webkit-host/host_wpe.cpp:442:36: error: no matching function for call to ‘std::vector<unsigned char>::push_back(std::remove_reference<std::function<void()>&>::type)’
+  442 |       if (holding_) held_.push_back(std::move(run)); else run();
+      |                     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1283:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(const value_type&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1283 |       push_back(const value_type& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1283:35: note:   no known conversion for argument 1 from ‘std::remove_reference<std::function<void()>&>::type’ {aka ‘std::function<void()>’} to ‘const std::vector<unsigned char>::value_type&’ {aka ‘const unsigned char&’}
+ 1283 |       push_back(const value_type& __x)
+      |                 ~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/14/bits/stl_vector.h:1300:7: note: candidate: ‘constexpr void std::vector<_Tp, _Alloc>::push_back(value_type&&) [with _Tp = unsigned char; _Alloc = std::allocator<unsigned char>; value_type = unsigned char]’
+ 1300 |       push_back(value_type&& __x)
+      |       ^~~~~~~~~
+/usr/include/c++/14/bits/stl_vector.h:1300:30: note:   no known conversion for argument 1 from ‘std::remove_reference<std::function<void()>&>::type’ {aka ‘std::function<void()>’} to ‘std::vector<unsigned char>::value_type&&’ {aka ‘unsigned char&&’}
+ 1300 |       push_back(value_type&& __x)
+      |                 ~~~~~~~~~~~~~^~~
+{"component": "webkit-host", "status": "FAIL", "message": "Command '['g++', '-std=c++20', '-O2', '-g', '-Wall', '-Wextra', '-fstack-protector-strong', '-D_FORTIFY_SOURCE=2', '-fPIE', '-pie', '-Wl,-z,relro,-z,now', '/home/axio/repo/native/webkit-host/host_wpe.cpp', '-o', '/home/axio/build/webkit/AxioWebKitHost', '-I/usr/include/wpe-webkit-2.0', '-I/usr/include/glib-2.0', '-I/usr/lib/x86_64-linux-gnu/glib-2.0/include', '-I/usr/include/sysprof-6', '-I/usr/include/libsoup-3.0', '-I/usr/include/libmount', '-I/usr/include/blkid', '-pthread', '-isystem', '/usr/include/mit-krb5', '-I/usr/include/wpe-1.0', '-I/usr/include/wpe-fdo-1.0', '-DWPE_ENABLE_XKB=1', '-lWPEWebKit-2.0', '-lsoup-3.0', '-lgmodule-2.0', '-pthread', '-lglib-2.0', '-lgio-2.0', '-lgobject-2.0', '-lglib-2.0', '-lWPEBackend-fdo-1.0', '-lwpe-1.0', '-lwayland-server', '-pthread']' returned non-zero exit status 1."}
