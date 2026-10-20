@@ -116,6 +116,10 @@ return JSON.stringify({text: String(getSelection()), editable: !!(a && a.isConte
 )JS";
 constexpr const char* PointerUpFunction = R"JS(
 let via = 'engine';
+const drag = window.__axioDrag;
+window.__axioDrag = null;
+// WebCore's release puts a caret at the pointer when it saw no drag: restore the dragged selection.
+if (drag && drag.ours) { getSelection().setBaseAndExtent(drag.node, drag.offset, drag.focusNode, drag.focusOffset); via = 'drag-emulated'; }
 const s = getSelection(), a = document.activeElement;
 const field = a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && typeof a.selectionStart === 'number' ? a : null;
 const collapsed = field ? a.selectionStart === a.selectionEnd : s.isCollapsed;
@@ -140,6 +144,29 @@ let text = '';
 if (field) { if (field.type !== 'password') text = field.value.slice(field.selectionStart, field.selectionEnd); }
 else text = String(getSelection());
 return JSON.stringify({via, text});
+)JS";
+// Selection by dragging: WPE's libwpe event factory gives motion events no button, so WebCore
+// never starts a selection drag. Anchored at the press, extended on each move, over page text
+// only (fields, links and controls keep WebKit's own behaviour); WebKit's own selection wins.
+constexpr const char* DragStartFunction = R"JS(
+window.__axioDrag = null;
+const e = document.elementFromPoint(x, y);
+if (!e || e.closest('input,textarea,select,button,a[href],[draggable="true"]') || e.isContentEditable) return 'skip';
+const r = document.caretRangeFromPoint(x, y);
+if (!r) return 'skip';
+window.__axioDrag = {node: r.startContainer, offset: r.startOffset, ours: false};
+return 'armed';
+)JS";
+constexpr const char* DragMoveFunction = R"JS(
+const d = window.__axioDrag;
+if (!d) return 'none';
+const s = getSelection();
+if (!d.ours && !s.isCollapsed) { window.__axioDrag = null; return 'engine'; }
+const r = document.caretRangeFromPoint(x, y);
+if (!r) return 'none';
+s.setBaseAndExtent(d.node, d.offset, r.startContainer, r.startOffset);
+d.ours = true; d.focusNode = r.startContainer; d.focusOffset = r.startOffset;
+return 'emulated';
 )JS";
 constexpr const char* CursorFunction = R"JS(
 const e = document.elementFromPoint(x, y);
@@ -317,6 +344,7 @@ public:
   void imFocus(WebKitInputMethodContext* context, bool focused);
   void imCursor(int x, int y, int width, int height);
   void hovered();
+  void dragMove();
 
   // Called by the backend box on the UI thread.
   void exported(struct wpe_fdo_shm_exported_buffer* buffer);
@@ -359,6 +387,7 @@ private:
   std::map<std::string, Native> natives_;
   double pointerX_ = 0, pointerY_ = 0, contextX_ = 0, contextY_ = 0;  // CSS px
   bool composing_ = false, cursorQuery_ = false, cursorDirty_ = false, contextSignaled_ = false;
+  bool dragArmed_ = false, dragQuery_ = false, dragDirty_ = false;
   std::string lastSelection_;
   std::string findText_; guint findCount_ = 0, findActive_ = 0, findIdentifier_ = 0; bool findCounted_ = false, findFound_ = false;
   bool findPending_ = false, findForward_ = true;
@@ -687,7 +716,15 @@ void WpeView::mouse(const MouseInput& mouse) {
   }
   wpe_view_backend_dispatch_pointer_event(backend_, &event);
   // WebKit reports a new hit test only when its context changes; the CSS cursor can change on any move.
-  if (host_.browserUI() && mouse.type == "move") hovered();
+  if (host_.browserUI() && mouse.type == "move") {
+    hovered();
+    if (dragArmed_ && (buttons_ & wpe_input_pointer_modifier_button1)) dragMove();
+  }
+  if (host_.browserUI() && button == 1 && mouse.type == "down" && mouse.clickCount == 1) {
+    dragArmed_ = true;
+    script(DragStartFunction, point(mouse.x, mouse.y), [](WpeView&, const std::string& answer) { AXIO_TRACE("drag %s", answer.c_str()); });
+  }
+  if (button == 1 && mouse.type == "up") dragArmed_ = false;
   // A finished left click or drag may have selected text: X11 PRIMARY (§8.2).
   if (host_.browserUI() && mouse.type == "up" && button == 1) selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
   // A right press opens the context menu (the engine's own signal if it fires, else the fallback).
@@ -897,6 +934,15 @@ void WpeView::hovered() {
     view.cursorQuery_ = false;
     view.host_.cursorChanged(&view.tab_, cssCursors().count(cursor) ? cursor : "default");
     if (view.cursorDirty_) view.hovered();
+  });
+}
+
+void WpeView::dragMove() {
+  if (dragQuery_) { dragDirty_ = true; return; }
+  dragQuery_ = true; dragDirty_ = false;
+  script(DragMoveFunction, point(pointerX_, pointerY_), [](WpeView& view, const std::string&) {
+    view.dragQuery_ = false;
+    if (view.dragDirty_ && view.dragArmed_) view.dragMove();
   });
 }
 
