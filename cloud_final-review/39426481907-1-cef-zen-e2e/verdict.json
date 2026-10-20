@@ -1,0 +1,231 @@
+{
+  "verdict": "FAIL",
+  "blocked": {
+    "harness": [],
+    "fixture": [],
+    "web": [],
+    "web-2x": [],
+    "a11y": []
+  },
+  "runs": {
+    "harness": {
+      "status": "PASS",
+      "reason": null,
+      "scenarios": {
+        "launch": "PASS",
+        "chrome": "PASS",
+        "fixture": "PASS"
+      },
+      "matrix": {}
+    },
+    "fixture": {
+      "status": "PASS",
+      "reason": null,
+      "scenarios": {
+        "launch": "PASS",
+        "chrome": "PASS",
+        "fixture_roundtrip": "PASS",
+        "fixture_host_kill": "PASS"
+      },
+      "matrix": {
+        "fixture_e1": "PASS",
+        "probe_chip_never_covers_content": "PASS",
+        "fixture_e2_host_kill": "PASS"
+      }
+    },
+    "web": {
+      "status": "MISSING",
+      "reason": null,
+      "scenarios": {},
+      "matrix": {}
+    },
+    "web-2x": {
+      "status": "MISSING",
+      "reason": null,
+      "scenarios": {},
+      "matrix": {}
+    },
+    "a11y": {
+      "status": "MISSING",
+      "reason": null,
+      "scenarios": {},
+      "matrix": {}
+    }
+  },
+  "frame_path_probe": {
+    "chosen": "default",
+    "variants": {
+      "default": {
+        "prefs": [],
+        "e1": "PASS",
+        "black_fraction": 0.001,
+        "frame_path": {
+          "frameUpload": "native",
+          "nativeReceiver": {
+            "applied": 6,
+            "presented": 6,
+            "skipped": 0,
+            "failed": 0,
+            "applyMicros": 3491,
+            "presentMicros": 6438,
+            "sharedImages": 6,
+            "surfaceImages": 0,
+            "partialCopies": 2,
+            "wholeCopies": 4,
+            "copiedPixels": 3876804,
+            "bound": true
+          },
+          "memfdFallback": null,
+          "frameTransport": "memfd",
+          "frameWorker": null,
+          "frameUploadError": null,
+          "framePixels": null
+        },
+        "typing": "PASS"
+      },
+      "worker-off": {
+        "prefs": [
+          "axiosozo.engines.linux.frame_worker=false"
+        ],
+        "e1": "PASS",
+        "black_fraction": 0.001,
+        "frame_path": {
+          "frameUpload": "native",
+          "nativeReceiver": {
+            "applied": 6,
+            "presented": 6,
+            "skipped": 0,
+            "failed": 0,
+            "applyMicros": 7921,
+            "presentMicros": 7973,
+            "sharedImages": 6,
+            "surfaceImages": 0,
+            "partialCopies": 2,
+            "wholeCopies": 4,
+            "copiedPixels": 3876804,
+            "bound": true
+          },
+          "memfdFallback": null,
+          "frameTransport": "memfd",
+          "frameWorker": null,
+          "frameUploadError": null,
+          "framePixels": null
+        },
+        "typing": "PASS"
+      },
+      "js-memfd": {
+        "prefs": [
+          "axiosozo.engines.linux.native_receiver=false",
+          "axiosozo.engines.linux.frame_worker=false"
+        ],
+        "e1": "PASS",
+        "black_fraction": 0.001,
+        "frame_path": {
+          "frameUpload": "videoframe",
+          "nativeReceiver": null,
+          "memfdFallback": null,
+          "frameTransport": "memfd",
+          "frameWorker": null,
+          "frameUploadError": null,
+          "framePixels": {
+            "source": {
+              "tag": "[object ArrayBuffer]",
+              "byteLength": 2584536,
+              "expected": 2584536,
+              "center": [
+                249,
+                247,
+                244,
+                255
+              ]
+            },
+            "canvas": {
+              "center": [
+                244,
+                247,
+                249,
+                255
+              ]
+            }
+          }
+        },
+        "typing": "PASS"
+      },
+      "memfd-off": {
+        "prefs": [
+          "axiosozo.engines.linux.memfd_frames=false"
+        ],
+        "e1": "PASS",
+        "black_fraction": 0.001,
+        "frame_path": {
+          "frameUpload": "videoframe",
+          "nativeReceiver": null,
+          "memfdFallback": null,
+          "frameTransport": "pipe",
+          "frameWorker": null,
+          "frameUploadError": null,
+          "framePixels": {
+            "source": {
+              "tag": "[object ArrayBuffer]",
+              "byteLength": 2584536,
+              "expected": 2584536,
+              "center": [
+                249,
+                247,
+                244,
+                255
+              ]
+            },
+            "canvas": {
+              "center": [
+                244,
+                247,
+                249,
+                255
+              ]
+            }
+          }
+        },
+        "typing": "PASS"
+      },
+      "memfd-off-receiver-off": {
+        "prefs": [
+          "axiosozo.engines.linux.memfd_frames=false",
+          "axiosozo.engines.linux.native_receiver=false"
+        ],
+        "e1": "PASS",
+        "black_fraction": 0.001,
+        "frame_path": {
+          "frameUpload": "videoframe",
+          "nativeReceiver": null,
+          "memfdFallback": null,
+          "frameTransport": "pipe",
+          "frameWorker": null,
+          "frameUploadError": null,
+          "framePixels": {
+            "source": {
+              "tag": "[object ArrayBuffer]",
+              "byteLength": 2584536,
+              "expected": 2584536,
+              "center": [
+                249,
+                247,
+                244,
+                255
+              ]
+            },
+            "canvas": {
+              "center": [
+                244,
+                247,
+                249,
+                255
+              ]
+            }
+          }
+        },
+        "typing": "PASS"
+      }
+    }
+  }
+}
