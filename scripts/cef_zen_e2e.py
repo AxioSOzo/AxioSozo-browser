@@ -53,7 +53,8 @@ ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
 # address-bar input (owned by cloud/linux-platform), and a crash ends the session.
 WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
-                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_gecko', 'urlbar_chromium')
+                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_gecko', 'urlbar_chromium',
+                 'ctrl_t_gecko', 'ctrl_t_chromium')
 SCALE_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'selection', 'wheel', 'to_gecko')
 FIXTURE_SCENARIOS = ('launch', 'chrome', 'fixture_roundtrip', 'fixture_host_kill')
 HOST = 'AxioCEFProbe --stream'
@@ -379,11 +380,11 @@ class CEFZenHarness(gui_test.Harness):
     def scenario_switch(self):
         url = self.feel.url
         # Tab A: the Gecko baseline, kept in Gecko for parity and as the E2 survivor.
-        self.open_tab(url)
+        self.gecko_handle = self.open_tab(url)
         self.wait_page(lambda page: page['p'] == '1', 'feel page in the Gecko baseline tab')
         self.gecko_tab = self.web()['tabId']
         # Tab B: the same page, moved to Chromium through Zen's own tab menu.
-        self.open_tab(url)
+        self.cef_handle = self.open_tab(url)
         gecko = self.wait_page(lambda page: page['p'] == '1', 'feel page in Gecko before the switch')
         self.focus_window()
         self.screenshot('01-gecko')
@@ -847,19 +848,6 @@ class CEFZenHarness(gui_test.Harness):
         out = {}
         self.click_at(*AT['blank'])
         key_before = self.page()['k']
-        tabs = self.web()['tabs']
-        # Zen's Ctrl+T opens its floating new-tab address bar (a tab exists once something is chosen).
-        self.key('ctrl+t')
-        out['ctrl_t'] = self.wait(lambda: (lambda s: {'tabs': s['tabs'], 'urlbar_focused': s['urlbarFocused']}
-                                           if s['tabs'] == tabs + 1 or s['urlbarFocused'] else None)(self.web()),
-                                  'Ctrl+T opens a new tab / Zen\'s new-tab address bar', timeout=10)
-        time.sleep(0.6)
-        self.screenshot('20-ctrl-t', settle=False)
-        # Dismissed with a click into the page, not Escape (the Linux parent's address-bar crash).
-        self.click_at(*AT['blank'])
-        time.sleep(0.8)
-        if self.web()['tabs'] != tabs:
-            self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
         # Ctrl+W with the focus in a Chromium page closes that Chromium tab.
         self.open_tab(self.feel.url)
         self.wait_page(lambda page: page['p'] == '1', 'extra feel tab in Gecko')
@@ -894,7 +882,7 @@ class CEFZenHarness(gui_test.Harness):
         out['page_last_key'] = last
         out['page_saw_chrome_keys'] = last != key_before and any(last.startswith(p) for p in ('C:t:', 'C:w:', 'C:Tab:', 'C:r:', ':F5:'))
         self.gate('shortcut_ownership', 'FAIL' if out['page_saw_chrome_keys'] else 'PASS',
-                  checked=['Ctrl+T', 'Ctrl+W', 'Ctrl+Tab', 'Ctrl+Shift+Tab', 'F5', 'Ctrl+R', 'Ctrl+F (find)', 'Ctrl+=/-/0 (zoom)',
+                  checked=['Ctrl+T (ctrl_t_*)', 'Ctrl+W', 'Ctrl+Tab', 'Ctrl+Shift+Tab', 'F5', 'Ctrl+R', 'Ctrl+F (find)', 'Ctrl+=/-/0 (zoom)',
                            'Alt+Left (history)', 'Ctrl+L (urlbar_*)'], details=out)
         if out['page_saw_chrome_keys']:
             raise AssertionError('the page received a Zen shortcut: ' + last)
@@ -916,6 +904,37 @@ class CEFZenHarness(gui_test.Harness):
         self.type_text('L')
         typed = self.wait_page(lambda page: page['t'].endswith('L'), f'a click returns typing to the {engine} page', timeout=10)['t']
         return {'focused': focused, 'urlbar_focused_after_escape': after_escape, 'typed_after_click': typed, 'focus': self.web()['focus']}
+
+    def ctrl_t(self, engine):
+        """Zen's Ctrl+T over the page: a new tab or Zen's new-tab address bar; dismissed by a click into the page."""
+        self.click_at(*AT['blank'])
+        tabs = self.web()['tabs']
+        self.key('ctrl+t')
+        opened = self.wait(lambda: (lambda s: {'new_tab': s['tabs'] == tabs + 1, 'urlbar_focused': s['urlbarFocused']}
+                                    if s['tabs'] == tabs + 1 or s['urlbarFocused'] else None)(self.web()),
+                           f'Ctrl+T over {engine}: a new tab / Zen\'s new-tab address bar', timeout=10)
+        time.sleep(0.6)
+        self.screenshot(f'23-ctrl-t-{engine}', settle=False)
+        self.click_at(*AT['blank'])
+        time.sleep(1.0)
+        state = self.web()
+        if state['tabs'] != tabs:
+            self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
+        return {'opened': opened, 'after_click': {'tabs': state['tabs'], 'urlbar_focused': state['urlbarFocused']}}
+
+    def scenario_ctrl_t_gecko(self):
+        self.select_tab(self.gecko_tab)
+        out = self.ctrl_t('gecko')
+        self.result['ctrl_t_gecko'] = out
+        return out
+
+    def scenario_ctrl_t_chromium(self):
+        self.ensure_chromium('24-to-chromium')
+        out = self.ctrl_t('chromium')
+        gecko = self.result.get('ctrl_t_gecko')
+        self.gate('ctrl_t', 'PASS' if gecko and gecko['opened'] == out['opened'] else 'FAIL', screenshot='23-ctrl-t-chromium.png',
+                  gecko=gecko, **out)
+        return out
 
     def scenario_urlbar_gecko(self):
         self.select_tab(self.gecko_tab)
@@ -1074,39 +1093,49 @@ class CEFZenHarness(gui_test.Harness):
 
     def scenario_beforeunload(self):
         self.require_chromium()
-        self.chrome_script("""
-            window.__feelDialogs = [];
-            if (!window.__feelDialogObserver) {
-              window.__feelDialogObserver = { observe: (subject, topic) => window.__feelDialogs.push(topic) };
-              for (const topic of ['common-dialog-loaded', 'tabmodal-dialog-loaded'])
-                Services.obs.addObserver(window.__feelDialogObserver, topic);
-            }
-            return true;""")
-        self.click_at(*AT['d-unload'])
-        self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed (with a user gesture)')
-        self.click_at(*AT['link'])
-
-        def shown():
-            text = self.alert_text()
-            if text is not None:
-                return {'alert_text': text}
-            try:
-                log = self.chrome_script('return window.__feelDialogs;')
-            except gui_test.MarionetteError as error:
-                return {'script_refused': str(error)[:160]}
-            page = self.page()
-            if page and page['p'] == '2':
-                raise AssertionError(f'navigated to page 2 without a Zen dialog (dialog notifications: {log})')
-            return {'notifications': log} if log else None
-        opened = self.wait(shown, 'Zen "leave page?" dialog', timeout=15)
-        time.sleep(0.6)
-        self.screenshot('17-beforeunload')
-        via = self.answer_prompt(['Return'], True)
-        page = self.wait_page(lambda page: page['p'] == '2', 'leaving the page after confirming')
-        self.chrome_script('BrowserCommands.back(); return true;')
-        self.wait_page(lambda page: page['p'] == '1', 'back to page 1')
-        self.gate('beforeunload', 'PASS' if via == 'keyboard' else 'EXPERIMENTAL', screenshot='17-beforeunload.png', dialog=opened, via=via)
-        return {'dialog': opened, 'via': via, 'page': page['p']}
+        # WebDriver accepts beforeunload prompts of its current tab by itself; point Marionette's
+        # content context at the Gecko baseline tab (without selecting it) so Zen's dialog over
+        # the Chromium tab is left to the user's keys.
+        self.marionette.call('WebDriver:SwitchToWindow', {'handle': self.gecko_handle, 'focus': False})
+        try:
+            if self.web()['tabId'] != self.cef_tab:
+                self.select_tab(self.cef_tab)
+            self.chrome_script("""
+                window.__feelDialogs = [];
+                if (!window.__feelDialogObserver) {
+                  window.__feelDialogObserver = { observe: (subject, topic) => window.__feelDialogs.push({topic,
+                    text: subject?.document?.getElementById?.('infoBody')?.textContent ?? null,
+                    title: subject?.document?.getElementById?.('infoTitle')?.textContent ?? null}) };
+                  for (const topic of ['common-dialog-loaded', 'tabmodal-dialog-loaded'])
+                    Services.obs.addObserver(window.__feelDialogObserver, topic);
+                }
+                return true;""")
+            self.click_at(*AT['d-unload'])
+            self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed (with a user gesture)')
+            out = {}
+            for attempt, (keys, stays) in enumerate(((['Escape'], True), (['Return'], False))):
+                self.chrome_script('window.__feelDialogs = []; return true;')
+                self.click_at(*AT['link'])
+                shown = self.wait(lambda: self.chrome_script('return window.__feelDialogs.length ? window.__feelDialogs : null;'),
+                                  'Zen "leave page?" dialog over the Chromium tab', timeout=15)
+                time.sleep(0.8)
+                self.screenshot(f'17-beforeunload-{attempt + 1}')
+                for key in keys:
+                    self.key(key)
+                if stays:
+                    time.sleep(2)
+                    page = self.page()
+                    if page['p'] != '1':
+                        raise AssertionError('"Stay on page" (Escape) still left the page: ' + repr(page))
+                    out['stay'] = {'dialog': shown, 'page': page['p']}
+                else:
+                    out['leave'] = {'dialog': shown, 'page': self.wait_page(lambda page: page['p'] == '2', 'Leave page (Return)')['p']}
+            self.chrome_script('BrowserCommands.back(); return true;')
+            self.wait_page(lambda page: page['p'] == '1', 'back to page 1')
+        finally:
+            self.marionette.call('WebDriver:SwitchToWindow', {'handle': self.cef_handle, 'focus': False})
+        self.gate('beforeunload', 'PASS', screenshots=['17-beforeunload-1.png', '17-beforeunload-2.png'], **out)
+        return out
 
     def scenario_to_gecko(self):
         self.require_chromium()
