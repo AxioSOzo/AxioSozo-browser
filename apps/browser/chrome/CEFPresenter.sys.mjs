@@ -5,7 +5,8 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
   RENDER_PATH_PIPE, WHEEL_PHASES, surfaceTargetId } from "./CEFEngineAdapter.sys.mjs";
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
-import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect } from "./EngineFrameSurface.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
+  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -776,16 +777,24 @@ export class CEFPresenter {
    */
   #draw(record, metadata, pixels) {
     if (this.disposed) return;
-    record.frames ??= new EngineFrameSurface(this.window, record.canvas, {
-      // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
-      isPaintable: () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden)),
-      onPaint: paint => {
-        record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
-        record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
-        record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
-        record.firstFrameAt ??= this.window.performance.now();
-        record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
-      } });
+    const isPaintable = () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden));
+    const onPaint = paint => {
+      record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
+      record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
+      record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+      record.firstFrameAt ??= this.window.performance.now();
+      record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
+    };
+    if (pixels instanceof NativeFrame) {
+      // Native receiver: the component presents the frame; nothing to convert here.
+      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable());
+      if (paint) { if (paint !== true) onPaint(paint); return; }
+      const fallback = nativeFallbackFrame(metadata, pixels);
+      if (!fallback) return;
+      ({ metadata, pixels } = fallback);
+    }
+    // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, { isPaintable, onPaint });
     record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
@@ -1525,6 +1534,7 @@ export class CEFPresenter {
       memfdFallback:record.surfaceMode ? null : record.adapter.memfdFallback ?? null,
       // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
       frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
+      nativeReceiver:record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).
@@ -1545,7 +1555,8 @@ export class CEFPresenter {
     }
     // Explicit diagnostic call in privileged chrome only, never a content API or
     // continuous page capture. The outer Zen window must be evidenced separately.
-    return { png:record.canvas.toDataURL("image/png"), diagnostics:this.diagnostics() };
+    return { png:record.nativeSink ? nativeFramePNG(this.window, record.nativeSink) : record.canvas.toDataURL("image/png"),
+      diagnostics:this.diagnostics() };
   }
   async dispose() {
     this.disposed = true;

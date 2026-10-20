@@ -1,5 +1,5 @@
 {
-  "comment": "Which linux-perf.yml jobs a push to cloud/perf-phase2 runs (job `plan`). ab_variants: tools/pixel-path/ci/zen_ab.sh VARIANTS (base = cloud/integration; others = this tree + TEST-ONLY prefs); soaks: soak_container.sh SOAKS (label:minutes:transport).",
+  "comment": "Which linux-perf.yml jobs a push to cloud/perf-phase2 runs (job `plan`). ab_variants: tools/pixel-path/ci/zen_ab.sh VARIANTS (base = cloud/integration; others = this tree + TEST-ONLY prefs); soaks: soak_container.sh SOAKS (label:minutes:transport). zen_run_id pins the Zen app artifact (a linux-perf-build run of this branch for native-receiver variants); empty = newest.",
   "bench": true,
   "ab_chromium": false,
   "ab_webkit": false,
@@ -10,5 +10,6 @@
   "soak": false,
   "soaks": "memfd:10:memfd pipe:4:pipe",
   "soak_scale": "1",
-  "bench_jobs": "presenter"
+  "bench_jobs": "presenter",
+  "zen_run_id": ""
 }

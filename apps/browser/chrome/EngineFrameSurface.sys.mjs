@@ -372,3 +372,106 @@ export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read
     return data.byteOffset === 0 && data.buffer.byteLength === bytes ? data.buffer : data.slice().buffer;
   };
 }
+
+/**
+ * Native receiver (docs/perf/pixel-path.md, "Native receiver"; Linux, memfd frames only, pref
+ * `axiosozo.engines.linux.native_receiver`, default false): the engine-view component
+ * (apps/browser/native/engine-view/linux, nsIAxioFrameReceiverService) maps the host's ring and
+ * keeps each target's whole frame off the main thread; presented frames go to the canvas's async
+ * ImageContainer as B8G8R8X8 images. No pixel crosses JS. Null (the JS path) without the pref,
+ * without the component (an app built before it), or when the ring cannot be mapped.
+ */
+export const NATIVE_RECEIVER_PREF = "axiosozo.engines.linux.native_receiver";
+const NATIVE_RECEIVER_CONTRACT = "@axiosozo.nl/frame-receiver;1";
+let nativeReceiverError = null;
+export function nativeReceiverStatus() { return nativeReceiverError; }
+export function nativeFrameRing(pid, capability, { prefs = globalThis.Services?.prefs, Cc = globalThis.Cc, Ci = globalThis.Ci } = {}) {
+  try {
+    if (!prefs?.getBoolPref(NATIVE_RECEIVER_PREF, false)) return null;
+    if (!Ci?.nsIAxioFrameReceiverService || !Cc?.[NATIVE_RECEIVER_CONTRACT]) { nativeReceiverError = "component_unavailable"; return null; }
+    const service = Cc[NATIVE_RECEIVER_CONTRACT].getService(Ci.nsIAxioFrameReceiverService);
+    return service.openRing(pid, capability.fd, capability.slot_bytes, capability.slots);
+  } catch (error) { nativeReceiverError = String(error?.message ?? error); return null; }
+}
+
+/** Passed to the presenters instead of pixels when the native receiver applied the frame. */
+export class NativeFrame {
+  constructor(sink, byteLength) { this.sink = sink; this.byteLength = byteLength; }
+}
+
+/**
+ * The readers' side of the native receiver: one sink per native target, each delivered memfd
+ * frame applied (presented or not, like DamagePayloadAssembler) before its frame_ack.
+ */
+export class NativeFrameSinks {
+  #ring; #sinks = new Map();
+  constructor(ring) { this.#ring = ring; }
+  async apply(metadata) {
+    const key = metadata.target?.native_target_id;
+    if (typeof key !== "string" || !key) throw new Error("INVALID_DAMAGE_PAYLOAD");
+    let sink = this.#sinks.get(key);
+    if (!sink) { sink = this.#ring.createSink(); this.#sinks.set(key, sink); }
+    const [x, y, w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
+    try { await sink.applyFrame(metadata.slot, metadata.payload_bytes, metadata.width, metadata.height, x, y, w, h); }
+    catch { throw new Error("INVALID_DAMAGE_PAYLOAD"); }
+    return new NativeFrame(sink, metadata.payload_bytes);
+  }
+  /** A target closed: its sink (and canvas binding) goes. */
+  forget(nativeTargetId) {
+    const sink = this.#sinks.get(nativeTargetId);
+    this.#sinks.delete(nativeTargetId);
+    try { sink?.close(); } catch {}
+  }
+  close() {
+    for (const key of [...this.#sinks.keys()]) this.forget(key);
+    try { this.#ring.close(); } catch {}
+  }
+  get size() { return this.#sinks.size; }
+}
+
+/**
+ * Presenter side: present a NativeFrame on `record.canvas` (bound once; the canvas must never
+ * have had a 2D context). Returns false when the canvas cannot be bound: the caller then draws
+ * `fallbackFrame()` (a whole-frame copy) through its EngineFrameSurface.
+ */
+export function presentNativeFrame(win, record, metadata, frame, paintable) {
+  if (record.nativeSink !== frame.sink) {
+    if (record.nativeSink === null || record.frames) return false;  // refused before, or already 2D
+    // A new target for this record (the old one closed): release the old binding first.
+    if (record.nativeSink) { try { record.nativeSink.close(); } catch {} }
+    try { frame.sink.bindCanvas(record.canvas); record.nativeSink = frame.sink; }
+    catch { record.nativeSink = null; return false; }
+  }
+  if (!paintable) return true;
+  const started = win.performance.now();
+  const canvas = record.canvas;
+  // The canvas's intrinsic size is the frame's (CSS scales it to the box, as on the 2D path).
+  if (canvas.width !== metadata.width || canvas.height !== metadata.height) {
+    canvas.width = metadata.width; canvas.height = metadata.height;
+  }
+  frame.sink.present(metadata.frame_id);
+  const [, , w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
+  return { uploadedPixels: w * h, framePixels: metadata.width * metadata.height, frameId: metadata.frame_id,
+    milliseconds: win.performance.now() - started, superseded: 0, upload: "native" };
+}
+
+/** The NativeFrame's whole frame as a frame for an EngineFrameSurface (bind refused). */
+export function nativeFallbackFrame(metadata, frame) {
+  const buffer = frame.sink.copyFrame();
+  if (!buffer) return null;
+  const whole = { ...metadata };
+  delete whole.damage;
+  return { metadata: whole, pixels: buffer };
+}
+
+/** captureFixtureFrame of a natively presented canvas: the sink's frame as a PNG data URL. */
+export function nativeFramePNG(win, sink) {
+  const buffer = sink.copyFrame();
+  if (!buffer) return null;
+  const width = sink.width, height = sink.height;
+  const canvas = win.document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+  canvas.width = width; canvas.height = height;
+  const rgba = convertBGRAInPlace(buffer, width);
+  canvas.getContext("2d").putImageData(new win.ImageData(new Uint8ClampedArray(rgba.buffer, 0, width * height * 4), width, height), 0, 0);
+  return canvas.toDataURL("image/png");
+}

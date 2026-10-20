@@ -53,6 +53,7 @@ jobs:
       soak: ${{ steps.plan.outputs.soak }}
       soaks: ${{ steps.plan.outputs.soaks }}
       soak_scale: ${{ steps.plan.outputs.soak_scale }}
+      zen_run_id: ${{ steps.plan.outputs.zen_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -77,6 +78,7 @@ jobs:
       baseline: '39330954155'
 
   zen-source:
+    needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -88,9 +90,11 @@ jobs:
       - id: pick
         env:
           GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ needs.plan.outputs.zen_run_id }}
         run: |
-          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=30" \
-            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          # plan.json zen_run_id pins one build (e.g. linux-perf-build of this branch); else the newest.
+          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=50" \
+            --jq '[.artifacts[] | select(.expired | not) | select(env.PINNED == "" or (.workflow_run.id | tostring) == env.PINNED)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
           echo "$artifact"
           echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
           echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"

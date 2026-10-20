@@ -184,3 +184,54 @@ test("the VideoFrame probe accepts an engine that honours the view offset, refus
   assert.equal(videoFrameUploadProbe().ok, false); assert.ok(videoFrameUploadProbe().got);
   resetVideoFrameProbe();
 });
+
+test("native receiver: sinks apply every frame per target, presenters bind once and present, fallbacks copy", async () => {
+  const { NativeFrame, NativeFrameSinks, nativeFrameRing, presentNativeFrame, nativeFallbackFrame } =
+    await import("../chrome/EngineFrameSurface.sys.mjs");
+  const calls = [];
+  const makeSink = id => ({ id, bound: null, closed: false, width: 4, height: 2,
+    applyFrame: async (...args) => { calls.push([id, "apply", ...args]); if (args[0] === 9) throw new Error("rejected"); },
+    bindCanvas(canvas) { if (canvas.refuse) throw new Error("NS_ERROR_DOM_INVALID_STATE_ERR"); this.bound = canvas; },
+    present(frameId) { calls.push([id, "present", frameId]); },
+    copyFrame: () => new ArrayBuffer(32), close() { this.closed = true; } });
+  let next = 0;
+  const ring = { createSink: () => makeSink(++next), closed: false, close() { this.closed = true; } };
+  const sinks = new NativeFrameSinks(ring);
+  const target = { native_target_id: "7" };
+  const frame = await sinks.apply({ target, slot: 1, payload_bytes: 32, width: 4, height: 2, damage: [[0, 0, 4, 2]] });
+  assert.ok(frame instanceof NativeFrame); assert.equal(frame.byteLength, 32);
+  await sinks.apply({ target, slot: 0, payload_bytes: 4, width: 4, height: 2, damage: [[1, 1, 1, 1]] });
+  assert.deepEqual(calls.map(c => c.slice(0, 2)), [[1, "apply"], [1, "apply"]], "one sink per target");
+  assert.deepEqual(calls[1].slice(2), [0, 4, 4, 2, 1, 1, 1, 1]);
+  await assert.rejects(sinks.apply({ target, slot: 9, payload_bytes: 4, width: 4, height: 2, damage: [[1, 1, 1, 1]] }), /INVALID_DAMAGE_PAYLOAD/);
+  await assert.rejects(sinks.apply({ target: {}, slot: 0, payload_bytes: 4, width: 4, height: 2 }), /INVALID_DAMAGE_PAYLOAD/);
+  // Presenter side.
+  const win = { performance: { now: () => 0 } };
+  const record = { canvas: { width: 300, height: 150 } };
+  const paint = presentNativeFrame(win, record, { frame_id: 5, width: 4, height: 2, damage: [[1, 1, 1, 1]] }, frame, true);
+  assert.equal(frame.sink.bound, record.canvas); assert.equal(record.nativeSink, frame.sink);
+  assert.deepEqual([record.canvas.width, record.canvas.height], [4, 2]);
+  assert.deepEqual(calls.at(-1), [1, "present", 5]);
+  assert.equal(paint.upload, "native"); assert.equal(paint.uploadedPixels, 1); assert.equal(paint.framePixels, 8);
+  assert.equal(presentNativeFrame(win, record, { frame_id: 6, width: 4, height: 2 }, frame, false), true, "bound, not painted");
+  assert.notDeepEqual(calls.at(-1), [1, "present", 6]);
+  // A canvas that cannot be bound (or already drew in 2D): the caller falls back to a whole copy.
+  const refused = { canvas: { refuse: true, width: 1, height: 1 } };
+  assert.equal(presentNativeFrame(win, refused, { frame_id: 7, width: 4, height: 2 }, frame, true), false);
+  assert.equal(refused.nativeSink, null);
+  assert.equal(presentNativeFrame(win, { canvas: {}, frames: {} }, { frame_id: 7, width: 4, height: 2 }, frame, true), false);
+  const copy = nativeFallbackFrame({ frame_id: 7, width: 4, height: 2, damage: [[1, 1, 1, 1]] }, frame);
+  assert.equal(copy.pixels.byteLength, 32); assert.equal("damage" in copy.metadata, false, "the copy is whole");
+  // A closed target's sink is closed; closing the sinks closes the ring.
+  const sink = frame.sink;
+  sinks.forget("7"); assert.equal(sink.closed, true); assert.equal(sinks.size, 0);
+  sinks.close(); assert.equal(ring.closed, true);
+  // Without the pref or the component: the JS path.
+  assert.equal(nativeFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => false } }), null);
+  assert.equal(nativeFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Cc: {}, Ci: {} }), null);
+  const opened = [];
+  const service = { openRing: (...args) => { opened.push(args); return ring; } };
+  const Cc = { "@axiosozo.nl/frame-receiver;1": { getService: () => service } }, Ci = { nsIAxioFrameReceiverService: {} };
+  assert.equal(nativeFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Cc, Ci }), ring);
+  assert.deepEqual(opened, [[42, 9, 64, 2]]);
+});

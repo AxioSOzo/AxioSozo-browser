@@ -12,7 +12,7 @@
 // the same protocol; moving CEF onto this module is a later, separate step.
 
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, disableMemfdFrames,
-  MEMFD_FALLBACK_ACK } from "./EngineFrameSurface.sys.mjs";
+  MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -212,7 +212,7 @@ export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatSeen = 0; #heartbeatCheckedAt = 0;
-  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null;
+  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null; #native = null;
   constructor(process, { profile, token, instance, identity, timers, deadline = 15000, frameDamage = false,
     damagePayload = false, frameTransport = "pipe", readSlot = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
     if (!profile || typeof profile.engine !== "string" || typeof profile.validateReady !== "function") throw new Error("INVALID_ENGINE_PROFILE");
@@ -345,7 +345,9 @@ export class EngineStreamHost {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd) {
         this.readPhase = "frame_memfd";
-        try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
+        // Native receiver: the component reads the slot; no pixels reach JS.
+        if (this.#native) pixels = await this.#native.apply(value);
+        else try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
         catch (error) {
           if (error?.message !== "MEMFD_READ_FAILED") throw error;
           await this.#memfdFallback(value);
@@ -353,7 +355,7 @@ export class EngineStreamHost {
         }
       }
       // Every delivered frame is applied, presented or not (§6.2).
-      if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
+      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
@@ -384,7 +386,7 @@ export class EngineStreamHost {
         const creation = value.event === "created" && this.#requests.get(value.request_id);
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_ENGINE_CREATION");
         adapter = this.#adapterFor(value.target, value.event === "created");
-        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
+        if (value.event === "closed") { this.#assembler?.forget(value.target.native_target_id); this.#native?.forget(value.target.native_target_id); }
       } else if (TARGET_EVENTS.has(value.event)) {
         throw new Error("MISSING_ENGINE_TARGET");
       } else if (value.event === "error" && !value.request_id) {
@@ -435,6 +437,10 @@ export class EngineStreamHost {
       try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
       catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
       this.memfd = memfd;
+      // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd);
+      this.#native = ring ? new NativeFrameSinks(ring) : null;
+      this.nativeReceiver = !!this.#native;
     }
     this.#ready = true;
     this.capabilities = Object.freeze({ ...value.capabilities });
@@ -473,7 +479,7 @@ export class EngineStreamHost {
   }
   fail(reason) {
     if (this.#ended) return;
-    this.#ended = true; this.status = "failed"; this.failure = reason;
+    this.#ended = true; this.status = "failed"; this.#native?.close(); this.#native = null; this.failure = reason;
     this.#stopHeartbeatWatchdog();
     console.error("AXIOSOZO_ENGINE_STREAM_DIAGNOSTIC", JSON.stringify({ engine: this.profile.engine, code: reason,
       phase: this.readPhase, lastFrameId: this.lastFrame, lastFrameBytes: this.lastFrameBytes,
@@ -499,7 +505,7 @@ export class EngineStreamHost {
       const result = await this.#process.wait();
       this.nativeExitCode = result.exitCode;
       if (result.exitCode !== 0) throw new Error("ENGINE_SHUTDOWN_FAILED");
-      this.#ended = true; this.status = "closed";
+      this.#ended = true; this.status = "closed"; this.#native?.close(); this.#native = null;
       const unavailable = new Error("ENGINE_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
       this.#requests.clear();
