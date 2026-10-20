@@ -282,6 +282,7 @@ struct Tab {
   uint64_t keySeq = 0, probeSent = 0, probeArrived = 0;
   // Text input state: 0 none, 1 text, 2 password; caret in logical points.
   int textMode = 0, sentMode = -1;
+  std::string datalistSent;  // last `datalist` event payload (deduplicated); empty: none shown
   double caret[4] = {0, 0, 0, 0}, sentCaret[4] = {0, 0, 0, 0};
   bool textInputScheduled = false;
   uint64_t textInputAt = 0;
@@ -649,7 +650,8 @@ static const std::map<std::string, std::vector<std::string>>& commandFields() {
       {"find", {"text", "forward", "match_case", "find_next"}}, {"stop_finding", {"clear_selection"}},
       {"zoom", {"level"}}, {"pinch", {"x", "y", "modifiers", "phase", "magnification"}},
       {"frame_rate", {"frame_rate"}}, {"ime_set_composition", {"text", "selection_start", "selection_end"}},
-      {"ime_commit_text", {"text"}}, {"ime_finish_composing", {}}, {"ime_cancel_composition", {}}};
+      {"ime_commit_text", {"text"}}, {"ime_finish_composing", {}}, {"ime_cancel_composition", {}},
+      {"datalist_query", {}}};
   return table;
 }
 static bool oneOf(const std::string& value, std::initializer_list<const char*> options) {

@@ -185,7 +185,8 @@ function zenWindow() {
     setAttribute(key, value) { this.attributes.set(key, value); }, removeAttribute(key) { this.attributes.delete(key); },
     getAttribute(key) { return this.attributes.get(key) ?? null; }, hasAttribute(key) { return this.attributes.has(key); },
     toggleAttribute(key, value) { if (value) this.attributes.set(key, ''); else this.attributes.delete(key); },
-    appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    appendChild(child) { this.children.push(child); child.parentNode = this; return child; }, dataset: {},
+    replaceChildren(...nodes) { this.children = []; nodes.forEach(node => this.appendChild(node)); },
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this); },
     addEventListener(type, handler) { this.handlers.set(type, handler); }, removeEventListener(type) { this.handlers.delete(type); },
     focus() {}, hasPointerCapture: () => false, setPointerCapture() {}, releasePointerCapture() {},
@@ -434,6 +435,61 @@ test('Linux: a selection made by the user in a Chromium tab becomes the desktop 
   canvas.handlers.get('pointerup')({ isTrusted: true, button: 0, buttons: 0, pointerId: 1, clientX: 1, clientY: 1, timeStamp: 1, preventDefault() {} });
   callbacks.onEvent({ event: 'text_selection', text: 'by the user' });
   assert.deepEqual(primary, [['by the user', 1]]);
+  await presenter.dispose();
+});
+
+test('datalist: Zen draws the suggestions Chromium cannot, filtered by the value; Down/Enter commit a choice as text', async () => {
+  const z = zenWindow();
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks, adapter } = z.launched[0];
+  const inputs = [], queries = [];
+  adapter.input = async (_target, method, fields) => { inputs.push([method, fields]); return { status: 'success' }; };
+  adapter.datalistQuery = async () => { queries.push(1); return { status: 'success' }; };
+  const overlay = z.first.linkedBrowser.parentNode.children.find(node => node !== z.first.linkedBrowser);
+  const canvas = overlay.children[0];
+  z.win.document.activeElement = canvas;
+  const key = (keyName, code = keyName) => {
+    const event = { isTrusted: true, key: keyName, code, keyCode: 0, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
+      prevented: false, preventDefault() { this.prevented = true; }, stopPropagation() {} };
+    canvas.handlers.get('keydown')(event);
+    return event;
+  };
+  const options = [{ value: 'apple', label: '' }, { value: 'apricot', label: '' }, { value: 'banana', label: 'fruit' }];
+  // Focus report: remembered, nothing drawn.
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  const popup = () => overlay.children.find(node => node.className === 'axiosozo-cef-datalist');
+  assert.equal(popup(), undefined);
+  // Typing asks for the new value; the answer is filtered and drawn under the field.
+  key('a', 'KeyA'); key('p', 'KeyP');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(queries.length, 1, 'one query per typing burst');
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: 'ap', options });
+  assert.equal(popup().hidden, false);
+  assert.deepEqual(popup().children.map(row => row.children[0].textContent), ['apple', 'apricot']);
+  assert.equal(popup().style.top, '50px');
+  // Down/Enter belong to the list; the page gets the chosen value as text replacing 'ap'.
+  const before = inputs.length;
+  assert.equal(key('ArrowDown').prevented, true);
+  assert.equal(popup().children[0].getAttribute('aria-selected'), 'true');
+  key('Enter');
+  assert.equal(popup().hidden, true);
+  await settle();
+  assert.deepEqual(inputs.slice(before), [['ime_commit_text', { text: 'apple', replacement_range: { start: 0, end: 2 } }]]);
+  // Escape closes the list without reaching the page; leaving the field forgets it.
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  key('ArrowDown');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  assert.equal(popup().children.length, 3, 'Down on the field opens the whole list');
+  const sent = inputs.length;
+  key('Escape');
+  assert.equal(popup().hidden, true);
+  assert.equal(inputs.length, sent);
+  callbacks.onEvent({ event: 'datalist', x: 0, y: 0, width: 0, height: 0, value: '', options: [] });
+  key('ArrowDown');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(queries.length, 2, 'no datalist field, no query');
   await presenter.dispose();
 });
 

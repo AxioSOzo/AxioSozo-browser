@@ -116,6 +116,14 @@ return {open: !bar.hidden, value: bar._findField?.value ?? null, fieldFocused: d
         status: bar._findStatusDesc?.textContent ?? null,
         highlightAll: bar.getElement?.('highlight')?.checked ?? null};
 """
+DATALIST_STATE = """
+const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
+const list = overlay?.style.display === 'block' ? overlay.querySelector('.axiosozo-cef-datalist') : null;
+const popup = document.getElementById('PopupAutoComplete');
+return {zen: list && !list.hidden ? {rows: [...list.children].map(row => row.firstChild?.textContent ?? ''),
+                                     box: (r => [r.left, r.top, r.width, r.height])(list.getBoundingClientRect())} : null,
+        firefox: popup ? {state: popup.state, rows: popup.view?.matchCount ?? null} : null};
+"""
 CONTEXT_MENU = """
 const popup = document.getElementById('axiosozo-chromium-context-menu');
 if (!popup) return {open: false};
@@ -879,20 +887,32 @@ class CEFZenHarness(gui_test.Harness):
         except AssertionError as error:
             out['select'] = str(error)[:300]
             self.gate('select_popup', 'FAIL', screenshot='09-select-open.png', reason=out['select'])
-        # <datalist>: autofill-style suggestions.
-        self.click_at(*AT['dl'])
-        self.type_text('ap')
-        time.sleep(1.0)
-        self.screenshot('09-datalist')
-        self.key('Down')
-        self.key('Return')
-        try:
-            out['datalist'] = self.wait_page(lambda page: page['dl'] in ('apple', 'apricot'), 'datalist suggestion chosen', timeout=8)['dl']
-            self.gate('datalist_popup', 'PASS', screenshot='09-datalist.png', value=out['datalist'])
-        except AssertionError:
-            out['datalist'] = self.page()['dl']
-            self.gate('datalist_popup', 'EXPERIMENTAL', screenshot='09-datalist.png', value=out['datalist'],
-                      note='typed text reaches the field; no suggestion popup could be chosen in OSR')
+        # <datalist>: Zen draws the suggestions (windowless Chromium draws none), Gecko baseline alongside.
+        out['datalist'] = {}
+        for engine, tab in (('chromium', self.cef_tab), ('gecko', self.gecko_tab)):
+            self.select_tab(tab)
+            if engine == 'chromium':
+                self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+            self.click_at(*AT['dl'])
+            self.key('ctrl+a')
+            self.key('BackSpace')
+            self.type_text('ap')
+            time.sleep(1.0)
+            shown = self.chrome_script(DATALIST_STATE)
+            self.screenshot(f'09-datalist-{engine}', settle=False)
+            self.key('Down')
+            self.key('Return')
+            try:
+                value = self.wait_page(lambda page: page['dl'] == 'apple', f'{engine}: datalist suggestion chosen', timeout=8)['dl']
+            except AssertionError:
+                value = self.page()['dl']
+            out['datalist'][engine] = {'shown': shown, 'value': value}
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        chromium = out['datalist']['chromium']
+        ok = chromium['value'] == 'apple' and (chromium['shown'].get('zen') or {}).get('rows') == ['apple', 'apricot']
+        self.gate('datalist_popup', 'PASS' if ok else 'FAIL', screenshots=['09-datalist-chromium.png', '09-datalist-gecko.png'],
+                  **out['datalist'], note='Chromium tab: Zen-drawn list from the host `datalist` event; Gecko: Firefox autocomplete popup')
         # <input type=color>: Chromium's colour chooser.
         self.click_at(*AT['color'])
         time.sleep(1.5)
@@ -911,6 +931,8 @@ class CEFZenHarness(gui_test.Harness):
                   observed=out['color'], note="Chromium's own colour chooser, composited into the engine frame (no Zen/GTK dialog)")
         if self.matrix['select_popup']['status'] == 'FAIL':
             raise AssertionError('select popup: ' + out['select'])
+        if self.matrix['datalist_popup']['status'] == 'FAIL':
+            raise AssertionError('datalist: ' + repr(out['datalist']))
         return out
 
     def scenario_context_menu(self):
