@@ -95,7 +95,8 @@ def main():
     pattern = re.compile(args.root_name)
     out = {'apps': [], 'root': None, 'nodes': [], 'pressed': None}
     deadline = time.monotonic() + args.timeout
-    while time.monotonic() < deadline:
+
+    def find_root():
         desktop = Atspi.get_desktop(0)
         app = None
         out['apps'] = []
@@ -120,10 +121,15 @@ def main():
                     pass
                 return None
             root = walk(app, match)
+        return root
+
+    root = None
+    while time.monotonic() < deadline:
+        root = find_root()
         if root is not None:
             break
         time.sleep(1)
-    else:
+    if root is None:
         print(json.dumps({**out, 'error': 'no accessible matching the root name in the app'}))
         return 1
     out['root'] = describe(root)
@@ -144,9 +150,15 @@ def main():
             except Exception:  # noqa: BLE001
                 return None
         node = walk(root, target)
+        retries = 0
         while node is None and time.monotonic() < deadline + args.timeout:
-            time.sleep(0.5)   # the tree may still be (re)building, e.g. right after a tab switch
+            # The tree may still be (re)building, e.g. right after a tab switch; a mirror whose
+            # root is renamed (the page title) replaces the root object, so look it up again.
+            time.sleep(0.5)
+            retries += 1
+            root = find_root() or root
             node = walk(root, target)
+        out['press_retries'] = retries
         if node is None:
             out['pressed'] = {'error': f'no {role} named {name!r}'}
         else:
