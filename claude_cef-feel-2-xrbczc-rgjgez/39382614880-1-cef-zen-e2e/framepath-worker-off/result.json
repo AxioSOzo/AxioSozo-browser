@@ -1,0 +1,237 @@
+{
+  "harness": "axiosozo-linux-gui+cef-zen",
+  "version": 1,
+  "engine": "chromium",
+  "started_utc": "2026-10-20T06:53:02+00:00",
+  "host": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile",
+    "AXIOSOZO_ENGINE_SWITCHING=1 (existing developer gate)",
+    "profile pref axiosozo.engines.linux.frame_worker=false",
+    "Marionette unhandledPromptBehavior=ignore"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "2097155",
+          "xwininfo": {
+            "Width": "1152",
+            "Height": "720",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo \u2014 AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.02
+    },
+    "chrome": {
+      "status": "PASS",
+      "details": {
+        "title": "AxioSozo \u2014 AxioSozo Dev",
+        "windowtype": "navigator:browser",
+        "axiosozo": true,
+        "version": 5,
+        "engineAdapter": "GeckoEngineAdapter",
+        "toolsEntry": true,
+        "spaceSwitcher": true,
+        "zenWorkspaces": true,
+        "tabs": 2,
+        "foundationPref": true,
+        "engineSurfaceService": false,
+        "appName": "AxioSozo",
+        "appVersion": "0.1a1",
+        "platformVersion": "156.0",
+        "os": "Linux",
+        "widget": "gtk",
+        "contentSandboxLevel": 6,
+        "compositor": "WebRender (Software)",
+        "webrenderNativeCompositorPref": true,
+        "gfx": {
+          "adapterDescription": "llvmpipe (LLVM 20.1.2, 256 bits)",
+          "adapterVendorID": "Mesa",
+          "adapterDriver": "",
+          "adapterDriverVersion": "25.2.8.0",
+          "windowProtocol": "x11",
+          "desktopEnvironment": null
+        },
+        "engine_view": "absent (AXCF pipe fallback)"
+      },
+      "seconds": 1.73
+    },
+    "switch": {
+      "status": "FAIL",
+      "reason": "AssertionError: the Chromium view is 1.0 black in 02-chromium.png; frame path {'engine': 'chromium', 'version': '154.0.8037.17', 'target': {'document_generation': 2, 'engine': 'chromium', 'engine_instance': '84e6c202-2817-4ecd-9634-aae63d9bebd9', 'identity': 'https://axiosozo.invalid', 'native_target_id': '1', 'navigation_generation': 2, 'private_mode': False, 'tab_id': '6c55d3be-6fba-4045-ba79-aa86d4b702bc'}, 'renderPath': 'native-osr-bgra', 'pipeFallback': True, 'frameTransport': 'memfd', 'memfdFallback': None, 'frameUpload': 'imagedata', 'nativeReceiver': None, 'frames': 4, 'meanDrawMilliseconds': 14.279332999999951, 'uploadedPixelShare': 1, 'supersededFrames': 0, 'firstFrameMilliseconds': 391.6654989999979, 'lastFrameId': 6, 'surface': {'width': 953, 'height': 678, 'device_scale': 1}, 'surfaceGeometry': None, 'surfaceStats': None, 'renderScaleLimited': False, 'inputFeatures': {'keyVerdict': True, 'wheelPhases': True, 'pinch': True, 'ime': True}, 'fixtureOnly': False, 'ownedTabIds': ['6c55d3be-6fba-4045-ba79-aa86d4b702bc']}",
+      "seconds": 14.08
+    },
+    "typing": {
+      "status": "PASS",
+      "details": {
+        "pointer": [
+          361,
+          72
+        ],
+        "focused": "text",
+        "page": {
+          "p": "1",
+          "l": 1,
+          "t": "zen feel",
+          "a": "",
+          "e": "",
+          "c": 0,
+          "s": "",
+          "y": 0,
+          "f": "text",
+          "sel": "one",
+          "col": "#336699",
+          "dl": "",
+          "d": [],
+          "k": ":l:KeyL",
+          "mb": "",
+          "z": [
+            1,
+            953
+          ],
+          "ws": null,
+          "cm": 0,
+          "perm": "",
+          "fc": "",
+          "fw": {
+            "def": 191.8,
+            "serif": 171.3,
+            "sans": 167.7,
+            "mono": 173.4,
+            "sys": 209.3,
+            "uimono": 244.2
+          },
+          "sw": 0
+        },
+        "x11_title": "AxioSozo feel {\"p\":\"1\",\"l\":1,\"t\":\"zen feel\",\"a\":\"\",\"e\":\"\",\"c\":0,\"s\":\"\",\"y\":0,\"f\":\"text\",\"sel\":\"one\",\"col\":\"#336699\",\"dl\":\"\",\"d\":[],\"k\":\":l:KeyL\",\"mb\":\"\",\"z\":[1,953],\"ws\":null,\"cm\":0,\"perm\":\"\",\"fc\":\"\",\"fw\":{\"def\":191.8,\"serif\":171.3,\"sans\":167.7,\"mono\":173. \u2014 AxioSozo Dev"
+      },
+      "seconds": 22.87
+    }
+  },
+  "screenshots": [
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/chrome.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/01-gecko.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/02-to-chromium-menu.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/02-chromium.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/failure-switch.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off/03-typed.png"
+  ],
+  "matrix": {
+    "window_title": {
+      "status": "PASS",
+      "x11_title": "AxioSozo feel {\"p\":\"1\",\"l\":1,\"t\":\"\",\"a\":\"\",\"e\":\"\",\"c\":0,\"s\":\"\",\"y\":0,\"f\":\"\",\"sel\":\"one\",\"col\":\"#336699\",\"dl\":\"\",\"d\":[],\"k\":\"\",\"mb\":\"\",\"z\":[1,953],\"ws\":null,\"cm\":0,\"perm\":\"\",\"fc\":\"\",\"fw\":{\"def\":191.8,\"serif\":171.3,\"sans\":167.7,\"mono\":173.4,\"sys\":209.3,\"uimo \u2014 AxioSozo Dev"
+    },
+    "e1_render_in_content_area": {
+      "status": "FAIL",
+      "screenshot": "02-chromium.png",
+      "seconds": 2.37,
+      "surface": {
+        "width": 953,
+        "height": 678,
+        "device_scale": 1
+      },
+      "first_frame_ms": 391.6654989999979,
+      "black_fraction": 1.0,
+      "frame_path": {
+        "frameUpload": "imagedata",
+        "nativeReceiver": null,
+        "memfdFallback": null,
+        "frameTransport": "memfd",
+        "frameWorker": null
+      }
+    },
+    "typing": {
+      "status": "PASS",
+      "screenshot": "03-typed.png",
+      "value": "zen feel"
+    },
+    "switch": {
+      "status": "FAIL",
+      "reason": "AssertionError: the Chromium view is 1.0 black in 02-chromium.png; frame path {'engine': 'chromium', 'version': '154.0.8037.17', 'target': {'document_generation': 2, 'engine': 'chromium', 'engine_instance': '84e6c202-2817-4ecd-9634-aae63d9bebd9', 'identity': 'https://axiosozo.invalid', 'native_target_id': '1', 'navigation_generation': 2, 'private_mode': False, 'tab_id': '6c55d3be-6fba-4045-ba79-aa86d4b702bc'}, 'renderPath': 'native-osr-bgra', 'pipeFallback': True, 'frameTransport': 'memfd', 'memfdFallback': None, 'frameUpload': 'imagedata', 'nativeReceiver': None, 'frames': 4, 'meanDrawMilliseconds': 14.279332999999951, 'uploadedPixelShare': 1, 'supersededFrames': 0, 'firstFrameMilliseconds': 391.6654989999979, 'lastFrameId': 6, 'surface': {'width': 953, 'height': 678, 'device_scale': 1}, 'surfaceGeometry': None, 'surfaceStats': None, 'renderScaleLimited': False, 'inputFeatures': {'keyVerdict': True, 'wheelPhases': True, 'pinch': True, 'ime': True}, 'fixtureOnly': False, 'ownedTabIds': ['6c55d3be-6fba-4045-ba79-aa86d4b702bc']}"
+    }
+  },
+  "mode": "web",
+  "scale": 1,
+  "feel_fixture": {
+    "origin": "http://127.0.0.1:34365",
+    "lan_origin": "http://10.1.1.141:35577",
+    "tls_origin": "https://127.0.0.1:43315",
+    "tls_note": null,
+    "sha256": {
+      "/feel.html": "dcf063819066f329268a1bf13cca0703bfdcc5f91a996bb0a7e809beef67558e",
+      "/engine.html": "bf3f50ec47827d4889b4a24665607599e1a796950a9291d190a9e23dad062c69"
+    }
+  },
+  "frame_prefs": {
+    "axiosozo.engines.linux.frame_worker": false
+  },
+  "app": {
+    "executable": "/home/runner/axiosozo-build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39362552105",
+    "repository_commit": "35782ef55f54f726e3d2730072026ced386d110d",
+    "fingerprint": "f3c8116e5f2df142c693e5200d79e18f6e60a1dfef76b2159be7ed7eb9c8f4b7",
+    "fingerprint_matches_checkout": false
+  },
+  "session": "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-f6e654050f321388",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "dbus": "private session bus",
+  "command": [
+    "/home/runner/axiosozo-build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-f6e654050f321388/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 4676,
+    "marionette_port": 34451,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 2.88,
+    "exit_code": 0
+  },
+  "prompt_handler": {
+    "default": "ignore",
+    "beforeUnload": "ignore"
+  },
+  "cef_check": "{\"component\": \"cef\", \"status\": \"PASS\", \"action\": \"native_build_check\", \"version\": \"154.0.23+g062ebe4+chromium-154.0.8037.17\", \"platform\": \"linux64\", \"sandbox\": {\"suid_helper_installed\": true, \"apparmor_restrict_unprivileged_userns\": 1, \"unprivileged_userns_clone\": 1, \"max_user_namespaces\": 63838, \"unprivileged_userns\": false, \"expected\": \"suid\", \"usable\": true}}",
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "status": "FAIL",
+  "evidence_dir": "/home/runner/work/AxioSozo-browser/evidence-e2e/framepath-worker-off"
+}
