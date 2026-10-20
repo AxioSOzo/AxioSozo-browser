@@ -1,0 +1,35 @@
+✔ nothing is loaded or installed while every switch is off; the window only listens to the Lab's prefs (2.705583ms)
+✔ a switch that is already on when the window opens is installed at once (0.747833ms)
+✔ turning a switch on installs the experiment in every open window; off removes it, aborts its signal and leaves no listener (0.710542ms)
+✔ the Lab stylesheet is held once while any experiment runs and released after the last (0.511666ms)
+✔ an installer may return a function or nothing as its handle (0.849708ms)
+✔ an async install counts once it resolves; one turned off before then is cleaned up when it arrives (5.167167ms)
+✔ a window that closes during an async install cleans the late handle up (0.4325ms)
+✔ an async install that fails while on is a problem; one that fails after it was turned off is not (0.806ms)
+✔ a later successful install clears the problem an earlier one left (0.749ms)
+✔ one failing experiment is isolated with its own problem code; the others in the window keep working (1.056416ms)
+✔ the real loader imports chrome/lab/<module>; a module that cannot load is LOAD_FAILED (0.417166ms)
+✔ anything a load() option throws is LOAD_FAILED; a LabError keeps its own problem code; no module is INSTALLER_MISSING (0.432625ms)
+✔ a failure in one window stays visible when the same experiment installs fine in another, in either order (0.335917ms)
+✔ the page shows the most recent failure across the open windows (0.220125ms)
+✔ a window that closes takes its own failures along, also a clean-up that throws as it closes (0.217ms)
+✔ a private window, an unknown one, or one without prefs gets an inert Lab: nothing loads, nothing listens (0.261583ms)
+✔ dispose() stops watching the switches and removes every experiment in reverse order (0.193875ms)
+✔ diagnostics() counts installs, disposals and failures of this window only (0.22125ms)
+✔ a graduated feature is listed but never loaded or installed, whatever its prefs say (0.22325ms)
+✔ each installer gets a frozen ctx with the window's services, ai and agents, and its own signal (0.380959ms)
+✔ ctx.toast shows through the window's toast and never throws (0.260875ms)
+✔ ctx.engineOf defaults to gecko (0.097917ms)
+✔ ctx.ai defaults to the Lab's facade over the platform's backend, shared by the window and refused once it is private (0.658416ms)
+✔ ctx.agents.startTask needs the user's own trusted action and refuses private windows and sensitive pages before the service (0.620166ms)
+✔ ctx.agents subscriptions and external watches end when the experiment is turned off or the window closes (0.262041ms)
+✔ ctx.agents.clientStatus reads the platform's client status (0.142083ms)
+✔ the first Lab window of the process clears leftovers once; private windows do not count (3.318792ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 126.182917

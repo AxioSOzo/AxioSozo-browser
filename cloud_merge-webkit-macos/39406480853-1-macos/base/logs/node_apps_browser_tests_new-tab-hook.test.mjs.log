@@ -1,0 +1,23 @@
+✔ overlay: one hash-pinned record replaces the existing Zen patch target; every other record is kept (3.957208ms)
+✔ overlay: applying gives exactly the pinned result, reverting gives the original; only the openTab hunk and two later headers change (2.24525ms)
+✔ hook: an accepted ordinary command opens only the fixed start page once and skips only Zen's consume branch (3.565209ms)
+✔ hook: the unpatched Zen file, run through the same native method, behaves as stock Zen (0.698458ms)
+✔ hook: a null, other, throwing or missing answer leaves the native branch; Zen may still consume it into its URL bar (2.700083ms)
+✔ hook: explicit URLs, clipboard paste and other event destinations are never asked and stay native (3.228ms)
+✔ hook: an extension's new-tab page overrides the native default and is never asked, even when the gate would say yes (1.201417ms)
+✔ gate: only an alive, registered, authoritative normal non-AI window with Firefox's own new-tab page and the flag on gets the start page (1.292291ms)
+✔ gate: every command reads again: the flag off or an extension installed during enablement take effect at the next command (0.167417ms)
+✔ gate: disposing ends only that window's gate; a replacement window keeps its own (0.139625ms)
+✔ startup: Firefox's own new-tab page only: the native default URL, AboutNewTab and the extension-controlled pref all agree (1.587792ms)
+✔ startup: the window's lifetime starts before its first await; readiness must be Zen's actual promise; the scheduler and gate need a live ready window (0.529542ms)
+✔ startup: the watch schedule starts only from a window whose own registration succeeded and that the services hold as registered and normal (5.331ms)
+✔ startup: the callback answers only for the exact current window.AxioSozo owner, a live window and an installed gate (0.252833ms)
+✔ startup: the callback is part of the window's first frozen object; one gate per window; late installation never publishes (0.739583ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 219.051792

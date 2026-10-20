@@ -1,0 +1,25 @@
+✔ post-acquire release failure retains an unbound claim, blocks reuse and reaches explicit Endpoint.stop (4.895917ms)
+✔ a successful pre-claim release preserves the original refusal and does not retain a claim (0.335959ms)
+✔ a failure arising during an explicit stop is retained for the next stop, not retried in the same stop (0.855917ms)
+✔ pre-ack malformed reply retains the exact owned child after close and kill acknowledgements (2.632334ms)
+✔ pre-ack EOF, oversized reply and helper error retain unresolved ownership; owned exit preserves each original error (0.491375ms)
+✔ pre-ack watchdog retains a hanging child through Endpoint.stop without any bind (1.645959ms)
+✔ pending raw spawn is retained after the watchdog; its late child is cleaned on the same owned handle (2.076792ms)
+✔ late actual spawn rejection proves no child, but deadline rejection alone does not (0.567791ms)
+✔ an indefinitely pending spawn remains owned through bounded retries and never starts another helper (0.811209ms)
+✔ only an issued retained snapshot can retry pre-claim cleanup; unrelated releases are never invoked (0.621458ms)
+✔ provisional release before launch prevents launch and has no actual-exit receipt (1.120958ms)
+✔ rejected or malformed raw wait keeps a pre-ack owner unresolved even after usability loss (0.505667ms)
+✔ native guard watchdog publishes a late raw lock child to retained ownership before proxy construction (2.245125ms)
+✔ native proof watchdog cannot spawn after cancellation and records no-child separately from owned exit (0.743084ms)
+✔ native installed-helper mutation fails admission before spawn or retention (0.274416ms)
+✔ categorical ownership diagnostics have no native effects and never count kill or close as exit (4.602083ms)
+✔ service retains the original configuration after failed unbound cleanup and blocks replacement (3.438042ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.356458
