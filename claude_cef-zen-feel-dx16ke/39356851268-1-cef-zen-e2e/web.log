@@ -1,0 +1,80 @@
+gui-test chromium/wheel: PASS
+gui-test chromium/cursor: PASS
+gui-test chromium/popups: PASS
+gui-test chromium/context_menu: PASS
+gui-test chromium/dialogs: PASS
+gui-test chromium/find: PASS
+gui-test chromium/zoom: PASS
+gui-test chromium/ime: BLOCKED_ENV (compose does not work in the Gecko baseline here either: {'focus': 'browser', 'keymap_apostrophe': 2, 'dead_acute': "got 'e'", 'ctrl_shift_u': "got '20ac '"})
+gui-test chromium/middle_click: PASS
+gui-test chromium/history: PASS
+gui-test chromium/beforeunload: PASS
+gui-test chromium/to_gecko: PASS
+gui-test chromium/host_kill: PASS
+gui-test chromium/shortcuts: FAIL (AssertionError: reload keys differ from Gecko: {'results': {'F5': False, 'ctrl+r': False}, 'probes': {'F5': {'keys': [{'key': 'F5', 'target': 'canvas', 'prevented': False}], 'reloads': 0, 'keyReload': {'disabled': None, 'command': 'Browser:Reload', 'oncommand': None}, 'cmdReload': 'true'}, 'ctrl+r': {'keys': [{'key': 'r', 'target': 'canvas', 'prevented': False}], 'reloads': 0, 'keyReload': {'disabled': None, 'command': 'Browser:Reload', 'oncommand': None}, 'cmdReload': 'true'}}} vs {'results': {'F5': True, 'ctrl+r': True}, 'probes': {'F5': {'keys': [{'key': 'F5', 'target': 'browser', 'prevented': False}], 'reloads': 1, 'keyReload': {'disabled': None, 'command': 'Browser:Reload', 'oncommand': None}, 'cmdReload': None}, 'ctrl+r': {'keys': [{'key': 'r', 'target': 'browser', 'prevented': False}], 'reloads': 1, 'keyReload': {'disabled': None, 'command': 'Browser:Reload', 'oncommand': None}, 'cmdReload': None}}})
+gui-test chromium/urlbar_chromium: FAIL (ConnectionError: Marionette closed the connection)
+gui-test chromium/ctrl_t_chromium: FAIL (BrokenPipeError: [Errno 32] Broken pipe)
+gui-test chromium/urlbar_gecko: FAIL (BrokenPipeError: [Errno 32] Broken pipe)
+gui-test chromium/ctrl_t_gecko: FAIL (BrokenPipeError: [Errno 32] Broken pipe)
+{
+  "status": "FAIL",
+  "scenarios": {
+    "launch": "PASS",
+    "chrome": "PASS",
+    "switch": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus": "PASS",
+    "selection": "PASS",
+    "clipboard": "PASS",
+    "wheel": "PASS",
+    "cursor": "PASS",
+    "popups": "PASS",
+    "context_menu": "PASS",
+    "dialogs": "PASS",
+    "find": "PASS",
+    "zoom": "PASS",
+    "ime": "BLOCKED_ENV",
+    "middle_click": "PASS",
+    "history": "PASS",
+    "beforeunload": "PASS",
+    "to_gecko": "PASS",
+    "host_kill": "PASS",
+    "shortcuts": "FAIL",
+    "urlbar_chromium": "FAIL",
+    "ctrl_t_chromium": "FAIL",
+    "urlbar_gecko": "FAIL",
+    "ctrl_t_gecko": "FAIL"
+  },
+  "matrix": {
+    "window_title": "PASS",
+    "e1_render_in_content_area": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus_ring_caret": "PASS",
+    "selection_drag_double_click": "PASS",
+    "clipboard_ctrl_c_v": "PASS",
+    "wheel_precise_vs_notch": "PASS",
+    "cursor_shapes": "PASS",
+    "select_popup": "PASS",
+    "datalist_popup": "EXPERIMENTAL",
+    "color_popup": "PASS",
+    "context_menu": "PASS",
+    "js_dialogs": "PASS",
+    "find_in_page": "PASS",
+    "page_zoom": "PASS",
+    "ime_dead_keys_compose": "BLOCKED_ENV",
+    "middle_click_paste_autoscroll": "PASS",
+    "history_toolbar_and_alt_left": "PASS",
+    "beforeunload": "PASS",
+    "return_to_gecko": "PASS",
+    "e2_host_kill_preserves_gecko": "PASS",
+    "reload_keys": "FAIL",
+    "shortcuts": "FAIL",
+    "urlbar_chromium": "FAIL",
+    "ctrl_t_chromium": "FAIL",
+    "urlbar_gecko": "FAIL",
+    "ctrl_t_gecko": "FAIL"
+  },
+  "reason": null
+}
