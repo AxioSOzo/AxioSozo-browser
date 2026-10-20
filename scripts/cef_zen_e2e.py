@@ -250,8 +250,9 @@ class ChromiumWeb(ChromiumEngine):
     name = 'chromium'
     owner = 'cloud/cef-zen-feel'
 
-    def __init__(self, mode, scale, a11y=False, native_receiver='default'):
+    def __init__(self, mode, scale, a11y=False, native_receiver='default', prefs=()):
         self.mode, self.scale, self.a11y, self.native_receiver = mode, scale, a11y, native_receiver
+        self.prefs = list(prefs)
 
     def browser_environment(self, harness):
         env = super().browser_environment(harness)
@@ -260,6 +261,11 @@ class ChromiumWeb(ChromiumEngine):
             # (engine-view/linux), whose Chromium frames capture black in this environment.
             with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
                 prefs.write('user_pref("axiosozo.engines.linux.native_receiver", false);\n')
+        if self.prefs:
+            # TEST-ONLY frame-path prefs (--pref), e.g. memfd frames off, to isolate where pixels go black.
+            with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
+                for name, value in self.prefs:
+                    prefs.write(f'user_pref({json.dumps(name)}, {json.dumps(value)});\n')
         if self.scale != 1:
             with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
                 prefs.write(f'user_pref("layout.css.devPixelsPerPx", "{self.scale}");\n')
@@ -1097,6 +1103,17 @@ class CEFZenHarness(gui_test.Harness):
                   via={k: v['via'] for k, v in out.items()}, results=self.page()['d'])
         return out
 
+    def find_next_settled(self, before, timeout=5.0):
+        """The findbar after Return: polled until its ordinal changes (the Chromium finder may
+        restart its session from the kept selection and step once), else the last state."""
+        deadline = time.monotonic() + timeout
+        state = self.chrome_script(FINDBAR_STATE)
+        while state['matches'] == before['matches'] and time.monotonic() < deadline:
+            time.sleep(0.25)
+            state = self.chrome_script(FINDBAR_STATE)
+        time.sleep(0.3)
+        return self.chrome_script(FINDBAR_STATE)
+
     def scenario_find(self):
         self.require_chromium()
         self.click_at(*AT['blank'])
@@ -1109,8 +1126,7 @@ class CEFZenHarness(gui_test.Harness):
         found = self.chrome_script(FINDBAR_STATE)
         self.screenshot('12-find')
         self.key('Return')
-        time.sleep(0.8)
-        again = self.chrome_script(FINDBAR_STATE)
+        again = self.find_next_settled(found)
         self.screenshot('12-find-next')
         # Highlight All on, then off again (Firefox's checkbox).
         toggle = "const bar = gBrowser.getCachedFindBar(gBrowser.selectedTab); bar.getElement('highlight').click(); " \
@@ -1136,8 +1152,7 @@ class CEFZenHarness(gui_test.Harness):
         gecko = self.chrome_script(FINDBAR_STATE)
         self.screenshot('12-find-gecko')
         self.key('Return')
-        time.sleep(0.8)
-        gecko_again = self.chrome_script(FINDBAR_STATE)
+        gecko_again = self.find_next_settled(gecko)
         self.key('Escape')
         self.select_tab(self.cef_tab)
         self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
@@ -1903,6 +1918,8 @@ def main():
     parser.add_argument('--scenario', help='comma list (default: all of the mode)')
     parser.add_argument('--native-receiver', choices=('default', 'off'), default='default',
                         help='off: TEST-ONLY pref axiosozo.engines.linux.native_receiver=false')
+    parser.add_argument('--pref', action='append', default=[], metavar='NAME=VALUE',
+                        help='TEST-ONLY profile pref under axiosozo.engines.linux.* (true/false/int/string); repeatable')
     parser.add_argument('--a11y', action='store_true', help='web mode: the AT-SPI accessibility run (GNOME_ACCESSIBILITY=1)')
     parser.add_argument('--evidence-dir')
     parser.add_argument('--size', default=None)
@@ -1917,6 +1934,13 @@ def main():
     if any(item not in available for item in scenarios):
         parser.error('--scenario takes: ' + ','.join(available))
     args.size = args.size or ('2560x1600' if args.scale == 2 else '1280x800')
+    prefs = []
+    for item in args.pref:
+        name, sep, raw = item.partition('=')
+        if not sep or not name.startswith('axiosozo.engines.linux.'):
+            parser.error('--pref takes axiosozo.engines.linux.NAME=VALUE')
+        value = {'true': True, 'false': False}.get(raw, int(raw) if raw.lstrip('-').isdigit() else raw)
+        prefs.append((name, value))
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     evidence = Path(args.evidence_dir).resolve() if args.evidence_dir else storage.BUILD_ROOT / 'gui-evidence' / f'cef-zen-{args.mode}-{stamp}'
     code = 0
@@ -1926,7 +1950,7 @@ def main():
     except OSError:
         workdir = None
     with FeelServer(workdir) as feel:
-        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y, args.native_receiver), evidence, feel)
+        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y, args.native_receiver, prefs), evidence, feel)
         harness.result.update(harness='axiosozo-linux-gui+cef-zen', mode=args.mode, scale=args.scale,
                               feel_fixture={'origin': feel.origin, 'lan_origin': feel.lan_origin, 'tls_origin': feel.tls_origin,
                                             'tls_note': feel.tls_note, 'sha256': feel.hashes})
@@ -1934,6 +1958,9 @@ def main():
                                                  else ['AXIOSOZO_ENGINE_PROBE=1 fixture probe'])
         if args.native_receiver == 'off':
             harness.result['test_only_switches'].append('profile pref axiosozo.engines.linux.native_receiver=false')
+        for name, value in prefs:
+            harness.result['test_only_switches'].append(f'profile pref {name}={json.dumps(value)}')
+        harness.result['frame_prefs'] = {name: value for name, value in prefs}
         if args.a11y:
             harness.result['test_only_switches'].append('GNOME_ACCESSIBILITY=1 (AT-SPI on, as with a screen reader)')
         if args.scale != 1:
