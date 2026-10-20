@@ -567,7 +567,7 @@ export class WebKitPresenter {
   captureFixtureFrame() {
     const record = this.active;
     if (!record?.displayedFrames || !allowedFixtureURL(record.latestURL, record.originalTarget.identity)) throw new Error("NO_VERIFIED_WEBKIT_FIXTURE_FRAME");
-    return { png: record.nativeSink ? nativeFramePNG(this.window, record.nativeSink) : record.canvas.toDataURL("image/png"),
+    return { png: (record.nativeSink && nativeFramePNG(this.window, record.nativeSink)) || record.canvas.toDataURL("image/png"),
       diagnostics: this.diagnostics() };
   }
   async dispose() {

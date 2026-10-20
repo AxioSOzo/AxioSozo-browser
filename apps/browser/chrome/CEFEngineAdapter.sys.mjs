@@ -5,7 +5,8 @@
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
-  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing } from "./EngineFrameSurface.sys.mjs";
+  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  workerFrameRing, FRAME_WORKER_PREF, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -646,6 +647,8 @@ export class CEFHostConnection {
     this.memfd = null; this.frameTransport = "pipe";
     this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
     this.#assembler?.forget(value.target?.native_target_id);
+    // The native receiver takes memfd frames only: the JS path draws the pipe frames from now on.
+    if (this.#native && !this.#native.acceptsBuffers) { this.#native.close(); this.#native = null; this.nativeReceiver = false; }
     console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: "chromium", frameId: value.frame_id }));
     this.readPhase = "frame_ack";
     await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
@@ -663,9 +666,8 @@ export class CEFHostConnection {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd && !this.#endpoint) {
         this.readPhase = "frame_memfd";
-        // Native receiver: the component reads the slot; no pixels reach JS.
-        if (this.#native) pixels = await this.#native.apply(value);
-        else try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
+        // Native receiver or frame worker: the slot is read off the main thread; no pixels reach JS.
+        try { pixels = this.#native ? await this.#native.apply(value) : await this.#slotReader(value.slot, value.payload_bytes); }
         catch (error) {
           if (error?.message !== "MEMFD_READ_FAILED") throw error;
           await this.#memfdFallback(value);
@@ -673,6 +675,8 @@ export class CEFHostConnection {
         }
       }
       // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
+      // After a memfd fallback, a frame worker's targets take the pipe payloads too.
+      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
       if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
@@ -778,7 +782,7 @@ export class CEFHostConnection {
       catch { throw new Error("UNVERIFIED_CEF_RUNTIME"); }
       this.memfd = memfd;
       // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
-      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd);
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
       this.#native = ring ? new NativeFrameSinks(ring) : null;
       this.nativeReceiver = !!this.#native;
     }
@@ -1364,6 +1368,7 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   // when this child's /proc/<pid>/fd is readable; otherwise the pipe.
   const frameTransport = !endpoint && platform !== "macosarm64" && memfdFramesWanted()
     && await memfdProcReadable(process.pid) ? "memfd" : "pipe";
+  if (frameTransport === "memfd" && Services.prefs.getBoolPref(FRAME_WORKER_PREF, false)) await frameWorkersUsable();
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
     shared: browsingMode === "web", platform, frameTransport,
     surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });

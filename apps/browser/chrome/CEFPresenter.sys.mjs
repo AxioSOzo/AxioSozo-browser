@@ -1555,7 +1555,7 @@ export class CEFPresenter {
     }
     // Explicit diagnostic call in privileged chrome only, never a content API or
     // continuous page capture. The outer Zen window must be evidenced separately.
-    return { png:record.nativeSink ? nativeFramePNG(this.window, record.nativeSink) : record.canvas.toDataURL("image/png"),
+    return { png:(record.nativeSink && nativeFramePNG(this.window, record.nativeSink)) || record.canvas.toDataURL("image/png"),
       diagnostics:this.diagnostics() };
   }
   async dispose() {

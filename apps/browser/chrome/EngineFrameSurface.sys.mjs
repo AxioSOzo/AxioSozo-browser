@@ -417,8 +417,21 @@ export class NativeFrameSinks {
     if (!sink) { sink = this.#ring.createSink(); this.#sinks.set(key, sink); }
     const [x, y, w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
     try { await sink.applyFrame(metadata.slot, metadata.payload_bytes, metadata.width, metadata.height, x, y, w, h); }
-    catch { throw new Error("INVALID_DAMAGE_PAYLOAD"); }
+    catch (error) { throw new Error(error?.message === "MEMFD_READ_FAILED" ? "MEMFD_READ_FAILED" : "INVALID_DAMAGE_PAYLOAD"); }
     return new NativeFrame(sink, metadata.payload_bytes);
+  }
+  /** Worker sinks also take pipe payloads (after a memfd fallback); the native one does not. */
+  get acceptsBuffers() { return this.#ring.acceptsBuffers === true; }
+  async applyBuffer(metadata, buffer) {
+    const key = metadata.target?.native_target_id;
+    if (typeof key !== "string" || !key || !this.acceptsBuffers) throw new Error("INVALID_DAMAGE_PAYLOAD");
+    let sink = this.#sinks.get(key);
+    if (!sink) { sink = this.#ring.createSink(); this.#sinks.set(key, sink); }
+    const bytes = buffer.byteLength;
+    const [x, y, w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
+    try { await sink.applyBuffer(buffer, metadata.width, metadata.height, x, y, w, h); }
+    catch { throw new Error("INVALID_DAMAGE_PAYLOAD"); }
+    return new NativeFrame(sink, bytes);
   }
   /** A target closed: its sink (and canvas binding) goes. */
   forget(nativeTargetId) {
@@ -448,6 +461,7 @@ export function presentNativeFrame(win, record, metadata, frame, paintable) {
   }
   if (!paintable) return true;
   const started = win.performance.now();
+  const upload = frame.sink.kind ?? "native";
   const canvas = record.canvas;
   // The canvas's intrinsic size is the frame's (CSS scales it to the box, as on the 2D path).
   if (canvas.width !== metadata.width || canvas.height !== metadata.height) {
@@ -456,12 +470,12 @@ export function presentNativeFrame(win, record, metadata, frame, paintable) {
   frame.sink.present(metadata.frame_id);
   const [, , w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
   return { uploadedPixels: w * h, framePixels: metadata.width * metadata.height, frameId: metadata.frame_id,
-    milliseconds: win.performance.now() - started, superseded: 0, upload: "native" };
+    milliseconds: win.performance.now() - started, superseded: 0, upload };
 }
 
 /** The NativeFrame's whole frame as a frame for an EngineFrameSurface (bind refused). */
 export function nativeFallbackFrame(metadata, frame) {
-  const buffer = frame.sink.copyFrame();
+  const buffer = typeof frame.sink.copyFrame === "function" ? frame.sink.copyFrame() : null;
   if (!buffer) return null;
   const whole = { ...metadata };
   delete whole.damage;
@@ -470,7 +484,8 @@ export function nativeFallbackFrame(metadata, frame) {
 
 /** captureFixtureFrame of a natively presented canvas: the sink's frame as a PNG data URL. */
 export function nativeFramePNG(win, sink) {
-  const buffer = sink.copyFrame();
+  // Worker sinks draw into the (placeholder) canvas itself: the caller snapshots that.
+  const buffer = typeof sink.copyFrame === "function" ? sink.copyFrame() : null;
   if (!buffer) return null;
   const width = sink.width, height = sink.height;
   const canvas = win.document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
@@ -478,4 +493,171 @@ export function nativeFramePNG(win, sink) {
   const rgba = convertBGRAInPlace(buffer, width);
   canvas.getContext("2d").putImageData(new win.ImageData(new Uint8ClampedArray(rgba.buffer, 0, width * height * 4), width, height), 0, 0);
   return canvas.toDataURL("image/png");
+}
+
+/**
+ * Off-main-thread JS path (docs/perf/pixel-path.md, "Frame worker"; pref
+ * `axiosozo.engines.linux.frame_worker`, default false; used when the native receiver is not):
+ * one ChromeWorker per native target with the same sink interface as the native receiver. The
+ * worker opens the host's memfd with IOUtils.openFileForSyncReading, reads each slot into a
+ * persistent buffer (no per-frame allocation), keeps the whole frame, and draws presented frames
+ * into the presenter canvas through transferControlToOffscreen() (BGRX VideoFrame rows, else
+ * the JS swizzle + putImageData). The main thread only validates metadata, posts and acks.
+ * captureFixtureFrame keeps working: Gecko snapshots a placeholder canvas for toDataURL.
+ */
+export const FRAME_WORKER_PREF = "axiosozo.engines.linux.frame_worker";
+export const FRAME_WORKER_URL = "chrome://browser/content/axiosozo/EngineFrameWorker.js";
+
+/** The worker side (EngineFrameWorker.js loads this module into its own global and calls it). */
+export function runFrameWorker(scope, { IOUtils = scope.IOUtils } = {}) {
+  let file = null, slotBytes = 0, payload = null, frame = null, width = 0, height = 0;
+  let canvas = null, context = null, image = null, upload = "imagedata", dirty = null, current = false;
+  const stats = { applied: 0, presented: 0, readMicros: 0, drawMicros: 0, upload: null };
+  const now = () => scope.performance?.now?.() ?? Date.now();
+  const reply = (id, ok, extra = {}) => scope.postMessage({ id, ok, stats, width, height, ...extra });
+  const patch = (source, w0, h0, x, y, w, h) => {
+    if (x === 0 && y === 0 && w === w0 && h === h0) {
+      if (!frame || frame.length !== w0 * h0 * 4) frame = new Uint8Array(w0 * h0 * 4);
+      frame.set(source.subarray(0, w0 * h0 * 4));
+      dirty = [0, 0, w0, h0];
+    } else {
+      if (!frame || width !== w0 || height !== h0) throw new Error("INVALID_DAMAGE_PAYLOAD");
+      const rowBytes = w * 4;
+      for (let row = 0; row < h; row++) frame.set(source.subarray(row * rowBytes, (row + 1) * rowBytes), ((y + row) * w0 + x) * 4);
+      dirty = unite(dirty, [x, y, w, h]);
+    }
+    width = w0; height = h0; stats.applied++;
+  };
+  const handlers = {
+    ping: ({ id }) => reply(id, true, { pong: true, sync: typeof IOUtils?.openFileForSyncReading === "function",
+      offscreen: typeof scope.OffscreenCanvas === "function" }),
+    open: ({ path, slotBytes: bytes }) => { file = IOUtils.openFileForSyncReading(path); slotBytes = bytes; },
+    apply: ({ id, slot, bytes, width: w0, height: h0, x, y, w, h }) => {
+      const started = now();
+      if (!file || bytes !== w * h * 4 || bytes > slotBytes) throw new Error("MEMFD_READ_FAILED");
+      if (!payload || payload.length < bytes) payload = new Uint8Array(bytes);
+      const view = payload.subarray(0, bytes);
+      try { file.readBytesInto(view, slot * slotBytes); }
+      catch { throw new Error("MEMFD_READ_FAILED"); }
+      stats.readMicros += Math.round((now() - started) * 1000);
+      patch(view, w0, h0, x, y, w, h);
+      reply(id, true);
+    },
+    applyBuffer: ({ id, buffer, width: w0, height: h0, x, y, w, h }) => {
+      if (buffer.byteLength !== w * h * 4) throw new Error("INVALID_DAMAGE_PAYLOAD");
+      patch(new Uint8Array(buffer), w0, h0, x, y, w, h);
+      reply(id, true);
+    },
+    bind: ({ canvas: offscreen }) => {
+      canvas = offscreen; context = canvas.getContext("2d", { alpha: false }); current = false;
+      upload = typeof scope.VideoFrame === "function" && videoFrameUploadWorks(scope) ? "videoframe" : "imagedata";
+      stats.upload = upload;
+    },
+    present: () => {
+      if (!context || !frame || !dirty) return;
+      const started = now();
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; current = false; }
+      let [x, y, w, h] = current ? dirty : [0, 0, width, height];
+      if (upload === "videoframe") {
+        try { drawBGRXRows(scope.VideoFrame, context, frame.buffer, width, y, h, stats.presented); }
+        catch { upload = stats.upload = "imagedata"; [x, y, w, h] = [0, 0, width, height]; }
+      }
+      if (upload === "imagedata") {
+        if (!image || image.width !== width || image.height !== height) {
+          image = new scope.ImageData(new Uint8ClampedArray(width * height * 4), width, height);
+          [x, y, w, h] = [0, 0, width, height];
+        }
+        convertBGRARect(frame.buffer, width, x, y, image.data, width, x, y, w, h);
+        context.putImageData(image, 0, 0, x, y, w, h);
+      }
+      current = true; dirty = null; stats.presented++;
+      stats.drawMicros += Math.round((now() - started) * 1000);
+    },
+    close: () => { try { file?.close(); } catch {} file = null; frame = payload = image = null; scope.close?.(); },
+  };
+  scope.onmessage = ({ data }) => {
+    try { handlers[data?.type]?.(data); }
+    catch (error) { if (data?.id) reply(data.id, false, { error: String(error?.message ?? error) }); }
+  };
+}
+
+/** The main-thread side of one worker sink (the native sink's interface). */
+export class WorkerFrameSink {
+  kind = "worker"; width = 0; height = 0;
+  #worker; #next = 1; #waiting = new Map(); #stats = {}; #closed = false; #bound = false;
+  constructor(worker, path, slotBytes) {
+    this.#worker = worker;
+    worker.onmessage = ({ data }) => {
+      if (data?.stats) this.#stats = data.stats;
+      const waiter = this.#waiting.get(data?.id);
+      if (!waiter) return;
+      this.#waiting.delete(data.id);
+      if (data.ok) waiter.resolve(data); else waiter.reject(new Error(data.error || "MEMFD_READ_FAILED"));
+    };
+    worker.onerror = event => { event?.preventDefault?.(); this.#failAll(new Error("ENGINE_FRAME_WORKER_FAILED")); };
+    if (path) worker.postMessage({ type: "open", path, slotBytes });
+  }
+  #failAll(error) { for (const waiter of this.#waiting.values()) waiter.reject(error); this.#waiting.clear(); }
+  #call(message, transfer) {
+    if (this.#closed) return Promise.reject(new Error("ENGINE_FRAME_WORKER_FAILED"));
+    const id = this.#next++;
+    return new Promise((resolve, reject) => {
+      this.#waiting.set(id, { resolve, reject });
+      try { this.#worker.postMessage({ ...message, id }, transfer ?? []); }
+      catch (error) {
+        // A buffer that cannot be transferred (another compartment's) is copied instead.
+        if (!transfer) { this.#waiting.delete(id); reject(error); return; }
+        this.#worker.postMessage({ ...message, id });
+      }
+    });
+  }
+  ping() { return this.#call({ type: "ping" }); }
+  applyFrame(slot, bytes, width, height, x, y, w, h) {
+    this.width = width; this.height = height;
+    return this.#call({ type: "apply", slot, bytes, width, height, x, y, w, h });
+  }
+  applyBuffer(buffer, width, height, x, y, w, h) {
+    this.width = width; this.height = height;
+    return this.#call({ type: "applyBuffer", buffer, width, height, x, y, w, h }, [buffer]);
+  }
+  bindCanvas(canvas) {
+    if (this.#bound || this.#closed) throw new Error("NS_ERROR_DOM_INVALID_STATE_ERR");
+    const offscreen = canvas.transferControlToOffscreen();
+    this.#worker.postMessage({ type: "bind", canvas: offscreen }, [offscreen]);
+    this.#bound = true;
+  }
+  present(frameId) { if (!this.#closed && this.#bound) this.#worker.postMessage({ type: "present", frameId }); }
+  get statsJSON() { return JSON.stringify({ ...this.#stats, bound: this.#bound }); }
+  close() {
+    if (this.#closed) return;
+    this.#closed = true;
+    try { this.#worker.postMessage({ type: "close" }); } catch {}
+    this.#failAll(new Error("ENGINE_FRAME_WORKER_FAILED"));
+  }
+}
+
+// Once per process: can a frame worker start here (ChromeWorker, sync file reads, OffscreenCanvas)?
+let frameWorkerProbe = null;
+export function frameWorkerProbeResult() { return frameWorkerProbe; }
+export async function frameWorkersUsable(Worker = globalThis.ChromeWorker, timeoutMs = 2000) {
+  if (frameWorkerProbe) return frameWorkerProbe.ok;
+  if (typeof Worker !== "function") { frameWorkerProbe = { ok: false, error: "no_chrome_worker" }; return false; }
+  let sink = null;
+  try {
+    sink = new WorkerFrameSink(new Worker(FRAME_WORKER_URL), null, 0);
+    const delay = globalThis.setTimeout ?? ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs").setTimeout;
+    const answer = await Promise.race([sink.ping(), new Promise((_, no) => delay(() => no(new Error("timeout")), timeoutMs))]);
+    frameWorkerProbe = { ok: !!(answer?.pong && answer.sync && answer.offscreen), sync: answer?.sync, offscreen: answer?.offscreen };
+  } catch (error) { frameWorkerProbe = { ok: false, error: String(error?.message ?? error) }; }
+  finally { sink?.close(); }
+  return frameWorkerProbe.ok;
+}
+
+/** A ring of worker sinks for one host (the native ring's interface), or null (pref off, no workers). */
+export function workerFrameRing(pid, capability, { prefs = globalThis.Services?.prefs, Worker = globalThis.ChromeWorker } = {}) {
+  try { if (!prefs?.getBoolPref(FRAME_WORKER_PREF, false) || !frameWorkerProbe?.ok || typeof Worker !== "function") return null; }
+  catch { return null; }
+  const path = `/proc/${pid}/fd/${capability.fd}`;
+  return { kind: "worker", acceptsBuffers: true,
+    createSink: () => new WorkerFrameSink(new Worker(FRAME_WORKER_URL), path, capability.slot_bytes), close() {} };
 }

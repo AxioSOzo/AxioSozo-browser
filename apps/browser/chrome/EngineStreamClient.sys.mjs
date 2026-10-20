@@ -12,7 +12,8 @@
 // the same protocol; moving CEF onto this module is a later, separate step.
 
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, disableMemfdFrames,
-  MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing } from "./EngineFrameSurface.sys.mjs";
+  MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  workerFrameRing } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -326,6 +327,8 @@ export class EngineStreamHost {
     this.memfd = null; this.frameTransport = "pipe";
     this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
     this.#assembler?.forget(value.target?.native_target_id);
+    // The native receiver takes memfd frames only: the JS path draws the pipe frames from now on.
+    if (this.#native && !this.#native.acceptsBuffers) { this.#native.close(); this.#native = null; this.nativeReceiver = false; }
     console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: this.profile.engine, frameId: value.frame_id }));
     this.readPhase = "frame_ack";
     if (!this.#ended) await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
@@ -345,9 +348,8 @@ export class EngineStreamHost {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd) {
         this.readPhase = "frame_memfd";
-        // Native receiver: the component reads the slot; no pixels reach JS.
-        if (this.#native) pixels = await this.#native.apply(value);
-        else try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
+        // Native receiver or frame worker: the slot is read off the main thread; no pixels reach JS.
+        try { pixels = this.#native ? await this.#native.apply(value) : await this.#slotReader(value.slot, value.payload_bytes); }
         catch (error) {
           if (error?.message !== "MEMFD_READ_FAILED") throw error;
           await this.#memfdFallback(value);
@@ -355,6 +357,8 @@ export class EngineStreamHost {
         }
       }
       // Every delivered frame is applied, presented or not (§6.2).
+      // After a memfd fallback, a frame worker's targets take the pipe payloads too.
+      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
       if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
@@ -438,7 +442,7 @@ export class EngineStreamHost {
       catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
       this.memfd = memfd;
       // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
-      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd);
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
       this.#native = ring ? new NativeFrameSinks(ring) : null;
       this.nativeReceiver = !!this.#native;
     }

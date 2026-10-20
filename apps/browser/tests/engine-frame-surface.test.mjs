@@ -235,3 +235,78 @@ test("native receiver: sinks apply every frame per target, presenters bind once 
   assert.equal(nativeFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Cc, Ci }), ring);
   assert.deepEqual(opened, [[42, 9, 64, 2]]);
 });
+
+test("frame worker: slots are read into a persistent buffer, frames patched, presents drawn into the offscreen canvas", async () => {
+  const { runFrameWorker, WorkerFrameSink, NativeFrameSinks, workerFrameRing } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  // The ring: slot 0 = a whole 2x2 frame (opaque red, BGRA 00 00 ff ff), slot 1 = one green pixel.
+  const ring = new Uint8Array(2 * 64);
+  new Uint32Array(ring.buffer, 0, 4).fill(0xffff0000);
+  new Uint32Array(ring.buffer, 64, 1).fill(0xff00ff00);
+  let failReads = false, opened = null;
+  const io = { openFileForSyncReading: path => { opened = path; return {
+    readBytesInto: (dest, offset) => { if (failReads) throw new Error("EACCES"); dest.set(ring.subarray(offset, offset + dest.length)); },
+    close() {} }; } };
+  const puts = [];
+  const offscreen = { width: 0, height: 0, getContext: () => ({ putImageData: (image, x, y, dx, dy, dw, dh) =>
+    puts.push({ data: [...image.data], rect: [dx, dy, dw, dh] }) }) };
+  const main = { onmessage: null, onerror: null, postMessage: data => queueMicrotask(() => scope.onmessage({ data })) };
+  const scope = { postMessage: data => queueMicrotask(() => main.onmessage({ data })), close() {},
+    ImageData: class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } } };
+  runFrameWorker(scope, { IOUtils: io });
+  const sink = new WorkerFrameSink(main, "/proc/42/fd/9", 64);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  await sink.applyFrame(0, 16, 2, 2, 0, 0, 2, 2);
+  assert.equal(opened, "/proc/42/fd/9");
+  sink.bindCanvas({ transferControlToOffscreen: () => offscreen });
+  sink.present(1); await settle();
+  assert.deepEqual([offscreen.width, offscreen.height], [2, 2]);
+  assert.deepEqual(puts[0].rect, [0, 0, 2, 2]); assert.deepEqual(puts[0].data.slice(0, 4), [255, 0, 0, 255]);
+  await sink.applyFrame(1, 4, 2, 2, 1, 1, 1, 1);
+  sink.present(2); await settle();
+  assert.deepEqual(puts[1].rect, [1, 1, 1, 1], "only the damage is drawn once the canvas is current");
+  assert.deepEqual(puts[1].data.slice(12, 16), [0, 255, 0, 255]);
+  const stats = JSON.parse(sink.statsJSON);
+  assert.equal(stats.applied, 2); assert.equal(stats.presented, 2); assert.equal(stats.upload, "imagedata"); assert.equal(stats.bound, true);
+  // A failing read rejects with MEMFD_READ_FAILED (the reader's in-band fallback), a pipe payload patches.
+  failReads = true;
+  await assert.rejects(sink.applyFrame(1, 4, 2, 2, 1, 1, 1, 1), /MEMFD_READ_FAILED/);
+  await sink.applyBuffer(new Uint32Array([0xff0000ff]).buffer, 2, 2, 0, 0, 1, 1);
+  sink.present(3); await settle();
+  assert.deepEqual(puts.at(-1).rect, [0, 0, 1, 1]); assert.deepEqual(puts.at(-1).data.slice(0, 4), [0, 0, 255, 255]);
+  await assert.rejects(sink.applyBuffer(new ArrayBuffer(8), 2, 2, 0, 0, 1, 1), /INVALID_DAMAGE_PAYLOAD/);
+  // Through NativeFrameSinks: worker rings take buffers; MEMFD_READ_FAILED passes through.
+  const sinks = new NativeFrameSinks({ kind: "worker", acceptsBuffers: true, createSink: () => sink, close() {} });
+  assert.equal(sinks.acceptsBuffers, true);
+  await assert.rejects(sinks.apply({ target: { native_target_id: "t" }, slot: 1, payload_bytes: 4, width: 2, height: 2, damage: [[1, 1, 1, 1]] }), /MEMFD_READ_FAILED/);
+  failReads = false;
+  const frame = await sinks.applyBuffer({ target: { native_target_id: "t" }, width: 2, height: 2, damage: [[0, 0, 2, 2]] }, new ArrayBuffer(16));
+  assert.equal(frame.sink, sink); assert.equal(frame.byteLength, 16);
+  sinks.close();
+  await assert.rejects(sink.applyFrame(0, 16, 2, 2, 0, 0, 2, 2), /ENGINE_FRAME_WORKER_FAILED/, "closed");
+  // The ring needs the pref and a usable worker (probed once at launch).
+  assert.equal(workerFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => false }, Worker: class {} }), null);
+  assert.equal(workerFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Worker: class {} }), null, "not probed");
+});
+
+test("frame workers are probed once (ChromeWorker, sync reads, OffscreenCanvas) before a ring is offered", async () => {
+  const { frameWorkersUsable, frameWorkerProbeResult, workerFrameRing, runFrameWorker, FRAME_WORKER_URL } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  const urls = [];
+  class FakeWorker {
+    constructor(url) {
+      urls.push(url);
+      const scope = { postMessage: data => queueMicrotask(() => this.onmessage?.({ data })), close() {}, OffscreenCanvas: class {},
+        IOUtils: { openFileForSyncReading: () => ({ readBytesInto() {}, close() {} }) } };
+      this.postMessage = data => queueMicrotask(() => scope.onmessage({ data }));
+      runFrameWorker(scope);
+    }
+  }
+  assert.equal(await frameWorkersUsable(FakeWorker), true);
+  assert.deepEqual(urls, [FRAME_WORKER_URL]);
+  assert.equal(frameWorkerProbeResult().ok, true);
+  assert.equal(await frameWorkersUsable(FakeWorker), true, "cached");
+  assert.equal(urls.length, 1);
+  const ring = workerFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Worker: FakeWorker });
+  assert.equal(ring.kind, "worker"); assert.equal(ring.acceptsBuffers, true);
+  const sink = ring.createSink();
+  assert.equal(sink.kind, "worker"); sink.close();
+});
