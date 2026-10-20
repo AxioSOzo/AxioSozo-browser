@@ -161,6 +161,19 @@ export function keyboardRoute(event, { editing = false, native = false, platform
       || /^F\d{1,2}$/u.test(event.key)) return "chrome";
   return Object.hasOwn(MAC_KEYS, event.code) || native ? "cef" : "unsupported";
 }
+// Firefox's developer-tools shortcuts on Linux (toolbox, inspector, consoles, network,
+// responsive design, debugger, style editor, profiler, view source). Over a Chromium tab
+// they would inspect the hidden blank Firefox document, so the tab explains instead.
+const DEVTOOLS_CHORDS = new Set(["i", "c", "k", "e", "m", "z"]);
+export const DEVTOOLS_NOTICE = "Developer tools aren't available for Chromium tabs yet. Open this tab in Firefox to inspect it.";
+export function developerToolsKey(event, platform = "linux") {
+  if (platform !== "linux" || event.metaKey || event.altKey) return false;
+  const key = String(event.key ?? "").toLowerCase();
+  if (event.key === "F12" && !event.ctrlKey) return true;
+  if (event.shiftKey && !event.ctrlKey && ["F5", "F7"].includes(event.key)) return true;
+  if (event.ctrlKey && event.shiftKey && DEVTOOLS_CHORDS.has(key)) return true;
+  return event.ctrlKey && !event.shiftKey && key === "u";
+}
 export function cefKey(event, type, platform = "mac") {
   if (keyboardRoute(event, { platform }) !== "cef") throw new Error("UNSUPPORTED_KEY");
   if (platform === "linux") {
@@ -465,6 +478,8 @@ export class CEFPresenter {
     if (!root) return;
     const style = this.window.document.createElementNS(XHTML, "style");
     style.textContent = `
+      /* The fixture probe chip wraps under the address bar, never onto the page. */
+      #nav-bar-customization-target:has(> #axiosozo-engine-probe) { flex-wrap:wrap; }
       /* Chromium permission doorhangers (ChromiumBrowserUI) anchor in #notification-popup-box. */
       [axiosozo-cef-active] #identity-box:not(:has(> #notification-popup-box:not([hidden]))),
       [axiosozo-cef-active] #identity-box > :not(#notification-popup-box),
@@ -577,6 +592,7 @@ export class CEFPresenter {
     if (record.visible !== visible) {
       record.visible = visible;
       if (visible) representNativeFrame(record); // a frame applied while hidden
+      if (!visible) this.#closeDatalist(record);
       record.a11y?.setVisible(record.a11yTarget, visible);
       // Surface mode also gates the endpoint's begin frames, fixture sessions included.
       if ((this.browsingMode === "web" || record.surfaceMode) && record.adapter?.target) {
@@ -748,10 +764,13 @@ export class CEFPresenter {
   /**
    * Accessibility (docs/design/engine-accessibility.md): surface mode only, where the
    * engine-view a11y component exposes Chromium's tree under this canvas. Without the
-   * component (pipe fallback) the canvas keeps its "not available" label.
+   * component (pipe fallback) the canvas keeps its "not available" label. On Linux the
+   * tree is mirrored into chrome DOM that Gecko exposes to AT-SPI (LinuxAccessibilityMirror).
    */
   #attachAccessibility(record, target) {
-    if (!record.surfaceMode) return;
+    let linux = false;
+    try { linux = this.window.Services?.appinfo?.OS === "Linux"; } catch {}
+    if (!record.surfaceMode && !linux) return;
     let a11y = null, targetId;
     try { a11y = sharedChromiumAccessibility(); targetId = surfaceTargetId(target); } catch { return; }
     const adapter = record.adapter;
@@ -842,6 +861,7 @@ export class CEFPresenter {
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
     if (event.event === "text_selection") this.#primarySelection(record, event.text);
+    if (event.event === "datalist") this.#datalist(record, event);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -859,6 +879,7 @@ export class CEFPresenter {
       }
     }
     this.onTargetEvent(event);
+    if (event.event === "navigation") this.#closeDatalist(record, true);
     if (record.committed && event.event === "navigation") { record.visible = undefined; this.#visibility(record); }
     // Page focus must be restated for each new document: a focus command that
     // crossed the navigation was rejected as stale (the first focus of a new tab
@@ -1127,6 +1148,8 @@ export class CEFPresenter {
       // wrapped BrowserCommands.back/forward already route to this tab; never a click.
       if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
+      if (type === "pointerdown") this.#closeDatalist(record);
+      if (type === "pointerup" && event.button === 0) this.#datalistClick(record, event);
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
       if (type !== "pointermove" || event.buttons) record.userInputAt = this.window.performance.now();
       event.preventDefault();
@@ -1250,6 +1273,12 @@ export class CEFPresenter {
         // Keys the input method owns (composition, dead keys) reach it untouched.
         if (event.isComposing || event.keyCode === 229 || event.key === "Process" || event.key === "Dead") return;
       }
+      if (this.#datalistKey(record, event, type)) { event.preventDefault(); event.stopPropagation(); return; }
+      if (this.browsingMode === "web" && developerToolsKey(event, platform)) {
+        event.preventDefault(); event.stopPropagation();
+        if (type === "down") this.#notice(record, DEVTOOLS_NOTICE);
+        return;
+      }
       const route = keyboardRoute(event, { editing:this.browsingMode === "web", platform });
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
@@ -1261,6 +1290,7 @@ export class CEFPresenter {
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
       record.userInputAt = this.window.performance.now();
       const fields = cefKey(event, type, platform); send("key", fields);
+      if (type === "down") this.#datalistTyped(record, event);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });
         else if (event.key === "Enter") send("key", { ...fields, type:"char", text:"\r" }); // newline in text areas
@@ -1342,6 +1372,136 @@ export class CEFPresenter {
     // A consumed key is only released; an unconsumed one is replayed after the current dispatch.
     if (consumed) finish(); else this.window.setTimeout(finish, 0);
   }
+  // ---- <datalist> (Linux web sessions) ------------------------------------------------
+  // Windowless Chromium draws no datalist suggestions. The host reports the focused
+  // field's options (`datalist`); Zen draws them under the field like Firefox's own
+  // autocomplete list, filters them by the field's value, and commits a choice as
+  // text input replacing the field's value. Keys go to the list only while it is open.
+  #datalist(record, event) {
+    if (!event.options.length) { record.datalist = null; this.#closeDatalist(record); return; }
+    const wanted = record.datalistWanted;
+    record.datalist = event;
+    record.datalistWanted = null;
+    if (!wanted || !record.contentFocused && this.window.document.activeElement !== record.canvas
+        && !this.#contentElement(record, this.window.document.activeElement)) {
+      if (record.datalistPopup && !record.datalistPopup.hidden) this.#renderDatalist(record, "filter");
+      return;
+    }
+    this.#renderDatalist(record, wanted);
+  }
+  #renderDatalist(record, mode) {
+    const list = record.datalist;
+    if (!list) return;
+    const typed = list.value.toLowerCase();
+    const options = list.options.filter(option => mode === "all" || !typed
+      || option.value.toLowerCase().includes(typed) || option.label.toLowerCase().includes(typed));
+    if (!options.length || (options.length === 1 && options[0].value === list.value && mode !== "all")) { this.#closeDatalist(record); return; }
+    let popup = record.datalistPopup;
+    if (!popup) {
+      popup = record.datalistPopup = this.#element(record.overlay, "div", "axiosozo-cef-datalist");
+      popup.setAttribute("role", "listbox");
+      popup.style.cssText = "position:absolute;z-index:3;box-sizing:border-box;min-width:120px;max-height:240px;overflow-y:auto;"
+        + "margin:0;padding:2px 0;background:Field;color:FieldText;border:1px solid color-mix(in srgb, currentColor 25%, transparent);"
+        + "border-radius:4px;box-shadow:0 2px 8px rgb(0 0 0 / .25);font:menu;user-select:none";
+      // Pointer input on the list never reaches the page underneath.
+      for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "wheel"]) {
+        this.#listenOn(record, popup, type, event => event.stopPropagation());
+      }
+      this.#listenOn(record, popup, "pointerdown", event => {
+        if (!event.isTrusted || event.button !== 0) return;
+        event.preventDefault();
+        const row = event.target?.closest?.("[data-index]");
+        if (row) this.#chooseDatalist(record, Number(row.dataset.index));
+      });
+    }
+    popup.replaceChildren();
+    record.datalistShown = options;
+    options.forEach((option, index) => {
+      const row = this.#element(popup, "div");
+      row.setAttribute("role", "option"); row.dataset.index = String(index);
+      row.style.cssText = "display:flex;gap:12px;justify-content:space-between;padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      this.#element(row, "span", null, option.value);
+      if (option.label && option.label !== option.value) {
+        const label = this.#element(row, "span", null, option.label);
+        label.style.opacity = "0.7";
+      }
+    });
+    Object.assign(popup.style, { left:`${Math.round(list.x)}px`, top:`${Math.round(list.y + list.height)}px`,
+      width:`${Math.max(120, Math.round(list.width))}px` });
+    popup.hidden = false;
+    record.datalistIndex = -1;
+    this.#highlightDatalist(record);
+  }
+  #highlightDatalist(record) {
+    const popup = record.datalistPopup;
+    if (!popup) return;
+    for (const row of popup.children) {
+      const selected = Number(row.dataset.index) === record.datalistIndex;
+      row.setAttribute("aria-selected", String(selected));
+      row.style.background = selected ? "SelectedItem" : "";
+      row.style.color = selected ? "SelectedItemText" : "";
+      if (selected) row.scrollIntoView?.({ block:"nearest" });
+    }
+  }
+  #closeDatalist(record, forget = false) {
+    if (forget) record.datalist = null;
+    record.datalistIndex = -1;
+    if (record.datalistPopup) record.datalistPopup.hidden = true;
+  }
+  #datalistOpen(record) { return !!record.datalistPopup && !record.datalistPopup.hidden; }
+  #queryDatalist(record, wanted) {
+    record.datalistWanted = wanted;
+    this.window.clearTimeout(record.datalistTimer);
+    // After Chromium applied the key: one query per typing burst.
+    record.datalistTimer = this.window.setTimeout(() => {
+      if (record.adapter?.datalistQuery) this.#action(record, target => record.adapter.datalistQuery(target));
+    }, 40);
+  }
+  #chooseDatalist(record, index) {
+    const option = record.datalistShown?.[index], list = record.datalist;
+    this.#closeDatalist(record);
+    if (!option || !list) return;
+    record.userInputAt = this.window.performance.now();
+    // The chosen value replaces the field's text, as typing it would (input events fire in the page).
+    this.#send(record, "ime_commit_text", { text:option.value.slice(0, 256),
+      replacement_range:{ start:0, end:list.value.length } });
+    list.value = option.value;
+  }
+  /** Keys while the list is open (or Down on a datalist field): true when the list took the key. */
+  #datalistKey(record, event, type) {
+    if (this.browsingMode !== "web" || event.ctrlKey || event.altKey || event.metaKey) return false;
+    const open = this.#datalistOpen(record);
+    if (type === "up") return record.datalistKeys?.delete(event.code) ?? false;
+    let taken = true;
+    if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      const count = record.datalistShown?.length ?? 0;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      // Positions -1 (the typed text) .. count-1, wrapping like Firefox's autocomplete list.
+      record.datalistIndex = record.datalistIndex < 0 ? (step > 0 ? 0 : count - 1)
+        : (record.datalistIndex + 1 + step + count + 1) % (count + 1) - 1;
+      this.#highlightDatalist(record);
+    } else if (open && event.key === "Enter" && record.datalistIndex >= 0) this.#chooseDatalist(record, record.datalistIndex);
+    else if (open && event.key === "Escape") this.#closeDatalist(record);
+    else if (!open && event.key === "ArrowDown" && record.datalist && !event.shiftKey) this.#queryDatalist(record, "all");
+    else taken = false;
+    if (taken) (record.datalistKeys ??= new Set()).add(event.code);
+    return taken;
+  }
+  /** After a typed key on a datalist field: refresh the suggestions for the new value. */
+  #datalistTyped(record, event) {
+    if (!record.datalist || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.key.length <= 2 || event.key === "Backspace" || event.key === "Delete") this.#queryDatalist(record, "filter");
+    else if (event.key === "Tab" || event.key === "Enter") this.#closeDatalist(record);
+  }
+  /** A click into the focused datalist field opens the whole list (as in Firefox). */
+  #datalistClick(record, event) {
+    const list = record.datalist;
+    if (!list || this.#datalistOpen(record)) return;
+    const bounds = record.canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+    if (x >= list.x && x <= list.x + list.width && y >= list.y && y <= list.y + list.height) this.#queryDatalist(record, "all");
+  }
+
   #contentElement(record, node) {
     return !!node && (node === record.canvas || node === record.ime?.text || node === record.ime?.password);
   }

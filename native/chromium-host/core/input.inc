@@ -387,6 +387,21 @@ static bool inputCommand(Tab* tab, const std::string& method, const Value& comma
   if (method == "wheel") return wheelCommand(tab, command, requestId);
   if (method == "pinch") return pinchCommand(tab, command, requestId);
   if (method.rfind("ime_", 0) == 0) return imeCommand(tab, method, command, requestId);
+  if (method == "datalist_query") {
+    // Web sessions: ask the focused frame's renderer for the focused field's <datalist>
+    // (answered with axio.datalist, then a `datalist` event).
+    if (!webBrowsing) { unsupported(requestId, "fixture_only"); return true; }
+    event("accepted", json::object({{"request_id", requestId}}));
+    if (cef_frame_t* frame = tab->browser->get_focused_frame(tab->browser)) {
+      auto name = json::toUtf16("axio.datalist_query");
+      auto text = view(name);
+      if (cef_process_message_t* message = cef::p_cef_process_message_create(&text))
+        frame->send_process_message(frame, PID_RENDERER, message);  // transfers our reference
+      frame->base.release(&frame->base);
+    }
+    complete(requestId, "success");
+    return true;
+  }
   if (method == "frame_rate") {
     // The window moved to a display with another refresh rate. CEF re-applies the
     // compositor v-sync interval and the capture rate live (UpdateFrameRate).
@@ -402,6 +417,48 @@ static bool inputCommand(Tab* tab, const std::string& method, const Value& comma
     return true;
   }
   return false;
+}
+
+// <datalist> suggestions (web sessions, Linux core host). The renderer reports the focused
+// field's list on focus and on `datalist_query`: [x, y, width, height] in widget pixels
+// (x < 0: no datalist field), the field's value, then value/label pairs. Zen draws the
+// suggestions (windowless Chromium draws none) and commits a choice as text input.
+static constexpr size_t DatalistMaxOptions = 64, DatalistTextLimit = 256, DatalistValueLimit = 1024;
+static void datalistMessage(Tab* tab, cef_process_message_t* message) {
+  if (!webBrowsing || !tab || tab->closing) return;
+  cef_list_value_t* args = message->get_argument_list(message);
+  if (!args) return;
+  size_t size = args->get_size(args);
+  bool valid = size >= 4 && size <= 5 + 2 * DatalistMaxOptions && (size == 4 || size % 2 == 1);
+  int box[4] = {0, 0, 0, 0};
+  for (size_t i = 0; valid && i < 4; i++) {
+    valid = args->get_type(args, i) == VTYPE_INT;
+    if (valid) box[i] = args->get_int(args, i);
+  }
+  std::vector<std::string> strings;
+  for (size_t i = 4; valid && i < size; i++) {
+    valid = args->get_type(args, i) == VTYPE_STRING;
+    if (!valid) break;
+    std::string item = take(args->get_string(args, i));
+    valid = json::toUtf16(item).size() <= (i == 4 ? DatalistValueLimit : DatalistTextLimit);
+    strings.push_back(item);
+  }
+  args->base.release(&args->base);
+  if (!valid) return;
+  Value payload;
+  if (box[0] < 0 || strings.empty() || tab->textMode == 2) {
+    if (tab->datalistSent.empty()) return;
+    payload = json::object({{"x", 0}, {"y", 0}, {"width", 0}, {"height", 0}, {"value", ""}, {"options", json::array()}});
+  } else {
+    double s = tab->scale > 0 ? tab->scale : 1;
+    Value options = json::array();
+    for (size_t i = 1; i + 1 < strings.size(); i += 2)
+      options.items.push_back(json::object({{"value", strings[i]}, {"label", strings[i + 1]}}));
+    payload = json::object({{"x", std::max(0, box[0]) / s}, {"y", std::max(0, box[1]) / s}, {"width", std::max(0, box[2]) / s},
+                            {"height", std::max(0, box[3]) / s}, {"value", strings[0]}, {"options", options}});
+  }
+  tab->datalistSent = box[0] < 0 || strings.empty() ? std::string() : json::write(payload);
+  tabEvent(tab, "datalist", payload);
 }
 
 static Ref<cef_keyboard_handler_t> keyboard;
@@ -431,7 +488,9 @@ static void configureInput() {
                                               cef_process_id_t source, cef_process_message_t* message) -> int {
     HOLD(value); HOLD(frame); HOLD(message);
     if (source != PID_RENDERER || !message) return 0;
-    if (take(message->get_name(message)) != "axio.text_input") return 0;
+    std::string name = take(message->get_name(message));
+    if (name == "axio.datalist") { datalistMessage(tabFor(value), message); return 1; }
+    if (name != "axio.text_input") return 0;
     Tab* tab = tabFor(value);
     if (!tab || tab->closing) return 1;
     cef_list_value_t* args = message->get_argument_list(message);
@@ -453,6 +512,76 @@ static void configureInput() {
     return 1;
   };
 }
+
+// Renderer side of the <datalist> report: page-defined options of the focused text field
+// (never a password field) and its current value, nothing else from the document.
+static std::u16string domText(cef_string_userfree_t value) {
+  std::u16string out = value && value->str ? std::u16string(value->str, value->length) : std::u16string();
+  if (value) cef::p_cef_string_userfree_utf16_free(value);
+  return out;
+}
+static std::u16string domAttribute(cef_domnode_t* node, const char* attribute) {
+  auto name = json::toUtf16(attribute);
+  auto text = view(name);
+  return node->has_element_attribute(node, &text) ? domText(node->get_element_attribute(node, &text)) : std::u16string();
+}
+static bool domHas(cef_domnode_t* node, const char* attribute) {
+  auto name = json::toUtf16(attribute);
+  auto text = view(name);
+  return node->has_element_attribute(node, &text) != 0;
+}
+static void datalistReport(cef_frame_t* frame, cef_domnode_t* node) {
+  std::vector<std::u16string> strings;
+  cef_rect_t bounds{-1, -1, 0, 0};
+  if (node && node->is_element(node) && node->is_form_control_element(node) &&
+      node->get_form_control_element_type(node) != DOM_FORM_CONTROL_TYPE_INPUT_PASSWORD && domHas(node, "list")) {
+    std::u16string listId = domAttribute(node, "list");
+    cef_domdocument_t* document = node->get_document(node);
+    cef_domnode_t* list = nullptr;
+    if (document && !listId.empty() && listId.size() <= 256) {
+      auto idText = view(listId);
+      list = document->get_element_by_id(document, &idText);
+    }
+    if (list && json::fromUtf16(domText(list->get_element_tag_name(list))) == "DATALIST") {
+      strings.push_back(domText(node->get_value(node)).substr(0, DatalistValueLimit));
+      cef_domnode_t* child = list->get_first_child(list);
+      while (child && strings.size() < 1 + 2 * DatalistMaxOptions) {
+        if (child->is_element(child) && json::fromUtf16(domText(child->get_element_tag_name(child))) == "OPTION" &&
+            !domHas(child, "disabled")) {
+          std::u16string value = domHas(child, "value") ? domAttribute(child, "value") : domText(child->get_element_inner_text(child));
+          std::u16string label = domAttribute(child, "label");
+          if (!value.empty()) {
+            strings.push_back(value.substr(0, DatalistTextLimit));
+            strings.push_back(label.substr(0, DatalistTextLimit));
+          }
+        }
+        cef_domnode_t* next = child->get_next_sibling(child);
+        child->base.release(&child->base);
+        child = next;
+      }
+      if (child) child->base.release(&child->base);
+      if (strings.size() > 1) bounds = node->get_element_bounds(node);
+      else strings.clear();
+    }
+    if (list) list->base.release(&list->base);
+    if (document) document->base.release(&document->base);
+  }
+  auto name = json::toUtf16("axio.datalist");
+  auto text = view(name);
+  cef_process_message_t* message = cef::p_cef_process_message_create(&text);
+  if (!message) return;
+  cef_list_value_t* args = message->get_argument_list(message);
+  int box[4] = {bounds.x, bounds.y, bounds.width, bounds.height};
+  for (size_t i = 0; i < 4; i++) args->set_int(args, i, box[i]);
+  for (size_t i = 0; i < strings.size(); i++) {
+    auto item = view(strings[i]);
+    args->set_string(args, 4 + i, &item);
+  }
+  args->base.release(&args->base);
+  frame->send_process_message(frame, PID_BROWSER, message);  // transfers our reference
+}
+static Ref<cef_domvisitor_t> datalistVisitor;
+static cef_frame_t* datalistFrame = nullptr;  // renderer main thread only, during visit_dom
 
 // Renderer side of the text-input report. Runs in the sandboxed renderer helper and
 // sends only the focused node's kind and bounds; no page text leaves the renderer.
@@ -482,6 +611,23 @@ cef_app_t* rendererApp() {
     for (size_t i = 0; i < 5; i++) args->set_int(args, i, values[i]);
     args->base.release(&args->base);
     frame->send_process_message(frame, PID_BROWSER, message);  // transfers our reference
+    datalistReport(frame, node);
+  };
+  datalistVisitor.api.visit = [](cef_domvisitor_t*, cef_domdocument_t* document) {
+    HOLD(document);
+    if (!document || !datalistFrame) return;
+    cef_domnode_t* focused = document->get_focused_node(document);
+    datalistReport(datalistFrame, focused);
+    if (focused) focused->base.release(&focused->base);
+  };
+  rendererHandler.api.on_process_message_received = [](cef_render_process_handler_t*, cef_browser_t* current, cef_frame_t* frame,
+                                                        cef_process_id_t source, cef_process_message_t* message) -> int {
+    HOLD(current); HOLD(frame); HOLD(message);
+    if (source != PID_BROWSER || !frame || !message || take(message->get_name(message)) != "axio.datalist_query") return 0;
+    datalistFrame = frame;
+    frame->visit_dom(frame, datalistVisitor.retain());
+    datalistFrame = nullptr;
+    return 1;
   };
   return helperApp.retain();
 }

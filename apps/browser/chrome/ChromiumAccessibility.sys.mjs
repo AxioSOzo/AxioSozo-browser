@@ -510,7 +510,11 @@ export function engineAccessibilityService() {
  */
 export class ChromiumAccessibility {
   #service; #observers; #timers; #pollMs; #views = new Map(); #poll = null; #disposed = false;
-  #observer = { observe: (_subject, topic, data) => { if (topic === "a11y-init-or-shutdown" && data === "0") this.disableAll(); } };
+  #observer = { observe: (_subject, topic, data) => {
+    if (topic !== "a11y-init-or-shutdown") return;
+    if (data === "0") this.disableAll();
+    else if (data === "1" && this.#service?.requestOnShow) for (const id of this.#views.keys()) this.#requested(id);
+  } };
 
   constructor({ service = engineAccessibilityService(), observerService = globalThis.Services?.obs ?? null,
     timers = defaultTimers(), pollMs = 15000 } = {}) {
@@ -539,6 +543,7 @@ export class ChromiumAccessibility {
     // Until the tree attaches the canvas stays one labelled group (design doc §4).
     view.canvas.setAttribute("role", "group");
     view.canvas.setAttribute("aria-label", "Chromium page");
+    if (this.#service.requestOnShow) this.#requested(view.targetId);
     return true;
   }
 
@@ -562,7 +567,13 @@ export class ChromiumAccessibility {
     const view = this.#views.get(targetId);
     if (!view) return;
     view.visible = visible;
+    // The Linux mirror keeps a hidden tab's tree: Chromium does not send it again after
+    // accessibility goes off and on (run 39387935674: after a tab switch AT-SPI saw only
+    // the page's root). Its mirror sits in the hidden tab, so AT-SPI reports it not showing.
+    if (!visible && this.#service?.keepWhileHidden) return;
     if (!visible) this.#disable(view);
+    // Services without a per-canvas assistive query (the Linux mirror) ask again on show.
+    else if (this.#service?.requestOnShow) this.#requested(targetId);
   }
 
   /**
@@ -578,6 +589,13 @@ export class ChromiumAccessibility {
         const patch = event.event === "ax_tree_update" ? view.tree.applyTreeUpdate(event) : view.tree.applyLocation(event);
         if (patch && (patch.nodes.length || patch.removed.length || patch.notifications.length || patch.reset)) {
           patch.viewport = view.viewport ?? null;
+          if (this.#service.chromiumRoles) {
+            // The Linux mirror maps Chromium roles to ARIA itself (the macOS records stay as they are).
+            for (const record of patch.nodes) {
+              record.crole = view.tree.node(record.id)?.role ?? null;
+              record.cb = view.tree.resolveBounds(record.id);
+            }
+          }
           this.#service.applyPatch(targetId, JSON.stringify(patch));
         }
       }
@@ -665,7 +683,10 @@ export function sharedChromiumAccessibility() {
   // every window delegates to the instance in the shared system global.
   const shared = sharedModule();
   if (shared && shared.sharedChromiumAccessibility !== sharedChromiumAccessibility) return shared.sharedChromiumAccessibility();
-  if (!sharedController || !sharedController.available) sharedController = new ChromiumAccessibility();
+  if (!sharedController || !sharedController.available) {
+    const service = engineAccessibilityService() ?? linuxMirrorService();
+    sharedController = new ChromiumAccessibility(service ? { service } : {});
+  }
   return sharedController;
 }
 function sharedModule() {
@@ -674,4 +695,201 @@ function sharedModule() {
 function defaultTimers() {
   if (typeof globalThis.setTimeout === "function") return globalThis;
   try { return globalThis.ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs"); } catch { return globalThis; }
+}
+
+// ---- Linux: AT-SPI through Gecko ----------------------------------------------------------
+// Linux has no engine-view accessibility component. Instead Chromium's tree is mirrored
+// into chrome DOM next to the tab's canvas: invisible (opacity 0), inert to the pointer,
+// never focusable, and owned by the canvas (aria-owns), so Gecko's own accessibility
+// (ATK/AT-SPI) exposes it under the Chromium page as it exposes any document. Chromium's
+// focus becomes the canvas' aria-activedescendant; an assistive "click" on a mirrored
+// node is relayed as `press` and nothing reaches the page through the DOM. Every string
+// is set as an attribute or text node, never parsed as markup.
+
+const ARIA_ROLES = {
+  rootWebArea: "document", webArea: "document", link: "link", button: "button", toggleButton: "button", popUpButton: "button",
+  comboBoxSelect: "combobox", checkBox: "checkbox", switch: "switch", radioButton: "radio", radioGroup: "radiogroup",
+  textField: "textbox", searchBox: "searchbox", textFieldWithComboBox: "combobox", comboBoxGrouping: "combobox",
+  comboBoxMenuButton: "combobox", heading: "heading", image: "img", canvas: "img", graphicsSymbol: "img", list: "list",
+  listItem: "listitem", descriptionList: "list", listBox: "listbox", listBoxOption: "option", menuListPopup: "listbox",
+  menuListOption: "option", table: "table", grid: "grid", treeGrid: "treegrid", row: "row", rowGroup: "rowgroup", cell: "cell",
+  gridCell: "gridcell", columnHeader: "columnheader", rowHeader: "rowheader", main: "main", navigation: "navigation",
+  banner: "banner", contentInfo: "contentinfo", complementary: "complementary", search: "search", region: "region",
+  form: "form", article: "article", document: "document", note: "note", dialog: "dialog", alertDialog: "alertdialog",
+  alert: "alert", status: "status", log: "log", timer: "timer", marquee: "marquee", application: "application",
+  tab: "tab", tabList: "tablist", tabPanel: "tabpanel", definition: "definition", term: "term", math: "math",
+  mathMLMath: "math", menu: "menu", menuBar: "menubar", menuItem: "menuitem", menuItemCheckBox: "menuitemcheckbox",
+  menuItemRadio: "menuitemradio", slider: "slider", spinButton: "spinbutton", progressIndicator: "progressbar",
+  meter: "meter", tree: "tree", treeItem: "treeitem", toolbar: "toolbar", splitter: "separator", scrollBar: "scrollbar",
+  group: "group", paragraph: "paragraph", blockquote: "blockquote", code: "code", figure: "figure", tooltip: "tooltip",
+  colorWell: "button", disclosureTriangle: "button", directory: "list", feed: "feed", insertion: "insertion",
+  deletion: "deletion", emphasis: "emphasis", strong: "strong", subscript: "subscript", superscript: "superscript",
+};
+const NAME_FROM_CONTENT = new Set(["staticText", "rootWebArea", "webArea", "paragraph", "genericContainer", "listItem",
+  "cell", "gridCell", "row", "list", "group", "section", "blockquote", "code"]);
+const MIRROR_ID = /^[a-z0-9-]{1,64}$/u;
+const FIELD_ROLES = new Set(["textField", "searchBox", "textFieldWithComboBox"]);
+
+export class LinuxAccessibilityMirror {
+  listener = null;
+  // ChromiumAccessibility: send Chromium roles and resolved bounds; ask for the tree on attach/show.
+  chromiumRoles = true; requestOnShow = true; keepWhileHidden = true;
+  #views = new Map(); #active;
+
+  /** @param active () → bool: a platform assistive client uses Gecko's accessibility (AT-SPI). */
+  constructor({ active = () => { try { return !!globalThis.Services?.appinfo?.accessibilityEnabled; } catch { return false; } } } = {}) {
+    this.#active = active;
+  }
+  get platformClientActive() { return this.#active(); }
+  view(targetId) { return this.#views.get(targetId) ?? null; }
+
+  attach(canvas, targetId) {
+    this.detach(targetId);
+    const doc = canvas.ownerDocument, parent = canvas.parentNode;
+    if (!doc || !parent) return;
+    const prefix = `axiosozo-cef-ax-${targetId}`;
+    if (!MIRROR_ID.test(prefix)) return;
+    const root = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    root.id = `${prefix}-root`;
+    root.setAttribute("data-axiosozo-cef-a11y", "mirror");
+    root.style.cssText = "position:absolute;inset:0;overflow:hidden;opacity:0;pointer-events:none;z-index:-1;"
+      + "font:12px/16px sans-serif;color:#000;background:transparent;contain:strict";
+    const live = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+    live.setAttribute("aria-live", "polite"); live.setAttribute("role", "status");
+    root.appendChild(live);
+    // Assistive clicks (Gecko's doAction) land on mirror nodes: relay them, keep them away from the page.
+    const swallow = event => {
+      event.stopPropagation(); event.preventDefault();
+      if (event.type !== "click") return;
+      const id = Number(event.target?.closest?.("[data-ax-id]")?.dataset.axId);
+      if (Number.isSafeInteger(id) && id > 0) this.listener?.onAction?.(targetId, id, "press", "");
+    };
+    for (const type of ["click", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu", "dblclick"]) {
+      root.addEventListener(type, swallow, true);
+    }
+    parent.insertBefore(root, canvas.nextSibling);
+    canvas.setAttribute("aria-owns", root.id);
+    this.#views.set(targetId, { canvas, root, live, prefix, nodes: new Map(), rootId: 0 });
+  }
+
+  detach(targetId) {
+    const view = this.#views.get(targetId);
+    if (!view) return;
+    this.#views.delete(targetId);
+    view.root.remove();
+    view.canvas.removeAttribute("aria-owns"); view.canvas.removeAttribute("aria-activedescendant");
+  }
+
+  /** Tree off (hidden tab, assistive client gone): drop the mirrored nodes, keep the view. */
+  clear(targetId) {
+    const view = this.#views.get(targetId);
+    if (!view) return;
+    for (const element of view.nodes.values()) element.remove();
+    view.nodes.clear(); view.rootId = 0;
+    view.canvas.removeAttribute("aria-activedescendant");
+  }
+
+  applyPatch(targetId, json) {
+    const view = this.#views.get(targetId);
+    if (!view) return;
+    const patch = JSON.parse(json);
+    if (patch.reset) this.clear(targetId);
+    for (const id of patch.removed ?? []) { view.nodes.get(id)?.remove(); view.nodes.delete(id); }
+    const doc = view.root.ownerDocument;
+    for (const record of patch.nodes ?? []) {
+      if (!record.x) { view.nodes.get(record.id)?.remove(); view.nodes.delete(record.id); continue; }
+      let element = view.nodes.get(record.id);
+      if (!element) {
+        element = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        element.id = `${view.prefix}-${record.id}`;
+        element.dataset.axId = String(record.id);
+        view.nodes.set(record.id, element);
+      }
+      this.#describe(element, record);
+    }
+    // Structure: every updated record lists its exposed children in order.
+    for (const record of patch.nodes ?? []) {
+      const element = view.nodes.get(record.id);
+      if (!element || !Array.isArray(record.kids)) continue;
+      if (FIELD_ROLES.has(record.crole) || record.protected) record.kids = [];
+      const text = element.querySelector(":scope > [data-ax-text]");
+      const kids = record.kids.map(id => {
+        let kid = view.nodes.get(id);
+        if (!kid) {
+          // Not delivered yet (or flattened away): a placeholder keeps the order.
+          kid = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+          kid.id = `${view.prefix}-${id}`; kid.dataset.axId = String(id);
+          view.nodes.set(id, kid);
+        }
+        return kid;
+      });
+      element.replaceChildren(...(text ? [text] : []), ...kids);
+    }
+    if (patch.root && view.nodes.has(patch.root) && view.rootId !== patch.root) {
+      view.rootId = patch.root;
+      view.root.replaceChildren(view.live, view.nodes.get(patch.root));
+    }
+    const focus = patch.focus && view.nodes.get(patch.focus);
+    if (focus) view.canvas.setAttribute("aria-activedescendant", focus.id);
+    else view.canvas.removeAttribute("aria-activedescendant");
+    for (const note of patch.notifications ?? []) {
+      if (note.type === "announce" && typeof note.text === "string") {
+        view.live.setAttribute("aria-live", note.priority === "high" ? "assertive" : "polite");
+        view.live.textContent = note.text.slice(0, 500);
+      }
+    }
+  }
+
+  #describe(element, record) {
+    const set = (name, value) => value === null || value === undefined || value === false || value === ""
+      ? element.removeAttribute(name) : element.setAttribute(name, String(value));
+    const role = record.crole ?? "";
+    set("role", ARIA_ROLES[role] ?? null);
+    const name = record.title || record.label || "";
+    let text = null;
+    if (role === "staticText") text = typeof record.value === "string" ? record.value : name;
+    else set("aria-label", NAME_FROM_CONTENT.has(role) ? null : name);
+    // A text field's text is its value (its Chromium children are the inner editor).
+    if (FIELD_ROLES.has(role) && !record.protected && typeof record.value === "string") text = record.value.slice(0, AX_LIMITS.value);
+    // Text of a static text node (ARIA has no "value" for it).
+    let holder = element.querySelector(":scope > [data-ax-text]");
+    if (text) {
+      if (!holder) { holder = element.ownerDocument.createElementNS("http://www.w3.org/1999/xhtml", "span"); holder.dataset.axText = ""; element.prepend(holder); }
+      if (holder.textContent !== text) holder.textContent = text;
+    } else holder?.remove();
+    const value = record.value;
+    set("aria-level", role === "heading" ? record.level : null);
+    const checkable = ["checkBox", "switch", "radioButton", "menuItemCheckBox", "menuItemRadio"].includes(role);
+    set("aria-checked", checkable ? (value === 1 ? "true" : value === 2 ? "mixed" : "false") : null);
+    set("aria-pressed", role === "toggleButton" ? (value === 1 ? "true" : value === 2 ? "mixed" : "false") : null);
+    set("aria-haspopup", role === "popUpButton" ? "menu" : null);
+    set("aria-selected", record.selected === null || record.selected === undefined ? null : String(!!record.selected));
+    set("aria-expanded", record.expanded === null || record.expanded === undefined ? null : String(!!record.expanded));
+    set("aria-disabled", record.enabled === false ? "true" : null);
+    set("aria-required", record.required ? "true" : null);
+    set("aria-invalid", record.invalid || null);
+    set("aria-multiline", record.multiline ? "true" : null);
+    set("aria-readonly", ["textField", "searchBox"].includes(role) && !record.editable ? "true" : null);
+    set("aria-busy", record.busy ? "true" : null);
+    set("aria-modal", record.modal ? "true" : null);
+    set("aria-live", record.live || null);
+    set("aria-roledescription", record.roledesc || null);
+    set("aria-description", record.help || null);
+    set("aria-placeholder", record.placeholder || null);
+    set("aria-setsize", record.setsize ?? null); set("aria-posinset", record.posinset ?? null);
+    const range = Array.isArray(record.range) ? record.range : null;
+    set("aria-valuemin", range && Number.isFinite(range[0]) ? range[0] : null);
+    set("aria-valuemax", range && Number.isFinite(range[1]) ? range[1] : null);
+    set("aria-valuenow", range && Number.isFinite(range[2]) ? range[2] : null);
+    set("data-ax-protected", record.protected ? "true" : null);
+    if (record.cb && [record.cb.x, record.cb.y, record.cb.w, record.cb.h].every(Number.isFinite)) {
+      element.dataset.axBounds = [record.cb.x, record.cb.y, record.cb.w, record.cb.h].map(n => Math.round(n)).join(",");
+    }
+  }
+}
+
+function linuxMirrorService() {
+  try {
+    return globalThis.Services?.appinfo?.OS === "Linux" ? new LinuxAccessibilityMirror() : null;
+  } catch { return null; }
 }

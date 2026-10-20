@@ -463,6 +463,19 @@ keyboard and select-all selections). Fixture sessions and macOS hosts never send
 an adapter rejects it outside web mode. Reading PRIMARY (middle-click paste) is
 Chromium's own and needs nothing from Zen.
 
+**Datalist suggestions (event `datalist`, command `datalist_query`, web sessions).**
+Windowless Chromium draws no `<datalist>` suggestions. When a text field with a `list`
+attribute (never a password field) gains focus, and after each
+`{"method":"datalist_query"}` (no fields; Zen sends it after typed keys), a Linux web
+host sends `{"event":"datalist","target":…,"x","y","width","height","value","options"}`:
+the field's box in logical points, its current value (≤ 1024 UTF-16 units) and up to 64
+enabled `<option>`s as `{value (1–256), label (≤ 256)}`. These are page-defined strings
+plus the field's own text, nothing else from the document. An event with `options: []`
+means the focused field has no datalist any more. Zen draws and filters the list itself
+and commits a choice with `ime_commit_text` whose `replacement_range` covers the old
+value. Fixture sessions answer `datalist_query` `unsupported`, macOS hosts never send
+the event, and an adapter rejects it outside web mode.
+
 **Sandbox.** The sandbox is never disabled.
 - Chromium uses the user-namespace sandbox when the kernel permits it.
 - Otherwise it uses the SUID `chrome-sandbox`. Ubuntu 24.04 restricts unprivileged

@@ -335,6 +335,8 @@ const EVENT_FIELDS = {
   text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
   // Linux web sessions: the page's selected text, for the desktop PRIMARY selection.
   text_selection: ["text"],
+  // Linux web sessions: the focused field's <datalist> options (Zen draws the suggestions).
+  datalist: ["x", "y", "width", "height", "value", "options"],
   // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
   prompt: ["prompt_id", "kind", "details", "timeout_ms"], prompt_closed: ["prompt_id", "reason"],
   download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
@@ -344,6 +346,15 @@ const EVENT_FIELDS = {
   ax_tree_update: ["seq", "batch", "reset", "final", "root", "focus", "px", "events", "truncated", "nodes"],
   ax_location: ["seq", "nodes"],
 };
+export const DATALIST_LIMITS = Object.freeze({ options: 64, text: 256, value: 1024 });
+/** A host `datalist` event: geometry in logical points, page-defined options, the field's value. */
+export function validDatalist(value) {
+  const box = ["x", "y", "width", "height"].every(key => Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 16384);
+  const text = (item, max) => typeof item === "string" && item.length <= max && !item.includes("\0");
+  return box && text(value.value, DATALIST_LIMITS.value) && Array.isArray(value.options) && value.options.length <= DATALIST_LIMITS.options
+    && value.options.every(option => isObject(option) && hasKeys(option, ["value", "label"]) && text(option.value, DATALIST_LIMITS.text)
+      && option.value.length > 0 && text(option.label, DATALIST_LIMITS.text));
+}
 // Only a PNG the host encoded itself: never a remote URL Zen would fetch, never SVG.
 export const MAX_FAVICON_LENGTH = 7400;
 const FAVICON = /^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
@@ -726,7 +737,7 @@ export class CEFHostConnection {
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
       } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "text_selection",
-          "favicon"].includes(value.event)
+          "favicon", "datalist"].includes(value.event)
           || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
@@ -1071,6 +1082,7 @@ export class CEFEngineAdapter {
           .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
     if (value.event === "text_selection" && (this.browsingMode !== "web" || typeof value.text !== "string"
         || !value.text.length || value.text.length > 16384)) throw targetError("INVALID_CEF_TEXT_SELECTION");
+    if (value.event === "datalist" && (this.browsingMode !== "web" || !validDatalist(value))) throw targetError("INVALID_CEF_DATALIST");
     if (AX_EVENTS.has(value.event)) {
       if (this.#host.capabilities?.accessibility !== true) throw targetError("INVALID_CEF_ACCESSIBILITY");
       try { (value.event === "ax_tree_update" ? validateAXTreeUpdate : validateAXLocation)(value); }
@@ -1206,6 +1218,12 @@ export class CEFEngineAdapter {
     this.resolve(target);
     if (typeof focused !== "boolean") throw new Error("INVALID_FOCUS");
     return this.#request("focus", { focused });
+  }
+  /** Linux web sessions: ask for the focused field's <datalist> (answered by a `datalist` event). */
+  datalistQuery(target) {
+    this.resolve(target);
+    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    return this.#request("datalist_query", {});
   }
   visibility(target, visible) {
     this.resolve(target);

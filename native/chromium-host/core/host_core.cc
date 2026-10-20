@@ -282,6 +282,7 @@ struct Tab {
   uint64_t keySeq = 0, probeSent = 0, probeArrived = 0;
   // Text input state: 0 none, 1 text, 2 password; caret in logical points.
   int textMode = 0, sentMode = -1;
+  std::string datalistSent;  // last `datalist` event payload (deduplicated); empty: none shown
   double caret[4] = {0, 0, 0, 0}, sentCaret[4] = {0, 0, 0, 0};
   bool textInputScheduled = false;
   uint64_t textInputAt = 0;
@@ -649,7 +650,8 @@ static const std::map<std::string, std::vector<std::string>>& commandFields() {
       {"find", {"text", "forward", "match_case", "find_next"}}, {"stop_finding", {"clear_selection"}},
       {"zoom", {"level"}}, {"pinch", {"x", "y", "modifiers", "phase", "magnification"}},
       {"frame_rate", {"frame_rate"}}, {"ime_set_composition", {"text", "selection_start", "selection_end"}},
-      {"ime_commit_text", {"text"}}, {"ime_finish_composing", {}}, {"ime_cancel_composition", {}}};
+      {"ime_commit_text", {"text"}}, {"ime_finish_composing", {}}, {"ime_cancel_composition", {}},
+      {"datalist_query", {}}};
   return table;
 }
 static bool oneOf(const std::string& value, std::initializer_list<const char*> options) {
@@ -778,6 +780,13 @@ static void streamCommand(const std::string& line) {
     // makes a windowless view paint transparently: an unstyled page's background then
     // has alpha 0 and showed as black in the presenter's opaque canvas.
     settings.background_color = 0xFFFFFFFF;
+    // Platform font policy (LaunchConfig::fonts); the strings outlive create_browser.
+    auto standardFont = json::toUtf16(config.fonts.standard), serifFont = json::toUtf16(config.fonts.serif);
+    auto sansFont = json::toUtf16(config.fonts.sansSerif), fixedFont = json::toUtf16(config.fonts.fixed);
+    if (!standardFont.empty()) settings.standard_font_family = view(standardFont);
+    if (!serifFont.empty()) settings.serif_font_family = view(serifFont);
+    if (!sansFont.empty()) settings.sans_serif_font_family = view(sansFont);
+    if (!fixedFont.empty()) settings.fixed_font_family = view(fixedFont);
     auto value = json::toUtf16(command.str("url"));
     auto address = view(value);
     event("accepted", json::object({{"request_id", requestId}}));
