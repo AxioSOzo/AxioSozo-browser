@@ -1,0 +1,44 @@
+✔ browser assigns and persists identity; same project has no duplicate creation (2.552291ms)
+✔ simultaneous ensures serialize and different projects receive different identities (1.13325ms)
+✔ two projects routing the same origin use separate cookie identities (0.917667ms)
+✔ unconfirmed suggested shared sites stay in the project identity (0.388209ms)
+✔ only confirmed shared-site patterns use the trusted space default (0.774541ms)
+✔ revoking confirmation affects the next route without changing the project identity (0.382417ms)
+✔ private, unknown privacy and container-disabled requests have no mutation (0.422708ms)
+✔ caller cannot pass IDs, projects, names, account labels or identity metadata (0.2555ms)
+✔ public uint32 identity boundaries fail closed including reserved UINT32_MAX (0.408833ms)
+✔ a nonzero default must exist as a public identity (0.271959ms)
+✔ known public mapping survives controller restart (0.2235ms)
+✔ missing or private in-range stored mappings are replaced by browser assignment (0.58125ms)
+✔ duplicate project mappings never silently share their jar (0.351958ms)
+✔ failed persistence retains a private retry hint and never routes unsaved identity (0.609709ms)
+✔ project removal during persistence fails and never removes container data (0.165125ms)
+✔ CAS rejects concurrent mapping changes instead of overwriting them (0.145708ms)
+✔ refresh uses trusted presentation callback; account labels stay untouched (0.389542ms)
+✔ invalid, privileged and credential URLs cause no identity allocation (0.1555ms)
+✔ Gecko adapter calls fixed pinned service signatures and exposes no removal (0.20125ms)
+✔ adapter rejects legacy-only color, unknown metadata and control-character names (0.106542ms)
+✔ adapter refuses non-public, mismatched and reserved identity replies (0.063ms)
+✔ shared-site revocation during identity checks changes the resolved route (0.1845ms)
+✔ disabling containers during presentation preparation prevents creation (0.106125ms)
+✔ project removal during routing identity checks prevents a returned plan (0.138583ms)
+✔ trusted deletion observation detaches mapping without clearing identity data (0.223541ms)
+✔ identity reset clears all associations and cannot silently adopt reused IDs (0.287625ms)
+✔ failed reset persistence keeps routing blocked until cleanup succeeds (0.213375ms)
+✔ deletion revokes an already running route before observer cleanup completes (0.176458ms)
+✔ reset stays blocked when a stale assignment callback leaves associations uncleared (0.120625ms)
+✔ disabled routing reads no identity metadata and allocates nothing (0.075583ms)
+✔ stale deletion cleanup fails instead of treating its old mapping as detached (0.335083ms)
+✔ reset during created-identity lookup cannot republish a stale retry hint (0.196209ms)
+✔ reset during awaited presentation cannot modify a reused identity (0.169833ms)
+✔ mapping change during presentation prevents old-identity mutation (0.169875ms)
+✔ reserved or otherwise invalid persisted identity records reject before browser side effects (0.781333ms)
+✔ the last public identity remains a valid saved ownership mapping (0.122125ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.54375

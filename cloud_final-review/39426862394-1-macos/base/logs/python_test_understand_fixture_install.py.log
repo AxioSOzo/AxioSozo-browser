@@ -1,0 +1,201 @@
+test_binary_hash_and_exact_executable_mode_are_required (test_understand_fixture_install.InstallerTests) ... ok
+test_binary_symlink_refuses (test_understand_fixture_install.InstallerTests) ... ok
+test_check_requires_existing_install (test_understand_fixture_install.InstallerTests) ... ok
+test_exclusive_write_does_not_replace_existing_input (test_understand_fixture_install.InstallerTests) ... ERROR
+test_exfat_public_source_mode_is_not_private_admission (test_understand_fixture_install.InstallerTests) ... ERROR
+test_failed_install_keeps_its_partial_root_and_never_repairs (test_understand_fixture_install.InstallerTests) ... FAIL
+test_file_mutation_during_bounded_hash_is_detected (test_understand_fixture_install.InstallerTests) ... FAIL
+test_install_and_check_only_create_private_readonly_inputs (test_understand_fixture_install.InstallerTests) ... ERROR
+test_installed_hash_mode_and_link_count_are_rechecked (test_understand_fixture_install.InstallerTests) ... ERROR
+test_installed_symlink_is_never_followed (test_understand_fixture_install.InstallerTests) ... ERROR
+test_installer_exposes_no_arbitrary_source_or_command_argument (test_understand_fixture_install.InstallerTests) ... usage: python3 -m unittest [-h] --run-id RUN_ID {install,check}
+python3 -m unittest: error: unrecognized arguments: --command /bin/sh
+ok
+test_layout_accepts_only_fixed_lowercase_32_hex_ids (test_understand_fixture_install.InstallerTests) ... ok
+test_missing_or_wrong_gate_refuses_before_mount_or_creation (test_understand_fixture_install.InstallerTests) ... ok
+test_pinned_file_refuses_byte_bound (test_understand_fixture_install.InstallerTests) ... ok
+test_profile_contents_are_not_enumerated_or_opened (test_understand_fixture_install.InstallerTests) ... ERROR
+test_profile_must_preexist_and_is_never_created (test_understand_fixture_install.InstallerTests) ... ok
+test_profile_private_mode_and_no_symlink_are_required (test_understand_fixture_install.InstallerTests) ... ok
+test_retained_directory_detects_namespace_replacement (test_understand_fixture_install.InstallerTests) ... ERROR
+test_retained_file_detects_same_bytes_named_replacement (test_understand_fixture_install.InstallerTests) ... ERROR
+test_second_install_refuses_without_overwrite (test_understand_fixture_install.InstallerTests) ... ERROR
+test_source_symlink_and_hardlink_refuse (test_understand_fixture_install.InstallerTests) ... ok
+test_source_wrong_hash_refuses_before_root_creation (test_understand_fixture_install.InstallerTests) ... ok
+test_write_uses_held_parent_if_namespace_changes_at_open (test_understand_fixture_install.InstallerTests) ... ERROR
+test_wrong_worktree_refuses_before_mount (test_understand_fixture_install.InstallerTests) ... ok
+test_mount_metadata_accepts_only_expected_image_mount_and_apfs (test_understand_fixture_install.MountMetadataTests) ... ok
+test_closed_staged_inputs_match_native_pins_and_their_public_bytes (test_understand_fixture_install.StagedPinsTests) ... ERROR
+
+======================================================================
+ERROR: test_exclusive_write_does_not_replace_existing_input (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 265, in test_exclusive_write_does_not_replace_existing_input
+    with installer.Directory(full, private=True) as parent:
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 74, in __init__
+    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+NotADirectoryError: [Errno 20] Not a directory: 'var'
+
+======================================================================
+ERROR: test_exfat_public_source_mode_is_not_private_admission (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 187, in test_exfat_public_source_mode_is_not_private_admission
+    self.assertEqual(installer.install(RUN_ID)["status"], "ok")
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_install_and_check_only_create_private_readonly_inputs (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 144, in test_install_and_check_only_create_private_readonly_inputs
+    result = installer.install(RUN_ID)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_installed_hash_mode_and_link_count_are_rechecked (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 205, in test_installed_hash_mode_and_link_count_are_rechecked
+    installer.install(RUN_ID)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_installed_symlink_is_never_followed (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 216, in test_installed_symlink_is_never_followed
+    installer.install(RUN_ID)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_profile_contents_are_not_enumerated_or_opened (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 138, in test_profile_contents_are_not_enumerated_or_opened
+    result = installer.install(RUN_ID)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_retained_directory_detects_namespace_replacement (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 226, in test_retained_directory_detects_namespace_replacement
+    with installer.Directory(full, private=True) as held:
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 74, in __init__
+    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+NotADirectoryError: [Errno 20] Not a directory: 'var'
+
+======================================================================
+ERROR: test_retained_file_detects_same_bytes_named_replacement (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 234, in test_retained_file_detects_same_bytes_named_replacement
+    with installer.PinnedFile(source, digest, maximum, source=True) as held:
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 119, in __init__
+    self.directory = Directory(self.path.parent, public_source=source)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 74, in __init__
+    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+NotADirectoryError: [Errno 20] Not a directory: 'var'
+
+======================================================================
+ERROR: test_second_install_refuses_without_overwrite (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 157, in test_second_install_refuses_without_overwrite
+    installer.install(RUN_ID)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 292, in install
+    root, profile, guard = admission(run_id, stack)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 225, in admission
+    flags(root)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 174, in flags
+    require(Path.cwd() == WORKTREE and os.environ.get("AXIOSOZO_BUILD_ROOT") == str(BUILD)
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 48, in require
+    raise RuntimeError("UNDERSTAND_FIXTURE_INSTALL_REFUSED")
+RuntimeError: UNDERSTAND_FIXTURE_INSTALL_REFUSED
+
+======================================================================
+ERROR: test_write_uses_held_parent_if_namespace_changes_at_open (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 275, in test_write_uses_held_parent_if_namespace_changes_at_open
+    with installer.Directory(full, private=True) as parent:
+  File "/Users/runner/work/_temp/base/scripts/understand_fixture_install.py", line 74, in __init__
+    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+NotADirectoryError: [Errno 20] Not a directory: 'var'
+
+======================================================================
+ERROR: test_closed_staged_inputs_match_native_pins_and_their_public_bytes (test_understand_fixture_install.StagedPinsTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 31, in test_closed_staged_inputs_match_native_pins_and_their_public_bytes
+    raw = (ORIGINAL_SOURCE / source).read_bytes()
+  File "/Applications/Xcode_16.4.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py", line 1249, in read_bytes
+    with self.open(mode='rb') as f:
+  File "/Applications/Xcode_16.4.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py", line 1242, in open
+    return io.open(self, mode, buffering, encoding, errors, newline,
+  File "/Applications/Xcode_16.4.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py", line 1110, in _opener
+    return self._accessor.open(self, flags, mode)
+FileNotFoundError: [Errno 2] No such file or directory: '/Volumes/T9/Code/AxioSozo-browser-workstation/tools/axiosozo-understand/fixture-host.mjs'
+
+======================================================================
+FAIL: test_failed_install_keeps_its_partial_root_and_never_repairs (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 297, in test_failed_install_keeps_its_partial_root_and_never_repairs
+    self.assertTrue(self.root.exists())
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_file_mutation_during_bounded_hash_is_detected (test_understand_fixture_install.InstallerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py", line 260, in test_file_mutation_during_bounded_hash_is_detected
+    self.assertTrue(mutated)
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.238s
+
+FAILED (failures=2, errors=11)

@@ -1,0 +1,40 @@
+✔ provider-specific prefs fail closed without a typed true value (1.799292ms)
+✔ unknown providers never read prefs, resolve paths, or spawn a helper (1.391ms)
+✔ store sends synthetic secrets only on stdin with fixed provider selector and minimal environment (0.798875ms)
+✔ key validation uses UTF-8 byte boundaries and rejects C0/DEL without spawning (0.433875ms)
+✔ only canonical reviewed project build roots produce the fixed helper path (0.5565ms)
+✔ presence only uses exists, reports missing, and returns frozen status with no output text (0.561958ms)
+✔ remove is permitted with missing/disabled prefs and missing items are already removed (0.317542ms)
+✔ helper refusals and raw spawn/pipe errors become fixed codes without exposing text (0.328542ms)
+✔ combined helper output is byte capped, discarded, and the child is reaped (0.18775ms)
+✔ timeout kills and reaps owned helper; cancellation sends no secret after startup abort (4.265334ms)
+✔ pre-abort causes no path checks or child; in-flight abort reaps helper and removes listeners (0.684125ms)
+✔ spawn deadline is bounded and a child returned after timeout is reaped without writing secret (0.611083ms)
+✔ native runtime initialization failures are normalized before reaching direct callers (0.400458ms)
+✔ every cleanup action starts even when APIs fail and cleanup waiting has its own bound (0.747333ms)
+✔ late helper verification after timeout or abort cannot spawn or transmit a secret (1.030875ms)
+✔ output-cap and reader failures force-close every pipe even when killing rejects (0.424542ms)
+✔ static reader root takes precedence with the same fixed namespace and no build-root lookup (0.325875ms)
+✔ absent or empty static reader root keeps the existing build-root fallback (0.18125ms)
+✔ malformed explicit static root never falls back or verifies or spawns (0.907209ms)
+✔ static environment lookup failure is a fixed refusal with no fallback or helper (0.119167ms)
+✔ synthetic omitted runtime refuses all native key operations before subprocess import or file checks (0.225792ms)
+✔ production omitted runtime keeps fixed default paths and provider selector (0.376667ms)
+✔ explicit fake runtime remains usable in a synthetic process with no native lookup or imports (0.178583ms)
+✔ native split UTF-8 output continues through empty decoded prefixes and counts exact raw bytes (0.244667ms)
+✔ native raw bytes enforce the shared stdout stderr cap even after split or invalid UTF-8 (0.257458ms)
+✔ native EOF requires a genuine zero-byte ArrayBuffer rather than null strings or views (0.6035ms)
+✔ native raw reader failures still force-close pipes and wait when kill rejects (0.213042ms)
+✔ native raw reader timeout and abort settle bounded cleanup and reap owned child (3.569ms)
+✔ privileged surface authority fails closed before helper resolution (0.487459ms)
+✔ surface revocation during helper verification prevents dispatch (0.53ms)
+✔ a child arriving for a revoked surface is cleaned without writing its key (0.539708ms)
+✔ revocation after input dispatch cannot report success or promise rollback (0.227416ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71.69125
