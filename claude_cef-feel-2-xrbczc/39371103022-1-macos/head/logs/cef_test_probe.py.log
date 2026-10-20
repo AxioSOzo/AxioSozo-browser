@@ -1,0 +1,13 @@
+......F..s.........
+======================================================================
+FAIL: test_sigterm_routes_through_owned_cleanup (__main__.LifecycleTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/test_probe.py", line 87, in test_sigterm_routes_through_owned_cleanup
+    self.assertEqual(process.returncode, 130, (out, err))
+AssertionError: 1 != 130 : ('{"component": "cef", "status": "RUNNING", "native_pid": 20778, "profile": "/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/axio-cef-lifecycle-tf8albwh/cef-profile-645ewr02"}\n', 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n  File "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/probe.py", line 973, in run\n    group_cleanup_required = cleanup_group(process)\n  File "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/probe.py", line 830, in cleanup_group\n    while exists() and time.monotonic() < deadline:\n  File "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/probe.py", line 821, in exists\n    os.killpg(process.pid, 0)\nPermissionError: [Errno 1] Operation not permitted\n')
+
+----------------------------------------------------------------------
+Ran 19 tests in 1.053s
+
+FAILED (failures=1, skipped=1)
