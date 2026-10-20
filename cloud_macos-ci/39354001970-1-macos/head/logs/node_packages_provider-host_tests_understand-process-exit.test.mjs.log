@@ -1,0 +1,23 @@
+✔ ordinary success close never signals a numeric PGID or the retained child (3.276333ms)
+✔ ordinary nonzero close never signals a numeric PGID or the retained child (0.416416ms)
+✔ ordinary signal exit close never signals a numeric PGID or the retained child (0.349959ms)
+✔ close alone never tries group cleanup even if fake retained exit fields are still null (0.323083ms)
+✔ cancel after leader exit settles without a close event or descendant signals (0.481666ms)
+✔ cancel while leader is live attempts the group then settles on exit without waiting for inherited pipes (0.369792ms)
+✔ timeout after leader exit settles without a close event or descendant signals (0.329667ms)
+✔ timeout while leader is live attempts the group then settles on exit without waiting for inherited pipes (0.31725ms)
+✔ close after leader exit settles without a close event or descendant signals (0.417208ms)
+✔ close while leader is live attempts the group then settles on exit without waiting for inherited pipes (0.439541ms)
+✔ host exit signals only a retained live leader; known exit is left alone (0.510583ms)
+✔ a leader exit observed during the group attempt suppresses the direct fallback and bounds cancel (0.256916ms)
+✔ a failed group attempt still uses the retained live child fallback (0.231666ms)
+✔ unknown retained exit facts refuse both signals; close still settles the selected timeout (0.236292ms)
+✔ a stopped exited child can advance the queue; its late close cannot remove the next child exit hook (0.417167ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 88.731041

@@ -1,0 +1,45 @@
+✔ controller publishes immutable hello/pending/approved/closed membership without profile data (4.04425ms)
+✔ controller denial and approval expiry have different fixed reasons and suppress late grants (1.4815ms)
+✔ controller hook/reporting events drain complete report and ack before EOF closure (0.581875ms)
+✔ controller EOF, disconnect, malformed input and idle expiry produce closed snapshots (0.849916ms)
+✔ controller pending and reporting observer revocation prevents subsequent approval/status effects (0.478125ms)
+✔ controller approved observer revocation prevents approval grant or tab effects (0.292334ms)
+✔ controller stop snapshots every removal and rejects callback-created replacement sessions (0.24325ms)
+✔ controller observer exceptions, rejecting promises and hostile thenables cannot alter lifecycle (1.17575ms)
+✔ endpoint emits authoritative immutable disabled/starting/listening/disabled snapshots (0.926459ms)
+✔ endpoint refusal states use only fixed reasons without accepting arbitrary exception content (0.59075ms)
+✔ endpoint handles asynchronous listener loss and rejects stale listener sockets (0.260166ms)
+✔ endpoint synchronous asyncListen failure cannot publish a false listening event (0.156375ms)
+✔ endpoint thrown asyncListen detaches before close and cleans the claim only once (0.978ms)
+✔ endpoint lock loss resolved or rejected closes listener and publishes one fixed unavailable event (0.4215ms)
+✔ endpoint lock-loss cleanup barrier preserves a newer re-enable and ignores old callbacks (0.219875ms)
+✔ endpoint disable/re-enable during prepare awaits claim cleanup before creating a successor (0.2435ms)
+✔ endpoint cancelled startup failure cannot overwrite disabled and a later disable supersedes pending enable (0.141375ms)
+✔ endpoint starting observer disable prevents all path/server effects (0.074334ms)
+✔ endpoint disabled observer re-enable waits for cleanup and repeated stop does not recurse (0.185875ms)
+✔ endpoint observer exceptions/rejections cannot prevent listen, lock cleanup or disable (0.380167ms)
+✔ composed endpoint lock loss stops approved controller effects and reports matching immutable removals (0.634375ms)
+✔ concurrent enables behind cleanup both await the successor final listening or refusal state (0.307167ms)
+✔ later disable wins over concurrent enables waiting for successor startup (0.190375ms)
+✔ synchronous listener-stop followed by listen throw transfers cleanup exactly once (0.133542ms)
+✔ rejected shutdown cleanup remains owned, rejects stop and blocks rebind until explicit retry succeeds (0.340542ms)
+✔ startup failure plus rejected claim release publishes cleanup failure and never implicitly retries (0.173375ms)
+✔ cancelled startup release failure is visible to the original stop and closes its server once (0.203125ms)
+✔ async lock loss with rejected release reports cleanup failure without unhandled rejection (0.150542ms)
+✔ controller shutdown failure still closes listener, reports unavailable and requires successful stop (0.146417ms)
+✔ disable promptly closes the exact bound starting server before deferred verification completes (0.182417ms)
+✔ reentrant controller shutdown failure cannot leave a disabled snapshot while failure is latched (1.013792ms)
+✔ lock rejection during deferred verification is consumed and closes startup before any listen (0.2265ms)
+✔ cancelled startup consumes late lock rejection while retaining deferred cleanup (0.14175ms)
+✔ an already-rejected owned lock is observed before creating or binding a server (0.108959ms)
+✔ synchronous socket accept before listen commitment is rejected even if asyncListen then throws (0.11675ms)
+✔ startup refusal cleanup settling owned lock loss retains the original blocked reason (0.117584ms)
+✔ ordinary shutdown settling the owned release promise never reports external lock loss (0.11025ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 87.648792

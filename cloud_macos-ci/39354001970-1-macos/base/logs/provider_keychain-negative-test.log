@@ -1,0 +1,145 @@
+✖ Production helper rejects malformed inputs before any SecItem operation (1.673333ms)
+✖ Actual Keychain query with an empty search list returns missing without output (0.234708ms)
+✖ Presence check with an empty search list reports missing without any output (0.153459ms)
+✖ Actual malformed Keychain query returns errSecParam without fallback (0.165042ms)
+✖ Negative Keychain build cannot store or delete any item (0.198041ms)
+✖ Production JS adapter handles native missing/error results without a plaintext fallback (0.315459ms)
+✖ Provider selector: only jev/openai are accepted, before any SecItem call; OpenAI presence is its own item (0.213416ms)
+✖ Production JS adapter for the OpenAI item handles missing/error results without a plaintext fallback (0.234875ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 0
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 75.398625
+
+✖ failing tests:
+
+test at tests/keychain.os.mjs:29:1
+✖ Production helper rejects malformed inputs before any SecItem operation (1.673333ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:31:20)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.start (node:internal/test_runner/test:1015:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:37:1
+✖ Actual Keychain query with an empty search list returns missing without output (0.234708ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:38:18)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:43:1
+✖ Presence check with an empty search list reports missing without any output (0.153459ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:44:18)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:49:1
+✖ Actual malformed Keychain query returns errSecParam without fallback (0.165042ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:50:18)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:55:1
+✖ Negative Keychain build cannot store or delete any item (0.198041ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:56:16)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:60:1
+✖ Production JS adapter handles native missing/error results without a plaintext fallback (0.315459ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:61:36)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:68:1
+✖ Provider selector: only jev/openai are accepted, before any SecItem call; OpenAI presence is its own item (0.213416ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at run (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:22:28)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:70:20)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/keychain.os.mjs:81:1
+✖ Production JS adapter for the OpenAI item handles missing/error results without a plaintext fallback (0.234875ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at artifact (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:13:16)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/keychain.os.mjs:82:36)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    code: 'BLOCKED_ENV'
+  }

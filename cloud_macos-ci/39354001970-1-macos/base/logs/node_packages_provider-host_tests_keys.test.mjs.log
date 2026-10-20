@@ -1,0 +1,26 @@
+✔ keys/status reports presence only, per provider, with capabilities and shape status (2.048833ms)
+✔ keys/store writes each provider to its own item and never echoes the key (0.486834ms)
+✔ keys/store rejects bad keys, providers and fields before touching the Keychain; failures use fixed codes (0.554667ms)
+✔ keys/remove deletes only the named provider item; missing counts as removed (0.431417ms)
+✖ MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper) (2.747083ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.170291
+
+✖ failing tests:
+
+test at packages/provider-host/tests/keys.test.mjs:85:1
+✖ MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper) (2.747083ms)
+  Error [ProviderError]: Keychain helper unavailable
+      at ChildProcess.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/src/keychain.mjs:31:38)
+      at ChildProcess.emit (node:events:508:28)
+      at ChildProcess._handle.onexit (node:internal/child_process:292:12)
+      at onErrorNT (node:internal/child_process:484:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+    code: 'KEYCHAIN_ERROR'
+  }

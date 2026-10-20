@@ -1,0 +1,112 @@
+✖ Native sandbox blocks external files, symlink escape, hooks/MCP config, shell, fork, and loopback networking (1.613042ms)
+✖ Native supervisor reaps a SIGTERM-ignoring sandboxed process after cancel (0.430208ms)
+✖ Native supervisor reaps a SIGTERM-ignoring sandboxed process after deadline (0.164042ms)
+✖ Parent disappearance closes private liveness pipe and native supervisor reaps the remaining child (0.322542ms)
+✖ Sandbox broker rejects arbitrary scope and policy injection (2.945375ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 0
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 78.389334
+
+✖ failing tests:
+
+test at tests/sandbox.os.mjs:47:1
+✖ Native sandbox blocks external files, symlink escape, hooks/MCP config, shell, fork, and loopback networking (1.613042ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at prepare (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:13:26)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:48:24)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.start (node:internal/test_runner/test:1015:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/sandbox.os.mjs:71:47
+✖ Native supervisor reaps a SIGTERM-ignoring sandboxed process after cancel (0.430208ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at prepare (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:13:26)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:72:24)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/sandbox.os.mjs:71:47
+✖ Native supervisor reaps a SIGTERM-ignoring sandboxed process after deadline (0.164042ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at prepare (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:13:26)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:72:24)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/sandbox.os.mjs:83:1
+✖ Parent disappearance closes private liveness pipe and native supervisor reaps the remaining child (0.322542ms)
+  Error [ProviderError]: Provider builds require the mounted T9-backed project storage
+      at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+      at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+      at prepare (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:13:26)
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:84:24)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    code: 'BLOCKED_ENV'
+  }
+
+test at tests/sandbox.os.mjs:95:1
+✖ Sandbox broker rejects arbitrary scope and policy injection (2.945375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    Comparison {
+  +   code: 'BLOCKED_ENV'
+  -   code: 'INVALID_INPUT'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:98:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: ProviderError: Provider builds require the mounted T9-backed project storage
+        at requireValue (file:///Users/runner/work/_temp/base/packages/provider-host/src/validation.mjs:5:25)
+        at providerBuildRoot (file:///Users/runner/work/_temp/base/packages/provider-host/src/storage.mjs:10:3)
+        at launchSandboxProbe (file:///Users/runner/work/_temp/base/packages/provider-host/src/sandbox.mjs:52:26)
+        at assert.throws.code (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:98:23)
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/packages/provider-host/tests/sandbox.os.mjs:98:10)
+        at Test.runInAsyncScope (node:async_hooks:228:14)
+        at Test.run (node:internal/test_runner/test:1118:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:787:18),
+    expected: { code: 'INVALID_INPUT' },
+    operator: 'throws',
+    diff: 'simple'
+  }

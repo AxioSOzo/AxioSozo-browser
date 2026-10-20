@@ -1,0 +1,25 @@
+✔ a failed stdin close cannot turn release retries into false positive cleanup (3.570292ms)
+✔ concurrent pending releases share one attempt and receipt, never just a released flag (0.3605ms)
+✔ rejected usability wait only invalidates held; independent owned receipt is required (0.480792ms)
+✔ rejected actual wait can be retried on the same retained handle but never proves exit (0.278375ms)
+✔ owned wait receipt rejects malformed/non-own/accessor/array/noninteger results (0.743583ms)
+✔ actual owned exit is sufficient even when prior stdin close and kill rejected (0.258292ms)
+✔ late close failure after owned receipt does not schedule new cleanup or signals (0.788334ms)
+✔ actual Unix cleanup and endpoint preserve unresolved helper ownership and block rebind (1.497791ms)
+✔ actual service keeps native configuration and blocks replacement until owned helper exit receipt (2.964958ms)
+✔ derived native proxy keeps actual exit receipt after bounded public wait rejects and retries owned cleanup (2.52075ms)
+✔ raw stderr never treats nonempty incomplete UTF-8 bytes as EOF and counts the exact 512-byte cap (0.131625ms)
+✔ raw metadata keeps only numeric ASCII, distinguishes true zero-byte EOF and refuses string-only adapters (0.124333ms)
+✔ raw pipe brand check admits genuine cross-realm buffers and refuses views or spoofed buffers (2.043ms)
+✔ API-shaped native metadata counts partial UTF-8 stderr through raw EOF and never executes a helper (2.526958ms)
+✔ API-shaped native metadata refuses 513 raw stderr bytes despite empty decoded prefix and cleans owned child (0.25525ms)
+✔ API-shaped native numeric stdout refuses non-ASCII raw prefix and cleans owned child (0.168125ms)
+✔ API-shaped raw metadata watchdog bounds owned cleanup even when every native operation hangs (0.368875ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84.091
