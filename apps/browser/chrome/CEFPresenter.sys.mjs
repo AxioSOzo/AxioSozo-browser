@@ -478,6 +478,8 @@ export class CEFPresenter {
     if (!root) return;
     const style = this.window.document.createElementNS(XHTML, "style");
     style.textContent = `
+      /* The fixture probe chip wraps under the address bar, never onto the page. */
+      #nav-bar-customization-target:has(> #axiosozo-engine-probe) { flex-wrap:wrap; }
       /* Chromium permission doorhangers (ChromiumBrowserUI) anchor in #notification-popup-box. */
       [axiosozo-cef-active] #identity-box:not(:has(> #notification-popup-box:not([hidden]))),
       [axiosozo-cef-active] #identity-box > :not(#notification-popup-box),
