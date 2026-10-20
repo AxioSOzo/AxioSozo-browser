@@ -215,6 +215,10 @@ test("native receiver: sinks apply every frame per target, presenters bind once 
   assert.equal(paint.upload, "native"); assert.equal(paint.uploadedPixels, 1); assert.equal(paint.framePixels, 8);
   assert.equal(presentNativeFrame(win, record, { frame_id: 6, width: 4, height: 2 }, frame, false), true, "bound, not painted");
   assert.notDeepEqual(calls.at(-1), [1, "present", 6]);
+  // Shown again: the frame applied while hidden is posted once.
+  const { representNativeFrame } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  assert.equal(representNativeFrame(record), true); assert.deepEqual(calls.at(-1), [1, "present", 6]);
+  assert.equal(representNativeFrame(record), false, "nothing new");
   // A canvas that cannot be bound (or already drew in 2D): the caller falls back to a whole copy.
   const refused = { canvas: { refuse: true, width: 1, height: 1 } };
   assert.equal(presentNativeFrame(win, refused, { frame_id: 7, width: 4, height: 2 }, frame, true), false);
@@ -234,6 +238,61 @@ test("native receiver: sinks apply every frame per target, presenters bind once 
   const Cc = { "@axiosozo.nl/frame-receiver;1": { getService: () => service } }, Ci = { nsIAxioFrameReceiverService: {} };
   assert.equal(nativeFrameRing(42, { fd: 9, slot_bytes: 64, slots: 2 }, { prefs: { getBoolPref: () => true }, Cc, Ci }), ring);
   assert.deepEqual(opened, [[42, 9, 64, 2]]);
+});
+
+test("direct compositing: the panel's rounded clip is lifted while the view fills it, corners are capped, restore undoes it", async () => {
+  const { directComposite } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  const style = () => {
+    const values = new Map();
+    return { values, getPropertyValue: name => values.get(name)?.[0] ?? "", getPropertyPriority: name => values.get(name)?.[1] ?? "",
+      setProperty(name, value, priority = "") { values.set(name, [value, priority]); }, removeProperty(name) { values.delete(name); },
+      set cssText(text) { values.clear(); this.text = text; } };
+  };
+  const rect = (left, top, width, height) => ({ left, top, width, height, right: left + width, bottom: top + height });
+  const removed = [];
+  const element = () => ({ style: style(), attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+    remove() { removed.push(this); } });
+  const root = { parentElement: null, bg: "rgba(0, 0, 0, 0)" };
+  const app = { parentElement: root, bg: "rgba(10, 20, 30, 0.5)" };
+  const body = { parentElement: app, bg: "rgb(0, 0, 0)" };
+  app.parentElement = body; body.parentElement = root; // panel -> app (half) -> body (opaque)
+  const panel = { ...element(), parentElement: app, rect: rect(100, 40, 800, 600) };
+  panel.getBoundingClientRect = () => panel.rect;
+  const overlay = { ...element(), children: [], appendChild(child) { this.children.push(child); }, rect: rect(100, 40, 800, 600) };
+  overlay.getBoundingClientRect = () => overlay.rect;
+  const background = { getBoundingClientRect: () => rect(0, 0, 1000, 700) };
+  let observed = null;
+  const win = {
+    document: { createElementNS: () => element(), getElementById: id => (id === "zen-browser-background" ? background : null) },
+    getComputedStyle: node => node === panel
+      ? { overflowX: panel.style.getPropertyValue("overflow") || "clip", overflowY: panel.style.getPropertyValue("overflow") || "clip",
+          borderTopLeftRadius: "5px", backgroundColor: "rgba(0, 0, 0, 0)" }
+      : { backgroundColor: node.bg ?? "rgba(0, 0, 0, 0)" },
+    ResizeObserver: class { constructor(callback) { observed = callback; } observe() {} disconnect() { observed = null; } },
+  };
+  const record = { overlay, stack: { closest: selector => (selector === ".browserSidebarContainer" ? panel : null) } };
+  assert.equal(directComposite(win, record, { prefs: { getBoolPref: () => false } }), null, "pref off");
+  delete record.directComposite;
+  const control = directComposite(win, record, { prefs: null });
+  assert.equal(control.active, true);
+  assert.equal(panel.style.getPropertyValue("overflow"), "visible", "clip lifted");
+  assert.equal(overlay.children.length, 4, "four corner caps");
+  const [topLeft, , , bottomRight] = overlay.children;
+  assert.match(topLeft.style.text, /top:0;left:0;width:5px;height:5px/);
+  assert.equal(topLeft.style.backgroundColor, "rgb(5, 10, 15)", "ancestors composited to an opaque color");
+  assert.equal(topLeft.style.backgroundImage, "-moz-element(#zen-browser-background)");
+  assert.equal(topLeft.style.backgroundPosition, "-100px -40px");
+  assert.equal(bottomRight.style.backgroundPosition, "-895px -635px");
+  assert.match(topLeft.style.mask, /circle 5px at 100% 100%/);
+  assert.equal(directComposite(win, record), control, "once per record");
+  // A view that no longer covers the panel gives the clip back.
+  overlay.rect = rect(100, 80, 800, 560); observed();
+  assert.equal(control.active, false); assert.equal(panel.style.getPropertyValue("overflow"), "");
+  overlay.rect = rect(100, 40, 800, 600); observed();
+  assert.equal(control.active, true);
+  control.restore();
+  assert.equal(panel.style.getPropertyValue("overflow"), ""); assert.equal(removed.length, 4); assert.equal(observed, null);
+  assert.equal(record.directComposite, undefined);
 });
 
 test("frame worker: slots are read into a persistent buffer, frames patched, presents drawn into the offscreen canvas", async () => {

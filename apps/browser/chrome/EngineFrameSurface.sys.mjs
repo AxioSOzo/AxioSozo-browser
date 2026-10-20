@@ -466,8 +466,11 @@ export function presentNativeFrame(win, record, metadata, frame, paintable, onDr
     catch { record.nativeSink = null; return false; }
     // A worker reports each draw (the 2D path's paint) itself; the native sink at the post.
     if (frame.sink.kind === "worker") frame.sink.onDrawn = onDrawn;
+    else directComposite(win, record);
   }
-  if (!paintable) return true;
+  // Applied but not shown (hidden window, inactive tab): representNativeFrame posts it on show.
+  if (!paintable) { record.nativeUnpresented = metadata.frame_id; return true; }
+  record.nativeUnpresented = null;
   if (frame.sink.kind === "worker") { frame.sink.present(metadata.frame_id); return true; }
   const started = win.performance.now();
   const upload = frame.sink.kind ?? "native";
@@ -481,6 +484,132 @@ export function presentNativeFrame(win, record, metadata, frame, paintable, onDr
   const [, , w, h] = metadata.damage?.[0] ?? [0, 0, metadata.width, metadata.height];
   return { uploadedPixels: w * h, framePixels: metadata.width * metadata.height, frameId: metadata.frame_id,
     milliseconds: win.performance.now() - started, superseded: 0, upload };
+}
+
+/**
+ * The presenter's view became visible again: post the newest applied frame if it was applied
+ * while hidden (the host may not send another one until the page changes).
+ */
+export function representNativeFrame(record) {
+  const frameId = record.nativeUnpresented;
+  if (frameId === null || frameId === undefined || !record.nativeSink) return false;
+  record.nativeUnpresented = null;
+  try { record.nativeSink.present(frameId); return true; } catch { return false; }
+}
+
+/**
+ * Direct compositing (docs/perf/pixel-path.md, "Direct compositing"; Linux native receiver,
+ * pref `axiosozo.engines.linux.direct_composite`, default on). The engine image is opaque and
+ * exactly device-pixel sized, and WebRender would composite it as its own compositor surface
+ * (no per-frame re-rasterization into picture-cache tiles, no blending) — except that Zen clips
+ * every tab panel (`.browserSidebarContainer`) with `overflow: clip` and a 5 px border radius,
+ * and a primitive under a rounded clip needs a mask, which WebRender refuses to promote
+ * ("overlay not allowed for prim with mask", linux-engine-profile run 39382362542). While the
+ * engine view fills that panel, the panel's clip is lifted (its rounded shadow stays) and the
+ * four rounded corners are drawn on top instead: tiny caps painted with Zen's own window
+ * background (`-moz-element(#zen-browser-background)` over the composited ancestor colors) and
+ * masked to the same arc. Only this tab's panel changes, and only while the view is shown.
+ * Returns the controller ({ restore(), active }) or null.
+ */
+export const DIRECT_COMPOSITE_PREF = "axiosozo.engines.linux.direct_composite";
+export const DIRECT_COMPOSITE_DEFAULT = true;
+const CORNERS = [["top", "left"], ["top", "right"], ["bottom", "left"], ["bottom", "right"]];
+export function directComposite(win, record, { prefs = globalThis.Services?.prefs } = {}) {
+  if (record.directComposite !== undefined) return record.directComposite;
+  record.directComposite = null;
+  let wanted = DIRECT_COMPOSITE_DEFAULT;
+  try { if (prefs) wanted = prefs.getBoolPref(DIRECT_COMPOSITE_PREF, DIRECT_COMPOSITE_DEFAULT); } catch {}
+  const overlay = record.overlay, panel = record.stack?.closest?.(".browserSidebarContainer");
+  if (!wanted || !overlay || !panel || typeof win.ResizeObserver !== "function") return null;
+  const doc = win.document, caps = [];
+  const prior = { value: panel.style.getPropertyValue("overflow"), priority: panel.style.getPropertyPriority("overflow") };
+  let lifted = false, restored = false;
+  const lift = on => {
+    if (on === lifted) return;
+    lifted = on;
+    if (on) panel.style.setProperty("overflow", "visible");
+    else if (prior.value) panel.style.setProperty("overflow", prior.value, prior.priority);
+    else panel.style.removeProperty("overflow");
+    for (const cap of caps) cap.style.display = on ? "block" : "none";
+  };
+  const update = () => {
+    if (restored) return;
+    const style = win.getComputedStyle(panel);
+    // Lifted, the computed overflow is ours; the panel clipped when it was lifted.
+    const clips = lifted || style.overflowX !== "visible" || style.overflowY !== "visible";
+    const radius = parseFloat(style.borderTopLeftRadius) || 0;
+    const outer = panel.getBoundingClientRect(), inner = overlay.getBoundingClientRect();
+    const fills = inner.width > 0 && inner.height > 0
+      && Math.abs(outer.left - inner.left) < 0.5 && Math.abs(outer.top - inner.top) < 0.5
+      && Math.abs(outer.right - inner.right) < 0.5 && Math.abs(outer.bottom - inner.bottom) < 0.5;
+    // Only a view that covers the whole panel replaces its clip (anything else keeps Zen's).
+    if (!clips || !fills) { lift(false); return; }
+    if (radius > 0) paintCaps(panel, outer, radius);
+    lift(true);
+  };
+  const paintCaps = (element, rect, radius) => {
+    const background = windowBackground(win, element);
+    const image = doc.getElementById("zen-browser-background");
+    const imageRect = image?.getBoundingClientRect();
+    CORNERS.forEach(([v, h], index) => {
+      let cap = caps[index];
+      if (!cap) {
+        cap = caps[index] = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
+        cap.setAttribute("aria-hidden", "true");
+        cap.className = "axiosozo-engine-corner";
+        overlay.appendChild(cap);
+      }
+      const x = h === "left" ? rect.left : rect.right - radius, y = v === "top" ? rect.top : rect.bottom - radius;
+      const style = cap.style;
+      style.cssText = `position:absolute;${v}:0;${h}:0;width:${radius}px;height:${radius}px;z-index:2;pointer-events:none;`;
+      style.backgroundColor = background;
+      if (imageRect?.width && imageRect.height) {
+        // Zen's gradient/grain layer, aligned with where it is painted under the panel.
+        style.backgroundImage = "-moz-element(#zen-browser-background)";
+        style.backgroundRepeat = "no-repeat";
+        style.backgroundSize = `${imageRect.width}px ${imageRect.height}px`;
+        style.backgroundPosition = `${imageRect.left - x}px ${imageRect.top - y}px`;
+      }
+      // Visible only outside the arc (the part the rounded clip removed).
+      style.mask = `radial-gradient(circle ${radius}px at ${h === "left" ? "100%" : "0"} ${v === "top" ? "100%" : "0"}, `
+        + `transparent calc(${radius}px - 0.5px), black ${radius}px)`;
+      style.display = lifted ? "block" : "none";
+    });
+  };
+  const observer = new win.ResizeObserver(() => update());
+  observer.observe(panel); observer.observe(overlay);
+  const controller = {
+    get active() { return lifted; },
+    update,
+    restore() {
+      if (restored) return;
+      lift(false); restored = true;
+      observer.disconnect();
+      for (const cap of caps) cap.remove();
+      caps.length = 0;
+      record.directComposite = undefined;
+    },
+  };
+  record.directComposite = controller;
+  update();
+  return controller;
+}
+
+/** The opaque color behind `element`: its ancestors' background colors, composited (alpha). */
+function windowBackground(win, element) {
+  const layers = [];
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const match = /rgba?\(([^)]+)\)/u.exec(win.getComputedStyle(node).backgroundColor || "");
+    if (!match) continue;
+    const [r, g, b, a = 1] = match[1].split(/[\s,/]+/u).filter(Boolean).map(Number);
+    if (a > 0) layers.push([r, g, b, a]);
+    if (a >= 1) break;
+  }
+  let [r, g, b] = [255, 255, 255];
+  for (const [lr, lg, lb, la] of layers.reverse()) {
+    r = lr * la + r * (1 - la); g = lg * la + g * (1 - la); b = lb * la + b * (1 - la);
+  }
+  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 }
 
 /** The NativeFrame's whole frame as a frame for an EngineFrameSurface (bind refused). */

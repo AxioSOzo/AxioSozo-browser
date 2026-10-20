@@ -6,7 +6,7 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -576,6 +576,7 @@ export class CEFPresenter {
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
     if (record.visible !== visible) {
       record.visible = visible;
+      if (visible) representNativeFrame(record); // a frame applied while hidden
       record.a11y?.setVisible(record.a11yTarget, visible);
       // Surface mode also gates the endpoint's begin frames, fixture sessions included.
       if ((this.browsingMode === "web" || record.surfaceMode) && record.adapter?.target) {
@@ -1532,6 +1533,7 @@ export class CEFPresenter {
         ?? (this.window.gBrowser.selectedTab === record.tab && record.priorDocShellIsActive);
     }
     record.stack.style.position = record.priorPosition;
+    record.directComposite?.restore(); // perf: the panel's rounded clip comes back with Gecko
     record.overlay.remove();
     // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
     try { record.canvas.width = 1; record.canvas.height = 1; } catch {}

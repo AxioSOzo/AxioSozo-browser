@@ -269,6 +269,9 @@ def frame_path_window(before, after, seconds):
         same = isinstance(a, dict) and all(b.get(k, 0) >= a.get(k, 0) for k in ('applied', 'presented'))
         base = a if same else {}
         delta = {k: b.get(k, 0) - base.get(k, 0) for k in ('applied', 'presented', 'skipped', 'failed', 'applyMicros', 'presentMicros')}
+        for k in ('partialCopies', 'wholeCopies', 'copiedPixels'):  # perf-phase3 receivers only
+            if k in b:
+                delta[k] = b[k] - base.get(k, 0)
         delta['apply_ms_per_frame'] = round(delta['applyMicros'] / 1000 / delta['applied'], 3) if delta['applied'] else None
         delta['present_ms_per_frame'] = round(delta['presentMicros'] / 1000 / delta['presented'], 3) if delta['presented'] else None
         delta['apply_share_of_one_core'] = round(delta['applyMicros'] / 1e6 / seconds, 4) if seconds else None

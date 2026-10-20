@@ -11,7 +11,7 @@
 import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_WEBKIT_TABS = 8;
@@ -253,6 +253,7 @@ export class WebKitPresenter {
         ?? (this.window.gBrowser.selectedTab === record.tab && record.priorDocShellIsActive);
     }
     record.stack.style.position = record.priorPosition;
+    record.directComposite?.restore(); // perf: the panel's rounded clip comes back with Gecko
     record.overlay.remove();
     // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
     try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
@@ -355,6 +356,7 @@ export class WebKitPresenter {
     if (typeof record.browser.docShellIsActive === "boolean" && record.committed) record.browser.docShellIsActive = false;
     if (record.visible === visible || !record.adapter?.target) return;
     record.visible = visible;
+    if (visible) representNativeFrame(record); // a frame applied while hidden
     this.#action(record, target => record.adapter.visibility(target, visible));
   }
   /** Resolves to the host result, or null when it failed (already handled). */
