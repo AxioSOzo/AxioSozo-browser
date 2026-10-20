@@ -50,6 +50,9 @@ on:
         description: Run id whose artifact the GUI job used
         value: ${{ jobs.gui.outputs.build_run_id }}
 
+permissions:
+  contents: read   # jobs widen this where they publish results
+
 jobs:
   build:
     if: inputs.prebuilt_run_id == ''

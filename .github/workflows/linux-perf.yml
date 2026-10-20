@@ -101,9 +101,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PINNED: ${{ needs.plan.outputs.zen_run_id }}
         run: |
-          # plan.json zen_run_id pins one build (e.g. linux-perf-build of this branch); else the newest.
+          # plan.json zen_run_id pins one (reviewed) build; else the newest of cloud/integration or dev in this repo.
           artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=50" \
-            --jq '[.artifacts[] | select(.expired | not) | select(env.PINNED == "" or (.workflow_run.id | tostring) == env.PINNED)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+            --jq '[.artifacts[] | select(.expired | not) | select(if env.PINNED == "" then (.workflow_run.head_repository_id == .workflow_run.repository_id and (.workflow_run.head_branch == "cloud/integration" or .workflow_run.head_branch == "dev")) else (.workflow_run.id | tostring) == env.PINNED end)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
           echo "$artifact"
           echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
           echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"
@@ -130,13 +130,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Base tree (cloud/integration)
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
         run: |
           mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT"
           # A real checkout (scripts/zen.py lists the packaged chrome files with git).
           git clone -q --no-checkout . "$RUNNER_TEMP/base" && git -C "$RUNNER_TEMP/base" checkout -q "$(git rev-parse "origin/$BASE_REF")"
           git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
           git rev-parse --short HEAD > .ab-commit
-          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"
+          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":'"${ZEN_ARTIFACT_JSON:-null}"'}' > "$EVIDENCE_OUT/ab-trees.json"
           cat "$EVIDENCE_OUT/ab-trees.json"
       - name: GUI packages and the CEF build/runtime packages
         run: |
@@ -210,13 +213,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Base tree (cloud/integration)
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
         run: |
           mkdir -p "$EVIDENCE_OUT"
           # A real checkout (scripts/zen.py lists the packaged chrome files with git).
           git clone -q --no-checkout . "$RUNNER_TEMP/base" && git -C "$RUNNER_TEMP/base" checkout -q "$(git rev-parse "origin/$BASE_REF")"
           git rev-parse --short "origin/$BASE_REF" > "$RUNNER_TEMP/base/.ab-commit"
           git rev-parse --short HEAD > .ab-commit
-          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/ab-trees.json"
+          echo '{"base_ref":"'"$BASE_REF"'","base":"'"$(cat "$RUNNER_TEMP/base/.ab-commit")"'","cand":"'"$(cat .ab-commit)"'","zen_artifact":'"${ZEN_ARTIFACT_JSON:-null}"'}' > "$EVIDENCE_OUT/ab-trees.json"
           { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
       - name: Download the build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -269,9 +275,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Record trees
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
         run: |
           mkdir -p "$EVIDENCE_OUT"
-          echo '{"cand":"'"$(git rev-parse --short HEAD)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/trees.json"
+          echo '{"cand":"'"$(git rev-parse --short HEAD)"'","zen_artifact":'"${ZEN_ARTIFACT_JSON:-null}"'}' > "$EVIDENCE_OUT/trees.json"
           { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
       - name: Download the build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

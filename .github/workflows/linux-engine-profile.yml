@@ -79,7 +79,7 @@ jobs:
             --jq '[.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not))][0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
           if [ -z "$artifact" ]; then
             artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=30" \
-              --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+              --jq '[.artifacts[] | select(.expired | not) | select((.workflow_run.head_repository_id == .workflow_run.repository_id and (.workflow_run.head_branch == "cloud/integration" or .workflow_run.head_branch == "dev")))] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
           fi
           echo "$artifact"
           echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
@@ -117,9 +117,12 @@ jobs:
         with:
           persist-credentials: false
       - name: GUI packages (scripts/linux_packages.py gui) and the CEF runtime
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
         run: |
           mkdir -p "$EVIDENCE_OUT/$LABEL" "$AXIOSOZO_BUILD_ROOT"
-          echo '${{ needs.zen-source.outputs.artifact }}' > "$EVIDENCE_OUT/zen-artifact.json"
+          printf '%s\n' "$ZEN_ARTIFACT_JSON" > "$EVIDENCE_OUT/zen-artifact.json"
           sudo apt-get update -qq
           extra="binutils libc6-dbg"
           [ "$ENGINE" = chromium ] && extra="$extra cmake ninja-build g++ zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
@@ -231,9 +234,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Runner resources
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
         run: |
           mkdir -p "$EVIDENCE_OUT"
-          echo '${{ needs.zen-source.outputs.artifact }}' > "$EVIDENCE_OUT/zen-artifact.json"
+          printf '%s\n' "$ZEN_ARTIFACT_JSON" > "$EVIDENCE_OUT/zen-artifact.json"
           { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
       - name: Download the build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

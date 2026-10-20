@@ -19,6 +19,9 @@ on:
 env:
   IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
 
+permissions:
+  contents: read   # jobs widen this where they publish results
+
 jobs:
   discover:
     runs-on: ubuntu-24.04
@@ -28,7 +31,7 @@ jobs:
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-discover
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sh native/webkit-host/upstream/discover.sh "$EVIDENCE_OUT"
       - if: always()
         uses: ./.github/actions/publish-ci-results
@@ -48,10 +51,10 @@ jobs:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
       CCACHE_HOST: ${{ github.workspace }}/../ccache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ env.CCACHE_HOST }}
           key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
@@ -73,7 +76,7 @@ jobs:
           sudo chown -R "$(id -u)" "$CCACHE_HOST"
           exit $code
       - if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ env.CCACHE_HOST }}
           key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}

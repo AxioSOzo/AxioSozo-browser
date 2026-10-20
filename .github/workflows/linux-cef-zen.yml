@@ -132,7 +132,11 @@ jobs:
           live = sorted((a for a in json.load(open(sys.argv[1]))['artifacts'] if not a['expired']),
                         key=lambda a: a['created_at'], reverse=True)
           pinned = [a for a in live if str(a['workflow_run']['id']) == sys.argv[2]]
-          pick = (pinned or live or [None])[0]
+          # Unpinned fallback: only builds of cloud/integration or dev in this repository (a PR
+          # build is never picked up implicitly).
+          trusted = [a for a in live if a['workflow_run'].get('head_repository_id') == a['workflow_run'].get('repository_id')
+                     and a['workflow_run'].get('head_branch') in ('cloud/integration', 'dev')]
+          pick = (pinned or trusted or [None])[0]
           if pick:
               print(json.dumps({'id': pick['id'], 'run_id': pick['workflow_run']['id'], 'pinned': bool(pinned),
                                 'branch': pick['workflow_run']['head_branch'], 'sha': pick['workflow_run']['head_sha'],

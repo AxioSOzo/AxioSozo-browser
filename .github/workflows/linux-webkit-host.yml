@@ -41,6 +41,9 @@ env:
   # upstreams.lock.json webkit.ci_image
   IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
 
+permissions:
+  contents: read   # jobs widen this where they publish results
+
 jobs:
   sandbox-probe:
     runs-on: ubuntu-24.04
@@ -50,7 +53,7 @@ jobs:
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-sandbox
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Probe bubblewrap under each container setting
         run: |
           set -u
@@ -85,7 +88,7 @@ jobs:
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-wpe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Runner info
         run: |
           mkdir -p "$EVIDENCE_OUT"

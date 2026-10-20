@@ -50,9 +50,9 @@ jobs:
           RUN_ID: ${{ inputs.run_id }}
         run: |
           if [ -z "$RUN_ID" ]; then
-            # Newest run (any branch) whose build job uploaded the app artifact.
+            # Newest run of cloud/integration or dev (this repository) whose build job uploaded the app artifact.
             for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/linux-zen-build.yml/runs?per_page=30" \
-                          --jq '.workflow_runs[] | select(.status=="completed") | .id'); do
+                          --jq '.workflow_runs[] | select(.status=="completed" and .head_repository.id == .repository.id and (.head_branch == "cloud/integration" or .head_branch == "dev")) | .id'); do
               if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
                    --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not)) | .id' | grep -q .; then
                 RUN_ID=$id; break

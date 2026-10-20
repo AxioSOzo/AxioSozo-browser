@@ -73,6 +73,8 @@ env:
   # upstreams.lock.json webkit.ci_image
   IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
   ARTIFACT: axiosozo-zen-linux-x86_64
+  # The prebuilt app to test (a reviewed linux-perf-build / linux-zen-build run id).
+  ZEN_RUN: "39383407870"
 
 jobs:
   unit:
@@ -174,12 +176,12 @@ jobs:
       - name: Newest Linux Zen build artifact
         id: zen
         run: |
-          # cloud/webkit-feel prefers linux-platform's build 39337785340: it carries the SWGL
-          # backdrop-filter fix (docs/handoff/linux-platform.md); newer artifacts of other branches may not.
-          preferred=""; [ "$GITHUB_REF_NAME" = cloud/webkit-feel ] && preferred=39337785340
+          # The pinned (reviewed) build ZEN_RUN, else the newest build of cloud/integration or dev
+          # in this repository (a PR build is never picked up implicitly).
+          preferred="$ZEN_RUN"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=30" \
             --jq "[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse
-                  | ((map(select(.workflow_run.id == ${preferred:-0})) + .) | .[0]) // empty
+                  | ((map(select(.workflow_run.id == ${preferred:-0})) + map(select((.workflow_run.head_repository_id == .workflow_run.repository_id and (.workflow_run.head_branch == \"cloud/integration\" or .workflow_run.head_branch == \"dev\"))))) | .[0]) // empty
                   | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}" \
             > "$EVIDENCE_OUT/zen-artifact.json" || true
           cat "$EVIDENCE_OUT/zen-artifact.json"

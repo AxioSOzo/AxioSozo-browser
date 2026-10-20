@@ -232,7 +232,7 @@ jobs:
           mkdir -p "$EVIDENCE_OUT"
           run=""
           for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/linux-zen-build.yml/runs?per_page=30" \
-                        --jq '.workflow_runs[] | select(.status=="completed") | .id'); do
+                        --jq '.workflow_runs[] | select(.status=="completed" and .head_repository.id == .repository.id and (.head_branch == "cloud/integration" or .head_branch == "dev")) | .id'); do
             if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
                  --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not)) | .id' | grep -q .; then
               run=$id; break
