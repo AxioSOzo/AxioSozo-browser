@@ -1780,7 +1780,7 @@ class CEFZenHarness(gui_test.Harness):
         # The notice shows for 4 s; a toolbox (if the shortcut leaked to Firefox) takes ~2 s to open.
         time.sleep(0.8)
         early = self.chrome_script(self.DEVTOOLS)
-        self.screenshot('38-devtools-chromium')
+        self.screenshot('38-devtools-chromium', settle=False)   # before the 4 s notice goes
         time.sleep(2.5)
         chromium = self.chrome_script(self.DEVTOOLS)
         chromium['notice'] = chromium.get('notice') or early.get('notice')
