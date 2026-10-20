@@ -17,7 +17,16 @@ Branch `cloud/perf-phase2`; mirror `claude/perf-phase2-l5jipx` (the session's de
 7. Native Linux receiver `apps/browser/native/engine-view/linux` (pref `axiosozo.engines.linux.native_receiver`),
    build workflow `.github/workflows/linux-perf-build.yml` (first build: run 39350827997, cold).
 
+## Defaults now (Linux, pipe mode)
+memfd frames ON; frame worker ON (memfd only, probe-gated); main-thread upload BGRX VideoFrame
+(probe-gated, imagedata fallback); native receiver OFF (pref, needs this branch's app build).
+
 ## Runs so far
+- linux-perf 39352857399: presenter bench (VideoFrame identical output, Firefox 158 damage band 0.60 → 0.12 ms);
+  A/B base/cand/worker/imagedata both engines — worker: 2× parent CPU −40 %, Chromium key → frame −44 %
+  (tables in docs/perf/pixel-path.md).
+- linux-cef-host 39351791880 (39ba2dc): every gate PASS on x86_64 and arm64 incl. real-CEF memfd fallback
+  (`zen-gui-chromium` setup step fails: known pre-existing probe.py check issue, as on cloud/integration).
 - linux-perf 39349238042: soak PASS; A/B base vs memfd (XTest wheel) still running at the time of writing.
 - linux-webkit-host 39349713944 (32c4110): PASS incl. real-WPE `memfd_fallback`.
 - linux-webkit-zen 39349714010 (32c4110): PASS.
