@@ -1,0 +1,11 @@
+# Pixel-path soak: PASS (native)
+
+31 cycles over 10.0 min; test prefs: {"axiosozo.engines.linux.memfd_frames": true}; RSS growth (cycle 2 -> last): 43.8 MB; host fds: {"webkit": {"min": 38, "max": 38, "last": 38}, "chromium": {"min": 334, "max": 339, "last": 334}}
+
+| Engine tab (median over cycles) | rAF fps | rAF p99 ms | rAF CPU % | parent CPU % | draw ms | scroll fps | scroll p99 ms | static nav->visible ms | key->frame ms | transport |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| webkit | 57.97 | 29.42 | 176.3 | 129.1 | 0.01 | 56.96 | 34.05 | 51.8 | 16.95 | memfd native |
+| chromium | 59.02 | 33.28 | 150.5 | 135.7 | 0.01 | 59.8 | 28.22 | 21.9 | 9.69 | memfd native |
+| gecko (in-page) | 58.99 | 17.1 | | | | | | | | |
+
+Problems: none
