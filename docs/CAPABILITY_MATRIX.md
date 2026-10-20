@@ -26,7 +26,40 @@ screenshots), EXPERIMENTAL, NOT_VERIFIED, BLOCKED_ENV. The host-level evidence i
 E2E is `scripts/webkit_feel_e2e.py` (linux-webkit-zen `e2e` job, `FEEL=1`). Its evidence is in
 `docs/evidence/linux/webkit-feel/` and `ci-results:cloud_webkit-feel/<run>-1-webkit-zen-e2e/feel/`.
 
-FEEL_GATES_PLACEHOLDER
+Final run: linux-webkit-zen **39376244911** (merged head 911eb7ed, Zen app build 39337785340, WPE 2.48.3),
+roundtrip/host_failure/three_engines PASS, all feel scenarios PASS. Host suites incl. `ui_test.py`:
+linux-webkit-host 39376244778 PASS. Earlier full-feel runs: 39370679857 (beforeunload PASS) and
+39365113915.
+
+| Gate | WebKit (Linux) | Evidence / measured |
+| --- | --- | --- |
+| Renders in Zen's content area | PASS (39376244911) | first frame 516 ms; 953×678 surface |
+| Favicon + title | PASS (39376244911) | page favicon → 32 px PNG (1426 B) on the Zen tab; title follows the page (`03-favicon-indicator.png`) |
+| Engine indicator next to the URL bar | PASS (39376244911) | "WebKit" pill before the identity box, tooltip with version and "local test page only", click → Firefox; the dashed probe placeholder is hidden |
+| Tab-menu engine labels, unavailable reasons | PASS (39376244911) | "Open in" submenu: Firefox / Chromium ("Experimental · test page only") / WebKit (checked); off-fixture tabs show the reason (unit tests) |
+| Typing, Tab focus | PASS (39376244911) | typed text, Ctrl+Backspace, Tab moves page focus |
+| Selection: drag / double / triple click | PASS (39376244911) | "alpha beta" / "gamma" / whole line (drag emulated in an isolated world: WPE motion events carry no button) |
+| Clipboard Ctrl+C/X/V | PASS (39376244911) | WebKit→Zen, Zen→WebKit, Gecko↔WebKit. Ctrl+Z after cut: not observed (soft) |
+| Linux PRIMARY + middle-click paste | PASS (39376244911) | WebKit selection → PRIMARY; middle-click in WebKit pastes Gecko's PRIMARY. Gecko pasting WebKit's PRIMARY: not observed (soft) |
+| Smooth/kinetic wheel, precise vs notch | PASS (39376244911) | notch 114 px in 9 steps / 139 ms (Gecko 114 px / 11 / 221 ms); precise 120 px in one event (Gecko same) |
+| Full CSS cursor set | PASS (39376244911) | pointer, text, move, wait, crosshair, not-allowed, grab, col-resize, default (computed CSS cursor per move) |
+| `<select>` popup drawn by Zen | PASS (39376244911) | XUL menupopup; pointer pick, keyboard pick, Escape keeps (`09-select-open.png`; popups capture black under SWGL) |
+| `<datalist>` popup | NOT_VERIFIED | WPE 2.48 (libwpe API) exposes no datalist hook to the embedder; typing reaches the field |
+| alert / confirm / prompt | PASS (39376244911) | Zen tab-modal dialogs, answered by keyboard (`11-prompt.png`) |
+| beforeunload | PASS (39376244911) | Zen's "Are you sure?" dialog; Stay (Escape) keeps page 1, Leave (Enter) goes to page 2; dialog open ≥3.4 s (`12-beforeunload.png`). TEST-ONLY: driven with no Marionette session open, classic WebDriver auto-accepts beforeunload |
+| Permission requests | PASS (39376244911) | geolocation → Zen doorhanger (Allow/Block), fixture mode remembers nothing. Camera/microphone requests are refused by the host (`media_capture_unavailable`; code path, not exercised by a test) |
+| File chooser | PASS (39376244911) | GTK picker through Zen's nsIFilePicker → `feel-upload.txt` |
+| Downloads refused with a Zen notice | PASS (39376244911) | "Downloads aren't available in WebKit tabs yet. Open this page in Firefox to download." |
+| Find in page → Zen findbar | PASS (39376244911) | "1 of 3" → Enter → "2 of 3", highlight in WebKit (`16-find.png`) |
+| Page zoom ↔ Zen zoom | PASS (39376244911) | Ctrl+= 110 % (URL-bar zoom button), Ctrl+0, Ctrl+-, Ctrl+wheel; same CSS widths as Gecko ±1 % |
+| IME composition with preedit | PASS (39376244911) | nsITextInputProcessor on Zen's proxy editor → underlined preedit in WebKit, commit "日本" in input and contenteditable (`18-preedit-*.png`). No IBus/Fcitx daemon under Xvfb: a real system IM is NOT_VERIFIED |
+| Context menu (link / image / selection) | PASS (39376244911) | Zen's native menu with link, image and selection items; Copy → clipboard; input works after the menu |
+| Shortcut ownership | PASS (39376244911) | Ctrl+Enter, Escape → page; Ctrl+Tab, Ctrl+Shift+Tab, F5, Ctrl+R, Ctrl+F, Ctrl+=/−/0 → Zen (from Zen's keysets) |
+| HiDPI 1× / 2× | PASS (39376244911) | devicePixelRatio 2 surface, back to 1×, input lands (TEST-ONLY pref `layout.css.devPixelsPerPx`) |
+| Crash recovery + retry | PASS (39376244911) | host SIGKILL → Gecko tab shown, Zen notice "WebKit stopped working in this tab…" + "Try again in WebKit" → back in WebKit, notice gone (`22-crash-notice.png`, `22-retried.png`) |
+| Real macOS E1/E2 | NOT_VERIFIED | Linux-only work; macOS paths unchanged (PR #12) |
+
+Not READY: fixture page only, Linux only, no general web browsing.
 
 ## WebKit gates (all must hold; otherwise the engine menu says why)
 
