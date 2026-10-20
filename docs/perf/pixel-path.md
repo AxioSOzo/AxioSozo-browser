@@ -199,3 +199,75 @@ At 900×650: 64 KiB pipe 2.7 ms / 36 wakeups → 1 MiB 1.2 ms / 3 → memfd 0.17
 | 39341141004, 39342063286 | linux-webkit-host at 3137181 / 9833f88: real WPE unit + stream + input + security + cleanup; damage_payload and memfd scenarios byte-identical to a forced whole frame | PASS |
 | 39341141669, 39342063487 | linux-webkit-zen at 3137181 / 9833f88: unit, adapter, E2E (launch, chrome, Gecko→WebKit→Gecko round trip, host failure, three engines) | E2E PASS |
 | 39340175745 | Linux check and test (PR #10) | green |
+
+# Phase 2 (cloud/perf-phase2)
+
+Owner: cloud/perf-phase2 (PR #14). Same rules as above: software rendering on GitHub runners,
+same-job A/B, never E1/E2, never READY; macOS surface path untouched.
+
+## memfd fallback, soak, default on
+
+- **Fallback** (contracts engine-stream-v1 §6.3 "Fallback"): before the hello Zen lists
+  `/proc/<host pid>/fd` (the same ptrace-read access a slot read needs); if that fails it asks for
+  the pipe and latches the session. A slot read that fails twice (one retry) drops that frame,
+  forgets its target's assembled frame and acknowledges it with
+  `frame_ack {frame_id, frame_transport:"pipe"}`: the host switches its writer to the pipe before
+  the credit returns, makes every pending frame whole (CEF) or re-sends every target whole
+  (WebKit, from its `latest` copy), and CEF repaints every view. Tests: node (both readers),
+  `native/chromium-host/tests/transport_memfd_test.cc` (fallback scenario),
+  `native/chromium-host/damage_test.py` (real CEF: 8 memfd frames, frame 9 dropped, the next pipe
+  frame whole 1800×1300, then 80×80 damage payloads — run 39351072238), WebKit
+  `stream_test.py` `memfd_fallback` (real WPE in linux-webkit-host 39349713944: PASS).
+- **Soak** (`tools/pixel-path/soak.py`, linux-perf job `soak`, debian:13, one Zen window with a
+  WebKit tab, a Chromium tab and a Gecko tab; each cycle: rAF window, XTest wheel window, static
+  navigation, key → frame, Gecko rAF), run **39349238042**:
+
+  | | cycles / min | rAF fps WebKit / Chromium / Gecko | rAF p99 ms | scroll fps WK / Cr | key → frame ms WK / Cr | parent CPU % WK / Cr | problems |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | memfd | 30 / 10 | 56.4 / 57.5 / 59.0 | 34.9 / 34.3 | 51.6 / 55.5 | 21.6 / 16.6 | 131 / 142 | none |
+  | pipe | 13 / 4 | 56.7 / 58.4 / 59.0 | 35.2 / 33.3 | 48.0 / 50.9 | 20.5 / 15.8 | 133 / 146 | none |
+
+  memfd: no fallback, transport stayed memfd in every window, WebKit host descriptors 38 → 38,
+  Chromium host 333–339; the hosts' RSS flat (WPEWebProcess 256 MB, CEF renderer ~250 MB); the
+  Zen parent's RSS oscillates 690–1104 MB with GC (per-frame slot buffers) without a trend
+  beyond that band. These medians are also the **multi-tab** numbers (2 engine tabs + 1 Gecko
+  tab in one window, 1×).
+- **Default**: `MEMFD_FRAMES_DEFAULT = true` (Linux pipe mode only; macOS never negotiates it).
+
+## Scroll fps is claimable now
+
+`zen_bench.py` injects wheel clicks with XTest (`XTestWheel`, ctypes libXtst) on the monotonic
+clock, flushed per event, and records the pacing (`input_pacing`: span, interval p99, late events).
+`xdotool click --repeat 120 --delay 16` had taken 17 s instead of 1.9 s from the second window on
+(docs/PERFORMANCE.md bottleneck 3). The soak's 60 scroll windows per transport all had a 1.9 s
+input span.
+
+## Upload without the JS swizzle: BGRX VideoFrame
+
+`EngineFrameSurface` uploads with `drawImage(new VideoFrame(rows, {format: "BGRX"}))` where the
+window draws BGRX VideoFrames exactly (probed once per process on a 3×2 scratch canvas), else the
+JS swizzle + `putImageData` (pref `axiosozo.engines.linux.frame_upload=imagedata`). Whole damaged
+rows from a `Uint8Array` view of the frame (no JS copy): Gecko 156's
+`dom/media/webcodecs/VideoFrame.cpp` ignores `VideoFrameBufferInit.layout` and assumes a tight
+stride, so a narrower rectangle cannot be described without a copy.
+
+## Off the main thread: frame worker and native receiver
+
+Both implement one "sink" per native target (applyFrame / bindCanvas / present), chosen by the
+readers in this order, with the main-thread JS path as the fallback:
+
+1. **Native receiver** (pref `axiosozo.engines.linux.native_receiver`, needs an app built from this
+   branch, `.github/workflows/linux-perf-build.yml`): `apps/browser/native/engine-view/linux`
+   (`nsIAxioFrameReceiverService`, GTK only) maps the host's ring read-only (direct child only,
+   exact size, seals checked); a background task queue copies each delivered frame's rows into the
+   target's whole frame, and each presented frame into a recycled B8G8R8X8 `SharedRGBImage` set on
+   the canvas's async `ImageContainer` (`HTMLCanvasElement::SetAxioExternalImageContainer`, the
+   platform-neutral patch the macOS path already uses). No pixel crosses JS, no swizzle, and the
+   frame reaches WebRender through the ImageBridge. Capture: `copyFrame()` → PNG.
+2. **Frame worker** (pref `axiosozo.engines.linux.frame_worker`): one ChromeWorker per target
+   (`EngineFrameWorker.js` loads `runFrameWorker` from EngineFrameSurface into its own global)
+   opens the memfd with `IOUtils.openFileForSyncReading`, reads slots with `readBytesInto` into a
+   persistent buffer (no per-frame allocation), keeps the whole frame and draws into the presenter
+   canvas through `transferControlToOffscreen()`. The main thread validates metadata, posts and
+   acks. After a memfd fallback it also takes the pipe payloads. Capture: Gecko's placeholder
+   snapshot (`toDataURL`).
