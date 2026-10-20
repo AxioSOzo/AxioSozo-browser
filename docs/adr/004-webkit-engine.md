@@ -155,9 +155,28 @@ on-screen window), `CALayerHost`/`CAContext` remote-layer hosting (private SPI d
 WebKit's process model; noted as the future zero-copy path, not attempted), CPU
 layer rendering (blank).
 
-### Host measurements (run RUN_HOST_FINAL, 1800x1300 at 2x, continuously animated fixture)
+### Host measurements (runs 39345979318 and 39346585739, 1800x1300 at 2x, rAF-animated fixture)
 
-HOST_TABLE_PLACEHOLDER
+Standalone receiver (`native/webkit-host/mac/tests/surface_receiver.mm`), 5 s of animation per
+case; CPU = host + WebKit WebContent/Networking (percent of one core); input = keydown to
+the toggled pixels arriving at the receiver. Two runs on the same runner type, to show the
+spread on a shared 3-core VM ([STATUS.json](../evidence/macos/webkit/STATUS.json)).
+
+| Case | fps | frame interval p50 / p95 | CPU total | input→frame p50 |
+| --- | --- | --- | --- | --- |
+| **surface, internal 60 Hz** (Zen's choice) | 59.4 / 46.2 | 16.9 / 25.5 ms; 21.5 / 34.4 ms | 48 % / 71 % | 19.9 / 11.8 ms |
+| surface, internal 120 Hz | 56.8 / 58.8 | 16.8 / 29.1 ms; 17.1 / 25.0 ms | 91 % / 115 % | 11.4 / 22.8 ms |
+| surface, external BEGIN_FRAME 60 Hz | 27.2 / 19.6 | 32.6 / 75.6 ms; 46.7 / 131.6 ms | 52 % / 51 % | 45.2 / 47.1 ms |
+| surface, external BEGIN_FRAME 120 Hz | 34.4 / 34.6 | 25.1 / 62.4 ms; 22.3 / 61.2 ms | 75 % / 86 % | 19.9 / 41.0 ms |
+| zero-copy stand-in (use held 40 ms), internal 60 Hz | – / 54.6 | – ; 16.8 / 30.2 ms | – / 74 % | – / 22.5 ms |
+| AXCF pipe fallback, 60 Hz | 59.6 / 60.4 | 15.2 / 27.8 ms; 15.4 / 27.5 ms | 79 % / 86 % | 24.9 / 29.4 ms |
+
+Per frame: host copy into the ring IOSurface + Mach send 0.85–1.08 ms (p50), FRAME paint to
+receipt ~1 ms; every snapshot took the zero-conversion path (WebKit already returns sRGB
+premultiplied BGRA). For comparison, the Linux in-Zen WebKit tab ran 48 fps / 33 ms
+key→paint with the Zen parent at 117–151 % CPU (docs/PERFORMANCE.md), and the pipe
+fallback here still pays one BGRA→RGBA conversion per frame in chrome JS, which the
+surface path removes entirely.
 
 Reading: the IOSurface hop itself costs ~1 ms (host copy+send) and Mach delivery ~1 ms;
 the snapshot (WebContent paint into a shareable bitmap) is the cost centre. External

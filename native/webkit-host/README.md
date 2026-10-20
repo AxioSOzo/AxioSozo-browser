@@ -135,15 +135,20 @@ libstdc++-14-dev, libsysprof-capture-4-dev; `ar x` + `tar -x` of `data.tar.*`, s
 checked against the signed index). It proves API use against the exact pinned headers,
 not linking or behaviour.
 
-## macOS scaffold
+## macOS host (WKWebView, engine-surface-v1)
 
 ```sh
-xcrun clang++ -std=c++20 -fobjc-arc -Wall -Wextra -framework Cocoa -framework WebKit \
-  native/webkit-host/mac/host_mac.mm -o .local/build/webkit/mac/AxioWebKitMacHost
-python3 native/webkit-host/mac/mac_test.py .local/build/webkit/mac/AxioWebKitMacHost [stream|input|security]
+native/webkit-host/mac/build.sh [out-dir]          # default $AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost
+python3 native/webkit-host/mac/mac_test.py <host> [stream|input|security]   # pipe mode, real WKWebView
+python3 native/webkit-host/mac/surface_test.py <host> <evidence-dir>        # Mach/IOSurface, standalone receiver
 ```
 
-A WKWebView in an offscreen, never-shown helper window, frames via
-`takeSnapshotWithConfiguration` (CPU, no damage source). It exists to validate the
-engine-neutral core against real WebKit and to stage the IOSurface design in the ADR; it
-is not the macOS product path and not engine-surface-v1 evidence.
+System WebKit (no download) in an offscreen, never-shown helper window; frames are
+`takeSnapshotWithConfiguration` snapshots on a frame-rate clock, delivered over
+engine-surface-v1 (global IOSurface ring, `surface_host.mm`) or, without `surface_service`,
+as AXCF BGRA pipe frames. Private SPI (both reported in `ready.private_spi`):
+`_setWindowOcclusionDetectionEnabled:` (else WebKit throttles the offscreen page to 0 Hz rAF)
+and `_setOverrideDeviceScaleFactor:` (page DPR = requested scale). Decision, candidates and
+measurements: [ADR 004 "macOS"](../../docs/adr/004-webkit-engine.md). CI:
+`.github/workflows/macos-webkit-host.yml` (capture bench, host tests, WPE regression).
+`mac/tests/capture_bench.mm` is the measurement tool behind the decision.
