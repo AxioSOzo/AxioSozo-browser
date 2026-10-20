@@ -1,0 +1,32 @@
+test_only_attaches_without_mounting_and_mounts_the_build_volume (test_storage.AttachAndMount) ... ok
+test_already_mounted_runs_no_build_helper (test_storage.Ensure) ... ok
+test_devstorage_failure_stops_before_the_build_volume (test_storage.Ensure) ... ok
+test_fallback_gives_up_on_a_busy_global_lock (test_storage.Ensure) ... ok
+test_fallback_mounts_only_while_holding_the_global_lock (test_storage.Ensure) ... ok
+test_fallback_skips_mounting_if_a_helper_mounted_during_the_lock_wait (test_storage.Ensure) ... ok
+test_global_lock_path_is_never_followed_as_a_symlink (test_storage.Ensure) ... ok
+test_helper_exit_status_does_not_decide_setup (test_storage.Ensure) ... ok
+test_unverified_volume_after_the_wait_is_reported (test_storage.Ensure) ... ok
+test_failing_helper_exit_is_ignored_once_the_volume_is_verified (test_storage.HelperPolling) ... ok
+test_helper_output_never_reaches_stdout (test_storage.HelperPolling) ... ok
+test_helper_runs_without_any_lock_held_and_is_retried_at_most_every_interval (test_storage.HelperPolling) ... ok
+test_volume_mounted_by_another_run_ends_the_wait_without_a_rerun (test_storage.HelperPolling) ... ok
+test_default_is_the_gitignored_checkout_directory (test_storage.LinuxBuildRoot) ... ok
+test_ensure_creates_a_private_directory_and_reports_linux (test_storage.LinuxBuildRoot) ... ok
+test_explicit_absolute_directory_outside_the_checkout (test_storage.LinuxBuildRoot) ... ok
+test_symlinked_root_is_refused (test_storage.LinuxBuildRoot) ... ok
+test_unsafe_roots_are_refused (test_storage.LinuxBuildRoot) ... ok
+test_inactive_unless_requested_on_macos (test_storage.MacosCiBuildRoot) ... ok
+test_outside_actions_or_without_a_root_is_refused (test_storage.MacosCiBuildRoot) ... ok
+test_owner_layout_always_refuses_the_mode (test_storage.MacosCiBuildRoot) ... ok
+test_runner_without_owner_layout_uses_the_explicit_root (test_storage.MacosCiBuildRoot) ... ok
+test_helpers_and_lock_follow_the_home_directory (test_storage.Paths) ... ok
+test_absent_or_empty_mountpoint_passes (test_storage.Preflight) ... ok
+test_files_under_the_mountpoint_are_never_hidden (test_storage.Preflight) ... ok
+test_missing_image_is_never_replaced (test_storage.Preflight) ... ok
+test_unreadable_leftover_mountpoint_names_the_fix (test_storage.Preflight) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.934s
+
+OK
