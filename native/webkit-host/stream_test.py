@@ -489,6 +489,18 @@ def damage_scenario(binary, origin, directory, engine):
         assert not session.orphans, session.orphans
 
 
+def memfd_refused_scenario(binary, origin, directory):
+    """Outside Linux there is no memfd (§6.3): the host refuses frame_transport "memfd" in the hello (exit 64)."""
+    session = Session(binary, origin, directory, frame_damage=True, damage_payload=True, memfd=True)
+    try:
+        session.process.wait(timeout=20)
+        assert session.process.returncode == 64, session.process.returncode
+    finally:
+        session.close()
+    assert not session.orphans and session.profile_removed, (session.orphans, session.profile_removed)
+    return dict(status='PASS', refused='frame_transport memfd is Linux-only; hello refused with exit 64')
+
+
 def damage_payload_scenario(binary, origin, directory, engine, memfd=False):
     """hello.damage_payload: rectangle-only payloads rebuild exactly the frame a forced whole frame shows.
     With memfd=True the same through frame_transport "memfd" (§6.3)."""
@@ -565,7 +577,8 @@ def run(binary=None, engine='webkit', port='wpe'):
             result['damage_payload'] = damage_payload_scenario(binary, origin, payload_dir, engine)
             memfd_dir = directory / 'memfd'
             memfd_dir.mkdir()
-            result['memfd'] = damage_payload_scenario(binary, origin, memfd_dir, engine, memfd=True)
+            result['memfd'] = (damage_payload_scenario(binary, origin, memfd_dir, engine, memfd=True)
+                               if platform.system() == 'Linux' else memfd_refused_scenario(binary, origin, memfd_dir))
             result['fixture_requests'] = [json.loads(line) for line in server.request_log.read_text().splitlines()]
             assert all(r['method'] == 'GET' and r['status'] == 200 for r in result['fixture_requests']), result['fixture_requests']
             assert engine != 'webkit' or result['fixture_requests'], 'WebKit fetched no fixture page'
