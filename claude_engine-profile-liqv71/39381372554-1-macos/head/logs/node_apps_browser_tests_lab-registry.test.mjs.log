@@ -1,0 +1,44 @@
+✔ a well-formed experiment and a well-formed graduated feature have no problems (3.452709ms)
+✔ an entry that is not a plain object is one problem only (0.633083ms)
+✔ id: lowercase words with single dashes, starting with a letter, at most 40 characters (0.918083ms)
+✔ title: one trimmed line of 1 to 60 characters (0.6435ms)
+✔ pitch: one trimmed line of at most 200 characters ending in . ! or ? (0.951834ms)
+✔ howToTry: 1 to 3 steps, each one trimmed line of at most 140 characters (0.711709ms)
+✔ group: one of the Lab's groups (or the groups passed in) (0.504958ms)
+✔ variantOf: absent, null or the shape of an experiment id (0.342833ms)
+✔ needs: some of claude-code, codex, antigravity without repeats, or none alone (0.452333ms)
+✔ module: a .sys.mjs file directly in chrome/lab/ or in one lowercase folder there (0.62725ms)
+✔ module: every one of the Lab's own module names is refused (0.328125ms)
+✔ RESERVED_MODULES names every .sys.mjs file of the Lab itself in chrome/lab/ (0.693916ms)
+✔ installer: the export name install<Something> (0.485458ms)
+✔ graduated: exactly { pref, default, live } with an existing axiosozo.* pref outside the Lab's own (0.749625ms)
+✔ a graduated feature has no Lab module or installer, and needs neither (0.440667ms)
+✔ unknown fields are each reported, alongside the other problems (0.513417ms)
+✔ buildRegistry freezes plain descriptors with variantOf, family and copies of the lists (0.525792ms)
+✔ buildRegistry leaves out a broken entry and a duplicate id, naming each, and keeps the rest (2.120458ms)
+✔ buildRegistry: a list that is not an array is an empty registry (0.371959ms)
+✔ buildRegistry keeps an experiment with an unknown or own variantOf on its own, with a problem (0.368333ms)
+✔ buildRegistry finds a variantOf cycle and keeps those experiments on their own (0.358417ms)
+✔ buildRegistry computes the family through a chain of variants, in any list order (0.297333ms)
+✔ the real experiment list has no problems and nothing is left out (0.3105ms)
+✔ every real experiment's switch is declared off in defaults.yaml and its module is in chrome/lab/ (1.305625ms)
+✔ labPref and labIdFromPref round-trip, and foreign pref names are no experiment (0.345458ms)
+✔ switchOf and isEnabled: a Lab switch is off when unset; a graduated one uses its own pref and default (0.84575ms)
+✔ listForPage lists every experiment with its switch from the prefs, graduated ones with their own (1.214166ms)
+✔ listForPage defaults to the real registry (0.461ms)
+✔ listForPage shows the code of a failure seen in a window, never for a graduated feature (2.548083ms)
+✔ setEnabledFromPage writes only the experiment's own switch and answers with the new list (0.282083ms)
+✔ setEnabledFromPage: turning one variant on turns the rest of its family off first, and nothing else (0.32775ms)
+✔ setEnabledFromPage refuses an unknown id, a non-boolean and missing prefs with fixed codes, writing nothing (0.62625ms)
+✔ setEnabledFromPage starts afresh: either toggle clears a stale problem, and what the windows report meanwhile is in its answer (0.678042ms)
+✔ setEnabledFromPage: a clean-up that fails while the Lab page turns the experiment off stays visible on the page (0.302416ms)
+✔ setEnabledFromPage clears the experiment's problems in every window, and only that experiment's (0.510875ms)
+✔ clientStatusForPage asks the platform, checking only for check: true (0.140792ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 165.21825
