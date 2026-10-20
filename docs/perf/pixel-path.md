@@ -271,3 +271,27 @@ readers in this order, with the main-thread JS path as the fallback:
    canvas through `transferControlToOffscreen()`. The main thread validates metadata, posts and
    acks. After a memfd fallback it also takes the pipe payloads. Capture: Gecko's placeholder
    snapshot (`toDataURL`).
+
+## A/B: memfd vs the integration pipe path (run 39349238042)
+
+Same-job A/B in Zen (prebuilt app 39337785340 + TEST-ONLY chrome overlay), base = cloud/integration
+`d5cc1a8` (pipe, perf-pixel-path merged), memfd = this branch with memfd on (now its default).
+Medians, round 1 / round 2. Scroll rows of this run still contain the `mousemove --sync` artefact
+(fixed afterwards) and are not used.
+
+| | Chromium base → memfd | WebKit base → memfd |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 49.1 → 40.9 / 49.1 → 42.2 % | 50.7 → 43.9 / 52.1 → 48.1 % |
+| 1× rAF CPU, whole browser | 71.4 → 62.6 / 72.0 → 64.1 % | 125.0 → 120.2 / 127.9 → 125.1 % |
+| 1× key → presented frame | 19.9 → 18.5 / 19.6 → 18.3 ms | 23.8 → 24.6 / 23.9 → 25.2 ms |
+| 2× rAF fps | 57.7 → 59.0 / 57.7 → 59.0 | 47.8 → 56.5 / 46.7 → 55.4 |
+| 2× rAF p99 interval | 31.4 → 22.5 / 31.9 → 20.2 ms | 41.4 → 31.7 / 44.2 → 31.2 ms |
+| 2× rAF CPU, Zen parent | 122.6 → 89.5 / 121.4 → 90.5 % | 127.1 → 97.0 / 124.1 → 100.7 % |
+| 2× rAF CPU, whole browser | 165.1 → 131.0 / 166.0 → 130.7 % | 330.6 → 304.5 / 328.6 → 310.5 % |
+| 2× key → presented frame | 18.9 → 20.1 / 18.8 → 20.3 ms | 29.3 → 30.8 / 29.7 → 30.1 ms |
+| 2× static navigate → visible | 102.6 → 62.8 / 67.3 → 49.2 ms | 89.6 → 76.7 / 136.0 → 77.6 ms |
+
+At 2× memfd takes a quarter of the Zen parent's CPU away and the p99 frame interval down by
+~30 % for both engines (WebKit to 56 fps); key → frame stays within ±1.5 ms (the key path is not
+transport-bound once the pipe carries only damage). Evidence: ci-results
+`cloud_perf-phase2/39349238042-1-ab-{chromium,webkit}/ab/ab.md`.
