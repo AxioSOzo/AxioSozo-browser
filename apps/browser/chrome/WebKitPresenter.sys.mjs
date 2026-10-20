@@ -250,6 +250,8 @@ export class WebKitPresenter {
         onFrame: (metadata, pixels) => this.#draw(record, metadata, pixels),
         onEvent: event => this.#event(record, event), onFailure: error => this.#revert(record, error) });
       if (this.disposed || this.pending !== record) throw new Error("ENGINE_SWITCH_CANCELLED");
+      // §8.2: events of the first load (favicon, text_input) already use the browser-UI path.
+      record.browserUI = record.adapter.browserUI === true;
       const target = await record.adapter.create(url, this.#surface(record));
       this.gecko.resolve(originalTarget); // the Gecko tab did not navigate while WebKit started
       if (this.disposed || this.pending !== record || this.window.gBrowser.selectedTab !== tab) throw new Error("ENGINE_SWITCH_CANCELLED");
@@ -257,7 +259,7 @@ export class WebKitPresenter {
       browser.style.visibility = "hidden"; overlay.style.display = "block";
       if (typeof browser.docShellIsActive === "boolean") browser.docShellIsActive = false;
       tab.setAttribute?.(ENGINE_ATTRIBUTE, "webkit");
-      if (record.adapter.browserUI) { this.#browserUI(); record.browserUI = true; this.#redirectBrowserFocus(record); }
+      if (record.browserUI) { this.#browserUI(); this.#redirectBrowserFocus(record); }
       this.#input(record);
       record.observer = new this.window.ResizeObserver(() => this.#resize(record));
       record.observer.observe(stack);

@@ -268,6 +268,24 @@ class FeelHarness(gui_test.Harness):
                                    'try { FullZoom.reset(); } catch {} return true;')
             except (gui_test.MarionetteError, OSError, subprocess.SubprocessError):
                 pass
+            # A page left blocked (a dialog nobody can see) would fail every later gate: restart WebKit.
+            if self.wk_tab and name not in ('crash_retry',):
+                try:
+                    if self.state()['tabId'] == self.wk_tab and self.webkit_ready():
+                        self.live('the failed scenario')
+                except (AssertionError, gui_test.MarionetteError, OSError, subprocess.SubprocessError, KeyError, TypeError):
+                    try:
+                        for pid in self.host_pids():
+                            os.kill(pid, signal.SIGKILL)
+                        self.wait(lambda: (lambda st: st if st['engine'] == 'gecko' and not st['geckoHidden'] else None)(self.state()),
+                                  'the Gecko tab after the recovery kill', timeout=30)
+                        self.chrome_script('const box = gBrowser.getNotificationBox(gBrowser.selectedBrowser);'
+                                           'const n = box?.getNotificationWithValue?.("axiosozo-webkit-stopped"); if (n) box.removeNotification(n);'
+                                           'return true;')
+                        self.ensure_webkit('recover-' + name)
+                        outcome.setdefault('recovery', []).append('webkit restarted')
+                    except (AssertionError, gui_test.MarionetteError, OSError, subprocess.SubprocessError, KeyError, TypeError) as error:
+                        outcome.setdefault('recovery', []).append('restart failed: ' + str(error)[:160])
         return outcome
 
     def live(self, name):

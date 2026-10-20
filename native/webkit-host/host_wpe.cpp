@@ -767,7 +767,7 @@ void WpeView::connect() {
     const char* uri = webkit_web_view_get_uri(v);
     std::string url = uri ? uri : "";
     AXIO_TRACE("load-changed %d %s", int(event), url.c_str());
-    if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; }
+    if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; view->host_.navigationStarting(&view->tab_); }
     else if (event == WEBKIT_LOAD_COMMITTED) { view->committed(); view->host_.loadCommitted(&view->tab_, url); }
     else if (event == WEBKIT_LOAD_FINISHED && !view->loadFailed_) {
       view->finished();

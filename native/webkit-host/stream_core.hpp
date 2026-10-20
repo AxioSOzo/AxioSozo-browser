@@ -136,6 +136,9 @@ struct Tab {
   int width = 900, height = 650; double scale = 2;
   std::string createRequest, closeRequest, navigationRequest;
   bool historyNavigation = false, commandNavigationInvalidated = false;
+  // A page-initiated navigation the policy admitted, whose generation advances when its load
+  // starts (WebKit asks beforeunload after the policy; "stay" must leave the document as it is).
+  bool pageNavigationPending = false, provisional = false;
   std::string historyURL, committedDocumentURL, lastCursor;
   std::set<std::string> committedURLs;
   int supersededLoads = 0;
@@ -315,17 +318,34 @@ public:
   bool navigationPolicy(Tab* tab, const std::string& url, const std::string& method) {
     if (!live(tab)) return false;
     if (!allowedURL(url) || method != "GET") { tabEvent(tab, "error", Object{{"code", "navigation_denied"}}); return false; }
-    if (!tab->commandNavigationInvalidated) invalidateNavigation(tab);
+    if (!tab->commandNavigationInvalidated) {
+      // §8.2 hosts defer to the load start (beforeunload runs in between); a redirect of a load
+      // already started, and hosts without browser UI, advance at once as before.
+      if (browserUI() && !tab->provisional) tab->pageNavigationPending = true;
+      else invalidateNavigation(tab);
+    }
     return !transport_.failed();
+  }
+  // The engine started (or announced) the load of an admitted page navigation: generations
+  // advance now, before any event of the new document. Idempotent; called from every early signal.
+  void navigationStarting(Tab* tab) {
+    if (!live(tab)) return;
+    tab->provisional = true;
+    if (!tab->pageNavigationPending) return;
+    tab->pageNavigationPending = false;
+    if (!tab->commandNavigationInvalidated) invalidateNavigation(tab);
   }
   void loadCommitted(Tab* tab, const std::string& url) {
     if (!live(tab)) return;
+    navigationStarting(tab);
+    tab->provisional = false;
     tab->historyURL = tab->historyNavigation && !tab->navigationRequest.empty() && tab->committedURLs.count(url) ? url : "";
     tab->latestValid = false;  // pixels before commit belong to the previous document
     tabEvent(tab, "url", Object{{"url", urlValue(url)}});
   }
   void loadFinished(Tab* tab, const std::string& url, int status) {
     if (!live(tab)) return;
+    tab->provisional = false;
     // A page restored from WebKit's back/forward cache reports its cached response
     // (200) or 0; only an explicit back/forward to a URL committed earlier with 200
     // may be labelled restored, as in cef-v1.
@@ -343,6 +363,7 @@ public:
   // `cancelled`: the engine aborted the load (superseded, stopped or policy-ignored).
   void loadFailed(Tab* tab, int nativeCode, bool cancelled, bool tls) {
     if (!live(tab)) return;
+    tab->provisional = false; tab->pageNavigationPending = false;
     if (cancelled && tab->supersededLoads > 0) { tab->supersededLoads--; return; }
     if (tls) tabEvent(tab, "error", Object{{"code", "certificate_error"}, {"native_code", nativeCode}});
     if (cancelled) {
@@ -358,8 +379,13 @@ public:
   void titleChanged(Tab* tab, const std::string& title) {
     if (live(tab)) tabEvent(tab, "title", Object{{"title", json::utf16Prefix(title, 1024)}});
   }
-  void urlChanged(Tab* tab, const std::string& url) { if (live(tab)) tabEvent(tab, "url", Object{{"url", urlValue(url)}}); }
+  void urlChanged(Tab* tab, const std::string& url) {
+    if (!live(tab)) return;
+    if (tab->pageNavigationPending) navigationStarting(tab);
+    tabEvent(tab, "url", Object{{"url", urlValue(url)}});
+  }
   void loadingChanged(Tab* tab, bool loading) {
+    if (live(tab) && loading && tab->pageNavigationPending) navigationStarting(tab);
     if (live(tab)) tabEvent(tab, "loading", Object{{"loading", loading}, {"can_go_back", tab->view->canGoBack()}, {"can_go_forward", tab->view->canGoForward()}});
   }
   void cursorChanged(Tab* tab, const std::string& cursor) {
@@ -651,6 +677,7 @@ private:
     accepted(requestId);
     if (navigation) {
       tab->navigationRequest = requestId; tab->historyNavigation = method == "back" || method == "forward"; tab->historyURL.clear();
+      tab->pageNavigationPending = false;
       // Back/forward-cache restores may skip policy checks: revoke the old document first.
       invalidateNavigation(tab); tab->commandNavigationInvalidated = true;
       if (transport_.failed()) return;
