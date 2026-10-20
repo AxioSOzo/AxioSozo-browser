@@ -117,11 +117,11 @@ def run_case(receiver, host, name, directory, origin, seconds, **options):
     (case / 'receiver-stderr.log').write_bytes(err or b'')
     # Process cleanup: no WebKit XPC helper launchd attributes to this host may outlive it
     # (other runner processes use WebKit too, so "new since start" is not ownership).
-    host_pid = result.get('host_pid')
+    # The host inherits our launchd responsibility; helpers that existed before the case are not its.
+    owners = {result.get('host_pid'), responsible_pid(os.getpid())} - {None}
     attributed = responsible_pid(os.getpid()) is not None
     def ours():
-        return {p: n for p, n in webkit_helpers().items()
-                if (responsible_pid(p) == host_pid if attributed else p not in before)}
+        return {p: n for p, n in webkit_helpers().items() if p not in before and (not attributed or responsible_pid(p) in owners)}
     deadline = time.monotonic() + 8
     leaked = ours()
     while leaked and time.monotonic() < deadline:

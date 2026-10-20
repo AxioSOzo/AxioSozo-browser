@@ -144,9 +144,10 @@ public:
   void stop() override { [web_ stopLoading]; }
   void resize(int width, int height, double scale) override {
     width_ = width; height_ = height; scale_ = scale;
+    // Scale first: the page's resize event must already see the new devicePixelRatio.
+    applyScale();
     [window_ setContentSize:NSMakeSize(width, height)];
     web_.frame = NSMakeRect(0, 0, width, height);
-    applyScale();
     epoch_++;  // a snapshot in flight has the old size
     wake();
   }

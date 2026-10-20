@@ -334,7 +334,8 @@ def mac_webkit_helpers():
 
 # WebKit helpers that existed before any host of this test process started (other apps).
 MAC_HELPER_BASELINE = set(mac_webkit_helpers())
-# Hosts this test process started (stream_test.Session); other runner processes use WebKit too.
+# Hosts this test process started (stream_test.Session) and their launchd responsible pids;
+# other runner processes (e.g. Quick Look) use WebKit too.
 MAC_HOST_PIDS = set()
 
 
@@ -351,12 +352,19 @@ def mac_responsible_pid(pid):
     return value if value > 0 else None
 
 
+def track_mac_host(pid):
+    """Remember a spawned host and the process launchd holds responsible for it (inherited)."""
+    if platform.system() == 'Darwin':
+        MAC_HOST_PIDS.update(p for p in (pid, mac_responsible_pid(pid)) if p)
+
+
 def mac_host_helpers(host_pids):
-    """WebKit helpers launchd attributes to one of `host_pids` (alive or already exited).
-    Without the responsibility API: every helper that appeared since this process started."""
-    helpers = mac_webkit_helpers()
+    """WebKit helpers started after this test process began whose launchd responsible pid is a
+    tracked host or that host's own responsible process. Without the responsibility API: every
+    helper that appeared since this process started."""
+    helpers = {pid: name for pid, name in mac_webkit_helpers().items() if pid not in MAC_HELPER_BASELINE}
     if mac_responsible_pid(os.getpid()) is None:
-        return {pid: name for pid, name in helpers.items() if pid not in MAC_HELPER_BASELINE}
+        return helpers
     return {pid: name for pid, name in helpers.items() if mac_responsible_pid(pid) in host_pids}
 
 
@@ -374,8 +382,9 @@ def sandbox_observation(host_pid):
     if platform.system() == 'Darwin':
         # System WebKit's helpers are launchd XPC services, not our children: attribute them
         # by launchd's responsible pid (other runner processes use WebKit too).
-        helpers = mac_host_helpers({host_pid})
-        processes = [dict(pid=pid, comm=name, sandboxed=mac_sandboxed(pid), responsible_pid=host_pid) for pid, name in sorted(helpers.items())]
+        helpers = mac_host_helpers({host_pid, mac_responsible_pid(host_pid)} - {None})
+        processes = [dict(pid=pid, comm=name, sandboxed=mac_sandboxed(pid), responsible_pid=mac_responsible_pid(pid))
+                     for pid, name in sorted(helpers.items())]
         web = [p for p in processes if p['comm'].startswith('com.apple.WebKit.WebContent')]
         network = [p for p in processes if p['comm'].startswith('com.apple.WebKit.Networking')]
         return dict(observed=True, processes=processes, bwrap_processes=0, web_process=bool(web), network_process=bool(network),

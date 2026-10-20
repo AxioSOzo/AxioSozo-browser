@@ -123,7 +123,7 @@ class Session:
         self.process = subprocess.Popen([str(binary), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.error,
                                         start_new_session=True, bufsize=0, env=env)
-        probe.MAC_HOST_PIDS.add(self.process.pid)
+        probe.track_mac_host(self.process.pid)
         self.token = secrets.token_hex(32)
         self.instance = 'webkit-fixture-' + secrets.token_hex(8)
         self.counter = 0

@@ -385,8 +385,10 @@ std::vector<pid_t> helpers() {
   for (int i = 0; i < count; ++i) {
     char name[256] = {};
     if (proc_name(pids[i], name, sizeof name) <= 0 || strncmp(name, "com.apple.WebKit", 16)) continue;
+    if (helperBaseline.count(pids[i])) continue;
+    // The host inherits our launchd responsibility: its helpers are attributed to it or to that.
     int responsible = responsiblePid(pids[i]);
-    if (responsible > 0 ? responsible == child : !helperBaseline.count(pids[i])) out.push_back(pids[i]);
+    if (responsible <= 0 || responsible == child || responsible == responsiblePid(getpid())) out.push_back(pids[i]);
   }
   return out;
 }
