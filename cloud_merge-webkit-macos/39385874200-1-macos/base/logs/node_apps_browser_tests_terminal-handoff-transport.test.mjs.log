@@ -1,0 +1,23 @@
+✔ facade consumes a valid receipt byte-by-byte through genuine raw EOF (4.805167ms)
+✔ policy verifier consumes a valid receipt byte-by-byte through genuine raw EOF (2.7855ms)
+✔ every split Unicode stderr prefix is drained to actual EOF for both consumers (2.541625ms)
+✔ neither consumer acknowledges before a split Unicode stderr stream reaches EOF (4.096166ms)
+✔ valid facade receipt followed by incomplete or malformed UTF8 is uncertain at raw EOF (1.288958ms)
+✔ valid policy receipt followed by incomplete or malformed UTF8 never verifies (0.727583ms)
+✔ malformed or incomplete stderr after dispatch remains uncertain with no second launch (1.025834ms)
+✔ policy malformed or incomplete stderr fails closed and closes all owned pipes (0.711333ms)
+✔ facade receipt raw cap admits exact16384 bytes and denies16385 (0.625667ms)
+✔ policy receipt raw cap admits exact1024 bytes and denies1025 (0.300083ms)
+✔ both raw stderr caps admit exactly16384 Unicode bytes and refuse16385 (1.112417ms)
+✔ decoded-only pipes are refused without readString fallback (1.015125ms)
+✔ cancelled facade retains uncertainty while a raw Unicode sequence is pending (1.6005ms)
+✔ cancelled raw policy reader force-closes owned pipes and caps hanging wait (1.607542ms)
+✔ cancelled late raw-policy child is reaped without starting any pipe read (0.782334ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 78.218209

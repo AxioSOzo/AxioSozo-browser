@@ -1,0 +1,36 @@
+✔ context menu is a Zen menupopup at the pointer; page actions stay in Chromium, the reply is single use (5.7915ms)
+✔ local menu actions close the native menu with dismiss; Open Link in New Tab opens Chromium; hiding dismisses (3.21ms)
+✔ host timeout or navigation closes the menu without a reply; a replayed prompt_id opens nothing (1.33ms)
+✔ local backstop timer closes a prompt when the host cannot report its timeout (1.4985ms)
+✔ alert/confirm/prompt use Firefox content-modal prompts with the Chromium origin; results reply once (2.535166ms)
+✔ Firefox's abuse protection: rapid dialogs offer to block; once blocked they are refused unseen until navigation (1.859375ms)
+✔ beforeunload uses Firefox strings; Leave accepts, Stay or abort keeps the page (1.665583ms)
+✔ production tab dialog path: Firefox PromptUtils contract (propBagToObject(bag, obj) returns nothing) (2.2235ms)
+✔ a dialog for a navigated-away document is aborted and its late result is never sent (0.746458ms)
+✔ a reply rejected as stale by the adapter leaves no UI behind (1.022542ms)
+✔ permissions: Firefox doorhanger for the Chromium origin, decisions remembered in a Chromium-only store (2.249875ms)
+✔ camera/microphone are refused natively with a clear notice (0.152541ms)
+✔ file picker: nsIFilePicker in the Zen window; only picked paths return; late results are discarded (2.074792ms)
+✔ downloads: saved under Firefox download settings, shown in the downloads panel, controlled by target (1.873333ms)
+✔ Firefox Download integration: pause keeps the native download, resume continues it, cancel removes it (1.573083ms)
+✔ HTTP auth uses Firefox’s tab-modal login prompt; credentials go only to the prompt that asked (1.014125ms)
+✔ certificate errors show Firefox’s certerror content without any bypass; the follow-up load failure is absorbed (0.3805ms)
+✔ blocked pop-ups use Firefox's notification bar; allowing the site opens them as Chromium tabs (1.556875ms)
+✔ Zen's findbar drives Chromium find through the tab's browser.finder and restores Firefox's finder (1.165458ms)
+✔ the zoom commands follow the Chromium page, so Ctrl+0 is enabled while it is zoomed (1.096708ms)
+✔ Firefox zoom commands zoom a Chromium tab and its URL-bar indicator; Gecko tabs keep Firefox's zoom (1.329875ms)
+✔ event schema rejects malformed, oversized and unexpected delegation payloads (0.756834ms)
+✔ adapter: delegated capabilities are accepted; a prompt reply is bound to its target and single use (5.528625ms)
+✔ adapter: after navigation a reply for the old document never reaches native; invalid replies are refused locally (2.498375ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"MISSING_CEF_TARGET","phase":"event_validate","lastFrameId":1,"lastFrameBytes":16,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ adapter: a malformed prompt ends only that tab; delegation events without a target end the host (1.676375ms)
+✔ adapter: fixture sessions never accept delegation traffic (0.202125ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 97.122333
