@@ -14,8 +14,7 @@
 name: linux-engine-profile
 on:
   push:
-    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile,
-               claude/perf-phase3-uvmfis]
+    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile]
     paths:
       - tools/engine-bench/profile/**
       - .github/workflows/linux-engine-profile.yml
@@ -49,12 +48,13 @@ env:
   # published the unstripped libxul used to symbolize profiles). With this checkout's chrome JS
   # (TEST-ONLY overlay) and hosts, the defaults are memfd frames + native receiver.
   ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39383407870' }}  # perf-phase3: linux-perf-build 39383407870 (damage-only native receiver); was 39362552105
-  PROFILE_PASSES: ${{ inputs.passes || 'plain,plain,profile' }}  # perf-phase3 push: TEMPORARY (upstream default plain,trace,profile)
+  PROFILE_PASSES: ${{ inputs.passes || 'plain,trace,profile' }}
   # Same-job control (perf-phase3): when set, every engine job runs zen_profile a second time with these
   # options (label <label>-control), e.g. the phase-3 features off, on the same runner.
-  PROFILE_CONTROL: ${{ inputs.control || '--pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false' }}  # perf-phase3 diag push: TEMPORARY
+  # (perf-phase3 used: --pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false)
+  PROFILE_CONTROL: ${{ inputs.control || '' }}
   # Extra zen_profile.py options, e.g. --wr-promotion-log (TEST-ONLY WebRender surface-promotion log).
-  PROFILE_EXTRA: ${{ inputs.extra || '--wr-promotion-log' }}  # perf-phase3 diag push: TEMPORARY
+  PROFILE_EXTRA: ${{ inputs.extra || '' }}
 
 jobs:
   zen-source:
