@@ -1,0 +1,21 @@
+2026-10-20T08:53:34Z apt bootstrap
+2026-10-20T08:53:42Z pinned WPE packages (probe.py setup --apt)
+2026-10-20T08:54:09Z Zen runtime + GUI packages, CEF build/runtime packages
+2026-10-20T08:54:19Z CEF host (probe.py setup, pinned + sha256-checked)
+2026-10-20T08:55:17Z unpack the Linux Zen app
+2026-10-20T08:55:24Z TEST-ONLY chrome overlay of the prebuilt app
+2026-10-20T08:55:27Z soak native: 10 min, transport memfd at 1x
+Authorization required, but no authorization protocol specified
+
+{"component": "pixel-path-soak", "status": "FAIL", "reason": null, "problems": ["chromium host descriptors 335 -> 368"]}
+# Pixel-path soak: FAIL (native)
+
+30 cycles over 10.0 min; test prefs: {"axiosozo.engines.linux.memfd_frames": true}; RSS growth (cycle 2 -> last): 3.0 MB; host fds: {"webkit": {"min": 38, "max": 38, "last": 38}, "chromium": {"min": 335, "max": 368, "last": 335}}
+
+| Engine tab (median over cycles) | rAF fps | rAF p99 ms | rAF CPU % | parent CPU % | draw ms | scroll fps | scroll p99 ms | static nav->visible ms | key->frame ms | transport |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| webkit | 56.71 | 30.57 | 201.0 | 125.85 | 0.01 | 55.7 | 35.25 | 59.65 | 19.41 | memfd native |
+| chromium | 59.05 | 26.84 | 157.85 | 134.5 | 0.01 | 59.6 | 23.17 | 30.35 | 12.68 | memfd native |
+| gecko (in-page) | 58.99 | 17.12 | | | | | | | | |
+
+Problems: chromium host descriptors 335 -> 368
