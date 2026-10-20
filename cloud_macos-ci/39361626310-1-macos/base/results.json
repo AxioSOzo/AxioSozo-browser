@@ -1,0 +1,196 @@
+{
+  "side": "base",
+  "commit": "a3ab14e6ac95effd74f20ccb2f6681b0dbd40046",
+  "platform": "macOS-15.7.9-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.9.6",
+  "counts": {
+    "EXPECTED_NONZERO": 1,
+    "PASS": 20,
+    "FAIL": 5
+  },
+  "gates": {
+    "dev-doctor": {
+      "status": "EXPECTED_NONZERO",
+      "exit": 2,
+      "seconds": 0.6,
+      "log": "logs/dev-doctor.log",
+      "tail": "te\": {\n        \"protocol\": \"official-claude-code-stream-json\",\n        \"pinned_version\": \"2.1.278\",\n        \"docs\": \"https://code.claude.com/docs/en/headless\"\n      },\n      \"capabilities\": {\n        \"discovery\": true,\n        \"fixture_protocol\": true,\n        \"live_verified\": false,\n        \"automatic_browser_control\": false,\n        \"shell\": false,\n        \"filesystem\": false,\n        \"account_migration\": false\n      },\n      \"blockers\": [\n        \"CLIENT_NOT_INSTALLED\",\n        \"VERSION_UNTESTED\",\n        \"LIVE_AUTH_NOT_AUTHORIZED\",\n        \"PROCESS_SANDBOX_NOT_PROVEN\"\n      ]\n    },\n    {\n      \"version\": 1,\n      \"driver\": \"antigravity\",\n      \"executable\": null,\n      \"client_version\": null,\n      \"version_source\": null,\n      \"version_status\": \"UNTESTED\",\n      \"protocol_status\": \"UNTESTED\",\n      \"installed\": false,\n      \"auth_status\": \"unknown\",\n      \"status\": \"BLOCKED_ENV\",\n      \"route\": {\n        \"protocol\": \"official-agy-stream-json\",\n        \"pinned_version\": null,\n        \"docs\": \"https://antigravity.google/docs/cli/headless/\"\n      },\n      \"capabilities\": {\n        \"discovery\": true,\n        \"fixture_protocol\": true,\n        \"live_verified\": false,\n        \"automatic_browser_control\": false,\n        \"shell\": false,\n        \"filesystem\": false,\n        \"account_migration\": false\n      },\n      \"blockers\": [\n        \"CLIENT_NOT_INSTALLED\",\n        \"VERSION_UNTESTED\",\n        \"LIVE_AUTH_NOT_AUTHORIZED\",\n        \"PROCESS_SANDBOX_NOT_PROVEN\"\n      ]\n    }\n  ]\n}\n"
+    },
+    "cargo-fmt": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.2,
+      "log": "logs/cargo-fmt.log",
+      "tail": ""
+    },
+    "cargo-clippy": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 5.5,
+      "log": "logs/cargo-clippy.log",
+      "tail": "    Updating crates.io index\n Downloading crates ...\n  Downloaded zmij v1.0.23\n  Downloaded itoa v1.0.18\n  Downloaded syn v2.0.119\n  Downloaded serde_derive v1.0.228\n  Downloaded unicode-ident v1.0.24\n  Downloaded serde_core v1.0.228\n  Downloaded quote v1.0.47\n  Downloaded proc-macro2 v1.0.107\n  Downloaded memchr v2.8.3\n  Downloaded serde v1.0.228\n  Downloaded serde_json v1.0.149\n   Compiling proc-macro2 v1.0.107\n   Compiling quote v1.0.47\n   Compiling unicode-ident v1.0.24\n   Compiling serde_core v1.0.228\n   Compiling zmij v1.0.23\n   Compiling serde v1.0.228\n   Compiling serde_json v1.0.149\n   Compiling syn v2.0.119\n    Checking memchr v2.8.3\n    Checking itoa v1.0.18\n   Compiling serde_derive v1.0.228\n    Checking browser-core v0.1.0 (/Users/runner/work/_temp/base/crates/browser-core)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.33s\n"
+    },
+    "cargo-test": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 3.3,
+      "log": "logs/cargo-test.log",
+      "tail": "   Compiling serde_core v1.0.228\n   Compiling zmij v1.0.23\n   Compiling itoa v1.0.18\n   Compiling memchr v2.8.3\n   Compiling serde_json v1.0.149\n   Compiling serde v1.0.228\n   Compiling browser-core v0.1.0 (/Users/runner/work/_temp/base/crates/browser-core)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.20s\n     Running unittests src/lib.rs (/Users/runner/axiosozo-build/cargo-target/debug/deps/browser_core-1dfbe2da2390fab2)\n\nrunning 10 tests\ntest tests::authentication_and_session_isolation ... ok\ntest tests::chrome_registration_preserves_real_target_and_rejects_rebinding ... ok\ntest tests::forged_engine_identity_fails ... ok\ntest tests::expiry_scope_and_one_use ... ok\ntest tests::no_web_origin_or_extra_fields ... ok\ntest tests::private_context_never_granted ... ok\ntest tests::generations_are_lossless_in_javascript ... ok\ntest tests::replay_and_reconnect_never_repeat_action ... ok\ntest tests::target_ids_are_browser_minted_and_unique ... ok\ntest tests::stale_document_invalidates_grant ... ok\n\ntest result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+    },
+    "cargo-build": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 1.3,
+      "log": "logs/cargo-build.log",
+      "tail": "   Compiling browser-core v0.1.0 (/Users/runner/work/_temp/base/crates/browser-core)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.25s\n"
+    },
+    "python-compile": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.5,
+      "log": "logs/python-compile.log",
+      "tail": "3.9.6 (default, Apr 30 2025, 02:07:17) \n[Clang 17.0.0 (clang-1700.0.13.5)]\n"
+    },
+    "python:test_agent_notify_install.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.4,
+      "log": "logs/python_test_agent_notify_install.py.log",
+      "tail": "l.InstallTest) ... ok\ntest_private_directory_refuses_wrong_mode_foreign_uid_and_symlink (test_agent_notify_install.InstallTest) ... ok\ntest_private_helper_mode_uid_link_or_special_refuse_without_repair (test_agent_notify_install.InstallTest) ... ok\ntest_product_pin_matches_native_module_literal (test_agent_notify_install.InstallTest) ... ok\ntest_setup_fixed_source_and_private_checksum_target (test_agent_notify_install.InstallTest) ... ok\ntest_short_writes_complete_exact_source (test_agent_notify_install.InstallTest) ... ok\ntest_source_ancestor_symlink_refuses_before_content_read (test_agent_notify_install.InstallTest) ... ok\ntest_source_hash_mismatch_before_build_mutations (test_agent_notify_install.InstallTest) ... ok\ntest_source_replacement_before_open_refuses (test_agent_notify_install.InstallTest) ... ok\ntest_source_same_inode_edit_during_read_refuses (test_agent_notify_install.InstallTest) ... ok\ntest_source_symlink_hardlink_foreign_uid_and_group_write_refuse_without_read (test_agent_notify_install.InstallTest) ... ok\ntest_source_too_large_before_read_refuses (test_agent_notify_install.InstallTest) ... ok\ntest_unknown_existing_hash_preserved (test_agent_notify_install.InstallTest) ... ok\ntest_valid_existing_setup_and_check_are_readonly (test_agent_notify_install.InstallTest) ... ok\ntest_zero_write_cleans_only_own_partial_entry (test_agent_notify_install.InstallTest) ... ok\n\n----------------------------------------------------------------------\nRan 22 tests in 0.013s\n\nOK\n"
+    },
+    "python:test_dev.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.5,
+      "log": "logs/python_test_dev.py.log",
+      "tail": "test_browser_uses_volume_root_cef_from_any_build_root (test_dev.EntrypointGates) ... ok\ntest_cef_profile_audit_ignores_links_and_unrelated_directories (test_dev.EntrypointGates) ... ok\ntest_component_environment_does_not_inherit_daily_engine_switch (test_dev.EntrypointGates) ... ok\ntest_failed_build_does_not_test_stale_binary (test_dev.EntrypointGates) ... SKIPPED_WORKSTATION_FIXTURE: agent socket POSIX tests require the workstation root\nSKIPPED_WORKSTATION_FIXTURE: agent bridge installer/stdio tests require the workstation root\nok\ntest_failed_e0_never_launches_zen_inspection (test_dev.EntrypointGates) ... FAIL: current coordinator build unavailable; lifecycle tests were not run against a stale executable\nPARTIAL_ENGINE_BLOCKED: E0 did not pass; no Zen embedding test was started.\nok\ntest_fixture_session_name_matches_native_profile_guard (test_dev.EntrypointGates) ... ok\ntest_missing_custom_zen_never_creates_probe_profile (test_dev.EntrypointGates) ... BLOCKED_ENV: current coordinator and custom Zen builds are required for GUI inspection\nok\ntest_web_probe_also_requires_actual_native_e0 (test_dev.EntrypointGates) ... PARTIAL_ENGINE_BLOCKED: E0 did not pass; no Zen embedding test was started.\nok\n\n----------------------------------------------------------------------\nRan 8 tests in 0.008s\n\nOK\n"
+    },
+    "python:test_dev_cleanup.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.2,
+      "log": "logs/python_test_dev_cleanup.py.log",
+      "tail": "test_final_timeout_does_not_retry_signals (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_grace_timeout_escalates_before_reap (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_initial_interrupt_already_reaped_has_no_signals (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_initial_wait_error_still_uses_owned_cleanup (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_interrupted_unreaped_leader_gets_term_then_grace_wait (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_kill_permission_error_propagates_after_wait (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_missing_kill_group_still_reaps_direct_child (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_missing_term_group_still_reaps_direct_child (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_nondefault_sigchld_rejected_before_build_mount_or_popen (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_nonzero_exit_is_preserved_without_cleanup (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_normal_exit_has_no_cleanup_signal_or_extra_wait (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_term_permission_error_propagates_after_wait (test_dev_cleanup.OwnedRunCleanupTests) ... ok\ntest_timeout_with_reaped_status_never_resignals_or_rewaits (test_dev_cleanup.OwnedRunCleanupTests) ... ok\n\n----------------------------------------------------------------------\nRan 13 tests in 0.001s\n\nOK\n"
+    },
+    "python:test_fixtures.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.6,
+      "log": "logs/python_test_fixtures.py.log",
+      "tail": "test_exact_fixture_origin_and_no_privileged_endpoints (test_fixtures.Fixtures) ... ok\ntest_generated_certificate_is_not_trusted (test_fixtures.Fixtures) ... ok\ntest_owned_fixture_port_closes (test_fixtures.Fixtures) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.343s\n\nOK\n"
+    },
+    "python:test_key_fixture.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.6,
+      "log": "logs/python_test_key_fixture.py.log",
+      "tail": "test_busy_lock_refuses_and_closes_without_mutating_marker (test_key_fixture.FixtureTests) ... ok\ntest_corrupt_presence_data_is_refused_without_deletion (test_key_fixture.FixtureTests) ... ok\ntest_exact_external_hash_named_path_only (test_key_fixture.FixtureTests) ... ok\ntest_exists_remove_cannot_receive_secret_data (test_key_fixture.FixtureTests) ... ok\ntest_lock_owner_mode_and_nlink_are_checked (test_key_fixture.FixtureTests) ... ok\ntest_main_rejects_bad_argv_before_any_filesystem_admission (test_key_fixture.FixtureTests) ... ok\ntest_marker_owner_type_permissions_links_are_fail_closed (test_key_fixture.FixtureTests) ... ok\ntest_missing_has_exit_44_and_no_marker_mutation (test_key_fixture.FixtureTests) ... ok\ntest_no_unlink_after_marker_identity_changes (test_key_fixture.FixtureTests) ... ok\ntest_only_exact_invented_placeholders_are_accepted (test_key_fixture.FixtureTests) ... ok\ntest_owned_directory_required (test_key_fixture.FixtureTests) ... ok\ntest_read_and_unknown_operations_selectors_are_never_implemented (test_key_fixture.FixtureTests) ... ok\ntest_repeat_store_does_not_rewrite_existing_marker (test_key_fixture.FixtureTests) ... ok\ntest_two_providers_stay_separate_and_store_only_literal_marker (test_key_fixture.FixtureTests) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 0.015s\n\nOK\n"
+    },
+    "python:test_key_fixture_lock.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.3,
+      "log": "logs/python_test_key_fixture_lock.py.log",
+      "tail": "test_exclusive_writer_excludes_presence_and_mutation (test_key_fixture_lock.PresenceLockTests) ... ok\ntest_presence_reads_coexist_with_another_owned_shared_reader (test_key_fixture_lock.PresenceLockTests) ... ok\ntest_shared_reader_excludes_store_and_remove_without_changes (test_key_fixture_lock.PresenceLockTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.011s\n\nOK\n"
+    },
+    "python:test_lifecycle.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 26.1,
+      "log": "logs/python_test_lifecycle.py.log",
+      "tail": "test_profile_inventory_does_not_authorize_deletion (test_lifecycle.CefProfileCleanup) ... ok\ntest_chrome_stdio_bootstrap_and_invalid_bootstrap (test_lifecycle.Lifecycle) ... ok\ntest_cleanup_after_partial_start_failure (test_lifecycle.Lifecycle) ... ok\ntest_descendant_ignoring_term_receives_group_kill (test_lifecycle.Lifecycle) ... ok\ntest_foreign_token_rejected_without_leaking_secret (test_lifecycle.Lifecycle) ... ok\ntest_no_bootstrap_and_no_inherited_secret (test_lifecycle.Lifecycle) ... ok\ntest_oversized_and_malformed_frames_close_owned_process (test_lifecycle.Lifecycle) ... ok\ntest_symlink_ancestor_rejected_without_creating_outside_namespace (test_lifecycle.Lifecycle) ... ok\ntest_symlink_lock_rejected (test_lifecycle.Lifecycle) ... ok\ntest_two_starts_stops_no_orphan_or_profile_double_owner (test_lifecycle.Lifecycle) ... ok\n\n----------------------------------------------------------------------\nRan 10 tests in 25.870s\n\nOK\n"
+    },
+    "python:test_manifest_accept_install.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.4,
+      "log": "logs/python_test_manifest_accept_install.py.log",
+      "tail": "e_foreign_uid_and_symlink (test_manifest_accept_install.InstallTest) ... ok\ntest_private_helper_mode_uid_link_or_special_refuse_without_repair (test_manifest_accept_install.InstallTest) ... ok\ntest_setup_fixed_source_and_private_checksum_target (test_manifest_accept_install.InstallTest) ... ok\ntest_short_writes_complete_exact_source (test_manifest_accept_install.InstallTest) ... ok\ntest_source_ancestor_symlink_refuses_before_content_read (test_manifest_accept_install.InstallTest) ... ok\ntest_source_hash_mismatch_before_build_mutations (test_manifest_accept_install.InstallTest) ... ok\ntest_source_replacement_before_open_refuses (test_manifest_accept_install.InstallTest) ... ok\ntest_source_same_inode_edit_during_read_refuses (test_manifest_accept_install.InstallTest) ... ok\ntest_source_symlink_hardlink_foreign_uid_and_group_write_refuse_without_read (test_manifest_accept_install.InstallTest) ... ok\ntest_template_only_pin_and_nested_template_pin_refuse (test_manifest_accept_install.InstallTest) ... ok\ntest_unknown_existing_hash_preserved (test_manifest_accept_install.InstallTest) ... ok\ntest_unsupported_division_cannot_expose_a_template_pin (test_manifest_accept_install.InstallTest) ... ok\ntest_valid_existing_setup_and_check_are_readonly (test_manifest_accept_install.InstallTest) ... ok\ntest_zero_write_cleans_only_own_partial_entry (test_manifest_accept_install.InstallTest) ... ok\n\n----------------------------------------------------------------------\nRan 29 tests in 0.035s\n\nOK\n"
+    },
+    "python:test_release_preview.py": {
+      "status": "FAIL",
+      "exit": 1,
+      "seconds": 1.1,
+      "log": "logs/python_test_release_preview.py.log",
+      "tail": "s_not_accepted (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'\ntest_identity_path_signs_inside_out_without_contacting_apple (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'\ntest_missing_identity_blocks_after_identity_free_steps (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'\ntest_notarize_requires_explicit_authorization (test_release_preview.SigningIdentity) ... ok\ntest_commit_mismatch_refuses (test_release_preview.SourceGate) ... ok\ntest_modified_tracked_file_refuses (test_release_preview.SourceGate) ... ok\ntest_untracked_file_refuses_before_any_write (test_release_preview.SourceGate) ... ok\n\n======================================================================\nFAIL: test_stage_root_must_be_external (test_release_preview.BundleChecks)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tests/test_release_preview.py\", line 413, in test_stage_root_must_be_external\n    self.assertIsNone(preview.stage_root_problem(self.stage_root))\nAssertionError: '/Users/runner/work/_temp/base/.local/release-tests/case-zjzwopj_/stage is not on external storage under /Volumes' is not None\n\n----------------------------------------------------------------------\nRan 20 tests in 0.801s\n\nFAILED (failures=1, skipped=5)\n"
+    },
+    "python:test_session_cleanup.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.1,
+      "log": "logs/python_test_session_cleanup.py.log",
+      "tail": " ... ok\ntest_nondefault_sigchld_close_never_signals_or_waits (test_session_cleanup.CleanupTests) ... ok\ntest_nondefault_sigchld_spawn_rejected_before_popen (test_session_cleanup.CleanupTests) ... ok\ntest_profile_namespace_not_inspected_or_deleted_even_without_processes (test_session_cleanup.CleanupTests) ... ok\ntest_reaped_handles_receive_no_signal_wait_or_grace (test_session_cleanup.CleanupTests) ... ok\ntest_sigchld_change_during_grace_retains_leader_and_lease (test_session_cleanup.CleanupTests) ... ok\ntest_stream_error_continues_lock_release_and_reports_uncertain (test_session_cleanup.CleanupTests) ... ok\ntest_term_permission_error_reports_uncertain_after_reap (test_session_cleanup.CleanupTests) ... ok\ntest_uncertain_session_cannot_spawn_new_process (test_session_cleanup.CleanupTests) ... ok\ntest_unexpected_external_reap_during_grace_never_resignals (test_session_cleanup.CleanupTests) ... ok\ntest_unlock_error_still_closes_owned_lock_after_reap (test_session_cleanup.CleanupTests) ... ok\ntest_unreaped_leader_kept_through_grace_and_kill_before_wait (test_session_cleanup.CleanupTests) ... ok\ntest_wait_error_continues_other_direct_reaps_without_unlock (test_session_cleanup.CleanupTests) ... ok\ntest_wait_timeout_retains_lease_streams_and_handles (test_session_cleanup.CleanupTests) ... ok\ntest_zombie_group_kill_permission_error_is_uncertain (test_session_cleanup.CleanupTests) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 0.001s\n\nOK\n"
+    },
+    "python:test_storage.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 1.4,
+      "log": "logs/python_test_storage.py.log",
+      "tail": "nted_runs_no_build_helper (test_storage.Ensure) ... ok\ntest_devstorage_failure_stops_before_the_build_volume (test_storage.Ensure) ... ok\ntest_fallback_gives_up_on_a_busy_global_lock (test_storage.Ensure) ... ok\ntest_fallback_mounts_only_while_holding_the_global_lock (test_storage.Ensure) ... ok\ntest_fallback_skips_mounting_if_a_helper_mounted_during_the_lock_wait (test_storage.Ensure) ... ok\ntest_global_lock_path_is_never_followed_as_a_symlink (test_storage.Ensure) ... ok\ntest_helper_exit_status_does_not_decide_setup (test_storage.Ensure) ... ok\ntest_unverified_volume_after_the_wait_is_reported (test_storage.Ensure) ... ok\ntest_failing_helper_exit_is_ignored_once_the_volume_is_verified (test_storage.HelperPolling) ... ok\ntest_helper_output_never_reaches_stdout (test_storage.HelperPolling) ... ok\ntest_helper_runs_without_any_lock_held_and_is_retried_at_most_every_interval (test_storage.HelperPolling) ... ok\ntest_volume_mounted_by_another_run_ends_the_wait_without_a_rerun (test_storage.HelperPolling) ... ok\ntest_helpers_and_lock_follow_the_home_directory (test_storage.Paths) ... ok\ntest_absent_or_empty_mountpoint_passes (test_storage.Preflight) ... ok\ntest_files_under_the_mountpoint_are_never_hidden (test_storage.Preflight) ... ok\ntest_missing_image_is_never_replaced (test_storage.Preflight) ... ok\ntest_unreadable_leftover_mountpoint_names_the_fix (test_storage.Preflight) ... ok\n\n----------------------------------------------------------------------\nRan 18 tests in 1.035s\n\nOK\n"
+    },
+    "python:test_terminal_handoff_cleanup.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.4,
+      "log": "logs/python_test_terminal_handoff_cleanup.py.log",
+      "tail": "ait (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_cleanup_reentry_during_signal_does_not_signal_twice (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_empty_owned_group_esrch_does_not_imply_pid_reuse (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_exited_leader_remains_unreaped_through_entire_descendant_grace (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_final_wait_failure_cannot_restore_group_authority (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_group_signals_precede_only_reap_and_each_has_fresh_authority (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_ownership_lost_between_term_and_kill_never_escalates (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_post_kill_exit_deadline_revokes_future_group_signals (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_raw_popen_or_receipt_pid_is_not_signal_authority (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_repeated_finally_cannot_signal_reused_pid_after_reap (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_signal_permission_error_revokes_future_authority (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_successful_independent_driver_release_revokes_signalling (test_terminal_handoff_cleanup.OwnershipTests) ... ok\ntest_unknown_observation_before_term_never_signals (test_terminal_handoff_cleanup.OwnershipTests) ... ok\n\n----------------------------------------------------------------------\nRan 38 tests in 0.095s\n\nOK\n"
+    },
+    "python:test_terminal_handoff_leaf.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.3,
+      "log": "logs/python_test_terminal_handoff_leaf.py.log",
+      "tail": " ... ok\ntest_exit_between_initial_and_presignal_observation_skips_term (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_exited_fixed_leaf_reaps_without_signal (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_final_wait_failure_never_restores_authority (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_flag_only_cancellation_during_spawn_retains_leaf_owner (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_live_permission_denial_stays_failure_and_never_retries (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_lost_child_authority_after_term_never_escalates (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_modified_or_nonbytes_source_rejected_before_spawn (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_nondefault_sigchld_is_refused_before_leaf_spawn (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_pointer_is_closed_and_fixed_owned_launch_scope (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_repeated_stop_after_reap_has_no_observation_or_signal (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_running_leaf_terminated_by_term_skips_kill (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_spawn_executes_verified_snapshot_not_mutable_script_path (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\ntest_term_ignoring_leaf_is_killed_then_reaped (test_terminal_handoff_leaf.FixtureLeafTests) ... ok\n\n----------------------------------------------------------------------\nRan 17 tests in 0.030s\n\nOK\n"
+    },
+    "python:test_understand_fixture_install.py": {
+      "status": "FAIL",
+      "exit": 1,
+      "seconds": 0.5,
+      "log": "logs/python_test_understand_fixture_install.py.log",
+      "tail": "line,\n  File \"/Applications/Xcode_16.4.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py\", line 1110, in _opener\n    return self._accessor.open(self, flags, mode)\nFileNotFoundError: [Errno 2] No such file or directory: '/Volumes/T9/Code/AxioSozo-browser-workstation/tools/axiosozo-understand/fixture-host.mjs'\n\n======================================================================\nFAIL: test_failed_install_keeps_its_partial_root_and_never_repairs (test_understand_fixture_install.InstallerTests)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py\", line 297, in test_failed_install_keeps_its_partial_root_and_never_repairs\n    self.assertTrue(self.root.exists())\nAssertionError: False is not true\n\n======================================================================\nFAIL: test_file_mutation_during_bounded_hash_is_detected (test_understand_fixture_install.InstallerTests)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tests/test_understand_fixture_install.py\", line 260, in test_file_mutation_during_bounded_hash_is_detected\n    self.assertTrue(mutated)\nAssertionError: False is not true\n\n----------------------------------------------------------------------\nRan 26 tests in 0.184s\n\nFAILED (failures=2, errors=11)\n"
+    },
+    "python:test_zen_profile.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.4,
+      "log": "logs/python_test_zen_profile.py.log",
+      "tail": "... ok\ntest_fd_is_closed_on_read_error (test_zen_profile.MarkerAdmission) ... ok\ntest_marker_identity_replacement_before_open_is_refused (test_zen_profile.MarkerAdmission) ... ok\ntest_symlink_and_hardlink_are_refused_without_open (test_zen_profile.MarkerAdmission) ... ok\ntest_valid_exact_json_marker_and_no_follow_bounded_fd (test_zen_profile.MarkerAdmission) ... ok\ntest_wrong_marker_mode_uid_type_and_oversize_are_refused (test_zen_profile.MarkerAdmission) ... ok\ntest_canonical_alias_is_refused (test_zen_profile.NamespaceAdmission) ... ok\ntest_cli_parser_preserves_alias_spelling_for_admission (test_zen_profile.NamespaceAdmission) ... ok\ntest_directory_identity_change_during_marker_read_is_refused (test_zen_profile.NamespaceAdmission) ... ok\ntest_each_environment_gate_is_required_before_metadata_read (test_zen_profile.NamespaceAdmission) ... ok\ntest_exact_short_profile_is_admitted (test_zen_profile.NamespaceAdmission) ... ok\ntest_legacy_namespace_checks_and_errors_are_preserved (test_zen_profile.NamespaceAdmission) ... ok\ntest_parent_and_profile_must_be_owned_private_directories (test_zen_profile.NamespaceAdmission) ... ok\ntest_run_id_and_exact_raw_spelling_are_required (test_zen_profile.NamespaceAdmission) ... ok\ntest_short_socket_byte_length (test_zen_profile.NamespaceAdmission) ... ok\ntest_wrong_build_root_is_refused_before_metadata (test_zen_profile.NamespaceAdmission) ... ok\n\n----------------------------------------------------------------------\nRan 16 tests in 0.052s\n\nOK\n"
+    },
+    "python:apps/browser/tests/test_bootstrap.py": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 5.6,
+      "log": "logs/python_apps_browser_tests_test_bootstrap.py.log",
+      "tail": "....s..PASS: ordered Zen patch result verified; skipping unsafe repeat import\nPASS: ordered Zen patch result verified; skipping unsafe repeat import\nPASS: ordered Zen patch result verified; skipping unsafe repeat import\n................s.........\n----------------------------------------------------------------------\nRan 33 tests in 5.219s\n\nOK (skipped=2)\n"
+    },
+    "python:tools/axiosozo-project-reader/project_reader_test.py": {
+      "status": "FAIL",
+      "exit": 1,
+      "seconds": 0.4,
+      "log": "logs/python_tools_axiosozo-project-reader_project_reader_test.py.log",
+      "tail": "y_with_core (__main__.ReaderTests)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-project-reader/project_reader_test.py\", line 30, in setUp\n    raise RuntimeError(\"tests require the external workstation TMPDIR\")\nRuntimeError: tests require the external workstation TMPDIR\n\n======================================================================\nERROR: test_size_cap_and_in_place_change_are_refused (__main__.ReaderTests)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-project-reader/project_reader_test.py\", line 30, in setUp\n    raise RuntimeError(\"tests require the external workstation TMPDIR\")\nRuntimeError: tests require the external workstation TMPDIR\n\n======================================================================\nERROR: test_unallowlisted_content_has_zero_descriptor_opens (__main__.ReaderTests)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-project-reader/project_reader_test.py\", line 30, in setUp\n    raise RuntimeError(\"tests require the external workstation TMPDIR\")\nRuntimeError: tests require the external workstation TMPDIR\n\n----------------------------------------------------------------------\nRan 24 tests in 0.002s\n\nFAILED (errors=24)\n"
+    },
+    "python:tools/axiosozo-arrival/arrival_lsof_test.py": {
+      "status": "FAIL",
+      "exit": 1,
+      "seconds": 0.3,
+      "log": "logs/python_tools_axiosozo-arrival_arrival_lsof_test.py.log",
+      "tail": "==========================================================\nFAIL: test_raw_output_and_private_stderr_discarded (__main__.RealSyntheticProcesses)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-arrival/arrival_lsof_test.py\", line 75, in setUp\n    self.fail(\"external workstation TMPDIR required\")\nAssertionError: external workstation TMPDIR required\n\n======================================================================\nFAIL: test_stderr_exact_cap_and_overflow (__main__.RealSyntheticProcesses)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-arrival/arrival_lsof_test.py\", line 75, in setUp\n    self.fail(\"external workstation TMPDIR required\")\nAssertionError: external workstation TMPDIR required\n\n======================================================================\nFAIL: test_stdout_exact_cap_and_overflow (__main__.RealSyntheticProcesses)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-arrival/arrival_lsof_test.py\", line 75, in setUp\n    self.fail(\"external workstation TMPDIR required\")\nAssertionError: external workstation TMPDIR required\n\n----------------------------------------------------------------------\nRan 18 tests in 0.001s\n\nFAILED (failures=13)\n"
+    },
+    "python:tools/axiosozo-manifest/manifest_accept_test.py": {
+      "status": "FAIL",
+      "exit": 1,
+      "seconds": 0.4,
+      "log": "logs/python_tools_axiosozo-manifest_manifest_accept_test.py.log",
+      "tail": "E\n======================================================================\nERROR: setUpClass (__main__.AcceptanceTest)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/runner/work/_temp/base/tools/axiosozo-manifest/manifest_accept_test.py\", line 29, in setUpClass\n    raise RuntimeError('EXTERNAL_WORKSTATION_FIXTURE_VOLUME_REQUIRED')\nRuntimeError: EXTERNAL_WORKSTATION_FIXTURE_VOLUME_REQUIRED\n\n----------------------------------------------------------------------\nRan 0 tests in 0.000s\n\nFAILED (errors=1)\n"
+    },
+    "node:apps/browser/tests/about-axiosozo-model.test.mjs": {
+      "status": "PASS",
+      "exit": 0,
+      "seconds": 0.4,
+      "log": "logs/node_apps_browser_tests_about-axiosozo-model.test.mjs.log",
+      "tail": "s remote checks (M1) (0.140333ms)\n\u2714 service and surface addresses with a query or fragment are refused in the editor (L5) (0.989375ms)\n\u2714 detection draft review keeps provenance and guess markers and yields a valid manifest (0.920709ms)\n\u2714 draft review rejects invalid edits instead of silently dropping them (0.223625ms)\n\u2714 editing a confirmed project round-trips its manifest (0.150667ms)\n\u2714 ledger views group per host/context and per day with readable durations (0.376917ms)\n\u2714 attention items map to page actions and never to non-web URLs (0.179375ms)\n\u2714 the page model shares enum values with the contexts core (0.186708ms)\n\u2714 add-project review, Domo-like: environments grouped per app, production URL on the web app, v2 manifest (16.259333ms)\n\u2714 add-project review, RemoteRAL-like: + Add environment gets a dev server; guesses stay marked; bad production URL refused (1.606375ms)\n\u2714 surfaces: Shown/More is written only where it differs from the kind's default; unticked ones are dropped (0.173792ms)\n\u2714 projects are grouped by space (any type) and the page says where a new project lives (0.19775ms)\n\u2714 deep links: four views, old hashes redirect, item links validated (0.238084ms)\n\u2714 AI & keys: provider cards keep the honest labels; Jev key form rules; Keychain texts match ProviderStatus (2.381375ms)\n\u2714 site rules show their own screen time; top sites are marked when a rule covers them (0.28675ms)\n\u2139 tests 23\n\u2139 suites 0\n\u2139 pass 23\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 118.611708\n"
+    }
+  }
+}
