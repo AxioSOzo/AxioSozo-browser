@@ -7,7 +7,7 @@
 // the loopback GET fixture, and general web mode is not offered (docs/CAPABILITY_MATRIX.md).
 import { EngineStreamHost, EngineStreamTarget, validFixtureOrigin } from "./EngineStreamClient.sys.mjs";
 import { memfdFramesWanted, memfdProcReadable, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
-import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_REFILL_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 
 // upstreams.lock.json `webkit` (Debian 13 packages); a test keeps these equal to the lockfile.
 export const WEBKIT_VERSION = "2.48.3";
@@ -185,8 +185,6 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   }
   const warm = await takeWarmWebKitHost(origin, { frameDamage, damagePayload, frameTransport });
   const host = warm ?? await startWebKitHost(win, origin, { frameDamage, damagePayload, frameTransport });
-  // The next spare: soon after this tab's host closes, at the latest PREWARM_REFILL_MS from now.
-  try { prewarmWebKitHost(win, PREWARM_REFILL_MS); } catch {}
   const adapter = new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
     document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure });
   const close = adapter.close.bind(adapter);

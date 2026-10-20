@@ -12,7 +12,8 @@
 // - Fixture mode only (the per-tab fixture hosts; never the shared web-mode Chromium host)
 //   and never on macOS (surface endpoints are untouched there).
 // - One use: a spare serves exactly one tab and is never returned; the next one is started
-//   when that tab's host closes (or, at the latest, PREWARM_REFILL_MS after it was taken).
+//   when that tab's host closes (a timed refill while the tab is open started a host inside
+//   the new tab's busy first minute: linux-engine-profile run 39385314455).
 // - A spare that died, failed or no longer matches the request is shut down, never used.
 // - Dropped on memory pressure and at quit; pref `axiosozo.engines.prewarm` (default on).
 
@@ -20,9 +21,6 @@ export const PREWARM_PREF = "axiosozo.engines.prewarm";
 export const PREWARM_DEFAULT = true;
 // The first spare: after start-up work, at idle.
 export const PREWARM_STARTUP_DELAY_MS = 3000;
-// A spare was taken but its tab stays open: start the next one later (the new tab's host
-// is still starting and painting its first frames now).
-export const PREWARM_REFILL_MS = 60000;
 // A tab's host closed: the next spare soon.
 export const PREWARM_AFTER_CLOSE_MS = 1000;
 const DROP_TOPICS = ["memory-pressure", "quit-application-granted"];

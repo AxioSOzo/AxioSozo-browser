@@ -8,7 +8,7 @@ import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlo
   disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, isNativeFrame, NativeFrameSinks, nativeFrameRing,
   workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
-import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_REFILL_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
 export const CHROMIUM_VERSION = "154.0.8037.17";
@@ -1439,8 +1439,6 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
   }
   const spare = await takeCEFFixtureHost(origin);
   const host = spare ?? await launchHost("fixture", origin);
-  // The next spare: soon after this tab's host closes, at the latest PREWARM_REFILL_MS from now.
-  prewarmCEFFixtureHost(win, PREWARM_REFILL_MS);
   // A spare comes from the shared module instance: its adapter class too (as in web mode).
   const Adapter = (spare && sharedInstance()?.CEFEngineAdapter) || CEFEngineAdapter;
   const adapter = new Adapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
