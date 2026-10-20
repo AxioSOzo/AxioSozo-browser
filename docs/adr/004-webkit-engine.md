@@ -93,35 +93,88 @@ closed, the engine's own sandbox enabled, clean exit without orphan helpers.
 | Ubuntu 24.04 packages | Ubuntu does not ship WPE WebKit in 24.04; Debian 13 (or a `debian:13` container) is the reference platform. |
 | In-process WebKit inside Gecko | Breaks process isolation and Gecko's own sandbox; rejected like in-process CEF. |
 
-## macOS plan (NOT_VERIFIED as a product path)
+## macOS (workstream `webkit-macos`; component evidence on macos-15, never Zen E1/E2)
 
-Target: a **WKWebView-based helper host** speaking the same pipe (engine-stream-v1,
-`webkit_port:"wkwebview"`) and delivering frames over the existing engine-neutral
-**engine-surface-v1** Mach/IOSurface channel (`surface_service`, CONNECT/FRAME/RELEASE,
-ring of `IOSurface`s, dirty rects, begin-frame ticks), so Zen's native presenter shows
-WebKit exactly as it shows CEF today.
+Status: **EXPERIMENTAL, component PASS on a GitHub `macos-15` arm64 runner** (Apple M1
+virtual, 3 cores, macOS 15.7.9, system WebKit 20621.3.11.11.3, 1024x768 1x display).
+The in-Zen E2E on macOS is **NOT_VERIFIED** (no macOS Zen build in CI).
 
-- Process and sandbox: system WebKit already runs WebContent/Networking/GPU as
-  sandboxed XPC services; the helper is the UI process. Per-instance
-  `WKWebsiteDataStore` (non-persistent for fixtures; `dataStoreForIdentifier:` for web
-  mode) keeps storage separate from Safari, Gecko and CEF.
-- Capture, in order of preference: (a) WebKit's remote layer tree hosted through
-  `CAContext`/`CALayerHost` and rendered into IOSurfaces (private API, as 003-native
-  option (d) already records; Chrome and WebKit use the same SPI); (b) a `CARenderer`
-  rendering the WKWebView layer tree into an IOSurface-backed Metal texture each vsync;
-  (c) CPU fallback `takeSnapshotWithConfiguration:` into BGRA (no damage, ~tens of ms).
-- Input: AppKit `NSEvent`s sent to the WKWebView (keyDown/up, mouse, scrollWheel via
-  `CGEventCreateScrollWheelEvent` pixel units) and `NSTextInputClient` for text commit
-  and later marked-text IME; device scale via the window's backing scale or
-  `_overrideDeviceScaleFactor` (SPI).
-- Policies: `WKNavigationDelegate` (main-frame allowlist, GET), `WKUIDelegate` (deny
-  pop-ups, dialogs, media capture, open panels), `WKContentRuleListStore` with a store
-  inside the private profile, default server-trust handling (fails closed).
+### Decision
 
-**Scaffold in this change** (`native/webkit-host/mac/host_mac.mm`): option (c) behind the
-shared core, a WKWebView in an offscreen borderless window that is never ordered on
-screen. It is EXPERIMENTAL and exists to validate the core against real WebKit and to
-stage the design above. It is not engine-surface-v1 evidence and not a product path.
+1. **System WebKit through WKWebView** in a helper host (`native/webkit-host/mac/host_mac.mm`)
+   behind the same engine-neutral core as WPE (`stream_core.hpp`, engine-stream-v1,
+   `webkit_port:"wkwebview"`). Frames leave over **engine-surface-v1** exactly like the CEF
+   host's surface mode (CONNECT/CONNECTED handshake before WebKit starts, global IOSurface
+   ring of 6 per target, FRAME with generations + one dirty rect, RELEASE, optional
+   BEGIN_FRAME, `surface_failed` + exit 64), via `native/webkit-host/mac/surface_host.mm`
+   (connect/drain/send adapted from `chromium-host/surface_transport.mm`). Without
+   `surface_service` the same host sends AXCF BGRA pipe frames (labelled fallback, tests).
+   The core change is additive and opt-in per engine (`Engine::surfaceSupported()`); the
+   WPE host and the scripted test engine keep refusing the surface keys.
+2. **Capture: `-[WKWebView takeSnapshotWithConfiguration:]`** (public API), one sRGB BGRA
+   copy into the ring IOSurface, taken on a `frame_rate` clock (default: internal pacing),
+   up to two snapshots in flight with in-order delivery, idle back-off to 4 Hz after 30
+   identical frames, identical frames dropped by the core's damage diff. The helper
+   window is borderless, ordered **off every display** at (-30000, -30000), ignores the
+   mouse, is excluded from the Windows menu, and the app is `Accessory` (no Dock icon,
+   menu bar or app-switcher entry). It is never the browser and never visible.
+3. **Private SPI, explicitly** (reported in `ready.private_spi`, `respondsToSelector`-guarded,
+   neither touches the sandbox or the process model):
+   - `-[WKWebView _setWindowOcclusionDetectionEnabled:NO]`: without it the offscreen window
+     is "occluded", WebKit reports `visibilityState:"hidden"` and runs rAF at **0 Hz**
+     (measured). Zen's `visibility` command is the real visibility.
+   - `-[WKWebView _setOverrideDeviceScaleFactor:]`: the page's `devicePixelRatio` and the
+     snapshot scale follow the requested `device_scale` (1x/2x) instead of the unknown
+     offscreen backing scale; frames are then 1:1 physical pixels (1800x1300 at 2x).
+4. **Process and sandbox unchanged**: WebContent and Networking run as Apple's XPC services,
+   observed under Seatbelt (`sandbox_check(pid) == 1`) and attributed to the host by
+   launchd's responsible pid; none outlived its host (5 s check per case). Per-instance
+   `nonPersistentDataStore`, content rule list compiled into the private profile.
+5. **Zen side**: WebKit is available on macOS arm64 when `AXIOSOZO_WEBKIT_BINARY` is
+   `<build root>/webkit/AxioWebKitMacHost` (build root on the project volume), the pref
+   `axiosozo.engines.webkit.enabled` is set and a fixture origin exists; otherwise a reason.
+   With the engine-view component the WebKit canvas is bound to an
+   `nsIAxioEngineEndpoint` (`createEndpoint(false)`, internal pacing) and frames never pass
+   through JS, exactly like Chromium tabs on macOS; without it the pipe presenter is used.
+
+### Capture candidates measured (capture bench, run 39342162006, 900x650 CSS px)
+
+| Candidate | Window | Result |
+| --- | --- | --- |
+| `takeSnapshot` | not ordered (old scaffold) | 247 fps snapshots, but `hidden`, rAF 0 Hz: 1 distinct frame in 3 s (frozen page) |
+| `takeSnapshot` | ordered offscreen, no SPI | `hidden`, rAF 0 Hz, 1 distinct frame |
+| `takeSnapshot` | **ordered offscreen + occlusion SPI** | **`visible`, rAF 60 Hz, 137 fps, p50 5.8 ms / p95 14 ms, 179 distinct frames in 3 s; input→pixels p50 8.6 ms** |
+| `takeSnapshot` at 2x (scale SPI) | unordered | 1800x1300, 56 fps, p50 16 ms |
+| `CALayer renderInContext:` | any | blank (one colour): WebKit's content is a remote layer tree |
+| `CARenderer` → IOSurface Metal texture | any | blank: same reason |
+| ScreenCaptureKit `SCStream` of the window | on screen, visible (reference) | 57 fps, IOSurfaces with dirty rects, but needs the Screen Recording TCC grant for the browser and a window on screen |
+| ScreenCaptureKit | offscreen + SPI / on screen alpha 0 | 16.7 fps / 1 frame: WindowServer does not composite them |
+
+Rejected for the product: ScreenCaptureKit (user-visible Screen Recording permission and an
+on-screen window), `CALayerHost`/`CAContext` remote-layer hosting (private SPI deep in
+WebKit's process model; noted as the future zero-copy path, not attempted), CPU
+layer rendering (blank).
+
+### Host measurements (run RUN_HOST_FINAL, 1800x1300 at 2x, continuously animated fixture)
+
+HOST_TABLE_PLACEHOLDER
+
+Reading: the IOSurface hop itself costs ~1 ms (host copy+send) and Mach delivery ~1 ms;
+the snapshot (WebContent paint into a shareable bitmap) is the cost centre. External
+BEGIN_FRAME pacing measured worse than internal pacing, so Zen uses internal pacing for
+WebKit. The receiver's zero-copy stand-in (use count held 40 ms past RELEASE) never saw an
+in-use ring surface overwritten.
+
+### Input on macOS
+
+AppKit `NSEvent`s are sent to the WKWebView: keys with macOS virtual key codes (Zen maps
+`KeyboardEvent.code` to kVK), text through `NSTextInputClient insertText:`, mouse, and
+pixel scroll-wheel `CGEvent`s. Measured: buttons, click-to-focus and typing, Escape /
+arrows / Tab with DOM key names, page `devicePixelRatio` 2 and 1, hidden = no frames,
+wheel scrolls exactly 400 CSS px at 2x. Known gaps (recorded, not failed): WebKit takes DOM
+`buttons` from the global `[NSEvent pressedMouseButtons]`, so synthetic drags are not seen
+as drags by the page; the scrolled wheel event is not delivered to a passive DOM `wheel`
+listener; no cursor events (WKWebView sets `NSCursor` itself); no IME composition.
 
 ## Consequences
 
@@ -159,5 +212,6 @@ UPSTREAM_RESULTS_PLACEHOLDER
 | Input fidelity: buttons, click focus, drag, XKB keycodes, wheel pixel delta (400 CSS px), cursor text/pointer, dpr 2/1, hidden = no frames | PASS | `input_test.py` |
 | 13 negative protocol cases with exact exit codes | PASS | `stream_security_test.py` |
 | Web process under bubblewrap; no orphan helpers; private profiles removed | PASS (CI-environment settings recorded; sandbox never disabled) | `sandbox-probe` job, run 39293842171; stream result |
-| Real WebKit through the shared core on macOS | EXPERIMENTAL PASS (WKWebView scaffold, earlier session) | `docs/evidence/macos/webkit-scaffold/` |
-| Zen E1/E2 with WebKit | NOT_TESTED | No Zen-side integration yet |
+| Real WebKit through the shared core on macOS | EXPERIMENTAL PASS (WKWebView host; stream, input, security over the pipe) | `macos-webkit-host.yml`, see "macOS" |
+| WKWebView frames over engine-surface-v1 (IOSurface + Mach) | EXPERIMENTAL PASS (standalone receiver, 8 cases) | `macos-webkit-host.yml`, [evidence](../evidence/macos/webkit/) |
+| Zen E1/E2 with WebKit | Linux: see docs/handoff/webkit-zen.md; macOS: NOT_VERIFIED | macOS Zen wiring has node tests only (`webkit-macos.test.mjs`) |

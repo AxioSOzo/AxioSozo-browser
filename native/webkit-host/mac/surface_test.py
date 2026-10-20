@@ -159,6 +159,8 @@ def main():
         # Zero-copy stand-in: the receiver keeps each IOSurface's use count 40 ms past its
         # RELEASE, like Gecko's compositor; the host must never overwrite a surface in use.
         'surface-zero-copy-inuse-60': dict(mode='surface', begin_frames='external', rate=60, hold_use_ms=40),
+        # The same with internal pacing, which Zen uses for WebKit (createEndpoint(false)).
+        'surface-zero-copy-inuse-internal-60': dict(mode='surface', begin_frames='internal', rate=60, hold_use_ms=40),
         'pipe-60-baseline': dict(mode='pipe', rate=60),
         'negative-no-connected': dict(mode='surface', negative='no_connected'),
         'negative-bogus-release': dict(mode='surface', negative='bogus_release'),
