@@ -211,6 +211,10 @@ export class EngineFrameSurface {
   accept(metadata, pixels) {
     if (this.#disposed) return;
     const { width, height } = metadata;
+    // Only a whole BGRA frame (an ArrayBuffer of width*height*4 bytes) is drawable. Anything else
+    // (e.g. a NativeFrame of another module instance that a presenter failed to recognise: the
+    // cef-feel-2 black frames) is refused loudly instead of painting a transparent, black canvas.
+    if (bufferLength(pixels) !== width * height * 4) throw new Error("INVALID_FRAME_PIXELS");
     const full = [0, 0, width, height];
     if (width !== this.#width || height !== this.#height) { this.#width = width; this.#height = height; this.#dirty = full; }
     else this.#dirty = unite(this.#dirty, metadata.damage?.[0] ?? full);

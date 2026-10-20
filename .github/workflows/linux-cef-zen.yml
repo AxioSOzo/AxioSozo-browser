@@ -207,28 +207,27 @@ jobs:
           set -o pipefail
           timeout 600 ./dev gui-test --app fetched --engine chromium --scenario launch,chrome,fixture \
             --evidence-dir "$EVIDENCE_OUT/harness" 2>&1 | tail -n 40 | tee "$EVIDENCE_OUT/harness.log"
-      - name: 0. Frame-path probe (E1 pixels per frame-path variant; picks the prefs for runs 2-5)
+      - name: 0. Frame-path probe (diagnostics; runs 2-5 always use the product defaults)
         id: framepath
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
-          # Chromium frames captured black on app 39362552105 (runs 39371098391, 39374652910) with
-          # the JS presenter too, so the variant is found here: the product default first, then
-          # TEST-ONLY frame-path prefs (frame path owned by cloud/perf-phase2; labelled in evidence).
+          # The Chromium black frames of cef-feel-2 (app 39362552105) came from presenters testing
+          # `instanceof NativeFrame` across module instances (fixed by perf-phase3 c22eb86; root cause
+          # in docs/handoff/final-review.md). Each frame path is still exercised here and reported;
+          # the variants after `default` are TEST-ONLY prefs for diagnosis only, never used by runs 2-5.
           python3 - "$EVIDENCE_OUT" <<'PY'
-          import json, os, pathlib, subprocess, sys
+          import json, pathlib, subprocess, sys
           out = pathlib.Path(sys.argv[1])
           variants = [('default', []),
-                      ('worker-off', ['axiosozo.engines.linux.frame_worker=false']),
+                      ('worker', ['axiosozo.engines.linux.native_receiver=false']),
                       ('js-memfd', ['axiosozo.engines.linux.native_receiver=false',
                                     'axiosozo.engines.linux.frame_worker=false']),
-                      ('memfd-off', ['axiosozo.engines.linux.memfd_frames=false']),
-                      ('memfd-off-receiver-off', ['axiosozo.engines.linux.memfd_frames=false',
-                                                  'axiosozo.engines.linux.native_receiver=false'])]
-          probe, chosen = {}, None
+                      ('pipe', ['axiosozo.engines.linux.memfd_frames=false'])]
+          probe = {}
           for name, prefs in variants:
               cmd = ['timeout', '420', 'python3', 'scripts/cef_zen_e2e.py', '--app', 'fetched', '--mode', 'web',
-                     '--scenario', 'launch,chrome,frame_selftest,switch,typing', '--evidence-dir', str(out / f'framepath-{name}')]
+                     '--scenario', 'launch,chrome,frame_selftest,switch', '--evidence-dir', str(out / f'framepath-{name}')]
               for pref in prefs:
                   cmd += ['--pref', pref]
               with open(out / f'framepath-{name}.log', 'w') as log:
@@ -236,45 +235,41 @@ jobs:
               path = out / f'framepath-{name}' / 'result.json'
               result = json.loads(path.read_text()) if path.exists() else {}
               e1 = result.get('matrix', {}).get('e1_render_in_content_area') or {}
-              typed = result.get('scenarios', {}).get('typing', {}).get('status')
               probe[name] = {'prefs': prefs, 'e1': e1.get('status'), 'black_fraction': e1.get('black_fraction'),
-                             'frame_path': e1.get('frame_path'), 'typing': typed}
-              if chosen is None and e1.get('status') == 'PASS':
-                  chosen = name
-          probe_out = {'chosen': chosen, 'variants': probe}
+                             'pixels': e1.get('pixels'), 'frame_path': e1.get('frame_path'),
+                             'selftest': result.get('scenarios', {}).get('frame_selftest', {}).get('status')}
+          status = 'PASS' if all(v['e1'] == 'PASS' for v in probe.values()) else 'FAIL'
+          probe_out = {'status': status, 'variants': probe}
           (out / 'framepath.json').write_text(json.dumps(probe_out, indent=2) + '\n')
           print(json.dumps(probe_out, indent=1))
-          args = ' '.join(f'--pref {p}' for p in dict(variants)[chosen]) if chosen else ''
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as gh:
-              gh.write(f'args={args}\nchosen={chosen or "none"}\n')
           PY
       - name: 2. Fixture mode E1/E2 (probe button, input, history, host kill)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/fixture.log"
       - name: 3. Web mode E1/E2 + native-feel matrix (1x)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
+          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
             | tail -n 80 | tee "$EVIDENCE_OUT/web.log"
       - name: 4. Web mode at 2x (HiDPI subset)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/web-2x.log"
       - name: 5. Web mode, AT-SPI accessibility (GNOME_ACCESSIBILITY=1)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
+          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
             | tail -n 40 | tee "$EVIDENCE_OUT/a11y.log"
       - name: Leftover processes
         if: always()
@@ -296,11 +291,12 @@ jobs:
           # BLOCKED gates (environment, or the known parent crash owned by cloud/linux-platform)
           # are listed, never counted as passes; any FAIL or a missing run fails the job.
           verdict = 'PASS' if all(r['status'] in ('PASS', 'BLOCKED_ENV') for r in summary.values()) else 'FAIL'
-          # Informational: the frame-path probe (step 0; frame path owned by cloud/perf-phase2) is
-          # reported, not part of this verdict; runs 2-5 use the variant it chose (TEST-ONLY prefs
-          # unless the product default showed pixels).
+          # The frame-path probe (step 0) is part of the verdict: every frame path (product default,
+          # worker, main-thread JS memfd, pipe) must show page content in the Chromium view.
           path = out / 'framepath.json'
           summary_native = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
+          if summary_native.get('status') != 'PASS':
+              verdict = 'FAIL'
           blocked = {name: [k for k, v in r['matrix'].items() if v in ('BLOCKED', 'BLOCKED_ENV')] for name, r in summary.items()}
           (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary,
                                                         'frame_path_probe': summary_native}, indent=2) + '\n')

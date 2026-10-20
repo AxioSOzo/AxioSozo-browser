@@ -378,3 +378,16 @@ test("frame workers are probed once (ChromeWorker, sync reads, OffscreenCanvas) 
   const sink = ring.createSink();
   assert.equal(sink.kind, "worker"); sink.close();
 });
+
+test("a source that is not a whole BGRA frame is refused, never painted black", async () => {
+  const { NativeFrame } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  const win = fakeWindow(), canvas = fakeCanvas();
+  const surface = new EngineFrameSurface(win, canvas, { upload: "imagedata" });
+  const meta = { frame_id: 1, width: 4, height: 3 };
+  for (const source of [new NativeFrame({}, 48), { byteLength: 48 }, new Uint8Array(48), new ArrayBuffer(47)]) {
+    assert.throws(() => surface.accept(meta, source), /INVALID_FRAME_PIXELS/);
+  }
+  assert.equal(win.ticks.length, 0, "nothing was scheduled");
+  surface.accept(meta, new ArrayBuffer(48));
+  assert.equal(win.ticks.length, 1);
+});
