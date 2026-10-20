@@ -1,0 +1,62 @@
+gui-test webkit/launch: PASS
+gui-test webkit/chrome: PASS
+gui-test webkit/switch: PASS
+gui-test webkit/polish: FAIL (AssertionError: timed out waiting for the page icon on the WebKit tab (host favicon → Zen setIcon))
+gui-test webkit/typing: PASS
+gui-test webkit/selection: FAIL (AssertionError: timed out waiting for drag selection of "alpha b…"; last page state {'p': '1', 'l': 1, 't': 'zen ', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': '', 'sel': 'one', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Tab:Tab', 'mb': '', 'z': [1, 953], 'ws': None, 'cm': 0, 'perm': '', 'file': ''})
+gui-test webkit/clipboard: PASS
+gui-test webkit/middle_click: PASS
+gui-test webkit/wheel: PASS
+gui-test webkit/cursor: FAIL (AssertionError: cursor mismatch: {'c-pointer': {'expected': 'pointer', 'seen': 'default'}, 'c-text': {'expected': 'text', 'seen': 'default'}, 'c-move': {'expected': 'move', 'seen': 'default'}, 'c-wait': {'expected': 'wait', 'seen': 'default'}, 'c-crosshair': {'expected': 'crosshair', 'seen': 'default'}, 'c-not-allowed': {'expected': 'not-allowed', 'seen': 'default'}, 'c-grab': {'expected': 'grab', 'seen': 'default'}, 'c-col-resize': {'expected': 'col-resize', 'seen': 'default'}})
+gui-test webkit/select_popup: FAIL (AssertionError: timed out waiting for <select> choice by keyboard; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': 'select', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1, 953], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 0, 'perm': '', 'file': ''})
+gui-test webkit/context_menu: FAIL (AssertionError: timed out waiting for Zen-drawn context menu for the WebKit selection)
+gui-test webkit/dialogs: FAIL (AssertionError: timed out waiting for Zen dialog for d-alert)
+gui-test webkit/beforeunload: FAIL (AssertionError: timed out waiting for beforeunload armed; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'beta', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Escape:Escape', 'mb': 'middle@area', 'z': [1, 953], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''})
+gui-test webkit/permission: FAIL (AssertionError: timed out waiting for Zen permission doorhanger for the WebKit page)
+gui-test webkit/file_dialog: FAIL (AssertionError: timed out waiting for Zen's (GTK) file picker window)
+gui-test webkit/download: FAIL (AssertionError: timed out waiting for a Zen notice for the refused download)
+gui-test webkit/find: PASS
+gui-test webkit/zoom: FAIL (AssertionError: timed out waiting for Ctrl+= zooms; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'needle', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': 'C:Control:ControlLeft', 'mb': 'middle@area', 'z': [1, 866], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''})
+gui-test webkit/ime: FAIL (AssertionError: timed out waiting for webkit text cleared; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'IncrementPage 2alpha beta gamma deltapointertextmovewaitcrosshairnot-allowedgrabcol-resizedefaultalertconfirmpromptarm unloadfind the needle here; another needle there; a third needle.notificationsdownloadbottom of the feel fixture', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1, 866], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''})
+gui-test webkit/shortcuts: PASS
+gui-test webkit/hidpi: FAIL (AssertionError: timed out waiting for input lands at 1x again; last page state {'p': '1', 'l': 3, 't': '', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': '', 'sel': 'one', 'col': '#336699', 'dl': '', 'd': [], 'k': '', 'mb': '', 'z': [1, 866], 'ws': None, 'cm': 0, 'perm': '', 'file': ''})
+gui-test webkit/crash_retry: FAIL (AssertionError: timed out waiting for back in WebKit after "Try again in WebKit")
+{
+  "status": "FAIL",
+  "matrix": {
+    "e1_render_in_content_area": "PASS",
+    "typing": "PASS",
+    "clipboard_ctrl_c_v": "PASS",
+    "primary_selection_middle_click": "PASS",
+    "wheel_precise_vs_notch": "PASS",
+    "cursor_shapes": "FAIL",
+    "file_dialog": "FAIL",
+    "find_in_page": "PASS",
+    "shortcut_ownership": "PASS"
+  },
+  "scenarios": {
+    "launch": "PASS",
+    "chrome": "PASS",
+    "switch": "PASS",
+    "polish": "FAIL",
+    "typing": "PASS",
+    "selection": "FAIL",
+    "clipboard": "PASS",
+    "middle_click": "PASS",
+    "wheel": "PASS",
+    "cursor": "FAIL",
+    "select_popup": "FAIL",
+    "context_menu": "FAIL",
+    "dialogs": "FAIL",
+    "beforeunload": "FAIL",
+    "permission": "FAIL",
+    "file_dialog": "FAIL",
+    "download": "FAIL",
+    "find": "PASS",
+    "zoom": "FAIL",
+    "ime": "FAIL",
+    "shortcuts": "PASS",
+    "hidpi": "FAIL",
+    "crash_retry": "FAIL"
+  }
+}

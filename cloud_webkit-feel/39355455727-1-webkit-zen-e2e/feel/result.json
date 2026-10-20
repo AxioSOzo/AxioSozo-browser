@@ -1,0 +1,652 @@
+{
+  "harness": "axiosozo-linux-gui+webkit-feel",
+  "version": 1,
+  "engine": "webkit",
+  "started_utc": "2026-10-20T01:53:16+00:00",
+  "host": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.41",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile",
+    "profile pref axiosozo.engines.webkit.enabled=true",
+    "Marionette unhandledPromptBehavior=ignore"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "2097155",
+          "xwininfo": {
+            "Width": "1152",
+            "Height": "720",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo — AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.14
+    },
+    "chrome": {
+      "status": "PASS",
+      "details": {
+        "title": "AxioSozo — AxioSozo Dev",
+        "windowtype": "navigator:browser",
+        "axiosozo": true,
+        "version": 5,
+        "engineAdapter": "GeckoEngineAdapter",
+        "toolsEntry": true,
+        "spaceSwitcher": true,
+        "zenWorkspaces": true,
+        "tabs": 2,
+        "foundationPref": true,
+        "engineSurfaceService": false,
+        "appName": "AxioSozo",
+        "appVersion": "0.1a1",
+        "platformVersion": "156.0",
+        "os": "Linux",
+        "widget": "gtk",
+        "contentSandboxLevel": 6,
+        "compositor": "WebRender (Software)",
+        "webrenderNativeCompositorPref": true,
+        "gfx": {
+          "adapterDescription": "llvmpipe (LLVM 19.1.7, 256 bits)",
+          "adapterVendorID": "Mesa",
+          "adapterDriver": "",
+          "adapterDriverVersion": "25.0.7.0",
+          "windowProtocol": "x11",
+          "desktopEnvironment": null
+        },
+        "engine_view": "absent (AXCF pipe fallback)"
+      },
+      "seconds": 1.75
+    },
+    "switch": {
+      "status": "PASS",
+      "details": {
+        "menu": {
+          "menu": {
+            "item": null,
+            "submenu": [
+              {
+                "label": "Firefox",
+                "disabled": true
+              },
+              {
+                "label": "Chromium",
+                "disabled": false
+              },
+              {
+                "label": "WebKit",
+                "disabled": false
+              }
+            ]
+          },
+          "picked": "submenu"
+        },
+        "seconds": 3.95,
+        "gecko_page": {
+          "p": "1",
+          "l": 1,
+          "t": "",
+          "a": "",
+          "e": "",
+          "c": 0,
+          "s": "",
+          "y": 0,
+          "f": "",
+          "sel": "one",
+          "col": "#336699",
+          "dl": "",
+          "d": [],
+          "k": "",
+          "mb": "",
+          "z": [
+            1,
+            953
+          ],
+          "ws": null,
+          "cm": 0,
+          "perm": "",
+          "file": ""
+        },
+        "native": {
+          "renderPath": "wpe-fdo-shm-bgra",
+          "frames": 2,
+          "surface": {
+            "width": 953,
+            "height": 678,
+            "device_scale": 1
+          },
+          "firstFrameMilliseconds": 574.9720610000004,
+          "inputFeatures": {
+            "keyVerdict": false,
+            "wheelPhases": true,
+            "imeCommit": true,
+            "ime": true,
+            "edit": true
+          },
+          "frameTransport": "pipe"
+        }
+      },
+      "seconds": 12.34
+    },
+    "polish": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for the page icon on the WebKit tab (host favicon → Zen setIcon)",
+      "seconds": 16.25
+    },
+    "typing": {
+      "status": "PASS",
+      "details": {
+        "page": {
+          "p": "1",
+          "l": 1,
+          "t": "zen ",
+          "a": "",
+          "e": "",
+          "c": 0,
+          "s": "",
+          "y": 0,
+          "f": "text",
+          "sel": "one",
+          "col": "#336699",
+          "dl": "",
+          "d": [],
+          "k": "C:Backspace:Backspace",
+          "mb": "",
+          "z": [
+            1,
+            953
+          ],
+          "ws": null,
+          "cm": 0,
+          "perm": "",
+          "file": ""
+        },
+        "ctrl_backspace": "PASS"
+      },
+      "seconds": 3.24
+    },
+    "selection": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for drag selection of \"alpha b…\"; last page state {'p': '1', 'l': 1, 't': 'zen ', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': '', 'sel': 'one', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Tab:Tab', 'mb': '', 'z': [1, 953], 'ws': None, 'cm': 0, 'perm': '', 'file': ''}",
+      "seconds": 21.39
+    },
+    "clipboard": {
+      "status": "PASS",
+      "details": {
+        "copied": "gamma",
+        "pasted_in_webkit": "gamma",
+        "pasted_in_gecko": "gamma",
+        "gecko_to_webkit": "delta",
+        "zen_to_webkit": "from zen",
+        "cut": "",
+        "cut_clipboard": "from zen",
+        "undo": "not observed: timed out waiting for Ctrl+Z restores the cut text; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': 'area', 'se"
+      },
+      "seconds": 25.93
+    },
+    "middle_click": {
+      "status": "PASS",
+      "details": {
+        "primary_after_webkit_selection": "delta",
+        "gecko_pastes_webkit_primary": null,
+        "webkit_pastes_gecko_primary": "alpha",
+        "middle_event": "middle@area"
+      },
+      "seconds": 58.55
+    },
+    "wheel": {
+      "status": "PASS",
+      "details": {
+        "webkit": {
+          "notch": {
+            "n": 8,
+            "ms": 136,
+            "y": 114
+          },
+          "precise": {
+            "n": 1,
+            "ms": 11,
+            "y": 120
+          }
+        },
+        "gecko": {
+          "notch": {
+            "n": 11,
+            "ms": 220,
+            "y": 114
+          },
+          "precise": {
+            "n": 1,
+            "ms": 2,
+            "y": 120
+          }
+        },
+        "six_notches_y": 684
+      },
+      "seconds": 149.71
+    },
+    "cursor": {
+      "status": "FAIL",
+      "reason": "AssertionError: cursor mismatch: {'c-pointer': {'expected': 'pointer', 'seen': 'default'}, 'c-text': {'expected': 'text', 'seen': 'default'}, 'c-move': {'expected': 'move', 'seen': 'default'}, 'c-wait': {'expected': 'wait', 'seen': 'default'}, 'c-crosshair': {'expected': 'crosshair', 'seen': 'default'}, 'c-not-allowed': {'expected': 'not-allowed', 'seen': 'default'}, 'c-grab': {'expected': 'grab', 'seen': 'default'}, 'c-col-resize': {'expected': 'col-resize', 'seen': 'default'}}",
+      "seconds": 50.68
+    },
+    "select_popup": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for <select> choice by keyboard; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': 'select', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1, 953], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 0, 'perm': '', 'file': ''}",
+      "seconds": 13.97
+    },
+    "context_menu": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for Zen-drawn context menu for the WebKit selection",
+      "seconds": 31.69
+    },
+    "dialogs": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for Zen dialog for d-alert",
+      "seconds": 16.26
+    },
+    "beforeunload": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for beforeunload armed; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'beta', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Escape:Escape', 'mb': 'middle@area', 'z': [1, 953], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''}",
+      "seconds": 24.74
+    },
+    "permission": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for Zen permission doorhanger for the WebKit page",
+      "seconds": 16.36
+    },
+    "file_dialog": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for Zen's (GTK) file picker window",
+      "seconds": 16.23
+    },
+    "download": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for a Zen notice for the refused download",
+      "seconds": 11.34
+    },
+    "find": {
+      "status": "PASS",
+      "details": {
+        "found": {
+          "open": true,
+          "value": "needle",
+          "matches": "1 of 3 matches",
+          "matchesArgs": "{\"current\":1,\"total\":3}",
+          "status": ""
+        },
+        "next": {
+          "open": true,
+          "value": "needle",
+          "matches": "2 of 3 matches",
+          "matchesArgs": "{\"current\":2,\"total\":3}",
+          "status": ""
+        }
+      },
+      "seconds": 3.76
+    },
+    "zoom": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for Ctrl+= zooms; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'needle', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': 'C:Control:ControlLeft', 'mb': 'middle@area', 'z': [1, 866], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''}",
+      "seconds": 45.83
+    },
+    "ime": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for webkit text cleared; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'alpha', 'e': '', 'c': 0, 's': 'IncrementPage 2alpha beta gamma deltapointertextmovewaitcrosshairnot-allowedgrabcol-resizedefaultalertconfirmpromptarm unloadfind the needle here; another needle there; a third needle.notificationsdownloadbottom of the feel fixture', 'y': 0, 'f': '', 'sel': 'three', 'col': '#336699', 'dl': '', 'd': [], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1, 866], 'ws': {'n': 0, 'ms': 0, 'y': 0}, 'cm': 1, 'perm': '', 'file': ''}",
+      "seconds": 40.04
+    },
+    "shortcuts": {
+      "status": "PASS",
+      "details": {
+        "ctrl_enter_reaches_page": "C:Enter:Enter",
+        "escape_reaches_page": ":Escape:Escape",
+        "ctrl_tab": "panel-1-3",
+        "f5": 2,
+        "ctrl_r": 3,
+        "page_last_key": "",
+        "page_saw_chrome_keys": false
+      },
+      "seconds": 46.74
+    },
+    "hidpi": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for input lands at 1x again; last page state {'p': '1', 'l': 3, 't': '', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': '', 'sel': 'one', 'col': '#336699', 'dl': '', 'd': [], 'k': '', 'mb': '', 'z': [1, 866], 'ws': None, 'cm': 0, 'perm': '', 'file': ''}",
+      "seconds": 17.17
+    },
+    "crash_retry": {
+      "status": "FAIL",
+      "reason": "AssertionError: timed out waiting for back in WebKit after \"Try again in WebKit\"",
+      "seconds": 63.89
+    }
+  },
+  "screenshots": [
+    "/out/feel/chrome.png",
+    "/out/feel/01-gecko.png",
+    "/out/feel/02-to-webkit-menu.png",
+    "/out/feel/02-to-webkit-submenu.png",
+    "/out/feel/02-webkit.png",
+    "/out/feel/failure-polish.png",
+    "/out/feel/04-typed-focus-ring.png",
+    "/out/feel/failure-selection.png",
+    "/out/feel/06-clipboard.png",
+    "/out/feel/07-middle-click.png",
+    "/out/feel/08-scrolled.png",
+    "/out/feel/failure-cursor.png",
+    "/out/feel/09-select-open.png",
+    "/out/feel/failure-select_popup.png",
+    "/out/feel/failure-context_menu.png",
+    "/out/feel/failure-dialogs.png",
+    "/out/feel/failure-beforeunload.png",
+    "/out/feel/failure-permission.png",
+    "/out/feel/failure-file_dialog.png",
+    "/out/feel/failure-download.png",
+    "/out/feel/16-find.png",
+    "/out/feel/17-zoomed-gecko.png",
+    "/out/feel/failure-zoom.png",
+    "/out/feel/18-preedit-gecko-text.png",
+    "/out/feel/failure-ime.png",
+    "/out/feel/21-hidpi-2x.png",
+    "/out/feel/failure-hidpi.png",
+    "/out/feel/22-crash-notice.png",
+    "/out/feel/failure-crash_retry.png"
+  ],
+  "matrix": {
+    "e1_render_in_content_area": {
+      "status": "PASS",
+      "screenshot": "02-webkit.png",
+      "seconds": 3.95,
+      "first_frame_ms": 574.9720610000004,
+      "surface": {
+        "width": 953,
+        "height": 678,
+        "device_scale": 1
+      }
+    },
+    "typing": {
+      "status": "PASS",
+      "screenshot": "04-typed-focus-ring.png",
+      "value": "zen ",
+      "ctrl_backspace": "PASS",
+      "tab_focus": "count"
+    },
+    "clipboard_ctrl_c_v": {
+      "status": "PASS",
+      "screenshot": "06-clipboard.png",
+      "copied": "gamma",
+      "pasted_in_webkit": "gamma",
+      "pasted_in_gecko": "gamma",
+      "gecko_to_webkit": "delta",
+      "zen_to_webkit": "from zen",
+      "cut": "",
+      "cut_clipboard": "from zen",
+      "undo": "not observed: timed out waiting for Ctrl+Z restores the cut text; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': '', 'e': '', 'c': 0, 's': '', 'y': 0, 'f': 'area', 'se"
+    },
+    "primary_selection_middle_click": {
+      "status": "PASS",
+      "screenshot": "07-middle-click.png",
+      "primary_after_webkit_selection": "delta",
+      "gecko_pastes_webkit_primary": null,
+      "webkit_pastes_gecko_primary": "alpha",
+      "middle_event": "middle@area"
+    },
+    "wheel_precise_vs_notch": {
+      "status": "PASS",
+      "webkit": {
+        "notch": {
+          "n": 8,
+          "ms": 136,
+          "y": 114
+        },
+        "precise": {
+          "n": 1,
+          "ms": 11,
+          "y": 120
+        }
+      },
+      "gecko": {
+        "notch": {
+          "n": 11,
+          "ms": 220,
+          "y": 114
+        },
+        "precise": {
+          "n": 1,
+          "ms": 2,
+          "y": 120
+        }
+      },
+      "notch_distance_ratio": 1.0,
+      "screenshot": "08-scrolled.png",
+      "note": "precise = widget wheel event in pixels; notch = X11 button 5"
+    },
+    "cursor_shapes": {
+      "status": "FAIL",
+      "seen": {
+        "c-default": "default",
+        "text": "text",
+        "link": "pointer",
+        "blank": "default"
+      },
+      "wrong": {
+        "c-pointer": {
+          "expected": "pointer",
+          "seen": "default"
+        },
+        "c-text": {
+          "expected": "text",
+          "seen": "default"
+        },
+        "c-move": {
+          "expected": "move",
+          "seen": "default"
+        },
+        "c-wait": {
+          "expected": "wait",
+          "seen": "default"
+        },
+        "c-crosshair": {
+          "expected": "crosshair",
+          "seen": "default"
+        },
+        "c-not-allowed": {
+          "expected": "not-allowed",
+          "seen": "default"
+        },
+        "c-grab": {
+          "expected": "grab",
+          "seen": "default"
+        },
+        "c-col-resize": {
+          "expected": "col-resize",
+          "seen": "default"
+        }
+      },
+      "note": "X11 screenshots do not include the pointer; asserted on the engine view's CSS cursor"
+    },
+    "file_dialog": {
+      "status": "FAIL",
+      "reason": "no picker window"
+    },
+    "find_in_page": {
+      "status": "PASS",
+      "screenshot": "16-find.png",
+      "findbar": {
+        "open": true,
+        "value": "needle",
+        "matches": "1 of 3 matches",
+        "matchesArgs": "{\"current\":1,\"total\":3}",
+        "status": ""
+      },
+      "after_enter": {
+        "open": true,
+        "value": "needle",
+        "matches": "2 of 3 matches",
+        "matchesArgs": "{\"current\":2,\"total\":3}",
+        "status": ""
+      }
+    },
+    "shortcut_ownership": {
+      "status": "PASS",
+      "details": {
+        "ctrl_enter_reaches_page": "C:Enter:Enter",
+        "escape_reaches_page": ":Escape:Escape",
+        "ctrl_tab": "panel-1-3",
+        "f5": 2,
+        "ctrl_r": 3,
+        "page_last_key": "",
+        "page_saw_chrome_keys": false
+      },
+      "checked": [
+        "Ctrl+Enter, Escape → page",
+        "Ctrl+Tab, Ctrl+Shift+Tab, F5, Ctrl+R → Zen",
+        "Ctrl+F/Ctrl+=/-/0 (find, zoom)"
+      ]
+    }
+  },
+  "app": {
+    "executable": "/home/axio/build/linux-app/39337785340/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39337785340",
+    "repository_commit": "b14bad769dba002a02f63a46d399b1a55d3825a2",
+    "fingerprint": "0de27b8a7c9628d3da8d18a98857adc3eef8b72f43f2518ae485f23ef5139b3d",
+    "fingerprint_matches_checkout": false
+  },
+  "session": "/home/axio/build/runtime/4810cb4f5d4c2d30/gui-20f45460d1f8fb2e",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "dbus": "private session bus",
+  "command": [
+    "/home/axio/build/linux-app/39337785340/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/axio/build/runtime/4810cb4f5d4c2d30/gui-20f45460d1f8fb2e/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 8955,
+    "marionette_port": 37111,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 2.96,
+    "exit_code": 0
+  },
+  "webkit_prepare": {
+    "facade": true,
+    "state": {
+      "version": 1,
+      "enabled": true,
+      "tabSwitch": true,
+      "pending": false,
+      "disposed": false,
+      "failure": null,
+      "browsingMode": "fixture",
+      "activeEngine": "gecko",
+      "engines": [
+        {
+          "id": "gecko",
+          "label": "Firefox",
+          "available": true,
+          "reason": null
+        },
+        {
+          "id": "chromium",
+          "label": "Chromium",
+          "available": true,
+          "reason": null,
+          "fixtureOnly": true
+        },
+        {
+          "id": "webkit",
+          "label": "WebKit",
+          "available": true,
+          "reason": null,
+          "fixtureOnly": true
+        }
+      ],
+      "webkit": {
+        "available": true,
+        "reason": null,
+        "fixtureOnly": true,
+        "webModeRequested": false,
+        "webMode": "unavailable",
+        "native": {
+          "engine": "gecko"
+        }
+      },
+      "webkitOwnedTabIds": [],
+      "enginePreferences": {
+        "enabled": false,
+        "last": null
+      },
+      "chromium": {
+        "version": 1,
+        "enabled": true,
+        "pending": false,
+        "disposed": false,
+        "failure": null,
+        "targetEvents": 0,
+        "activeEngine": "gecko",
+        "fixtureOrigin": "http://127.0.0.1:43939",
+        "browsingMode": "fixture",
+        "restrictions": "Local GET fixture only. Experimental: automatic Chromium control, IME, clipboard, native accessibility, downloads and permissions are unavailable.",
+        "automatedChromiumControl": "unsupported",
+        "cefOwnedTabIds": [],
+        "enginePreferences": {
+          "enabled": false,
+          "last": null
+        },
+        "native": {
+          "engine": "gecko"
+        }
+      },
+      "native": {
+        "engine": "gecko"
+      }
+    },
+    "engineOf": "gecko",
+    "geckoVisibility": "",
+    "geckoURL": "about:axiosozo#projects",
+    "overlay": null,
+    "tabEngineAttribute": null,
+    "tabLabel": "AxioSozo",
+    "urlbar": "about:axiosozo#projects",
+    "indicator": {
+      "hidden": true,
+      "label": "WebKit"
+    }
+  },
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "status": "FAIL",
+  "evidence_dir": "/out/feel"
+}
