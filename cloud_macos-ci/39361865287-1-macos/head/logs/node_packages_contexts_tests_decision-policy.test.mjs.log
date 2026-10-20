@@ -1,0 +1,20 @@
+✔ legacy v1 rules retain their exact normalized shape and Jev wire default (2.788333ms)
+✔ explicit provider survives rule-store serialization and is per-rule, never an argument override (1.211583ms)
+✔ unknown or malformed provider is rejected by rule and rule-store validation (1.311167ms)
+✔ screen is explicit rule policy; rule storage never accepts an image payload (0.241333ms)
+✔ all sensitive screen rules cap to address even after an explicit outline raise (0.985ms)
+✔ screen construction denies missing or non-boolean availability and unsupported providers without inspecting the payload (0.594208ms)
+✔ a trusted fake screen opt-in produces an exact, immutable host-valid request without retaining the caller object (0.981958ms)
+✔ address, outline, none and capped screen never smuggle or inspect supplied images (0.507042ms)
+✔ PNG admission rejects exact-shape, mime, dimensions, base64, signature and IHDR failures (1.489666ms)
+✔ decoded one-MiB boundary uses the raised screen state cap; over-bound images fail (109.611875ms)
+✔ screen does not bypass disabled rule, unmatched host, empty effects, deadlines or HTTP-only admission (1.534791ms)
+✔ additive persisted contract keeps provider optional and agrees with the package observation set (11.410542ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 206.322958
