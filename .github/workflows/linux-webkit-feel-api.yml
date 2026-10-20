@@ -1,0 +1,30 @@
+# TEMPORARY (cloud/webkit-feel): dump the WPE WebKit 2.48.3 API surface (headers + GIR
+# signal signatures) from the pinned Debian 13 -dev packages, so host changes are written
+# against the exact pinned API (the cloud session cannot reach Debian). Evidence only.
+name: linux-webkit-feel-api
+on:
+  push:
+    branches: [cloud/webkit-feel]
+    paths: [.github/workflows/linux-webkit-feel-api.yml, native/webkit-host/ci/api_*, native/webkit-host/host_wpe.cpp, native/webkit-host/stream_core.hpp]
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          mkdir -p "$EVIDENCE_OUT"
+          docker run --rm -v "$PWD:/src:ro" -v "$EVIDENCE_OUT:/out" docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5 sh /src/native/webkit-host/ci/api_dump.sh || true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: webkit-feel-api

@@ -215,7 +215,11 @@ static void configureStream() {
     bool capture = false;
     Value names;
     bool known = permissionNames(requested, &capture, names);
+    // CEF passes the requesting origin as a GURL spec ("https://host:port/"); Zen and the
+    // protocol take a serialized origin without the root path.
     std::string originText = utf8(origin_);
+    if (originText.size() > 1 && originText.back() == '/' && webOrigin(originText.substr(0, originText.size() - 1)))
+      originText.pop_back();
     if (webBrowsing && tab && known && webOrigin(originText)) {
       if (Prompt* p = issuePrompt(tab, PromptPermission, &callback->base,
                                   json::object({{"origin", originText}, {"permissions", names}}), 300)) {

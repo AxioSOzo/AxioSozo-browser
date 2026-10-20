@@ -192,14 +192,23 @@ export function nextEngine(current, window) {
  */
 export function tabMenuModel(current, window, engines = ENGINES) {
   const from = normalizeEngineId(current) ?? DEFAULT_ENGINE;
-  const entries = menuEngines(window, engines);
+  const entries = menuEngines(window, engines).map(entry => ({ ...entry, note: engineNote(entry, window) }));
   const available = entries.filter(entry => !entry.disabled);
   if (available.length > 2 || (available.length > 1 && entries.length > available.length)) {
-    return { mode: "submenu", label: "Open in", items: entries.map(({ engine, disabled, reason }) => ({
-      id: engine.id, label: engine.label, checked: engine.id === from, disabled: disabled || engine.id === from, reason })) };
+    return { mode: "submenu", label: "Open in", items: entries.map(({ engine, disabled, reason, note }) => ({
+      id: engine.id, label: engine.label, checked: engine.id === from, disabled: disabled || engine.id === from, reason, note })) };
   }
   const other = available.find(entry => entry.engine.id !== from);
   if (!other) return { mode: "hidden", label: "", items: [] };
   return { mode: "toggle", label: `Open in ${other.engine.label}`,
-    items: [{ id: other.engine.id, label: other.engine.label, checked: false, disabled: false, reason: null }] };
+    items: [{ id: other.engine.id, label: other.engine.label, checked: false, disabled: false, reason: null, note: other.note }] };
+}
+
+/** Short menu note beside an engine: why it is unavailable, else "Experimental" / "test page only". */
+export function engineNote({ engine, disabled, reason }, window) {
+  if (disabled) return reason ?? "Unavailable";
+  if (!engine.experimental) return "";
+  let fixtureOnly = false;
+  try { fixtureOnly = engine.available(window)?.fixtureOnly === true; } catch {}
+  return fixtureOnly ? "Experimental · test page only" : "Experimental";
 }

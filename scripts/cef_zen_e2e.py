@@ -51,17 +51,19 @@ FEEL = ROOT / 'tests/fixtures/cef-zen-feel.html'
 ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
 # Address-bar focus checks run last: the Linux parent process has a known WebRender crash around
 # address-bar input (owned by cloud/linux-platform), and a crash ends the session.
-WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
+WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'fonts', 'scrollbars', 'badge', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
-                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
+                 'history', 'beforeunload', 'download', 'permission', 'file_chooser', 'cert_error', 'devtools', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
                  'urlbar_gecko', 'ctrl_t_gecko')
+A11Y_SCENARIOS = ('launch', 'chrome', 'switch', 'a11y')
 SCALE_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'selection', 'wheel', 'to_gecko')
 FIXTURE_SCENARIOS = ('launch', 'chrome', 'fixture_roundtrip', 'fixture_host_kill')
 HOST = 'AxioCEFProbe --stream'
 # Fixed CSS-pixel geometry of tests/fixtures/cef-zen-feel.html (centres).
 AT = {'text': (170, 38), 'count': (410, 38), 'link': (520, 38), 'area': (170, 150), 'select': (420, 138),
       'color': (550, 138), 'dl': (680, 138), 'd-alert': (80, 276), 'd-confirm': (210, 276), 'd-prompt': (340, 276),
-      'd-unload': (470, 276), 'edit': (220, 330), 'blank': (700, 560)}
+      'd-unload': (470, 276), 'edit': (220, 330), 'blank': (700, 560), 'dl-link': (55, 496), 'perm': (230, 496),
+      'file': (360, 496), 'tls-link': (630, 496)}
 CURSORS = {'c-pointer': (60, 'pointer'), 'c-text': (150, 'text'), 'c-move': (240, 'move'), 'c-wait': (330, 'wait'),
            'c-crosshair': (420, 'crosshair'), 'c-not-allowed': (510, 'not-allowed'), 'c-grab': (600, 'grab'),
            'c-col-resize': (690, 'ew-resize'), 'c-default': (780, 'default')}
@@ -111,7 +113,19 @@ const matches = bar._foundMatches ?? bar.querySelector('.found-matches');
 return {open: !bar.hidden, value: bar._findField?.value ?? null, fieldFocused: document.activeElement === bar._findField?.inputField
           || bar._findField?.matches?.(':focus-within') || false,
         matches: matches?.textContent || matches?.value || null, matchesArgs: matches?.getAttribute('data-l10n-args') ?? null,
-        status: bar._findStatusDesc?.textContent ?? null};
+        status: bar._findStatusDesc?.textContent ?? null,
+        highlightAll: bar.getElement?.('highlight')?.checked ?? null,
+        chromiumResults: Object.getOwnPropertyDescriptor(gBrowser.selectedBrowser, 'finder')?.get?.()?.events ?? null};
+"""
+DATALIST_STATE = """
+const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
+const list = overlay?.style.display === 'block' ? overlay.querySelector('.axiosozo-cef-datalist') : null;
+const popup = document.getElementById('PopupAutoComplete');
+return {zen: list && !list.hidden ? {rows: [...list.children].map(row => row.firstChild?.textContent ?? ''),
+                                     box: (r => [r.left, r.top, r.width, r.height])(list.getBoundingClientRect())} : null,
+        firefox: popup ? {state: popup.state, rows: (() => { try { return popup.view?.matchCount ?? null; } catch (e) { return null; } })(),
+                          labels: [...(popup.richlistbox?.children ?? [])].filter(n => !n.collapsed && !n.hidden)
+                                    .map(n => n.getAttribute('ac-value') ?? n.getAttribute('ac-label') ?? '').slice(0, 8)} : null};
 """
 CONTEXT_MENU = """
 const popup = document.getElementById('axiosozo-chromium-context-menu');
@@ -122,12 +136,32 @@ return {open: popup.state === 'open', state: popup.state,
 """
 
 
-class FeelServer:
-    """Owned loopback HTTP fixture: /feel.html and /engine.html, each with ?page=2. GET only."""
+DOWNLOAD_BODY = b'AxioSozo feel download: synthetic test file, no personal data.\n'
 
-    def __init__(self):
+
+def lan_address():
+    """The machine's own non-loopback IPv4 address (a UDP connect sends no packet), or None."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(('192.0.2.1', 9))
+            address = probe.getsockname()[0]
+        return None if address.startswith('127.') else address
+    except OSError:
+        return None
+
+
+class FeelServer:
+    """Owned HTTP fixture servers: /feel.html and /engine.html (each with ?page=2) and /download.txt
+    (an attachment). GET only. Loopback always; a copy on the machine's own LAN address (for the
+    "Not secure" badge of a plain-HTTP non-loopback page); a loopback HTTPS copy with a throwaway
+    self-signed certificate (certificate-error gates). Nothing listens beyond this machine's addresses."""
+
+    def __init__(self, workdir=None):
         pages = {'/feel.html': FEEL.read_bytes(), '/engine.html': ENGINE_FIXTURE.read_bytes()}
         self.hashes = {name: hashlib.sha256(data).hexdigest() for name, data in pages.items()}
+        self.servers = []
+        owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.0'
@@ -135,12 +169,14 @@ class FeelServer:
             def log_message(self, *_):
                 pass
 
-            def reply(self, code, payload=b'', content_type='text/plain; charset=utf-8'):
+            def reply(self, code, payload=b'', content_type='text/plain; charset=utf-8', extra=()):
                 self.send_response(code)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(payload)))
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('X-Content-Type-Options', 'nosniff')
+                for name, value in extra:
+                    self.send_header(name, value)
                 self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; "
                                  "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'")
                 self.end_headers()
@@ -148,11 +184,16 @@ class FeelServer:
                 self.close_connection = True
 
             def do_GET(self):
-                if self.headers.get_all('Host', []) != [f'127.0.0.1:{self.server.server_port}']:
+                host, port = self.server.server_address[:2]
+                if self.headers.get_all('Host', []) != [f'{host}:{port}']:
                     return self.reply(400)
                 url = urllib.parse.urlsplit(self.path)
                 if url.path in pages and url.query in ('', 'page=2') and not url.fragment:
-                    return self.reply(200, pages[url.path], 'text/html; charset=utf-8')
+                    return self.reply(200, pages[url.path].replace(b'__AXIOSOZO_TLS_URL__', (owner.tls_url or '#').encode()),
+                                      'text/html; charset=utf-8')
+                if url.path == '/download.txt' and not url.query:
+                    return self.reply(200, DOWNLOAD_BODY, 'text/plain; charset=utf-8',
+                                      [('Content-Disposition', 'attachment; filename="axiosozo-feel-download.txt"')])
                 if url.path == '/favicon.ico':
                     return self.reply(204)
                 return self.reply(404)
@@ -160,19 +201,48 @@ class FeelServer:
             def do_POST(self):
                 self.reply(405)
 
-        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.server.daemon_threads = True
-        self.origin = f'http://127.0.0.1:{self.server.server_port}'
+        def serve(address, context=None):
+            server = http.server.ThreadingHTTPServer((address, 0), Handler)
+            server.daemon_threads = True
+            if context:
+                server.socket = context.wrap_socket(server.socket, server_side=True)
+            self.servers.append(server)
+            return f"{'https' if context else 'http'}://{address}:{server.server_port}"
+
+        self.origin = serve('127.0.0.1')
         self.url = self.origin + '/feel.html'
-        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
+        lan = lan_address()
+        self.lan_origin = serve(lan) if lan else None
+        self.lan_url = self.lan_origin + '/feel.html' if lan else None
+        self.tls_origin = self.tls_url = None
+        self.tls_note = None
+        if workdir and shutil.which('openssl'):
+            import ssl
+            key, cert = Path(workdir) / 'feel-tls.key', Path(workdir) / 'feel-tls.crt'
+            made = subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(key), '-out', str(cert),
+                                   '-days', '1', '-subj', '/CN=axiosozo-feel-untrusted', '-addext', 'subjectAltName=IP:127.0.0.1'],
+                                  capture_output=True, text=True, timeout=60)
+            if made.returncode == 0:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(str(cert), str(key))
+                self.tls_origin = serve('127.0.0.1', context)
+                self.tls_url = self.tls_origin + '/feel.html'
+            else:
+                self.tls_note = 'openssl: ' + made.stderr.strip()[-300:]
+        else:
+            self.tls_note = 'openssl missing'
+        self.threads = [threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
+                        for server in self.servers]
 
     def __enter__(self):
-        self.thread.start()
+        for thread in self.threads:
+            thread.start()
         return self
 
     def __exit__(self, *_):
-        self.server.shutdown()
-        self.server.server_close()
+        for server in self.servers:
+            server.shutdown()
+            server.server_close()
 
 
 class ChromiumWeb(ChromiumEngine):
@@ -180,18 +250,38 @@ class ChromiumWeb(ChromiumEngine):
     name = 'chromium'
     owner = 'cloud/cef-zen-feel'
 
-    def __init__(self, mode, scale):
-        self.mode, self.scale = mode, scale
+    def __init__(self, mode, scale, a11y=False, native_receiver='default', prefs=()):
+        self.mode, self.scale, self.a11y, self.native_receiver = mode, scale, a11y, native_receiver
+        self.prefs = list(prefs)
 
     def browser_environment(self, harness):
         env = super().browser_environment(harness)
+        if self.native_receiver == 'off':
+            # TEST-ONLY: the frame path's JS/worker presenter instead of the native Linux receiver
+            # (engine-view/linux), whose Chromium frames capture black in this environment.
+            with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
+                prefs.write('user_pref("axiosozo.engines.linux.native_receiver", false);\n')
+        if self.prefs:
+            # TEST-ONLY frame-path prefs (--pref), e.g. memfd frames off, to isolate where pixels go black.
+            with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
+                for name, value in self.prefs:
+                    prefs.write(f'user_pref({json.dumps(name)}, {json.dumps(value)});\n')
         if self.scale != 1:
             with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
                 prefs.write(f'user_pref("layout.css.devPixelsPerPx", "{self.scale}");\n')
         if self.mode == 'web':
+            # Downloads of both engines land in the throwaway session (Firefox's own download prefs).
+            downloads = Path(harness.result['session']) / 'downloads'
+            downloads.mkdir(mode=0o700, exist_ok=True)
+            with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
+                prefs.write(f'user_pref("browser.download.dir", {json.dumps(str(downloads))});\n'
+                            'user_pref("browser.download.folderList", 2);\nuser_pref("browser.download.useDownloadDir", true);\n')
             for name in ('AXIOSOZO_ENGINE_PROBE', 'AXIOSOZO_ENGINE_FIXTURE_ORIGIN'):
                 env.pop(name, None)
             env['AXIOSOZO_ENGINE_SWITCHING'] = '1'
+        if self.a11y:
+            # As a desktop with an active screen reader: Gecko starts its ATK/AT-SPI bridge.
+            env['GNOME_ACCESSIBILITY'] = '1'
         return env
 
     def prepare(self, harness):
@@ -208,6 +298,38 @@ class ChromiumWeb(ChromiumEngine):
         state = harness.wait(lambda: harness.chrome_script(ENGINE_STATE), 'window.AxioSozo.engineProbe (web mode)', timeout=30)
         if state['browsingMode'] != 'web':
             raise EngineUnavailable('engine probe is not in web mode: ' + repr(state))
+
+
+def black_fraction(png, box, step=4):
+    """Share of (near-)black pixels inside box [x, y, w, h] (device pixels) of a harness PNG
+    (gui_test.xwd_to_png: 8-bit RGB, filter 0 on every row)."""
+    import struct
+    import zlib
+    data = Path(png).read_bytes()
+    width = height = 0
+    idat = b''
+    at = 8
+    while at < len(data):
+        size, = struct.unpack('>I', data[at:at + 4])
+        kind = data[at + 4:at + 8]
+        body = data[at + 8:at + 8 + size]
+        if kind == b'IHDR':
+            width, height = struct.unpack('>II', body[:8])
+        elif kind == b'IDAT':
+            idat += body
+        at += 12 + size
+    raw = zlib.decompress(idat)
+    stride = width * 3 + 1
+    x0, y0 = max(0, int(box[0])), max(0, int(box[1]))
+    x1, y1 = min(width, int(box[0] + box[2])), min(height, int(box[1] + box[3]))
+    total = black = 0
+    for y in range(y0, y1, step):
+        row = raw[y * stride + 1:(y + 1) * stride]
+        for x in range(x0, x1, step):
+            r, g, b = row[x * 3:x * 3 + 3]
+            total += 1
+            black += r + g + b < 24
+    return round(black / total, 3) if total else None
 
 
 def parse_feel(title):
@@ -266,6 +388,10 @@ class CEFZenHarness(gui_test.Harness):
             self.result['prompt_handler'] = 'ignore (handler map refused: %s)' % str(error)[:200]
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
+
+    def start_bus(self, session):
+        self.bus_address = super().start_bus(session)
+        return self.bus_address
 
     # -- state and geometry ---------------------------------------------------------------
     def web(self):
@@ -424,14 +550,198 @@ class CEFZenHarness(gui_test.Harness):
         except AssertionError as error:
             raise AssertionError(f'{error}; X11 title is {self.window_title()!r}') from None
         time.sleep(1)
-        self.screenshot('02-chromium')
+        shot = self.screenshot('02-chromium')
+        black = self.view_black(shot, state)
         self.gate('window_title', 'PASS', x11_title=self.window_title())
-        self.gate('e1_render_in_content_area', 'PASS', screenshot='02-chromium.png', seconds=seconds,
-                  surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'))
+        self.gate('e1_render_in_content_area', 'PASS' if black is not None and black < 0.5 else 'FAIL', screenshot='02-chromium.png',
+                  seconds=seconds, surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'),
+                  black_fraction=black, frame_path={k: native.get(k) for k in ('frameUpload', 'nativeReceiver', 'memfdFallback',
+                                                                              'frameTransport', 'frameWorker')})
+        if black is None or black >= 0.5:
+            raise AssertionError(f'the Chromium view is {black} black in 02-chromium.png; frame path {native}')
         return {'menu': menu, 'seconds': seconds, 'gecko_page': gecko, 'state': {k: state[k] for k in
                 ('engine', 'mode', 'view', 'geckoHidden', 'geckoURL', 'overlay', 'label', 'tabs', 'focus')},
-                'native': {k: native.get(k) for k in ('renderPath', 'frames', 'surface', 'firstFrameMilliseconds',
-                                                      'meanDrawMilliseconds', 'uploadedPixelShare', 'inputFeatures')}}
+                'native': native}
+
+    def scenario_fonts(self):
+        """The same text in each CSS generic family has the same width in Chromium as in the Gecko tab
+        (same fonts resolved through fontconfig), including the fallback for unknown and ui-* families."""
+        self.require_chromium()
+        chromium = self.page()['fw']
+        self.screenshot('30-fonts-chromium')
+        self.select_tab(self.gecko_tab)
+        gecko = self.page()['fw']
+        self.screenshot('30-fonts-gecko')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        ratios = {name: round(chromium[name] / gecko[name], 3) if gecko[name] else None for name in gecko}
+        off = {name: ratio for name, ratio in ratios.items() if ratio is None or abs(ratio - 1) > 0.03}
+        self.gate('fonts_match_gecko', 'FAIL' if off else 'PASS', screenshots=['30-fonts-chromium.png', '30-fonts-gecko.png'],
+                  chromium=chromium, gecko=gecko, ratios=ratios,
+                  note='CSS px width of the same text per family (default=unknown family, serif, sans-serif, monospace, '
+                       'system-ui, ui-monospace); within 3% = the same face')
+        if off:
+            raise AssertionError(f'font widths differ from Gecko: {off}')
+        return {'chromium': chromium, 'gecko': gecko, 'ratios': ratios}
+
+    def scenario_scrollbars(self):
+        """Chromium uses overlay scrollbars like Gecko on GTK: no layout width taken, a thin bar while scrolling."""
+        self.require_chromium()
+        out = {}
+        for engine, tab in (('chromium', self.cef_tab), ('gecko', self.gecko_tab)):
+            self.select_tab(tab)
+            if engine == 'chromium':
+                self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+            self.move(*AT['blank'])
+            for _ in range(3):
+                self.xdotool('click', '5')
+                time.sleep(0.05)
+            page = self.wait_page(lambda page: page['y'] > 0, f'{engine} scrolled')
+            time.sleep(0.3)
+            self.screenshot(f'31-scrollbar-{engine}', settle=False)
+            out[engine] = {'layout_width': page['sw'], 'inner_width': page['z'][1]}
+            self.scroll_top()
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        same = out['chromium']['layout_width'] == out['gecko']['layout_width']
+        self.gate('overlay_scrollbars', 'PASS' if same else 'FAIL', screenshots=['31-scrollbar-chromium.png', '31-scrollbar-gecko.png'],
+                  **out, note='layout_width = innerWidth - clientWidth: 0 for overlay scrollbars')
+        if not same:
+            raise AssertionError(f'scrollbar layout width differs: {out}')
+        return out
+
+    BADGE_GEOMETRY = """
+        const rect = node => { if (!node) return null; const r = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          const chain = []; for (let n = node.parentElement, i = 0; n && i < 4; n = n.parentElement, i++) {
+            const pr = n.getBoundingClientRect(); chain.push({id: n.id || n.localName, x: pr.left, w: pr.width,
+              display: getComputedStyle(n).display, overflow: getComputedStyle(n).overflowX}); }
+          return {id: node.id, x: r.left, y: r.top, w: r.width, h: r.height, flex: style.flex, parents: chain,
+                  shown: r.width > 0 && r.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'}; };
+        const browser = gBrowser.selectedBrowser, stack = browser.parentNode;
+        const overlay = stack?.querySelector?.('[data-axiosozo-cef]');
+        const content = rect(overlay && overlay.style.display === 'block' ? overlay : browser);
+        return {content, urlbar: rect(document.getElementById('urlbar')),
+                chips: ['axiosozo-engine-badge', 'axiosozo-engine-probe', 'axiosozo-engine-indicator', 'axiosozo-actions']
+                  .map(id => rect(document.getElementById(id))).filter(Boolean)};"""
+
+    @staticmethod
+    def overlaps(chips, content):
+        def inter(a, b):
+            return min(a['x'] + a['w'], b['x'] + b['w']) - max(a['x'], b['x']) > 0.5 and \
+                min(a['y'] + a['h'], b['y'] + b['h']) - max(a['y'], b['y']) > 0.5
+        return [chip['id'] for chip in chips if chip['shown'] and inter(chip, content)]
+
+    def scenario_badge(self):
+        """Engine chips and the "Not secure" badge live in Zen's toolbar/address bar, never over the page."""
+        self.require_chromium()
+        loopback = self.chrome_script(self.BADGE_GEOMETRY)
+        out = {'loopback': loopback}
+        covering = self.overlaps(loopback['chips'], loopback['content'])
+        if self.feel.lan_url:
+            # A plain-HTTP page on the runner's own non-loopback address: Chromium tabs show "Not secure".
+            self.chrome_script('gBrowser.selectedTab = gBrowser.tabs.find(t => t.linkedPanel === arguments[0]); return true;',
+                               [self.cef_tab])
+            self.chrome_script('window.AxioSozo.engineProbe.navigate(arguments[0]); return true;', [self.feel.lan_url])
+            self.wait_page(lambda page: page['p'] == '1' and self.web()['page']['url'].startswith(self.feel.lan_origin),
+                           'the LAN copy of the feel page in Chromium', timeout=20)
+            time.sleep(0.8)
+            self.screenshot('32-not-secure-badge')
+            lan = self.chrome_script(self.BADGE_GEOMETRY)
+            out['lan'] = lan
+            out['lan_badge_shown'] = any(chip['id'] == 'axiosozo-engine-badge' and chip['shown'] for chip in lan['chips'])
+            covering += self.overlaps(lan['chips'], lan['content'])
+            self.chrome_script('window.AxioSozo.engineProbe.navigate(arguments[0]); return true;', [self.feel.url])
+            self.wait_page(lambda page: self.web()['page']['url'].startswith(self.feel.origin), 'back on the loopback page', timeout=20)
+        else:
+            out['lan'] = 'no non-loopback IPv4 address on this machine'
+        status = 'FAIL' if covering else ('PASS' if out.get('lan_badge_shown') else 'EXPERIMENTAL')
+        self.gate('badge_never_covers_content', status, screenshot='32-not-secure-badge.png', covering=covering,
+                  lan_badge_shown=out.get('lan_badge_shown'))
+        if covering:
+            raise AssertionError(f'chips over the page content: {covering}: {out}')
+        return out
+
+    def atspi(self, root_name, root_role=None, press=None):
+        """The app's AT-SPI subtree under the accessible named root_name (scripts/atspi_probe.py)."""
+        if getattr(self, 'bus_address', 'disabled:').startswith('disabled:'):
+            raise gui_test.Blocked('no private D-Bus session bus for AT-SPI')
+        command = ['/usr/bin/python3', '-I', str(ROOT / 'scripts/atspi_probe.py'), '--app-pid', str(self.browser.pid),
+                   '--root-name', root_name]
+        if root_role:
+            command += ['--root-role', root_role]
+        if press:
+            command += ['--press', press]
+        done = subprocess.run(command, env={**self.x_env, 'DBUS_SESSION_BUS_ADDRESS': self.bus_address}, capture_output=True,
+                              text=True, timeout=120)
+        if 'No module named' in done.stderr or 'Namespace Atspi not available' in done.stderr:
+            raise gui_test.Blocked('python3-gi / gir1.2-atspi-2.0 missing: ' + done.stderr.strip()[-200:])
+        try:
+            return json.loads(done.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise AssertionError(f'atspi_probe failed ({done.returncode}): {done.stderr.strip()[-600:]}') from None
+
+    @staticmethod
+    def has(tree, role, name):
+        return any(node['role'] == role and node['name'] == name for node in tree.get('nodes', []))
+
+    def scenario_a11y(self):
+        """Chromium's accessibility tree reaches AT-SPI under the tab (as the Gecko tab's document does), and
+        an assistive action on a Chromium button presses it."""
+        self.require_chromium()
+        time.sleep(2)
+        chromium = self.atspi(r'\(Chromium\)$')
+        self.select_tab(self.gecko_tab)
+        gecko = self.atspi(r'^AxioSozo feel', root_role='document web')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        time.sleep(1)
+        expected = [('push button', 'Increment'), ('link', 'Page 2'), ('entry', 'Type here')]
+        found = {f'{role}:{name}': {'chromium': self.has(chromium, role, name), 'gecko': self.has(gecko, role, name)}
+                 for role, name in expected}
+        before = self.page()['c']
+        pressed = self.atspi(r'\(Chromium\)$', press='push button=Increment')
+        try:
+            after = self.wait_page(lambda page: page['c'] > before, 'the AT-SPI action pressed the Chromium button', timeout=10)['c']
+        except AssertionError:
+            after = self.page()['c']
+        # Focus: Chromium's focused node is AT-SPI's focused accessible (button: the canvas keeps
+        # Zen's focus; text field: Zen's IME proxy editor has it).
+        def focused_nodes():
+            return [(node['role'], node['name']) for node in self.atspi(r'\(Chromium\)$').get('nodes', []) if node['focused']]
+        self.click_at(*AT['text'])
+        self.wait_page(lambda page: page['f'] == 'text', 'text field focused')
+        self.key('Tab')
+        self.wait_page(lambda page: page['f'] == 'count', 'Tab to the button')
+        try:
+            focused_button = self.wait(lambda: (lambda f: f if ('push button', 'Increment') in f else None)(focused_nodes()),
+                                       'AT-SPI focus on the Chromium button', timeout=10)
+        except AssertionError:
+            focused_button = focused_nodes()
+        self.key('shift+Tab')
+        self.wait_page(lambda page: page['f'] == 'text', 'Shift+Tab to the text field')
+        time.sleep(1.5)
+        focused = {'button': focused_button, 'text_field': focused_nodes(), 'chrome_focus': self.web()['focus']}
+        self.screenshot('33-a11y')
+        ok = all(item['chromium'] for item in found.values()) and after > before
+        self.gate('accessibility_atspi', 'PASS' if ok else 'FAIL', found=found, press={'before': before, 'after': after, **(pressed.get('pressed') or {})},
+                  press_retries=pressed.get('press_retries'), press_roots=pressed.get('press_roots'),
+                  chromium_root=chromium.get('root'), chromium_nodes=len(chromium.get('nodes', [])), gecko_nodes=len(gecko.get('nodes', [])),
+                  focused=focused,
+                  note='GNOME_ACCESSIBILITY=1 (test-only, as with a running screen reader); read through AT-SPI with atspi_probe.py')
+        if not ok:
+            raise AssertionError(f'AT-SPI: {found}, press {before}->{after}: {pressed.get("pressed")}')
+        return {'found': found, 'chromium': chromium, 'gecko': {'root': gecko.get('root'), 'nodes': gecko.get('nodes', [])[:80]},
+                'pressed': pressed.get('pressed'), 'focused': focused}
+
+    def view_black(self, shot, state=None):
+        view = (state or self.web())['view']
+        scale = self.chrome_script('return window.devicePixelRatio;')
+        try:
+            return black_fraction(shot, [view['x'] * scale, view['y'] * scale, view['w'] * scale, view['h'] * scale])
+        except (OSError, ValueError, KeyError) as error:
+            self.result.setdefault('notes', []).append(f'black_fraction: {error}')
+            return None
 
     def scenario_typing(self):
         self.require_chromium()
@@ -649,20 +959,32 @@ class CEFZenHarness(gui_test.Harness):
         except AssertionError as error:
             out['select'] = str(error)[:300]
             self.gate('select_popup', 'FAIL', screenshot='09-select-open.png', reason=out['select'])
-        # <datalist>: autofill-style suggestions.
-        self.click_at(*AT['dl'])
-        self.type_text('ap')
-        time.sleep(1.0)
-        self.screenshot('09-datalist')
-        self.key('Down')
-        self.key('Return')
-        try:
-            out['datalist'] = self.wait_page(lambda page: page['dl'] in ('apple', 'apricot'), 'datalist suggestion chosen', timeout=8)['dl']
-            self.gate('datalist_popup', 'PASS', screenshot='09-datalist.png', value=out['datalist'])
-        except AssertionError:
-            out['datalist'] = self.page()['dl']
-            self.gate('datalist_popup', 'EXPERIMENTAL', screenshot='09-datalist.png', value=out['datalist'],
-                      note='typed text reaches the field; no suggestion popup could be chosen in OSR')
+        # <datalist>: Zen draws the suggestions (windowless Chromium draws none), Gecko baseline alongside.
+        out['datalist'] = {}
+        for engine, tab in (('chromium', self.cef_tab), ('gecko', self.gecko_tab)):
+            self.select_tab(tab)
+            if engine == 'chromium':
+                self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+            self.click_at(*AT['dl'])
+            self.key('ctrl+a')
+            self.key('BackSpace')
+            self.type_text('ap')
+            time.sleep(1.0)
+            shown = self.chrome_script(DATALIST_STATE)
+            self.screenshot(f'09-datalist-{engine}', settle=False)
+            self.key('Down')
+            self.key('Return')
+            try:
+                value = self.wait_page(lambda page: page['dl'] == 'apple', f'{engine}: datalist suggestion chosen', timeout=8)['dl']
+            except AssertionError:
+                value = self.page()['dl']
+            out['datalist'][engine] = {'shown': shown, 'value': value}
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        chromium = out['datalist']['chromium']
+        ok = chromium['value'] == 'apple' and (chromium['shown'].get('zen') or {}).get('rows') == ['apple', 'apricot']
+        self.gate('datalist_popup', 'PASS' if ok else 'FAIL', screenshots=['09-datalist-chromium.png', '09-datalist-gecko.png'],
+                  **out['datalist'], note='Chromium tab: Zen-drawn list from the host `datalist` event; Gecko: Firefox autocomplete popup')
         # <input type=color>: Chromium's colour chooser.
         self.click_at(*AT['color'])
         time.sleep(1.5)
@@ -681,6 +1003,8 @@ class CEFZenHarness(gui_test.Harness):
                   observed=out['color'], note="Chromium's own colour chooser, composited into the engine frame (no Zen/GTK dialog)")
         if self.matrix['select_popup']['status'] == 'FAIL':
             raise AssertionError('select popup: ' + out['select'])
+        if self.matrix['datalist_popup']['status'] == 'FAIL':
+            raise AssertionError('datalist: ' + repr(out['datalist']))
         return out
 
     def scenario_context_menu(self):
@@ -780,6 +1104,17 @@ class CEFZenHarness(gui_test.Harness):
                   via={k: v['via'] for k, v in out.items()}, results=self.page()['d'])
         return out
 
+    def find_next_settled(self, before, timeout=5.0):
+        """The findbar after Return: polled until its ordinal changes (the Chromium finder may
+        restart its session from the kept selection and step once), else the last state."""
+        deadline = time.monotonic() + timeout
+        state = self.chrome_script(FINDBAR_STATE)
+        while state['matches'] == before['matches'] and time.monotonic() < deadline:
+            time.sleep(0.25)
+            state = self.chrome_script(FINDBAR_STATE)
+        time.sleep(0.3)
+        return self.chrome_script(FINDBAR_STATE)
+
     def scenario_find(self):
         self.require_chromium()
         self.click_at(*AT['blank'])
@@ -788,11 +1123,55 @@ class CEFZenHarness(gui_test.Harness):
         self.type_text('needle')
         found = self.wait(lambda: (lambda b: b if b['value'] == 'needle' and ('3' in str(b['matches']) + str(b['matchesArgs'])) else None)(
             self.chrome_script(FINDBAR_STATE)), 'findbar reports 3 matches from Chromium', timeout=15)
+        time.sleep(0.5)
+        found = self.chrome_script(FINDBAR_STATE)
         self.screenshot('12-find')
+        self.key('Return')
+        again = self.find_next_settled(found)
+        self.screenshot('12-find-next')
+        # Diagnostics only: a second find-next (its ordinal and the finder's raw sent/result log).
+        self.key('Return')
+        again2 = self.find_next_settled(again)
+        # Highlight All on, then off again (Firefox's checkbox).
+        toggle = "const bar = gBrowser.getCachedFindBar(gBrowser.selectedTab); bar.getElement('highlight').click(); " \
+                 "return bar.getElement('highlight').checked;"
+        highlight_on = self.chrome_script(toggle)
+        time.sleep(1.0)
+        self.screenshot('12-find-highlight-all')
+        highlight_off = self.chrome_script(toggle)
+        time.sleep(1.0)
+        self.screenshot('12-find-highlight-off')
         self.key('Escape')
         closed = self.wait(lambda: not self.chrome_script(FINDBAR_STATE)['open'], 'findbar closed', timeout=10)
-        self.gate('find_in_page', 'PASS', screenshot='12-find.png', findbar=found)
-        return {'opened': bar, 'found': found, 'closed': closed}
+        # Gecko baseline: the same search in Firefox's own findbar.
+        self.select_tab(self.gecko_tab)
+        self.click_at(*AT['blank'])
+        self.key('ctrl+f')
+        self.wait(lambda: self.chrome_script(FINDBAR_STATE)['open'], 'Gecko findbar open', timeout=10)
+        self.key('ctrl+a')
+        self.type_text('needle')
+        gecko = self.wait(lambda: (lambda b: b if b['value'] == 'needle' and '3' in str(b['matches']) + str(b['matchesArgs']) else None)(
+            self.chrome_script(FINDBAR_STATE)), 'Gecko findbar reports 3 matches', timeout=15)
+        time.sleep(0.5)
+        gecko = self.chrome_script(FINDBAR_STATE)
+        self.screenshot('12-find-gecko')
+        self.key('Return')
+        gecko_again = self.find_next_settled(gecko)
+        self.key('Escape')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        same = (found['matches'], again['matches']) == (gecko['matches'], gecko_again['matches'])
+        self.gate('find_in_page', 'PASS' if same else 'FAIL', screenshots=['12-find.png', '12-find-next.png', '12-find-gecko.png'],
+                  chromium=[found['matches'], again['matches']], gecko=[gecko['matches'], gecko_again['matches']],
+                  chromium_results=again.get('chromiumResults'),
+                  second_find_next={'matches': again2['matches'], 'log': again2.get('chromiumResults')},
+                  highlight_all={'chromium': found.get('highlightAll'), 'gecko': gecko.get('highlightAll'),
+                                 'toggled': [highlight_on, highlight_off]},
+                  note='12-find*.png: without Highlight All only the active match is marked (selection), with it every match')
+        if not same:
+            raise AssertionError(f"findbar counts differ: chromium {[found['matches'], again['matches']]} "
+                                 f"gecko {[gecko['matches'], gecko_again['matches']]}")
+        return {'opened': bar, 'found': found, 'again': again, 'closed': closed, 'gecko': gecko, 'gecko_again': gecko_again}
 
     ZOOM_KEYS = """
         return [...document.querySelectorAll('key')].filter(k => ['0', '=', '+', '-'].includes(k.getAttribute('key'))
@@ -1187,6 +1566,237 @@ class CEFZenHarness(gui_test.Harness):
         self.gate('beforeunload', 'PASS', screenshots=['17-beforeunload-1.png', '17-beforeunload-2.png'], **out)
         return out
 
+    DOWNLOADS = """
+        return (async () => {
+          const {Downloads} = ChromeUtils.importESModule('resource://gre/modules/Downloads.sys.mjs');
+          const list = await Downloads.getList(Downloads.ALL);
+          return (await list.getAll()).map(d => ({source: d.source?.url ?? null, target: d.target?.path ?? null,
+            succeeded: d.succeeded, stopped: d.stopped, error: d.error ? String(d.error.message || d.error) : null,
+            bytes: d.currentBytes}));
+        })();"""
+
+    def download_in(self, engine):
+        before = len(self.chrome_script(self.DOWNLOADS))
+        self.click_at(*AT['dl-link'])
+        try:
+            done = self.wait(lambda: (lambda items: items[before:] if len(items) > before and all(i['stopped'] for i in items[before:])
+                                      else None)(self.chrome_script(self.DOWNLOADS)), f'{engine}: a finished download in Firefox\'s list',
+                             timeout=45)
+        except AssertionError as error:
+            items = self.chrome_script(self.DOWNLOADS)
+            self.screenshot(f'34-download-{engine}-stuck', settle=False)
+            raise AssertionError(f'{error}; downloads {items[before:]!r} (before {before})') from None
+        time.sleep(0.8)
+        self.screenshot(f'34-download-{engine}', settle=False)
+        item = done[-1]
+        body = Path(item['target']).read_bytes() if item.get('target') and Path(item['target']).is_file() else None
+        panel = self.chrome_script("return {panel: window.DownloadsPanel?.panel?.state ?? null, "
+                                   "button: document.getElementById('downloads-button')?.getAttribute('attention') ?? null,"
+                                   "indicator: !!document.getElementById('downloads-indicator-anchor')};")
+        return {'download': item, 'content_ok': body == DOWNLOAD_BODY, 'panel': panel}
+
+    def scenario_download(self):
+        """A Chromium download goes through Zen's download UI (Firefox's list, panel and download dir), like Gecko's."""
+        self.ensure_chromium('34-to-chromium')
+        self.scroll_top()
+        chromium = self.download_in('chromium')
+        self.chrome_script('window.DownloadsPanel?.hidePanel?.(); return true;')
+        self.select_tab(self.gecko_tab)
+        gecko = self.download_in('gecko')
+        self.chrome_script('window.DownloadsPanel?.hidePanel?.(); return true;')
+        self.ensure_chromium('34-to-chromium')
+        ok = chromium['download']['succeeded'] and chromium['content_ok']
+        self.gate('downloads_zen_ui', 'PASS' if ok and gecko['download']['succeeded'] else 'FAIL',
+                  screenshots=['34-download-chromium.png', '34-download-gecko.png'], chromium=chromium, gecko=gecko)
+        if not ok:
+            raise AssertionError(f'Chromium download: {chromium}')
+        return {'chromium': chromium, 'gecko': gecko}
+
+    PERMISSION_PANEL = """
+        const panel = PopupNotifications.panel;
+        const n = panel?.state === 'open' ? panel.firstElementChild : null;
+        if (!n) return {open: false, state: panel?.state ?? null};
+        const point = node => { if (!node) return null; const r = node.getBoundingClientRect();
+          return [Math.round(node.screenX + r.width / 2), Math.round(node.screenY + r.height / 2)]; };
+        return {open: true, id: n.id, label: n.getAttribute('label'), name: n.getAttribute('name'),
+          primary: n.getAttribute('buttonlabel'), secondary: n.getAttribute('secondarybuttonlabel'),
+          checkbox: n.checkbox?.checked ?? null, block: point(n.secondaryButton), scale: devicePixelRatio};"""
+
+    def permission_in(self, engine):
+        self.click_at(*AT['perm'])
+        try:
+            shown = self.wait(lambda: (lambda p: p if p['open'] else None)(self.chrome_script(self.PERMISSION_PANEL)),
+                              f'{engine}: Zen\'s permission prompt', timeout=15)
+        except AssertionError as error:
+            state = self.web()
+            raise AssertionError(f'{error}; page perm {(self.page(state) or {}).get("perm")!r}, '
+                                 f'notice {state.get("notice")!r}, panel {state.get("panel")!r}') from None
+        time.sleep(0.8)
+        self.screenshot(f'35-permission-{engine}', settle=False)
+        # "Block", clicked for real (the default: nothing is granted unless the user allows it).
+        x, y = shown['block']
+        self.xdotool('mousemove', '--sync', round(x * shown['scale']), round(y * shown['scale']))
+        self.xdotool('click', '1')
+        try:
+            page = self.wait_page(lambda page: page['perm'].startswith('denied'), f'{engine}: the page saw the denial', timeout=10)['perm']
+        except AssertionError:
+            page = self.page()['perm']
+        return {'prompt': shown, 'page': page}
+
+    def scenario_permission(self):
+        """A Chromium permission request appears as Zen's doorhanger; Block (and no answer) denies it."""
+        self.ensure_chromium('35-to-chromium')
+        chromium = self.permission_in('chromium')
+        self.select_tab(self.gecko_tab)
+        gecko = self.permission_in('gecko')
+        self.ensure_chromium('35-to-chromium')
+        ok = chromium['page'].startswith('denied') and chromium['prompt']['open']
+        self.gate('permission_prompt_zen_ui', 'PASS' if ok else 'FAIL', screenshots=['35-permission-chromium.png', '35-permission-gecko.png'],
+                  chromium=chromium, gecko=gecko,
+                  note='doorhanger popups capture black under Xvfb; the prompt is asserted from PopupNotifications')
+        if not ok:
+            raise AssertionError(f'permission: {chromium}')
+        return {'chromium': chromium, 'gecko': gecko}
+
+    def dialog_windows(self):
+        try:
+            return set(self.xdotool('search', '--onlyvisible', '--pid', self.browser.pid).split())
+        except subprocess.SubprocessError:
+            return set()
+
+    def file_chooser_in(self, engine, upload):
+        windows = self.dialog_windows()
+        self.click_at(*AT['file'])
+        dialog = self.wait(lambda: (lambda new: sorted(new) if new else None)(self.dialog_windows() - windows),
+                           f'{engine}: a file chooser window', timeout=20)
+        wid = dialog[-1]
+        name = self.xdotool('getwindowname', wid)
+        time.sleep(1.0)
+        self.screenshot(f'36-file-chooser-{engine}', settle=False)
+        self.xdotool('windowfocus', '--sync', wid)
+        self.xdotool('key', '--window', wid, 'ctrl+l')
+        time.sleep(0.4)
+        self.xdotool('type', '--window', wid, '--delay', '40', str(upload))
+        time.sleep(0.6)
+        self.xdotool('key', '--window', wid, 'Return')
+        try:
+            page = self.wait_page(lambda page: page['fc'].startswith(upload.name), f'{engine}: the page got the chosen file', timeout=15)['fc']
+        except AssertionError:
+            page = self.page()['fc']
+            if self.dialog_windows() - windows:
+                self.xdotool('key', '--window', wid, 'Escape')
+        self.focus_window()
+        return {'dialog': name, 'page': page}
+
+    def scenario_file_chooser(self):
+        """<input type=file> in Chromium opens Zen's own (GTK) file chooser; only the chosen file reaches the page."""
+        self.ensure_chromium('36-to-chromium')
+        upload = Path(self.result['session']) / 'feel-upload.txt'
+        upload.write_bytes(b'AxioSozo feel upload\n')
+        chromium = self.file_chooser_in('chromium', upload)
+        self.select_tab(self.gecko_tab)
+        gecko = self.file_chooser_in('gecko', upload)
+        self.ensure_chromium('36-to-chromium')
+        expected = f'{upload.name}:{upload.stat().st_size}'
+        ok = chromium['page'] == expected
+        self.gate('file_chooser_zen_ui', 'PASS' if ok else 'FAIL', screenshots=['36-file-chooser-chromium.png', '36-file-chooser-gecko.png'],
+                  chromium=chromium, gecko=gecko, expected=expected, note='GTK file chooser (no portal under Xvfb)')
+        if not ok:
+            raise AssertionError(f'file chooser: {chromium}, expected {expected}')
+        return {'chromium': chromium, 'gecko': gecko}
+
+    CERT_PANEL = """
+        const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
+        const panel = overlay?.querySelector('.axiosozo-cef-certerror');
+        return panel && !panel.hidden ? {title: panel.querySelector('h1')?.textContent, text: panel.textContent.slice(0, 600),
+          buttons: [...panel.querySelectorAll('button')].map(b => b.textContent)} : null;"""
+
+    def scenario_cert_error(self):
+        """An untrusted certificate fails closed in Chromium with Zen's certificate error page, as in Gecko."""
+        if not self.feel.tls_url:
+            raise gui_test.Blocked('no TLS fixture: ' + str(self.feel.tls_note))
+        self.ensure_chromium('37-to-chromium')
+        self.scroll_top()
+        self.click_at(*AT['tls-link'])
+        panel = self.wait(lambda: self.chrome_script(self.CERT_PANEL), 'Zen\'s certificate error page over the Chromium tab', timeout=20)
+        time.sleep(1.5)
+        state = self.web()
+        loaded = (state.get('page') or {}).get('url', '').startswith(self.feel.tls_origin) and self.page(state) is not None
+        self.screenshot('37-cert-error-chromium')
+        # Gecko baseline: Firefox's own about:certerror for the same link.
+        self.select_tab(self.gecko_tab)
+        self.scroll_top()
+        self.click_at(*AT['tls-link'])
+        gecko = self.wait(lambda: (lambda u: u if u.startswith('about:certerror') or u.startswith('about:neterror') else None)(
+            self.chrome_script('return gBrowser.selectedBrowser.documentURI?.spec ?? "";')), 'Firefox certificate error page', timeout=20)
+        time.sleep(1)
+        self.screenshot('37-cert-error-gecko')
+        self.chrome_script('BrowserCommands.back(); return true;')
+        self.wait_page(lambda page: page['p'] == '1', 'Gecko tab back on the feel page', timeout=20)
+        # Back to the Chromium tab, which still (correctly) shows the certificate error panel
+        # rather than a feel page, so ensure_chromium() would wait for nothing.
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.web()['engine'] == 'chromium' and self.chrome_script(self.CERT_PANEL),
+                  'the Chromium tab with its certificate error panel', timeout=20)
+        # "Go back (Recommended)", clicked for real.
+        point = self.chrome_script("""
+            const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
+            const button = overlay?.querySelector('.axiosozo-cef-certerror button.primary');
+            if (!button || overlay.querySelector('.axiosozo-cef-certerror').hidden) return null;
+            const r = button.getBoundingClientRect();
+            return [Math.round((mozInnerScreenX + r.left + r.width / 2) * devicePixelRatio),
+                    Math.round((mozInnerScreenY + r.top + r.height / 2) * devicePixelRatio)];""")
+        if point:
+            self.xdotool('mousemove', '--sync', *point)
+            self.xdotool('click', '1')
+        back = self.wait_page(lambda page: page['p'] == '1' and self.web()['page']['url'].startswith(self.feel.origin),
+                              'Go back returns to the feel page', timeout=20)
+        ok = bool(panel) and not loaded
+        self.gate('certificate_error_fails_closed', 'PASS' if ok else 'FAIL',
+                  screenshots=['37-cert-error-chromium.png', '37-cert-error-gecko.png'], panel=panel, chromium_loaded=loaded,
+                  gecko=gecko.split('?')[0], go_back=bool(point))
+        if not ok:
+            raise AssertionError(f'certificate error: panel {panel}, loaded {loaded}')
+        return {'panel': panel, 'gecko': gecko, 'back': back['p']}
+
+    DEVTOOLS = """
+        const notice = (n => n && !n.hidden ? n.textContent : null)(gBrowser.selectedBrowser.parentNode
+          .querySelector('[data-axiosozo-cef] .axiosozo-cef-notice'));
+        let toolbox = null, error = null;
+        try {
+          const {require} = ChromeUtils.importESModule('resource://devtools/shared/loader/Loader.sys.mjs');
+          const {gDevTools} = require('devtools/client/framework/devtools');
+          toolbox = gDevTools.getToolboxForTab?.(gBrowser.selectedTab) ?? null;
+        } catch (e) { error = String(e); }
+        const hosts = [...document.querySelectorAll('.devtools-toolbox-bottom-iframe, .devtools-toolbox-side-iframe')].length;
+        return {toolbox: !!toolbox || hosts > 0, toolboxFrames: hosts, error, notice,
+                target: toolbox?.target?.url ?? toolbox?.commands?.targetCommand?.targetFront?.url ?? null};"""
+
+    def scenario_devtools(self):
+        """Record what the developer-tools shortcut does over a Chromium tab (Chromium's DevTools are not embedded)."""
+        self.ensure_chromium('38-to-chromium')
+        self.click_at(*AT['blank'])
+        self.key('ctrl+shift+i')
+        # The notice shows for 4 s; a toolbox (if the shortcut leaked to Firefox) takes ~2 s to open.
+        time.sleep(0.8)
+        early = self.chrome_script(self.DEVTOOLS)
+        self.screenshot('38-devtools-chromium', settle=False)   # before the 4 s notice goes
+        time.sleep(2.5)
+        chromium = self.chrome_script(self.DEVTOOLS)
+        chromium['notice'] = chromium.get('notice') or early.get('notice')
+        if chromium.get('toolbox'):
+            self.key('ctrl+shift+i')
+            time.sleep(2)
+        self.focus_window()
+        self.ensure_chromium('38-to-chromium')
+        status = 'NOT_VERIFIED'
+        if chromium.get('notice') and not chromium.get('toolbox'):
+            status = 'PASS'
+        self.gate('devtools', status, screenshot='38-devtools-chromium.png', chromium=chromium,
+                  note='Chromium DevTools are not embedded in Zen; PASS only when the shortcut explains this instead of '
+                       'inspecting the hidden Gecko document')
+        return {'chromium': chromium}
+
     def scenario_to_gecko(self):
         self.require_chromium()
         url = self.web()['page']['url']
@@ -1280,6 +1890,13 @@ class CEFZenHarness(gui_test.Harness):
         page1 = self.wait(lambda: (lambda t: t if 'page=1' in t else None)(self.fixture_state()['tabLabel']), 'back to page 1')
         self.gate('fixture_e1', 'PASS', screenshots=['f02-chromium.png', 'f03-typed.png', 'f04-page2.png'],
                   native={k: state['native'].get(k) for k in ('renderPath', 'surface', 'frames', 'firstFrameMilliseconds')})
+        # The fixture probe's "Return to Gecko" chip stays in Zen's toolbar, never over the page.
+        geometry = self.chrome_script(self.BADGE_GEOMETRY)
+        covering = self.overlaps(geometry['chips'], geometry['content'])
+        self.gate('probe_chip_never_covers_content', 'FAIL' if covering else 'PASS', screenshot='f02-chromium.png',
+                  covering=covering, geometry=geometry)
+        if covering:
+            raise AssertionError(f'chips over the page content: {covering}: {geometry}')
         return {'probe_button': probe, 'typed': typed, 'clicked': clicked, 'page2': page2, 'back': back, 'page1': page1}
 
     def scenario_fixture_host_kill(self):
@@ -1316,6 +1933,11 @@ def main():
     parser.add_argument('--mode', choices=('web', 'fixture'), default='web')
     parser.add_argument('--scale', type=int, choices=(1, 2), default=1)
     parser.add_argument('--scenario', help='comma list (default: all of the mode)')
+    parser.add_argument('--native-receiver', choices=('default', 'off'), default='default',
+                        help='off: TEST-ONLY pref axiosozo.engines.linux.native_receiver=false')
+    parser.add_argument('--pref', action='append', default=[], metavar='NAME=VALUE',
+                        help='TEST-ONLY profile pref under axiosozo.engines.linux.* (true/false/int/string); repeatable')
+    parser.add_argument('--a11y', action='store_true', help='web mode: the AT-SPI accessibility run (GNOME_ACCESSIBILITY=1)')
     parser.add_argument('--evidence-dir')
     parser.add_argument('--size', default=None)
     parser.add_argument('--timeout', type=float, default=30)
@@ -1323,20 +1945,41 @@ def main():
     parser.add_argument('--hold', type=int, default=0)
     parser.add_argument('--screenshot')
     args = parser.parse_args()
-    available = FIXTURE_SCENARIOS if args.mode == 'fixture' else (SCALE_SCENARIOS if args.scale == 2 else WEB_SCENARIOS)
+    available = FIXTURE_SCENARIOS if args.mode == 'fixture' else A11Y_SCENARIOS if args.a11y else (
+        SCALE_SCENARIOS if args.scale == 2 else WEB_SCENARIOS)
     scenarios = [item for item in (args.scenario or ','.join(available)).split(',') if item]
     if any(item not in available for item in scenarios):
         parser.error('--scenario takes: ' + ','.join(available))
     args.size = args.size or ('2560x1600' if args.scale == 2 else '1280x800')
+    prefs = []
+    for item in args.pref:
+        name, sep, raw = item.partition('=')
+        if not sep or not name.startswith('axiosozo.engines.linux.'):
+            parser.error('--pref takes axiosozo.engines.linux.NAME=VALUE')
+        value = {'true': True, 'false': False}.get(raw, int(raw) if raw.lstrip('-').isdigit() else raw)
+        prefs.append((name, value))
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     evidence = Path(args.evidence_dir).resolve() if args.evidence_dir else storage.BUILD_ROOT / 'gui-evidence' / f'cef-zen-{args.mode}-{stamp}'
     code = 0
-    with FeelServer() as feel:
-        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale), evidence, feel)
+    workdir = storage.BUILD_ROOT / 'gui-evidence' / ('feel-tls-' + stamp)
+    try:
+        workdir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        workdir = None
+    with FeelServer(workdir) as feel:
+        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y, args.native_receiver, prefs), evidence, feel)
         harness.result.update(harness='axiosozo-linux-gui+cef-zen', mode=args.mode, scale=args.scale,
-                              feel_fixture={'origin': feel.origin, 'sha256': feel.hashes})
+                              feel_fixture={'origin': feel.origin, 'lan_origin': feel.lan_origin, 'tls_origin': feel.tls_origin,
+                                            'tls_note': feel.tls_note, 'sha256': feel.hashes})
         harness.result['test_only_switches'] += (['AXIOSOZO_ENGINE_SWITCHING=1 (existing developer gate)'] if args.mode == 'web'
                                                  else ['AXIOSOZO_ENGINE_PROBE=1 fixture probe'])
+        if args.native_receiver == 'off':
+            harness.result['test_only_switches'].append('profile pref axiosozo.engines.linux.native_receiver=false')
+        for name, value in prefs:
+            harness.result['test_only_switches'].append(f'profile pref {name}={json.dumps(value)}')
+        harness.result['frame_prefs'] = {name: value for name, value in prefs}
+        if args.a11y:
+            harness.result['test_only_switches'].append('GNOME_ACCESSIBILITY=1 (AT-SPI on, as with a screen reader)')
         if args.scale != 1:
             harness.result['test_only_switches'].append(f'profile pref layout.css.devPixelsPerPx={args.scale}')
         try:
@@ -1359,6 +2002,8 @@ def main():
         except (RuntimeError, OSError, subprocess.SubprocessError, AssertionError) as error:
             status, code = 'FAIL', 1
             harness.result['reason'] = f'{type(error).__name__}: {error}'
+    if workdir:
+        shutil.rmtree(workdir, ignore_errors=True)   # the throwaway TLS key
     for name, outcome in harness.result['scenarios'].items():
         if outcome['status'] == 'FAIL':
             harness.matrix.setdefault(name, {'status': 'FAIL', 'reason': outcome.get('reason')})

@@ -16,7 +16,7 @@
 name: linux-cef-zen
 on:
   push:
-    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel]
+    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel, claude/cef-feel-2-xrbczc, claude/cef-feel-2-xrbczc-rgjgez, cloud/cef-feel-2]
     paths:
       - apps/browser/chrome/CEF*.sys.mjs
       - apps/browser/chrome/Chromium*.sys.mjs
@@ -28,20 +28,25 @@ on:
       - scripts/gui_engines/chromium.py
       - scripts/gui_test.py
       - scripts/cef_zen_e2e.py
+      - scripts/atspi_probe.py
       - tests/fixtures/cef-zen-feel.html
       - tests/fixtures/engine.html
+      - apps/browser/chrome/browser-experience.css
       - .github/workflows/linux-cef-zen.yml
       - .github/actions/publish-ci-results/**
 
 concurrency:
   group: linux-cef-zen-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false   # long GUI evidence runs queue instead of being cancelled
 
 permissions:
   contents: read
 
 env:
   ARTIFACT: axiosozo-zen-linux-x86_64
+  # The prebuilt app to test (linux-perf-build: SWGL address-bar crash fix + native frame
+  # receiver + memfd frames). The newest unexpired artifact is used if this one expired.
+  ZEN_RUN: "39362552105"
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -66,12 +71,13 @@ jobs:
             apps/browser/tests/cef-adapter.test.mjs apps/browser/tests/chromium-tabs.test.mjs \
             apps/browser/tests/chromium-browser-ui.test.mjs apps/browser/tests/chromium-accessibility.test.mjs \
             apps/browser/tests/engine-probe-controls.test.mjs apps/browser/tests/engine-tabs.test.mjs \
-            apps/browser/tests/engine-registry.test.mjs apps/browser/tests/engine-surface.test.mjs 2>&1 \
+            apps/browser/tests/engine-registry.test.mjs apps/browser/tests/engine-surface.test.mjs \
+            apps/browser/tests/chromium-accessibility-linux.test.mjs 2>&1 \
             | tee "$EVIDENCE_OUT/node-unit.log"
       - name: Python (GUI plug-in tests, syntax)
         run: |
           set -o pipefail
-          python3 -m py_compile scripts/cef_zen_e2e.py scripts/gui_engines/chromium.py
+          python3 -m py_compile scripts/cef_zen_e2e.py scripts/gui_engines/chromium.py scripts/atspi_probe.py
           python3 -m unittest tests/test_gui_engine_chromium.py 2>&1 | tee "$EVIDENCE_OUT/python-unit.log"
       - if: always()
         uses: ./.github/actions/publish-ci-results
@@ -101,10 +107,18 @@ jobs:
       - name: Newest Linux Zen build artifact
         id: zen
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=20" \
-            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty
-                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
-            > "$EVIDENCE_OUT/zen-artifact.json" || true
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=50" > "$RUNNER_TEMP/artifacts.json"
+          python3 - "$RUNNER_TEMP/artifacts.json" "$ZEN_RUN" > "$EVIDENCE_OUT/zen-artifact.json" <<'PY'
+          import json, sys
+          live = sorted((a for a in json.load(open(sys.argv[1]))['artifacts'] if not a['expired']),
+                        key=lambda a: a['created_at'], reverse=True)
+          pinned = [a for a in live if str(a['workflow_run']['id']) == sys.argv[2]]
+          pick = (pinned or live or [None])[0]
+          if pick:
+              print(json.dumps({'id': pick['id'], 'run_id': pick['workflow_run']['id'], 'pinned': bool(pinned),
+                                'branch': pick['workflow_run']['head_branch'], 'sha': pick['workflow_run']['head_sha'],
+                                'created_at': pick['created_at']}))
+          PY
           cat "$EVIDENCE_OUT/zen-artifact.json"
           run=$(python3 -c 'import json,sys; d=open(sys.argv[1]).read().strip(); print(json.loads(d)["run_id"] if d else "")' "$EVIDENCE_OUT/zen-artifact.json")
           echo "run_id=$run" >> "$GITHUB_OUTPUT"
@@ -119,8 +133,12 @@ jobs:
             zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
             libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
             libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core \
-            fonts-liberation xclip x11-xkb-utils x11-xserver-utils xkb-data > "$EVIDENCE_OUT/apt.log" 2>&1
-          dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool | tee "$EVIDENCE_OUT/tool-versions.tsv"
+            fonts-liberation xclip x11-xkb-utils x11-xserver-utils xkb-data openssl at-spi2-core python3-gi gir1.2-atspi-2.0 \
+            > "$EVIDENCE_OUT/apt.log" 2>&1
+          dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool at-spi2-core gir1.2-atspi-2.0 \
+            fonts-dejavu-core fonts-liberation | tee "$EVIDENCE_OUT/tool-versions.tsv"
+          fc-match serif | tee "$EVIDENCE_OUT/fontconfig.txt"; fc-match sans | tee -a "$EVIDENCE_OUT/fontconfig.txt"
+          fc-match sans-serif | tee -a "$EVIDENCE_OUT/fontconfig.txt"; fc-match monospace | tee -a "$EVIDENCE_OUT/fontconfig.txt"
       - name: Restore pinned CEF archive
         if: steps.zen.outputs.run_id != ''
         id: cef-cache
@@ -166,27 +184,73 @@ jobs:
           set -o pipefail
           timeout 600 ./dev gui-test --app fetched --engine chromium --scenario launch,chrome,fixture \
             --evidence-dir "$EVIDENCE_OUT/harness" 2>&1 | tail -n 40 | tee "$EVIDENCE_OUT/harness.log"
+      - name: 0. Frame-path probe (E1 pixels per frame-path variant; picks the prefs for runs 2-5)
+        id: framepath
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          # Chromium frames captured black on app 39362552105 (runs 39371098391, 39374652910) with
+          # the JS presenter too, so the variant is found here: the product default first, then
+          # TEST-ONLY frame-path prefs (frame path owned by cloud/perf-phase2; labelled in evidence).
+          python3 - "$EVIDENCE_OUT" <<'PY'
+          import json, os, pathlib, subprocess, sys
+          out = pathlib.Path(sys.argv[1])
+          variants = [('default', []),
+                      ('worker-off', ['axiosozo.engines.linux.frame_worker=false']),
+                      ('memfd-off', ['axiosozo.engines.linux.memfd_frames=false']),
+                      ('memfd-off-receiver-off', ['axiosozo.engines.linux.memfd_frames=false',
+                                                  'axiosozo.engines.linux.native_receiver=false'])]
+          probe, chosen = {}, None
+          for name, prefs in variants:
+              cmd = ['timeout', '420', 'python3', 'scripts/cef_zen_e2e.py', '--app', 'fetched', '--mode', 'web',
+                     '--scenario', 'launch,chrome,switch,typing', '--evidence-dir', str(out / f'framepath-{name}')]
+              for pref in prefs:
+                  cmd += ['--pref', pref]
+              with open(out / f'framepath-{name}.log', 'w') as log:
+                  subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+              path = out / f'framepath-{name}' / 'result.json'
+              result = json.loads(path.read_text()) if path.exists() else {}
+              e1 = result.get('matrix', {}).get('e1_render_in_content_area') or {}
+              typed = result.get('scenarios', {}).get('typing', {}).get('status')
+              probe[name] = {'prefs': prefs, 'e1': e1.get('status'), 'black_fraction': e1.get('black_fraction'),
+                             'frame_path': e1.get('frame_path'), 'typing': typed}
+              if chosen is None and e1.get('status') == 'PASS':
+                  chosen = name
+          probe_out = {'chosen': chosen, 'variants': probe}
+          (out / 'framepath.json').write_text(json.dumps(probe_out, indent=2) + '\n')
+          print(json.dumps(probe_out, indent=1))
+          args = ' '.join(f'--pref {p}' for p in dict(variants)[chosen]) if chosen else ''
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as gh:
+              gh.write(f'args={args}\nchosen={chosen or "none"}\n')
+          PY
       - name: 2. Fixture mode E1/E2 (probe button, input, history, host kill)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/fixture.log"
       - name: 3. Web mode E1/E2 + native-feel matrix (1x)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
+          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
             | tail -n 80 | tee "$EVIDENCE_OUT/web.log"
       - name: 4. Web mode at 2x (HiDPI subset)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/web-2x.log"
+      - name: 5. Web mode, AT-SPI accessibility (GNOME_ACCESSIBILITY=1)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y ${{ steps.framepath.outputs.args }} --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
+            | tail -n 40 | tee "$EVIDENCE_OUT/a11y.log"
       - name: Leftover processes
         if: always()
         run: ps -eo pid,ppid,stat,etime,args | grep -E "AxioCEFProbe|chrome-sandbox|axiosozo-dev" | grep -v grep | tee "$EVIDENCE_OUT/leftover-processes.txt" || true
@@ -198,7 +262,7 @@ jobs:
           import json, pathlib, sys
           out = pathlib.Path(sys.argv[1])
           runs = {}
-          for name in ('harness', 'fixture', 'web', 'web-2x'):
+          for name in ('harness', 'fixture', 'web', 'web-2x', 'a11y'):
               path = out / name / 'result.json'
               runs[name] = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
           summary = {name: {'status': r.get('status'), 'reason': r.get('reason'),
@@ -207,8 +271,14 @@ jobs:
           # BLOCKED gates (environment, or the known parent crash owned by cloud/linux-platform)
           # are listed, never counted as passes; any FAIL or a missing run fails the job.
           verdict = 'PASS' if all(r['status'] in ('PASS', 'BLOCKED_ENV') for r in summary.values()) else 'FAIL'
+          # Informational: the frame-path probe (step 0; frame path owned by cloud/perf-phase2) is
+          # reported, not part of this verdict; runs 2-5 use the variant it chose (TEST-ONLY prefs
+          # unless the product default showed pixels).
+          path = out / 'framepath.json'
+          summary_native = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
           blocked = {name: [k for k, v in r['matrix'].items() if v in ('BLOCKED', 'BLOCKED_ENV')] for name, r in summary.items()}
-          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=2) + '\n')
+          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary,
+                                                        'frame_path_probe': summary_native}, indent=2) + '\n')
           print(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=1))
           PY
           find "$EVIDENCE_OUT" -name '*.png' -size +4M -delete
@@ -219,5 +289,5 @@ jobs:
           path: ${{ env.EVIDENCE_OUT }}
           name: cef-zen-e2e
       - name: Fail the job unless every run passed
-        if: always() && steps.zen.outputs.run_id != ''
+        if: always()
         run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); sys.exit(v['verdict']!='PASS')"

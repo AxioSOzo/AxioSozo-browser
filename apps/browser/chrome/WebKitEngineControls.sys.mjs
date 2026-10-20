@@ -12,8 +12,22 @@ import { WebKitPresenter } from "./WebKitPresenter.sys.mjs";
 import { webkitPlatform, webkitAvailabilityFor, webkitWebModeRequested, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { normalizeEngineId, isEngineAvailable, engineAvailability, engineLabel, CHROMIUM_FIXTURE_LINEUP } from "./EngineRegistry.sys.mjs";
 import { installEngineTabMenu } from "./EngineTabMenu.sys.mjs";
+import { allowedFixtureURL } from "./EngineStreamClient.sys.mjs";
+import { ensureRuntimeStylesheet } from "./DevLoop.sys.mjs";
 
+const XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_TOOLBARBUTTON = "toolbarbutton";
+export const CONTROLS_ATTRIBUTE = "axiosozo-webkit-controls";
+// User-facing reasons for failure codes (the indicator tooltip and the tab menu).
+export const FAILURE_REASONS = Object.freeze({
+  WEBKIT_LOCAL_FIXTURE_ONLY: "WebKit runs only the local test page for now",
+  WEBKIT_PRIVATE_OR_UNKNOWN_TAB: "WebKit is not available in private windows",
+  WEBKIT_TAB_LIMIT: "Too many WebKit tabs are open",
+  WEBKIT_RUNTIME_UNAVAILABLE: "The WebKit engine is not installed",
+  ENGINE_SWITCH_IN_PROGRESS: "Another engine switch is still running",
+  UNVERIFIED_ENGINE_RUNTIME: "The installed WebKit engine is not the verified version",
+  WEBKIT_PAGE_LOAD_FAILED: "The page could not be loaded in WebKit",
+});
 
 export function installWebKitEngine(win, gecko, { chromium = null, Presenter = WebKitPresenter, onFailure = () => {} } = {}) {
   const services = win?.Services;
@@ -46,6 +60,8 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
       onEngineChange: () => { refreshOwners(); updateIndicator(); },
       onSwitchStart: tabId => { if (typeof tabId === "string") owners.add(tabId); },
       onFailure: error => { failure = /^[A-Z0-9_]{1,96}$/u.test(error?.message) ? error.message : "WEBKIT_FAILED"; onFailure(error); updateIndicator(); },
+      // The "Try again in WebKit" button of the stopped notice on the preserved Firefox tab.
+      onRetry: tab => (tab === win.gBrowser.selectedTab ? switchTo("webkit", tab) : Promise.resolve(null)),
     });
     return presenter;
   }
@@ -54,30 +70,48 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
     return normalizeEngineId(chromium?.engineOf(tab)) ?? "gecko";
   };
 
-  // A small toolbar indicator while the selected tab runs in WebKit (also the way back).
+  // The engine indicator, inside the address bar before the site identity (as Chromium's
+  // badge): "WebKit" while the selected tab runs in WebKit, a click returns it to Firefox.
+  // Without an identity box (other layouts) it is a toolbar chip.
+  const root = win.document.documentElement;
+  root?.setAttribute?.(CONTROLS_ATTRIBUTE, "true");
+  cleanups.push(() => root?.removeAttribute?.(CONTROLS_ATTRIBUTE));
+  try { cleanups.push(ensureRuntimeStylesheet(win.document)); } catch {}
+  const identity = win.document.getElementById?.("identity-box");
   const toolbar = win.document.getElementById?.("nav-bar-customization-target");
-  const indicator = toolbar ? win.document.createXULElement(XUL_TOOLBARBUTTON) : null;
+  const indicator = identity ? win.document.createElementNS(XHTML, "button")
+    : (toolbar ? win.document.createXULElement(XUL_TOOLBARBUTTON) : null);
   function updateIndicator() {
     if (!indicator) return;
     const tab = win.gBrowser.selectedTab;
     const active = engineOf(tab) === "webkit";
     indicator.hidden = !active && !pending;
+    // The WebKit this tab runs: pinned WPE on Linux, the system WebKit bundle on macOS.
     let version = WEBKIT_VERSION;
     try { version = presenter?.diagnostics?.()?.version ?? WEBKIT_VERSION; } catch {}
-    const label = pending ? "Switching engine…" : `WebKit ${version} · test page only · back to Firefox`;
+    const label = pending ? "Switching…" : "WebKit";
     indicator.setAttribute("label", label);
-    indicator.setAttribute("tooltiptext", (failure ? failure + ". " : "")
-      + "Experimental WebKit engine (local test page only). Dialogs, permissions, downloads, IME and accessibility are unavailable.");
+    if (identity) indicator.textContent = label;
+    const reason = failure ? (FAILURE_REASONS[failure] ?? failure) + ". " : "";
+    const tip = `${reason}WebKit ${version} (experimental, local test page only). Click to open this tab in Firefox.`;
+    indicator.setAttribute(identity ? "title" : "tooltiptext", tip);
+    indicator.setAttribute("aria-label", pending ? "Switching engine" : `WebKit engine, experimental. Open this tab in Firefox`);
     indicator.setAttribute("engine", "webkit");
+    indicator.toggleAttribute("pending", pending);
     indicator.disabled = pending || disposed;
   }
   if (indicator) {
     indicator.id = "axiosozo-webkit-indicator";
     indicator.hidden = true;
-    const command = event => { if (event.isTrusted) switchTo("gecko").catch(() => {}); };
-    indicator.addEventListener("command", command);
-    toolbar.appendChild(indicator);
-    cleanups.push(() => { indicator.removeEventListener("command", command); indicator.remove(); });
+    const command = event => {
+      if (!event.isTrusted) return;
+      event.stopPropagation(); // never the identity popup or the address bar
+      switchTo("gecko").catch(() => {});
+    };
+    const type = identity ? "click" : "command";
+    indicator.addEventListener(type, command);
+    if (identity) identity.before(indicator); else toolbar.appendChild(indicator);
+    cleanups.push(() => { indicator.removeEventListener(type, command); indicator.remove(); });
     const select = () => updateIndicator();
     win.gBrowser.tabContainer.addEventListener("TabSelect", select);
     cleanups.push(() => win.gBrowser.tabContainer.removeEventListener("TabSelect", select));
@@ -114,7 +148,15 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
   }
 
   // Zen's tab context menu: "Open in" with every available engine (latest installer wins).
-  const menu = installEngineTabMenu(win, { engineOf, setTabEngine: (tab, id) => switchTo(id, tab), onFailure });
+  // Per tab: WebKit is offered only where it can run, otherwise disabled with the reason.
+  const availability = (tab, id) => {
+    if (id !== "webkit" || engineOf(tab) === "webkit") return null;
+    if (tab !== win.gBrowser.selectedTab) return { available: false, reason: "Select the tab first" };
+    const origin = (() => { try { return services?.env?.get?.("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") ?? ""; } catch { return ""; } })();
+    if (!allowedFixtureURL(tab.linkedBrowser?.currentURI?.spec, origin)) return { available: false, reason: FAILURE_REASONS.WEBKIT_LOCAL_FIXTURE_ONLY };
+    return null;
+  };
+  const menu = installEngineTabMenu(win, { engineOf, setTabEngine: (tab, id) => switchTo(id, tab), onFailure, availability });
   if (menu) cleanups.push(() => menu.dispose());
   updateIndicator();
 
