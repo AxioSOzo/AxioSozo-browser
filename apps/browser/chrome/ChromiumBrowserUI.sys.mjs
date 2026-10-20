@@ -249,6 +249,8 @@ class ChromiumFinder {
   removeResultListener(listener) { this.listeners.delete(listener); }
   #notify(method, ...args) { for (const listener of [...this.listeners]) { try { listener[method]?.(...args); } catch {} } }
   #send(text, forward, findNext) {
+    this.events.push(["sent", forward, findNext]);
+    if (this.events.length > 24) this.events.shift();
     this.ui.command(this.record, "find", { text: text.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
   }
   #find(searchString, forward, findNext) {
@@ -304,6 +306,8 @@ class ChromiumFinder {
   }
   #keepActiveOnly() {
     this.stopped = true;
+    this.events.push(["stop"]);
+    if (this.events.length > 24) this.events.shift();
     this.ui.command(this.record, "stop_finding", { clear_selection: false });
   }
   requestMatchesCount() { this.#notify("onMatchesCountResult", { total: this.lastCount, current: this.lastActive, limit: 1000 }); }

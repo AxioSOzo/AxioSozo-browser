@@ -96,7 +96,8 @@ def main():
     out = {'apps': [], 'root': None, 'nodes': [], 'pressed': None}
     deadline = time.monotonic() + args.timeout
 
-    def find_root():
+    def find_roots(fresh=False):
+        """Every accessible matching the root name and role, in tree order."""
         desktop = Atspi.get_desktop(0)
         app = None
         out['apps'] = []
@@ -111,21 +112,28 @@ def main():
                 continue
             if pid == args.app_pid or (app is None and re.search(args.app_name, candidate.get_name() or '')):
                 app = candidate
-        root = None
+        roots = []
         if app is not None:
+            if fresh:
+                try:
+                    app.clear_cache()   # the client-side cache may still hold a replaced subtree
+                except Exception:  # noqa: BLE001
+                    pass
+
             def match(node, _depth):
                 try:
                     if pattern.search(node.get_name() or '') and (not args.root_role or node.get_role_name() == args.root_role):
-                        return node
+                        roots.append(node)
                 except Exception:  # noqa: BLE001
                     pass
                 return None
-            root = walk(app, match)
-        return root
+            walk(app, match)
+        return roots
 
     root = None
     while time.monotonic() < deadline:
-        root = find_root()
+        roots = find_roots()
+        root = roots[0] if roots else None
         if root is not None:
             break
         time.sleep(1)
@@ -149,16 +157,24 @@ def main():
                 return node if node.get_role_name() == role and node.get_name() == name else None
             except Exception:  # noqa: BLE001
                 return None
-        node = walk(root, target)
+        def search(candidates):
+            for candidate in candidates:
+                found = walk(candidate, target)
+                if found is not None:
+                    return found
+            return None
+        node = search(roots)
         retries = 0
         while node is None and time.monotonic() < deadline + args.timeout:
             # The tree may still be (re)building, e.g. right after a tab switch; a mirror whose
-            # root is renamed (the page title) replaces the root object, so look it up again.
+            # root is renamed (the page title) replaces the root object, so look it up again
+            # (every matching root, with the client cache cleared).
             time.sleep(0.5)
             retries += 1
-            root = find_root() or root
-            node = walk(root, target)
+            roots = find_roots(fresh=True)
+            node = search(roots)
         out['press_retries'] = retries
+        out['press_roots'] = [describe(candidate) for candidate in roots[:6]]
         if node is None:
             out['pressed'] = {'error': f'no {role} named {name!r}'}
         else:

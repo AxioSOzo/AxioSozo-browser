@@ -725,6 +725,7 @@ class CEFZenHarness(gui_test.Harness):
         self.screenshot('33-a11y')
         ok = all(item['chromium'] for item in found.values()) and after > before
         self.gate('accessibility_atspi', 'PASS' if ok else 'FAIL', found=found, press={'before': before, 'after': after, **(pressed.get('pressed') or {})},
+                  press_retries=pressed.get('press_retries'), press_roots=pressed.get('press_roots'),
                   chromium_root=chromium.get('root'), chromium_nodes=len(chromium.get('nodes', [])), gecko_nodes=len(gecko.get('nodes', [])),
                   focused=focused,
                   note='GNOME_ACCESSIBILITY=1 (test-only, as with a running screen reader); read through AT-SPI with atspi_probe.py')
@@ -1128,6 +1129,9 @@ class CEFZenHarness(gui_test.Harness):
         self.key('Return')
         again = self.find_next_settled(found)
         self.screenshot('12-find-next')
+        # Diagnostics only: a second find-next (its ordinal and the finder's raw sent/result log).
+        self.key('Return')
+        again2 = self.find_next_settled(again)
         # Highlight All on, then off again (Firefox's checkbox).
         toggle = "const bar = gBrowser.getCachedFindBar(gBrowser.selectedTab); bar.getElement('highlight').click(); " \
                  "return bar.getElement('highlight').checked;"
@@ -1160,6 +1164,7 @@ class CEFZenHarness(gui_test.Harness):
         self.gate('find_in_page', 'PASS' if same else 'FAIL', screenshots=['12-find.png', '12-find-next.png', '12-find-gecko.png'],
                   chromium=[found['matches'], again['matches']], gecko=[gecko['matches'], gecko_again['matches']],
                   chromium_results=again.get('chromiumResults'),
+                  second_find_next={'matches': again2['matches'], 'log': again2.get('chromiumResults')},
                   highlight_all={'chromium': found.get('highlightAll'), 'gecko': gecko.get('highlightAll'),
                                  'toggled': [highlight_on, highlight_off]},
                   note='12-find*.png: without Highlight All only the active match is marked (selection), with it every match')
@@ -1750,23 +1755,30 @@ class CEFZenHarness(gui_test.Harness):
         return {'panel': panel, 'gecko': gecko, 'back': back['p']}
 
     DEVTOOLS = """
-        let toolbox = null;
+        const notice = (n => n && !n.hidden ? n.textContent : null)(gBrowser.selectedBrowser.parentNode
+          .querySelector('[data-axiosozo-cef] .axiosozo-cef-notice'));
+        let toolbox = null, error = null;
         try {
-          const {gDevTools} = ChromeUtils.importESModule('resource://devtools/client/framework/devtools.sys.mjs');
+          const {require} = ChromeUtils.importESModule('resource://devtools/shared/loader/Loader.sys.mjs');
+          const {gDevTools} = require('devtools/client/framework/devtools');
           toolbox = gDevTools.getToolboxForTab?.(gBrowser.selectedTab) ?? null;
-        } catch (e) { return {error: String(e)}; }
-        return {toolbox: !!toolbox, target: toolbox?.target?.url ?? toolbox?.commands?.targetCommand?.targetFront?.url ?? null,
-                notice: (n => n && !n.hidden ? n.textContent : null)(gBrowser.selectedBrowser.parentNode
-                  .querySelector('[data-axiosozo-cef] .axiosozo-cef-notice'))};"""
+        } catch (e) { error = String(e); }
+        const hosts = [...document.querySelectorAll('.devtools-toolbox-bottom-iframe, .devtools-toolbox-side-iframe')].length;
+        return {toolbox: !!toolbox || hosts > 0, toolboxFrames: hosts, error, notice,
+                target: toolbox?.target?.url ?? toolbox?.commands?.targetCommand?.targetFront?.url ?? null};"""
 
     def scenario_devtools(self):
         """Record what the developer-tools shortcut does over a Chromium tab (Chromium's DevTools are not embedded)."""
         self.ensure_chromium('38-to-chromium')
         self.click_at(*AT['blank'])
         self.key('ctrl+shift+i')
-        time.sleep(4)
-        chromium = self.chrome_script(self.DEVTOOLS)
+        # The notice shows for 4 s; a toolbox (if the shortcut leaked to Firefox) takes ~2 s to open.
+        time.sleep(0.8)
+        early = self.chrome_script(self.DEVTOOLS)
         self.screenshot('38-devtools-chromium')
+        time.sleep(2.5)
+        chromium = self.chrome_script(self.DEVTOOLS)
+        chromium['notice'] = chromium.get('notice') or early.get('notice')
         if chromium.get('toolbox'):
             self.key('ctrl+shift+i')
             time.sleep(2)
