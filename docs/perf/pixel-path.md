@@ -348,3 +348,20 @@ memfd frames, probe passed); `axiosozo.engines.linux.frame_worker=false` keeps t
 path. WebKit 1× static navigate → visible was +8…46 % in all variants of this branch against a
 low base in round 1 (41.5 ms; 56–75 ms in other runs): NOT_VERIFIED as a regression, re-checked in
 the next A/B.
+
+## Attribution behind the phase-2 choices (engine-profile run 39340307459)
+
+The concurrent profiling session (branch `claude/engine-profile-nipd8o`, perf + Gecko profiler of
+the Zen parent; its `docs/perf/profile-findings.md` had not landed when this was written) profiled
+rAF windows on the pre-phase-2 pipe path. Zen parent, 1×:
+
+| rAF window | parent CPU | Subprocess worker (pipe I/O) | GeckoMain | of which `engine_stream_read` / `bgraToRGBA` | WebRender (Renderer + SwComposite) |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 3681 ms | 2222 ms (60 %) | 1129 ms | 190 / 117 ms | 225 ms |
+| WebKit | 3253 ms | 1931 ms (59 %) | 1038 ms | 180 / 103 ms | 195 ms |
+
+The pipe's worker was the largest parent cost; memfd frames remove the pixel bytes from it
+(A/B: parent −25 % at 2×). The main thread's reads and conversions are what the frame worker
+moves (A/B: a further −15 points at 2×). What is left is the chrome's own work, the AXCF metadata
+and events through the pipe, and software compositing (WebRender is ~6 % of the parent in these
+windows); the native receiver removes the remaining JS frame handling.
