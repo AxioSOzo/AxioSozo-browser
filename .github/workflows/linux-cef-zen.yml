@@ -107,11 +107,18 @@ jobs:
       - name: Newest Linux Zen build artifact
         id: zen
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=50" \
-            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse
-                  | ((map(select(.workflow_run.id == ($ENV.ZEN_RUN | tonumber))) + .) | .[0] // empty
-                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
-            > "$EVIDENCE_OUT/zen-artifact.json" || true
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=50" > "$RUNNER_TEMP/artifacts.json"
+          python3 - "$RUNNER_TEMP/artifacts.json" "$ZEN_RUN" > "$EVIDENCE_OUT/zen-artifact.json" <<'PY'
+          import json, sys
+          live = sorted((a for a in json.load(open(sys.argv[1]))['artifacts'] if not a['expired']),
+                        key=lambda a: a['created_at'], reverse=True)
+          pinned = [a for a in live if str(a['workflow_run']['id']) == sys.argv[2]]
+          pick = (pinned or live or [None])[0]
+          if pick:
+              print(json.dumps({'id': pick['id'], 'run_id': pick['workflow_run']['id'], 'pinned': bool(pinned),
+                                'branch': pick['workflow_run']['head_branch'], 'sha': pick['workflow_run']['head_sha'],
+                                'created_at': pick['created_at']}))
+          PY
           cat "$EVIDENCE_OUT/zen-artifact.json"
           run=$(python3 -c 'import json,sys; d=open(sys.argv[1]).read().strip(); print(json.loads(d)["run_id"] if d else "")' "$EVIDENCE_OUT/zen-artifact.json")
           echo "run_id=$run" >> "$GITHUB_OUTPUT"
@@ -237,5 +244,5 @@ jobs:
           path: ${{ env.EVIDENCE_OUT }}
           name: cef-zen-e2e
       - name: Fail the job unless every run passed
-        if: always() && steps.zen.outputs.run_id != ''
+        if: always()
         run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); sys.exit(v['verdict']!='PASS')"
