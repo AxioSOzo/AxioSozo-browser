@@ -196,6 +196,7 @@ def scenario(session, origin, directory):
     results['context_menu'] = {k: details[k] for k in ('x', 'y', 'type_flags', 'edit_flags', 'editable', 'media_type')}
     # Input still reaches the page after the menu (no engine-side menu state left behind).
     click(session, *AT['t'])
+    event(session, 'text_input', lambda item: item['mode'] == 'text' and item['caret_y'] < 120)
     session.completed(session.command('paste_text', text='!'))
     results['input_after_context_menu'] = wait_state(session, lambda s: s.get('t', '').endswith('!'))['t']
 
@@ -212,6 +213,7 @@ def scenario(session, origin, directory):
     assert session.target == before and len([e for e in session.events if e.get('event') == 'navigation']) == len(navigations), \
         'Stay changed the target'
     click(session, *AT['t'])
+    event(session, 'text_input', lambda item: item['mode'] == 'text' and item['caret_y'] < 120)
     session.completed(session.command('paste_text', text='?'))
     stayed = wait_state(session, lambda s: s.get('t', '').endswith('?'))['t']
     click(session, *AT['link'])
