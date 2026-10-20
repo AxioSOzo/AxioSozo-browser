@@ -11,6 +11,7 @@
 // logic with CEF-only extensions (surface mode, web mode, UI delegation, a11y). It is
 // the same protocol; moving CEF onto this module is a later, separate step.
 
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -134,8 +135,20 @@ export function validDamage(damage, width, height) {
     && x + w <= width && y + h <= height;
 }
 
+/** §6.2 damage payloads: the frame's payload is exactly its damage rectangle's rows. */
+function frameBytes(metadata, damage, payload) {
+  if (!payload) return metadata.stride * metadata.height;
+  return damage && validDamage(metadata.damage, metadata.width, metadata.height)
+    ? metadata.damage[0][2] * metadata.damage[0][3] * 4 : -1;
+}
+function payloadMatches(metadata, size, damage, payload, memfd) {
+  // §6.3: a memfd frame has no pipe payload; its slot holds exactly the expected bytes.
+  if (memfd) return size === 0 && validMemfdFrame(metadata, memfd, frameBytes(metadata, damage, payload));
+  return size === frameBytes(metadata, damage, payload);
+}
+
 /** One AXCF item (§5). Lengths and metadata are validated before pixels are read. */
-export async function readStreamPacket(pipe, { engine, identity, damage = false }) {
+export async function readStreamPacket(pipe, { engine, identity, damage = false, payload = false, memfd = null }) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -151,10 +164,10 @@ export async function readStreamPacket(pipe, { engine, identity, damage = false 
   catch { throw new Error("INVALID_AXCF_METADATA"); }
   if (!isObject(metadata) || metadata.version !== 1) throw new Error("INVALID_AXCF_METADATA");
   if (kind === 2) {
-    if (!hasKeys(metadata, damage ? [...FRAME_KEYS, "damage"] : FRAME_KEYS)
+    if (!hasKeys(metadata, [...FRAME_KEYS, ...(damage ? ["damage"] : []), ...(memfd ? ["slot", "payload_bytes"] : [])])
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
-        || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
+        || metadata.stride !== metadata.width * 4 || !payloadMatches(metadata, size, damage, payload, memfd)
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
         || metadata.format !== "BGRA8"
         || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))) throw new Error("INVALID_AXCF_FRAME");
@@ -177,7 +190,7 @@ const TARGET_EVENTS = new Set(["created", "navigation", "loading", "title", "url
 // Fixed diagnostic codes only: never native payloads, URLs, input or tokens.
 export const STREAM_FAILURE_CODES = new Set([
   "TRUNCATED_AXCF_HEADER", "TRUNCATED_AXCF_METADATA", "TRUNCATED_AXCF_PIXELS", "INVALID_AXCF_HEADER",
-  "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_ENGINE_EVENT",
+  "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_DAMAGE_PAYLOAD", "MEMFD_READ_FAILED", "INVALID_ENGINE_EVENT",
   "INVALID_ENGINE_TARGET", "FOREIGN_ENGINE_TARGET", "INVALID_ENGINE_CREATION", "UNKNOWN_ENGINE_TARGET",
   "INVALID_ENGINE_GENERATION", "STALE_ENGINE_EVENT", "UNEXPECTED_ENGINE_FRAME", "FOREIGN_ENGINE_FRAME",
   "FUTURE_ENGINE_FRAME", "UNVERIFIED_ENGINE_RUNTIME", "UNREQUESTED_ENGINE_CREATION", "MISSING_ENGINE_TARGET",
@@ -198,14 +211,20 @@ export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatSeen = 0; #heartbeatCheckedAt = 0;
-  #heartbeatTimer = null; #heartbeatOn = false; #now;
+  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null;
   constructor(process, { profile, token, instance, identity, timers, deadline = 15000, frameDamage = false,
-    heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
+    damagePayload = false, frameTransport = "pipe", readSlot = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
     if (!profile || typeof profile.engine !== "string" || typeof profile.validateReady !== "function") throw new Error("INVALID_ENGINE_PROFILE");
     if (!/^[0-9a-f]{64}$/u.test(token) || !id(instance) || !validFixtureOrigin(identity) || !/^[a-z]{1,8}$/u.test(requestPrefix)) {
       throw new Error("INVALID_ENGINE_BOOTSTRAP");
     }
     this.profile = profile; this.instance = instance; this.identity = identity; this.frameDamage = frameDamage === true;
+    // §6.2: rectangle-only payloads (needs frame damage); frames are rebuilt per target here.
+    this.damagePayload = this.frameDamage && damagePayload === true;
+    this.#assembler = this.damagePayload ? new DamagePayloadAssembler() : null;
+    // §6.3: pixels from the host's memfd instead of the pipe (Linux; pref-gated by the launcher).
+    if (!["pipe", "memfd"].includes(frameTransport)) throw new Error("INVALID_ENGINE_BOOTSTRAP");
+    this.frameTransport = frameTransport; this.#readSlot = readSlot; this.memfd = null;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.requestPrefix = requestPrefix;
     this.onFailure = onFailure;
@@ -236,7 +255,9 @@ export class EngineStreamHost {
       else if (!this.#closing) this.fail("ENGINE_UNEXPECTED_EXIT");
     }, () => this.fail("ENGINE_PROCESS_FAILURE"));
     const hello = { version: 1, method: "hello", token: this.#token, engine_instance: this.instance,
-      fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}) };
+      fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}),
+      ...(this.damagePayload ? { damage_payload: true } : {}),
+      ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}) };
     await this.#write(hello);
     await this.#readyWait.promise;
     this.status = "connected";
@@ -298,10 +319,19 @@ export class EngineStreamHost {
     adapter.fail(code);
   }
   async #read() {
-    const options = { engine: this.profile.engine, identity: this.identity, damage: this.frameDamage };
+    const options = { engine: this.profile.engine, identity: this.identity, damage: this.frameDamage, payload: this.damagePayload, memfd: null };
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readStreamPacket(this.#process.stdout, options);
+      options.memfd = this.memfd;
+      const packet = await readStreamPacket(this.#process.stdout, options);
+      const { kind, metadata: value } = packet;
+      let pixels = packet.pixels;
+      if (kind === 2 && this.memfd) {
+        this.readPhase = "frame_memfd";
+        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+      }
+      // Every delivered frame is applied, presented or not (§6.2).
+      if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
@@ -332,6 +362,7 @@ export class EngineStreamHost {
         const creation = value.event === "created" && this.#requests.get(value.request_id);
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_ENGINE_CREATION");
         adapter = this.#adapterFor(value.target, value.event === "created");
+        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
       } else if (TARGET_EVENTS.has(value.event)) {
         throw new Error("MISSING_ENGINE_TARGET");
       } else if (value.event === "error" && !value.request_id) {
@@ -367,10 +398,22 @@ export class EngineStreamHost {
     if (this.#ready || this.status !== "starting") throw new Error("UNVERIFIED_ENGINE_RUNTIME");
     const fields = this.profile.readyFields;
     if (!hasKeys(value, ["version", "event", ...fields]) || value.engine_instance !== this.instance) throw new Error("UNVERIFIED_ENGINE_RUNTIME");
-    try { this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage }); }
+    try { this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage, damagePayload: this.damagePayload }); }
     catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
     const interval = value.capabilities?.heartbeat_interval_ms;
     if (interval !== undefined && !(Number.isInteger(interval) && interval >= 100 && interval <= 2000)) throw new Error("UNVERIFIED_ENGINE_RUNTIME");
+    // §6.3: exactly the transport the hello asked for; a memfd ring within the frame bound.
+    const transport = value.capabilities?.frame_transport ?? "pipe";
+    if (transport !== this.frameTransport || ("memfd" in (value.capabilities ?? {})) !== (transport === "memfd")
+        || (transport === "memfd" && !validMemfdCapability(value.capabilities.memfd, MAX_FRAME_BYTES))) {
+      throw new Error("UNVERIFIED_ENGINE_RUNTIME");
+    }
+    if (transport === "memfd") {
+      const memfd = Object.freeze({ ...value.capabilities.memfd });
+      try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
+      catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
+      this.memfd = memfd;
+    }
     this.#ready = true;
     this.capabilities = Object.freeze({ ...value.capabilities });
     this.ready = Object.freeze(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "capabilities" && key !== "version")));
@@ -465,6 +508,7 @@ export class EngineStreamTarget {
   get tabId() { return this.#pending.tab_id; }
   get identity() { return this.#pending.identity; }
   get host() { return this.#host; }
+  get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
   get ended() { return this.#ended; }
   get inputFeatures() {
     const capabilities = this.#host.capabilities ?? {};

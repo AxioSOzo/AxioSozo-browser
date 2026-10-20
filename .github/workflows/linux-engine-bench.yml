@@ -183,6 +183,12 @@ jobs:
           set -o pipefail
           timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root . --out "$EVIDENCE_OUT/bench" \
             --reps "$BENCH_REPS" --frame-damage 2>&1 | tee "$EVIDENCE_OUT/bench-damage.log"
+      - name: Bench (hello.frame_damage + damage_payload, if the host offers it)
+        if: always() && hashFiles('native/chromium-host/tests/transport_damage_payload_test.cc') != ''
+        run: |
+          set -o pipefail
+          timeout 3000 python3 tools/engine-bench/bench.py --engine chromium --cef-root . --out "$EVIDENCE_OUT/bench" \
+            --reps "$BENCH_REPS" --frame-damage --damage-payload 2>&1 | tee "$EVIDENCE_OUT/bench-payload.log"
       - name: Summary
         if: always()
         run: |

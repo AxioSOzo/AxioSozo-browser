@@ -10,6 +10,7 @@
 // any page.
 import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect } from "./EngineFrameSurface.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_WEBKIT_TABS = 8;
@@ -74,18 +75,9 @@ export function streamKey(event, type) {
  * With `rect` only that rectangle is converted, into a new buffer of its size.
  */
 export function bgraToRGBA(buffer, width, rect = null) {
-  const source = new Uint8Array(buffer);
-  const [x, y, w, h] = rect ?? [0, 0, width, source.length / 4 / width];
-  const out = rect ? new Uint8ClampedArray(w * h * 4) : new Uint8ClampedArray(buffer);
-  for (let row = 0; row < h; row++) {
-    let from = ((y + row) * width + x) * 4, to = row * w * 4;
-    for (let column = 0; column < w; column++, from += 4, to += 4) {
-      const blue = source[from], green = source[from + 1], red = source[from + 2], alpha = source[from + 3];
-      const scale = alpha && alpha !== 255 ? 255 / alpha : 1;
-      out[to] = red * scale; out[to + 1] = green * scale; out[to + 2] = blue * scale; out[to + 3] = alpha;
-    }
-  }
-  return out;
+  if (!rect) return convertBGRAInPlace(buffer, width);
+  const [x, y, w, h] = rect;
+  return convertBGRARect(buffer, width, x, y, new Uint8ClampedArray(w * h * 4), w, 0, 0, w, h);
 }
 
 const NOTICES = {
@@ -174,7 +166,7 @@ export class WebKitPresenter {
     const record = { tab, browser, stack, overlay, canvas, originalTarget, committed: false, adapter: null,
       priorVisibility: browser.style.visibility, priorPosition: stack.style.position,
       priorDocShellIsActive: browser.docShellIsActive, latestURL: url, title: "", loading: null, listeners: [],
-      displayedFrames: 0, damageFrames: 0, uploadedPixels: 0, fullPixels: 0, drawMilliseconds: 0,
+      displayedFrames: 0, damageFrames: 0, supersededFrames: 0, frames: null, uploadedPixels: 0, fullPixels: 0, drawMilliseconds: 0,
       firstFrameAt: null, startedAt: this.window.performance.now(), clicks: { time: 0, x: 0, y: 0, count: 1 },
       wheel: null, cursor: "default", visible: undefined };
     this.pending = record;
@@ -284,30 +276,21 @@ export class WebKitPresenter {
     record.renderScaleLimited = surface.device_scale < (this.window.devicePixelRatio || 1);
     return surface;
   }
+  /** EngineFrameSurface converts and uploads the damage at the next refresh tick (once per tick). */
   #draw(record, metadata, pixels) {
-    if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
-    const started = this.window.performance.now();
-    const canvas = record.canvas;
-    const resized = canvas.width !== metadata.width || canvas.height !== metadata.height;
-    if (canvas.width !== metadata.width) canvas.width = metadata.width;
-    if (canvas.height !== metadata.height) canvas.height = metadata.height;
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) throw new Error("WEBKIT_CANVAS_UNAVAILABLE");
-    const damage = !resized && record.displayedFrames > 0 ? metadata.damage?.[0] : null;
-    if (damage) {
-      // Only the changed rectangle (§6.1): pixels outside it equal the previous frame.
-      const [x, y, w, h] = damage;
-      context.putImageData(new this.window.ImageData(bgraToRGBA(pixels, metadata.width, damage), w, h), x, y);
-      record.damageFrames++; record.uploadedPixels += w * h;
-    } else {
-      context.putImageData(new this.window.ImageData(bgraToRGBA(pixels, metadata.width), metadata.width, metadata.height), 0, 0);
-      record.uploadedPixels += metadata.width * metadata.height;
-    }
-    record.fullPixels += metadata.width * metadata.height;
-    record.displayedFrames++;
-    record.drawMilliseconds += this.window.performance.now() - started;
-    record.firstFrameAt ??= this.window.performance.now();
-    record.lastFrameId = metadata.frame_id;
+    if (this.disposed) return;
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, {
+      // A frame that is not painted makes the next paint whole.
+      isPaintable: () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden)),
+      onPaint: paint => {
+        if (paint.uploadedPixels < paint.framePixels) record.damageFrames++;
+        record.uploadedPixels += paint.uploadedPixels; record.fullPixels += paint.framePixels;
+        record.supersededFrames += paint.superseded;
+        record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+        record.firstFrameAt ??= this.window.performance.now();
+        record.lastFrameId = paint.frameId;
+      } });
+    record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
     if (event.event === "url") record.latestURL = event.url || record.latestURL;
@@ -558,8 +541,8 @@ export class WebKitPresenter {
   diagnostics() {
     const record = this.active;
     if (!record) return { engine: "gecko", ownedTabIds: this.owners(), failures: [...this.failures], pending: !!this.pending };
-    return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra",
-      pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames,
+    return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra", frameTransport: record.adapter.frameTransport ?? "pipe",
+      pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
       uploadedPixels: record.uploadedPixels, fullPixels: record.fullPixels,
       meanDrawMilliseconds: record.displayedFrames ? record.drawMilliseconds / record.displayedFrames : 0,
       firstFrameMilliseconds: record.firstFrameAt === null ? null : record.firstFrameAt - record.startedAt,

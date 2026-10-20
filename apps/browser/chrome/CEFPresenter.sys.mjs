@@ -5,6 +5,7 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
   RENDER_PATH_PIPE, WHEEL_PHASES, surfaceTargetId } from "./CEFEngineAdapter.sys.mjs";
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -159,18 +160,9 @@ export function cefKey(event, type, platform = "mac") {
 }
 /** Pipe fallback only: surface mode never touches pixels in JS. */
 export function bgraToRGBA(buffer) {
-  // AXCF read() gives this presenter its own ArrayBuffer. Convert that buffer
-  // in place: a 5K capped frame is ~33 MiB, so allocating a second pixel copy
-  // for every paint needlessly amplifies main-thread memory pressure.
-  const rgba = new Uint8ClampedArray(buffer);
-  for (let i = 0; i < rgba.length; i += 4) {
-    const blue = rgba[i], green = rgba[i + 1], red = rgba[i + 2], alpha = rgba[i + 3];
-    // CEF paints premultiplied BGRA; canvas ImageData takes unpremultiplied RGBA.
-    const scale = alpha && alpha !== 255 ? 255 / alpha : 1;
-    rgba[i] = red * scale; rgba[i + 1] = green * scale;
-    rgba[i + 2] = blue * scale; rgba[i + 3] = alpha;
-  }
-  return rgba;
+  // In place (no second pixel copy of a frame of up to ~33 MiB); EngineFrameSurface
+  // holds the fast path and the identical-output rule.
+  return convertBGRAInPlace(buffer, new Uint8Array(buffer).length / 4);
 }
 
 /**
@@ -178,16 +170,7 @@ export function bgraToRGBA(buffer) {
  * frame buffer is left untouched): the work is proportional to the damage, not the frame.
  */
 export function bgraRegionToRGBA(buffer, frameWidth, x, y, width, height) {
-  const source = new Uint8Array(buffer), rgba = new Uint8ClampedArray(width * height * 4);
-  for (let row = 0; row < height; row++) {
-    let from = ((y + row) * frameWidth + x) * 4, to = row * width * 4;
-    for (let column = 0; column < width; column++, from += 4, to += 4) {
-      const blue = source[from], green = source[from + 1], red = source[from + 2], alpha = source[from + 3];
-      const scale = alpha && alpha !== 255 ? 255 / alpha : 1;
-      rgba[to] = red * scale; rgba[to + 1] = green * scale; rgba[to + 2] = blue * scale; rgba[to + 3] = alpha;
-    }
-  }
-  return rgba;
+  return convertBGRARect(buffer, frameWidth, x, y, new Uint8ClampedArray(width * height * 4), width, 0, 0, width, height);
 }
 
 // Component phase names (NSEventPhase) as cef-v1 wheel/pinch phase values.
@@ -671,7 +654,7 @@ export class CEFPresenter {
       priorVisibility:browser.style.visibility, priorPosition:stack.style.position, originalLabel:tab.label,
       priorDocShellIsActive:browser.docShellIsActive, pendingURL:this.browsingMode === "web" ? url : null,
       latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
-      framePixels:0, uploadedPixels:0, canvasCurrent:false,
+      framePixels:0, uploadedPixels:0, frames:null,
       firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 },
       surfaceMode:false, native:null, hostByteCap:false, keyVerdicts:new Map(), keyDowns:new Map(),
       wheelRemainder:{ x:0, y:0 }, ime:null, title:this.browsingMode === "web" ? this.restoreTitles.get(tab) ?? "" : "",
@@ -787,35 +770,23 @@ export class CEFPresenter {
     record.firstFrameAt ??= this.window.performance.now();
     this.#a11yViewport(record);
   }
-  /** Pipe fallback only (no engine-view component): CPU BGRA frames drawn with putImageData. */
+  /**
+   * Pipe fallback only (no engine-view component): CPU BGRA frames. EngineFrameSurface
+   * converts and uploads the damage at the next refresh tick (once per tick).
+   */
   #draw(record, metadata, pixels) {
-    if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) {
-      record.canvasCurrent = false; // a skipped frame: the next one is drawn whole
-      return;
-    }
-    const started = this.window.performance.now();
-    const sized = record.canvas.width === metadata.width && record.canvas.height === metadata.height;
-    if (record.canvas.width !== metadata.width) record.canvas.width = metadata.width;
-    if (record.canvas.height !== metadata.height) record.canvas.height = metadata.height;
-    const context = record.canvas.getContext("2d", { alpha:false });
-    if (!context) throw new Error("CEF_CANVAS_UNAVAILABLE");
-    const damage = metadata.damage?.[0];
-    if (damage && sized && record.canvasCurrent) {
-      // Linux frame damage: convert and upload only the changed rectangle.
-      const [x, y, width, height] = damage;
-      context.putImageData(new this.window.ImageData(bgraRegionToRGBA(pixels, metadata.width, x, y, width, height),
-        width, height), x, y);
-      record.uploadedPixels += width * height;
-    } else {
-      context.putImageData(new this.window.ImageData(bgraToRGBA(pixels), metadata.width, metadata.height), 0, 0);
-      record.uploadedPixels += metadata.width * metadata.height;
-    }
-    record.canvasCurrent = true;
-    record.framePixels += metadata.width * metadata.height;
-    record.displayedFrames++;
-    record.drawMilliseconds += this.window.performance.now() - started;
-    record.firstFrameAt ??= this.window.performance.now();
-    record.lastFrameId = metadata.frame_id;
+    if (this.disposed) return;
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, {
+      // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
+      isPaintable: () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden)),
+      onPaint: paint => {
+        record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
+        record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
+        record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+        record.firstFrameAt ??= this.window.performance.now();
+        record.lastFrameId = paint.frameId;
+      } });
+    record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
     if (event.event === "ax_tree_update" || event.event === "ax_location") {
@@ -1550,10 +1521,13 @@ export class CEFPresenter {
     const stats = record.surfaceMode ? record.adapter.surfaceStats?.() ?? null : null;
     return { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
+      frameTransport:record.surfaceMode ? null : record.adapter.frameTransport ?? "pipe",
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).
       uploadedPixelShare:record.surfaceMode || !record.framePixels ? null : record.uploadedPixels / record.framePixels,
+      // Pipe mode: frames a newer one replaced before the refresh tick (never converted).
+      supersededFrames:record.surfaceMode ? null : record.supersededFrames ?? 0,
       firstFrameMilliseconds:record.firstFrameAt - record.startedAt, lastFrameId:record.lastFrameId,
       surface:record.adapter.surface, surfaceGeometry:record.surfaceGeometry ?? null, surfaceStats:stats,
       renderScaleLimited:!!record.renderScaleLimited, inputFeatures:record.adapter.inputFeatures ?? null,

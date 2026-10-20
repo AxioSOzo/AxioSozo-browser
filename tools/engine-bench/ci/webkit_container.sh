@@ -59,6 +59,11 @@ log "bench: $REPS repetitions with hello.frame_damage"
 dstatus=0
 as_axio $B --out "$OUT/bench" --reps "$REPS" --frame-damage >"$OUT/bench-damage.log" 2>&1 || dstatus=$?
 log "bench damage exit $dstatus"
+if grep -q damage_payload "$REPO/native/webkit-host/stream_core.hpp"; then
+  log "bench: $REPS repetitions with hello.frame_damage + damage_payload"
+  as_axio $B --out "$OUT/bench" --reps "$REPS" --frame-damage --damage-payload >"$OUT/bench-payload.log" 2>&1 || dstatus=$?
+  log "bench payload exit $dstatus"
+fi
 ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"
 chmod -R a+rX "$OUT"
 [ "$status" = 0 ] || exit "$status"

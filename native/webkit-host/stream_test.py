@@ -41,7 +41,7 @@ def read_exact(pipe, size, deadline):
 FRAME_KEYS = {'version', 'target', 'frame_id', 'width', 'height', 'stride', 'device_scale', 'format'}
 
 
-def read_packet(pipe, deadline, damage=False):
+def read_packet(pipe, deadline, damage=False, payload=False, memfd=False):
     header = read_exact(pipe, 16, deadline)
     magic, version, kind, metadata_size, size = struct.unpack('>4sHHII', header)
     if magic != b'AXCF' or version != 1 or kind not in (1, 2):
@@ -54,11 +54,15 @@ def read_packet(pipe, deadline, damage=False):
     if kind == 2:
         width, height = metadata['width'], metadata['height']
         # Exactly the cef-v1 frame keys; `damage` only when negotiated in hello.
-        if set(metadata) != (FRAME_KEYS | {'damage'} if damage else FRAME_KEYS):
+        keys = (FRAME_KEYS | {'damage'} if damage else FRAME_KEYS) | ({'slot', 'payload_bytes'} if memfd else set())
+        if set(metadata) != keys:
             raise ValueError('unexpected AXCF frame keys ' + ','.join(sorted(metadata)))
         if (not isinstance(width, int) or not isinstance(height, int)
                 or not 1 <= width <= 4096 or not 1 <= height <= 4096
-                or metadata['stride'] != width * 4 or size != width * height * 4
+                or metadata['stride'] != width * 4
+                or (memfd and (size or metadata['payload_bytes'] != (metadata['damage'][0][2] * metadata['damage'][0][3] * 4
+                                                                      if payload else width * height * 4)))
+                or (not memfd and size != (metadata['damage'][0][2] * metadata['damage'][0][3] * 4 if payload else width * height * 4))
                 or metadata['format'] != 'BGRA8'):
             raise ValueError('invalid AXCF frame geometry')
     return kind, metadata, read_exact(pipe, size, deadline)
@@ -106,7 +110,8 @@ STATUS_TAIL_2X = (630, 595, 400, 65)
 
 
 class Session:
-    def __init__(self, binary, origin, directory, frame_damage=False, timeout=30, hello_extra=None):
+    def __init__(self, binary, origin, directory, frame_damage=False, timeout=30, hello_extra=None, damage_payload=False,
+                 memfd=False):
         self.origin, self.directory = origin, directory
         probe.BASE.mkdir(parents=True, exist_ok=True)
         self.profile = Path(tempfile.mkdtemp(prefix='webkit-profile-', dir=probe.BASE))
@@ -127,12 +132,26 @@ class Session:
         self.events, self.frames = [], 0
         self.frame_log = []  # (monotonic, frame_id, width, height, device_scale)
         self.frame_damage = frame_damage
+        # hello.damage_payload (engine-stream-v1 §6.2): payloads are the damage rectangle's rows;
+        # the whole frame is rebuilt here exactly as Zen's DamagePayloadAssembler does.
+        self.damage_payload = damage_payload
+        self.whole = {}  # native_target_id -> (width, height, bytearray)
+        self.payload_bytes = self.whole_bytes = 0
         self.damage_checked = self.damage_violations = 0
         self.damage_area = []
         self.last = None  # (metadata, pixels) of the newest frame
+        self.prior = None  # the frame delivered before it
         hello = dict(version=1, method='hello', token=self.token, engine_instance=self.instance, fixture_origin=origin)
         if frame_damage:
             hello['frame_damage'] = True
+        if damage_payload:
+            hello['damage_payload'] = True
+        # §6.3 frame_transport "memfd": pixels are read from the host's memfd slot through
+        # /proc/<pid>/fd/<fd>, as Zen does (IOUtils.read with offset/maxBytes).
+        self.memfd = None
+        self.memfd_requested = memfd
+        if memfd:
+            hello['frame_transport'] = 'memfd'
         hello.update(hello_extra or {})
         self.write(hello)
 
@@ -156,7 +175,14 @@ class Session:
     def until(self, predicate, seconds=None, capture=None):
         deadline = time.monotonic() + (self.timeout if seconds is None else seconds)
         while True:
-            kind, item, pixels = read_packet(self.process.stdout, deadline, self.frame_damage)
+            kind, item, pixels = read_packet(self.process.stdout, deadline, self.frame_damage, self.damage_payload,
+                                             memfd=self.memfd_requested)
+            if kind == 1 and item.get('event') == 'ready' and self.memfd_requested:
+                self.memfd = item['capabilities']['memfd']
+            if kind == 2 and self.memfd_requested:
+                pixels = self.read_slot(item)
+            if kind == 2 and self.damage_payload:
+                pixels = self.assemble(item, pixels)
             if kind == 1:
                 self.events.append(item)
                 target = item.get('target')
@@ -171,7 +197,7 @@ class Session:
                                               crc=zlib.crc32(pixels))) + '\n')
                 if self.frame_damage:
                     self.check_damage(item, pixels)
-                self.last = (item, bytes(pixels))
+                self.prior, self.last = self.last, (item, bytes(pixels))
                 self.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
                 if capture:
                     png(capture, item['width'], item['height'], pixels)
@@ -191,6 +217,29 @@ class Session:
     def current_frame(self, count, **kwargs):
         """A frame of the current target generation (after navigation, back or forward)."""
         return self.frame_after(count, lambda item: item['target'] == self.target, **kwargs)
+
+    def read_slot(self, item):
+        memfd = self.memfd
+        assert memfd and 0 <= item['slot'] < memfd['slots'] and 0 < item['payload_bytes'] <= memfd['slot_bytes'], item
+        with open(f"/proc/{self.process.pid}/fd/{memfd['fd']}", 'rb', buffering=0) as handle:
+            data = os.pread(handle.fileno(), item['payload_bytes'], item['slot'] * memfd['slot_bytes'])
+        assert len(data) == item['payload_bytes'], (len(data), item)
+        return data
+
+    def assemble(self, item, payload):
+        width, height, (x, y, w, h) = item['width'], item['height'], item['damage'][0]
+        key = item['target']['native_target_id']
+        self.payload_bytes += len(payload); self.whole_bytes += width * height * 4
+        if (x, y, w, h) == (0, 0, width, height):
+            self.whole[key] = (width, height, bytearray(payload))
+        else:
+            known = self.whole.get(key)
+            assert known and known[:2] == (width, height), 'partial payload without a whole frame of its size'
+            frame = known[2]
+            for row in range(h):
+                start = ((y + row) * width + x) * 4
+                frame[start:start + w * 4] = payload[row * w * 4:(row + 1) * w * 4]
+        return bytes(self.whole[key][2])
 
     def check_damage(self, item, pixels):
         rects = item['damage']
@@ -431,6 +480,52 @@ def damage_scenario(binary, origin, directory, engine):
         assert not session.orphans, session.orphans
 
 
+def damage_payload_scenario(binary, origin, directory, engine, memfd=False):
+    """hello.damage_payload: rectangle-only payloads rebuild exactly the frame a forced whole frame shows.
+    With memfd=True the same through frame_transport "memfd" (§6.3)."""
+    session = Session(binary, origin, directory, frame_damage=True, damage_payload=True, memfd=memfd)
+    try:
+        ready = session.until(lambda kind, item: item.get('event') == 'ready')
+        assert ready['capabilities'].get('damage_payload') is True, ready['capabilities']
+        assert ready['capabilities'].get('frame_transport') == ('memfd' if memfd else 'pipe'), ready['capabilities']
+        pending = dict(tab_id='payload-tab', engine_instance=session.instance, identity=origin,
+                       document_generation=1, navigation_generation=1, private_mode=False)
+        session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=1)
+        session.until(lambda kind, item: kind == 2)
+        session.command('focus', focused=True)
+        count = session.frames
+        for character in 'payload':
+            session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text=character)
+        session.title('input=payload |')
+        session.frame_after(count, seconds=10)
+        # Let typing settle (caret blink keeps sending small frames), then force a whole frame.
+        time.sleep(0.5)
+        session.command('visibility', visible=False)
+        session.command('visibility', visible=True)
+        whole = session.until(lambda kind, item: kind == 2 and item['damage'][0] == [0, 0, item['width'], item['height']], seconds=10)
+        # The frame rebuilt from rectangle payloads right before the forced whole frame.
+        rebuilt = session.prior
+        before_whole = session.frame_log[-2][1] if len(session.frame_log) > 1 else None
+        partial_frames = sum(1 for area in session.damage_area if area < 1)
+        # The forced whole frame equals the rebuilt one unless the page changed in between
+        # (caret blink): then it differs only inside the caret's small area.
+        differing = sum(1 for i in range(0, len(rebuilt[1]), 4) if rebuilt[1][i:i + 4] != session.last[1][i:i + 4])
+        session.command('close')
+        session.until(lambda kind, item: item.get('event') == 'closed')
+        session.process.wait(timeout=20)
+        assert partial_frames >= 1, session.damage_area
+        assert session.damage_violations == 0, session.damage_violations
+        assert session.payload_bytes < session.whole_bytes, (session.payload_bytes, session.whole_bytes)
+        assert differing <= 0.01 * whole['width'] * whole['height'], differing
+        return dict(status='PASS', frames=session.frames, partial_frames=partial_frames,
+                    payload_bytes=session.payload_bytes, whole_frame_bytes=session.whole_bytes,
+                    rebuilt_vs_forced_whole_differing_pixels=differing, last_rebuilt_frame=rebuilt[0]['frame_id'],
+                    forced_whole_frame=whole['frame_id'], frame_before_whole=before_whole)
+    finally:
+        session.close()
+        assert not session.orphans, session.orphans
+
+
 def run(binary=None, engine='webkit', port='wpe'):
     binary = Path(binary or probe.BINARY)
     if engine == 'webkit' and port == 'wpe':
@@ -456,6 +551,12 @@ def run(binary=None, engine='webkit', port='wpe'):
             damage_dir = directory / 'damage'
             damage_dir.mkdir()
             result['damage'] = damage_scenario(binary, origin, damage_dir, engine)
+            payload_dir = directory / 'damage-payload'
+            payload_dir.mkdir()
+            result['damage_payload'] = damage_payload_scenario(binary, origin, payload_dir, engine)
+            memfd_dir = directory / 'memfd'
+            memfd_dir.mkdir()
+            result['memfd'] = damage_payload_scenario(binary, origin, memfd_dir, engine, memfd=True)
             result['fixture_requests'] = [json.loads(line) for line in server.request_log.read_text().splitlines()]
             assert all(r['method'] == 'GET' and r['status'] == 200 for r in result['fixture_requests']), result['fixture_requests']
             assert engine != 'webkit' or result['fixture_requests'], 'WebKit fetched no fixture page'
