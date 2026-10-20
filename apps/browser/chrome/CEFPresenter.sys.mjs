@@ -1742,6 +1742,9 @@ export class CEFPresenter {
       // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
       frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
       frameUploadError:record.frames?.uploadError ?? null,
+      // memfd frames: "native" (engine-view receiver) or "worker" ring, null on the main-thread JS path.
+      frameRing:record.surfaceMode ? null : record.adapter.frameRingKind ?? null,
+      nativeSinkKind:record.nativeSink === null ? "refused" : record.nativeSink?.kind ?? (record.nativeSink ? "native" : null),
       // JS frame path only: centre pixel of the last source frame and of the canvas.
       framePixels:record.frames?.pixelProbe?.() ?? null,
       nativeReceiver:record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null,

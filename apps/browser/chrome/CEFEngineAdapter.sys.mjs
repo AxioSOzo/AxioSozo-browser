@@ -805,6 +805,7 @@ export class CEFHostConnection {
       const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
       this.#native = ring ? new NativeFrameSinks(ring) : null;
       this.nativeReceiver = !!this.#native;
+      this.frameRingKind = ring?.kind ?? (ring ? "native" : null);
     }
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
@@ -937,6 +938,8 @@ export class CEFEngineAdapter {
   get surfaceMode() { return this.#host.surfaceMode === true; }
   /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
   get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** memfd frames: "native" or "worker" when a frame ring reads the slots off the main thread, else null. */
+  get frameRingKind() { return this.#host.frameRingKind ?? null; }
   /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
   get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }

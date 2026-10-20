@@ -595,7 +595,7 @@ class CEFZenHarness(gui_test.Harness):
         self.gate('e1_render_in_content_area', 'PASS' if pixels.get('content') else 'FAIL', screenshot='02-chromium.png', pixels=pixels,
                   seconds=seconds, surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'),
                   black_fraction=black, frame_path={k: native.get(k) for k in ('frameUpload', 'nativeReceiver', 'memfdFallback',
-                                                                              'frameTransport', 'frameWorker', 'frameUploadError',
+                                                                              'frameTransport', 'frameWorker', 'frameUploadError', 'frameRing', 'nativeSinkKind',
                                                                               'framePixels')})
         if not pixels.get('content'):
             raise AssertionError(f'no page content in the Chromium view of 02-chromium.png ({pixels}); frame path {native}')
