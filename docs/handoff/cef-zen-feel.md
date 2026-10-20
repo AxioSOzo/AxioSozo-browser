@@ -8,7 +8,7 @@ Branch: `claude/cef-zen-feel-dx16ke` — this session's designated branch, used 
 
 Nothing is READY. Here is where things stand:
 - E1/E2 for Chromium inside the Linux Zen app are **green**: `linux-cef-zen` runs
-  **39359724324** and **39362536705** (on the final code) succeeded, and I inspected its screenshots.
+  **39359724324** and **39362536705** (on the final code) succeeded; I inspected the screenshots of 39359724324.
 - Most of the native-feel matrix passes.
 - PARTIAL because these remain open:
   - dead keys and compose: BLOCKED_ENV under Xvfb;
