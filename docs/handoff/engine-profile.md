@@ -1,7 +1,8 @@
 Status: PARTIAL
 
-# engine-profile handoff (WIP, cloud session 19 Oct 2026)
+# engine-profile handoff (WIP, cloud session 20 Oct 2026)
 
-Branch: `claude/engine-profile-nipd8o` (session-designated branch for cloud/engine-profile).
-In progress: tools/engine-bench/profile/ (zen_profile.py, hooks.js, gecko_profile.py, report.py),
-.github/workflows/linux-engine-profile.yml. First Actions run pending; see git log for run ids.
+Branch `claude/engine-profile-liqv71` (session-designated; continues `claude/engine-profile-nipd8o-9upfrm`,
+merged with origin/cloud/integration cad019b). Profiling the perf-phase2 defaults (memfd + native receiver):
+linux-engine-profile run 39379600003 in progress. Baseline (pre-phase-2) in docs/perf/profile-findings.md from
+run 39363370750.
