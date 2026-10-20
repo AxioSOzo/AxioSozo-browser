@@ -258,7 +258,10 @@ test("frame worker: slots are read into a persistent buffer, frames patched, pre
   await sink.applyFrame(0, 16, 2, 2, 0, 0, 2, 2);
   assert.equal(opened, "/proc/42/fd/9");
   sink.bindCanvas({ transferControlToOffscreen: () => offscreen });
+  const drawn = [];
+  sink.onDrawn = paint => drawn.push(paint);
   sink.present(1); await settle();
+  assert.deepEqual([drawn[0].frameId, drawn[0].uploadedPixels, drawn[0].framePixels, drawn[0].upload], [1, 4, 4, "worker"]);
   assert.deepEqual([offscreen.width, offscreen.height], [2, 2]);
   assert.deepEqual(puts[0].rect, [0, 0, 2, 2]); assert.deepEqual(puts[0].data.slice(0, 4), [255, 0, 0, 255]);
   await sink.applyFrame(1, 4, 2, 2, 1, 1, 1, 1);

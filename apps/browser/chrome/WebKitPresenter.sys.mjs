@@ -292,7 +292,7 @@ export class WebKitPresenter {
     };
     if (pixels instanceof NativeFrame) {
       // Native receiver: the component presents the frame; nothing to convert here.
-      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable());
+      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
       if (paint) { if (paint !== true) onPaint(paint); return; }
       const fallback = nativeFallbackFrame(metadata, pixels);
       if (!fallback) return;

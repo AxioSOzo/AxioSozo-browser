@@ -451,15 +451,18 @@ export class NativeFrameSinks {
  * have had a 2D context). Returns false when the canvas cannot be bound: the caller then draws
  * `fallbackFrame()` (a whole-frame copy) through its EngineFrameSurface.
  */
-export function presentNativeFrame(win, record, metadata, frame, paintable) {
+export function presentNativeFrame(win, record, metadata, frame, paintable, onDrawn = null) {
   if (record.nativeSink !== frame.sink) {
     if (record.nativeSink === null || record.frames) return false;  // refused before, or already 2D
     // A new target for this record (the old one closed): release the old binding first.
     if (record.nativeSink) { try { record.nativeSink.close(); } catch {} }
     try { frame.sink.bindCanvas(record.canvas); record.nativeSink = frame.sink; }
     catch { record.nativeSink = null; return false; }
+    // A worker reports each draw (the 2D path's paint) itself; the native sink at the post.
+    if (frame.sink.kind === "worker") frame.sink.onDrawn = onDrawn;
   }
   if (!paintable) return true;
+  if (frame.sink.kind === "worker") { frame.sink.present(metadata.frame_id); return true; }
   const started = win.performance.now();
   const upload = frame.sink.kind ?? "native";
   const canvas = record.canvas;
@@ -510,6 +513,7 @@ export const FRAME_WORKER_PREF = "axiosozo.engines.linux.frame_worker";
 export const FRAME_WORKER_URL = "chrome://browser/content/axiosozo/EngineFrameWorker.js";
 
 /** The worker side (EngineFrameWorker.js loads this module into its own global and calls it). */
+const frameIdOf = data => (Number.isSafeInteger(data?.frameId) ? data.frameId : 0);
 export function runFrameWorker(scope, { IOUtils = scope.IOUtils } = {}) {
   let file = null, slotBytes = 0, payload = null, frame = null, width = 0, height = 0;
   let canvas = null, context = null, image = null, upload = "imagedata", dirty = null, current = false;
@@ -554,7 +558,7 @@ export function runFrameWorker(scope, { IOUtils = scope.IOUtils } = {}) {
       upload = typeof scope.VideoFrame === "function" && videoFrameUploadWorks(scope) ? "videoframe" : "imagedata";
       stats.upload = upload;
     },
-    present: () => {
+    present: data => {
       if (!context || !frame || !dirty) return;
       const started = now();
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; current = false; }
@@ -572,7 +576,10 @@ export function runFrameWorker(scope, { IOUtils = scope.IOUtils } = {}) {
         context.putImageData(image, 0, 0, x, y, w, h);
       }
       current = true; dirty = null; stats.presented++;
-      stats.drawMicros += Math.round((now() - started) * 1000);
+      const milliseconds = now() - started;
+      stats.drawMicros += Math.round(milliseconds * 1000);
+      scope.postMessage({ drawn: true, stats, frameId: frameIdOf(data), uploadedPixels: w * h, framePixels: width * height,
+        milliseconds, superseded: 0, upload: "worker" });
     },
     close: () => { try { file?.close(); } catch {} file = null; frame = payload = image = null; scope.close?.(); },
   };
@@ -584,12 +591,13 @@ export function runFrameWorker(scope, { IOUtils = scope.IOUtils } = {}) {
 
 /** The main-thread side of one worker sink (the native sink's interface). */
 export class WorkerFrameSink {
-  kind = "worker"; width = 0; height = 0;
+  kind = "worker"; width = 0; height = 0; onDrawn = null;
   #worker; #next = 1; #waiting = new Map(); #stats = {}; #closed = false; #bound = false;
   constructor(worker, path, slotBytes) {
     this.#worker = worker;
     worker.onmessage = ({ data }) => {
       if (data?.stats) this.#stats = data.stats;
+      if (data?.drawn) { try { this.onDrawn?.({ ...data, frameId: data.frameId }); } catch {} return; }
       const waiter = this.#waiting.get(data?.id);
       if (!waiter) return;
       this.#waiting.delete(data.id);
