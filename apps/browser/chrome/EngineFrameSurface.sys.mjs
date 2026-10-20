@@ -297,8 +297,12 @@ export class DamagePayloadAssembler {
  * in flight), so the read completes before the credit returns.
  */
 export const MEMFD_FRAMES_PREF = "axiosozo.engines.linux.memfd_frames";
-/** Default of MEMFD_FRAMES_PREF on Linux (the pipe stays the fallback; docs/perf/pixel-path.md). */
-export const MEMFD_FRAMES_DEFAULT = false;
+/**
+ * Default of MEMFD_FRAMES_PREF on Linux: on since the soak (docs/perf/pixel-path.md, "memfd soak",
+ * linux-perf run 39349238042: 30 cycles / 10 min, WebKit + Chromium + Gecko tabs, no fallback,
+ * host descriptors flat). The pipe stays the fallback (pre-hello /proc probe, in-band fallback).
+ */
+export const MEMFD_FRAMES_DEFAULT = true;
 
 // Process-wide: once a slot read failed (or /proc/<pid>/fd was unreadable) every later host of
 // this session uses the pipe, so a broken environment costs one fallback, not one per tab.
