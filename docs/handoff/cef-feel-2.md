@@ -36,6 +36,24 @@ Work in progress. This file is updated after each run; the final version lists e
 - Permission: no Zen prompt within 15 s; the view was black (native receiver) so no visual
   clue; diagnostics added.
 
+## Session 2 (claude/cef-feel-2-xrbczc-rgjgez), in progress
+- Run 39374652910 (commit 3437ae48): every cef_zen_e2e step captured the Chromium view
+  100% black from the first screenshot, also with `native_receiver=false`. Its diagnostics
+  show `nativeReceiver: null`, `frameWorker: null`, `frameTransport: memfd`,
+  `frameUpload: imagedata`: the native receiver was never active, so the earlier attribution
+  to it was wrong. gui_test step 1 (fixture) still shows pixels (`harness/fixture-chromium.png`;
+  the probe chip now wraps under the address bar).
+- linux-cef-zen step 0 now probes frame-path variants (product default, then TEST-ONLY
+  `frame_worker=false`, `memfd_frames=false`, both off) and runs 2-5 use the first variant
+  with pixels (`framepath.json`, `verdict.frame_path_probe`).
+- Fixes pushed, awaiting a run (commit 781893fb):
+  - Permission: the Linux host rejected CEF's requesting origin `http://h:p/` (trailing
+    slash), so Chromium denied every request before Zen could ask. Fixed in `core/handlers.inc`.
+  - Certificate-error flow in the harness; datalist probe; AT-SPI press retry on a fresh root;
+    find-next polls until the ordinal settles.
+  - The chip-wrap CSS moved to CEFPresenter's style (browser-experience.css scoping test).
+  - Linux prompts say "your computer" (macOS keeps "your Mac").
+
 ## Found: Chromium pixels capture black on the native Linux frame receiver (frame path, not this workstream)
 - With the product-default native receiver (engine-view/linux, app 39362552105), every
   Chromium screenshot after the first frames is black.
