@@ -1,0 +1,21 @@
+gui-test chromium/launch: PASS
+gui-test chromium/chrome: PASS
+gui-test chromium/switch: FAIL (AssertionError: the Chromium view is 1.0 black in 02-chromium.png; frame path {'engine': 'chromium', 'version': '154.0.8037.17', 'target': {'document_generation': 2, 'engine': 'chromium', 'engine_instance': '36d7cedf-71b8-4b04-a9e1-a93ace19375c', 'identity': 'https://axiosozo.invalid', 'native_target_id': '1', 'navigation_generation': 2, 'private_mode': False, 'tab_id': '3b4e7e04-6ea3-49dc-93a3-d6035165077c'}, 'renderPath': 'native-osr-bgra', 'pipeFallback': True, 'frameTransport': 'memfd', 'memfdFallback': None, 'frameUpload': 'imagedata', 'nativeReceiver': None, 'frames': 3, 'meanDrawMilliseconds': 7.036167333333651, 'uploadedPixelShare': 1, 'supersededFrames': 1, 'firstFrameMilliseconds': 301.58569999999963, 'lastFrameId': 6, 'surface': {'width': 953, 'height': 678, 'device_scale': 1}, 'surfaceGeometry': None, 'surfaceStats': None, 'renderScaleLimited': False, 'inputFeatures': {'keyVerdict': True, 'wheelPhases': True, 'pinch': True, 'ime': True}, 'fixtureOnly': False, 'ownedTabIds': ['3b4e7e04-6ea3-49dc-93a3-d6035165077c']})
+gui-test chromium/a11y: FAIL (AssertionError: AT-SPI: {'push button:Increment': {'chromium': True, 'gecko': True}, 'link:Page 2': {'chromium': True, 'gecko': True}, 'entry:Type here': {'chromium': True, 'gecko': True}}, press 0->0: {'error': "no push button named 'Increment'"})
+{
+  "status": "FAIL",
+  "scenarios": {
+    "launch": "PASS",
+    "chrome": "PASS",
+    "switch": "FAIL",
+    "a11y": "FAIL"
+  },
+  "matrix": {
+    "window_title": "PASS",
+    "e1_render_in_content_area": "FAIL",
+    "accessibility_atspi": "FAIL",
+    "switch": "FAIL",
+    "a11y": "FAIL"
+  },
+  "reason": null
+}
