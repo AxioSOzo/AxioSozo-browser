@@ -144,7 +144,30 @@ pinned in `upstreams.lock.json` `webkit.upstream`. `linux-webkit-upstream.yml` b
 in the same pinned Debian 13 image (clang, lld, ninja, ccache in the Actions cache) and
 runs the full host suite against the result (`AXIOSOZO_WEBKIT_UPSTREAM_PREFIX`).
 
-UPSTREAM_RESULTS_PLACEHOLDER
+Measured (GitHub-hosted ubuntu-24.04, 4 vCPU, 16 GiB; clang + lld + ninja -j4; Release;
+docs, introspection, MiniBrowser, API tests and WebDriver off; bubblewrap sandbox on):
+
+| Release | Tarball sha256 matches official `.sums` | Configure | Cold build (no ccache hits) | Runs |
+| --- | --- | --- | --- | --- |
+| 2.54.1 | yes | 16-19 s | 79 min; 123 min on a busier runner | 39296934153, 39319667952 |
+| 2.52.6 | yes | 22-28 s | 128 min; 264 min | 39319667952, 39296934153 |
+
+Both builds installed and the host linked against them; `ready` reported
+`runtime_webkit` 2.54.1 / 2.52.6, i.e. the host's API use (legacy libwpe + fdo SHM) still
+compiles and initializes on current upstream. 2.54 also installs `wpe-platform-2.0`
+(headless/DRM/Wayland), the path to native damage and DMA-BUF later.
+UPSTREAM_SUITE_PLACEHOLDER
+
+Findings while wiring it: Debian 13's `wpewebkit` build-deps lack libhyphen (2.52+
+requires it by default); WebKit's installed helpers need an install RPATH under a custom
+prefix; ccache gave 0 % hits across runs so far (being diagnosed, `ccache-before.txt`).
+
+**Recommendation.** Keep the Debian 2.48.3 pin for the loopback fixture profile (fast:
+the whole Linux job is ~1.5 min). Before any web mode, move the product pin to the current
+upstream stable (today 2.54.1) built from the sha256-pinned tarball in CI, with the build
+cached as an artifact keyed by the lock entry (a cold build is 1.3-2 h on 4 vCPU and must
+not run per test job), and track WebKitGTK/WPE security advisories (WSA) to bump it. Do not
+pin 2.52.x: it is older and builds slower.
 
 ## Verification status (2026-10-19)
 
