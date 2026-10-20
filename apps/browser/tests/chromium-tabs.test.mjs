@@ -757,3 +757,16 @@ test('a restored Chromium tab is labelled with its page title before its engine 
   assert.equal(z.launched.length, 1); assert.equal(background.label, 'Later page');
   await presenter.dispose();
 });
+
+test('Linux: developer-tools shortcuts over a Chromium tab explain instead of inspecting the hidden Firefox document', async () => {
+  const { developerToolsKey, DEVTOOLS_NOTICE } = await import('../chrome/CEFPresenter.sys.mjs');
+  const k = (key, mods = {}) => ({ key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
+  for (const event of [k('F12'), k('I', { ctrlKey: true, shiftKey: true }), k('C', { ctrlKey: true, shiftKey: true }),
+    k('K', { ctrlKey: true, shiftKey: true }), k('u', { ctrlKey: true }), k('F7', { shiftKey: true })]) {
+    assert.equal(developerToolsKey(event), true, JSON.stringify(event));
+  }
+  for (const event of [k('J', { ctrlKey: true, shiftKey: true }), k('c', { ctrlKey: true }), k('i'), k('F5'),
+    k('I', { metaKey: true, altKey: true })]) assert.equal(developerToolsKey(event), false, JSON.stringify(event));
+  assert.equal(developerToolsKey(k('F12'), 'mac'), false, 'macOS keeps its own routing');
+  assert.match(DEVTOOLS_NOTICE, /Open this tab in Firefox/u);
+});

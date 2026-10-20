@@ -161,6 +161,19 @@ export function keyboardRoute(event, { editing = false, native = false, platform
       || /^F\d{1,2}$/u.test(event.key)) return "chrome";
   return Object.hasOwn(MAC_KEYS, event.code) || native ? "cef" : "unsupported";
 }
+// Firefox's developer-tools shortcuts on Linux (toolbox, inspector, consoles, network,
+// responsive design, debugger, style editor, profiler, view source). Over a Chromium tab
+// they would inspect the hidden blank Firefox document, so the tab explains instead.
+const DEVTOOLS_CHORDS = new Set(["i", "c", "k", "e", "m", "z"]);
+export const DEVTOOLS_NOTICE = "Developer tools aren't available for Chromium tabs yet. Open this tab in Firefox to inspect it.";
+export function developerToolsKey(event, platform = "linux") {
+  if (platform !== "linux" || event.metaKey || event.altKey) return false;
+  const key = String(event.key ?? "").toLowerCase();
+  if (event.key === "F12" && !event.ctrlKey) return true;
+  if (event.shiftKey && !event.ctrlKey && ["F5", "F7"].includes(event.key)) return true;
+  if (event.ctrlKey && event.shiftKey && DEVTOOLS_CHORDS.has(key)) return true;
+  return event.ctrlKey && !event.shiftKey && key === "u";
+}
 export function cefKey(event, type, platform = "mac") {
   if (keyboardRoute(event, { platform }) !== "cef") throw new Error("UNSUPPORTED_KEY");
   if (platform === "linux") {
@@ -1257,6 +1270,11 @@ export class CEFPresenter {
         if (event.isComposing || event.keyCode === 229 || event.key === "Process" || event.key === "Dead") return;
       }
       if (this.#datalistKey(record, event, type)) { event.preventDefault(); event.stopPropagation(); return; }
+      if (this.browsingMode === "web" && developerToolsKey(event, platform)) {
+        event.preventDefault(); event.stopPropagation();
+        if (type === "down") this.#notice(record, DEVTOOLS_NOTICE);
+        return;
+      }
       const route = keyboardRoute(event, { editing:this.browsingMode === "web", platform });
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
