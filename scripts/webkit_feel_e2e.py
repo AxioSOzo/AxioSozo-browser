@@ -253,6 +253,7 @@ class FeelHarness(gui_test.Harness):
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
 
     def new_session(self):
+        self.context = None  # a new session starts in the content context
         try:
             session = self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True,
                                                                     'unhandledPromptBehavior': {'default': 'ignore', 'beforeUnload': 'ignore'}})
@@ -847,9 +848,12 @@ class FeelHarness(gui_test.Harness):
         self.gate('beforeunload', 'PASS' if ok else 'FAIL', screenshots=['12-beforeunload.png', '12-beforeunload-leave.png'],
                   stay=stay, leave=leave, stayed_on=stayed['p'], live_count=live['c'], left_to=left['p'],
                   note='Stay by Escape, Leave by Enter in Zen\'s tab-modal "Leave page?" dialog; driven without a Marionette session')
-        # Back to page 1 for the next scenarios.
-        self.chrome_script('BrowserCommands.back(); return true;')
-        self.wait_page(lambda page: page['p'] == '1', 'back to page 1', timeout=20)
+        # A fresh page 1 for the next scenarios: Back would restore the armed page from WebKit's
+        # back/forward cache (its beforeunload handler too).
+        self.chrome_script('return window.AxioSozo.engineProbe.navigate(arguments[0]).then(() => true);', [self.fixture.url])
+        fresh = self.wait_page(lambda page: page['p'] == '1', 'a fresh page 1', timeout=20)
+        if 'armed' in fresh['d']:
+            raise AssertionError(f'page 1 still armed after a fresh load: {fresh!r}')
         if not ok:
             raise AssertionError(f'beforeunload: stay {stay!r} leave {leave!r}')
         return {'stay': stay, 'leave': leave, 'left': left['p']}
@@ -1040,6 +1044,8 @@ class FeelHarness(gui_test.Harness):
     def scenario_hidpi(self):
         self.ensure_webkit('20-to-webkit')
         one = self.page()['z']
+        # The window keeps its CSS size across a scale change; restore its device size afterwards.
+        geometry = self.chrome_script('return [outerWidth * devicePixelRatio, outerHeight * devicePixelRatio, screenX, screenY];')
         self.chrome_script('Services.prefs.setCharPref("layout.css.devPixelsPerPx", "2"); return true;')
         try:
             two = self.wait_page(lambda page: page['z'][0] == 2, 'WebKit page at devicePixelRatio 2', timeout=30)
@@ -1050,9 +1056,16 @@ class FeelHarness(gui_test.Harness):
         finally:
             self.chrome_script('Services.prefs.clearUserPref("layout.css.devPixelsPerPx"); return true;')
         back = self.wait_page(lambda page: page['z'][0] == 1, 'back to devicePixelRatio 1', timeout=30)
+        width, height, left, top = geometry
+        self.chrome_script('window.resizeTo(arguments[0], arguments[1]); window.moveTo(arguments[2], arguments[3]); return true;',
+                           [round(width), round(height), left, top])
+        restored = self.wait(lambda: (lambda g: g if abs(g[0] - width) < 2 and abs(g[1] - height) < 2 else None)(
+            self.chrome_script('return [outerWidth * devicePixelRatio, outerHeight * devicePixelRatio];')), 'the window size restored', timeout=15)
+        self.wait(lambda: self.webkit_ready(), 'WebKit presented at the restored size', timeout=15)
         self.click_at(*AT['count'])
         clicked = self.wait_page(lambda page: page['c'] >= 1, 'input lands at 1x again', timeout=10)['c']
-        self.gate('hidpi_1x_2x', 'PASS', screenshot='21-hidpi-2x.png', one=one, two=two['z'], surface=surface, back=back['z'], click=clicked)
+        self.gate('hidpi_1x_2x', 'PASS', screenshot='21-hidpi-2x.png', one=one, two=two['z'], surface=surface, back=back['z'], click=clicked,
+                  window_before=geometry, window_restored=restored)
         return {'one': one, 'two': two['z'], 'surface': surface}
 
     def scenario_crash_retry(self):
@@ -1076,6 +1089,9 @@ class FeelHarness(gui_test.Harness):
         self.screenshot('22-crash-notice')
         self.result.setdefault('crash_notice_layout', notice)
         retry = next(b for b in notice['buttons'] if 'Try again' in str(b['label']))
+        screen_w, screen_h = map(int, self.xdotool('getdisplaygeometry').split())
+        if not (0 <= retry['box']['x'] * notice['scale'] < screen_w and 0 <= retry['box']['y'] * notice['scale'] < screen_h):
+            raise AssertionError(f'the retry button is off the {screen_w}x{screen_h} screen: {notice!r}')
         self.click_screen(retry['box'], notice['scale'])
         try:
             self.wait(lambda: self.webkit_ready(), 'back in WebKit after "Try again in WebKit"', timeout=60)

@@ -169,6 +169,13 @@ def scenario(session, origin, directory):
     session.completed(session.command('ime_set_composition', text='かな', selection_start=2, selection_end=2))
     session.command('ime_commit_text', text='仮名')
     results['ime_contenteditable'] = wait_state(session, lambda s: s.get('e') == '仮名')['e']
+    # Ctrl+A right after a click (an editing command) stays behind the click: select all in the
+    # field just focused, then Backspace empties it. Sent back to back, as a fast user does.
+    click(session, *AT['t'])
+    session.command('edit', action='select_all')
+    for kind in ('down', 'up'):
+        session.command('key', type=kind, native_key_code=22, windows_key_code=8, modifiers=0, text='')
+    results['click_then_select_all'] = wait_state(session, lambda s: s.get('t') == '')['t']
 
     # CSS cursors from the element's computed style.
     session.command('mouse', type='move', x=AT['mv'][0], y=AT['mv'][1], modifiers=0, button='left', click_count=1, mouse_leave=False)

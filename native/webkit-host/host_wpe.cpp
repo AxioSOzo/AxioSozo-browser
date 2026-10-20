@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
+#include <deque>
 #include <map>
 #include <set>
 #include <sys/stat.h>
@@ -328,8 +329,26 @@ public:
   void key(const KeyInput& key) override;
   void mouse(const MouseInput& mouse) override;
   void wheel(const WheelInput& wheel) override;
-  void commitText(const std::string& text) override { commit(text); }
+  void commitText(const std::string& text) override {
+    if (hold([this, text] { commitText(text); })) return;
+    commit(text);
+  }
+  // Editing commands reach the web process directly, while pointer and key events queue in
+  // WebKit's UI process: a command right after a click would overtake it (Ctrl+A selecting
+  // before the click focused the field). Within ButtonSettleUs of a button event the command
+  // waits, and the input behind it waits with it, so the page sees the user's order.
   bool edit(const std::string& action) override {
+    if (hold([this, action] { edit(action); })) return true;
+    gint64 since = g_get_monotonic_time() - lastButtonUs_;
+    if (host_.browserUI() && since >= 0 && since < ButtonSettleUs) {
+      holding_ = true;
+      held_.push_back([this, action] { runEdit(action); });
+      later(int((ButtonSettleUs - since) / 1000) + 1, [](WpeView& view) { view.releaseHeld(); });
+      return true;
+    }
+    return runEdit(action);
+  }
+  bool runEdit(const std::string& action) {
     // §8.2: WebKit's own pasteboard is private to this host; Zen's clipboard gets the text.
     if (host_.browserUI() && (action == "copy" || action == "cut")) {
       clipboardThen(action == "copy" ? WEBKIT_EDITING_COMMAND_COPY : WEBKIT_EDITING_COMMAND_CUT); return true;
@@ -404,6 +423,25 @@ private:
   double pointerX_ = 0, pointerY_ = 0, contextX_ = 0, contextY_ = 0;  // CSS px
   bool composing_ = false, cursorQuery_ = false, cursorDirty_ = false, contextSignaled_ = false;
   bool dragArmed_ = false, dragQuery_ = false, dragDirty_ = false;
+  static constexpr gint64 ButtonSettleUs = 80000;
+  gint64 lastButtonUs_ = 0;
+  bool holding_ = false;
+  std::deque<std::function<void()>> held_;
+  bool hold(std::function<void()> run) {
+    if (!holding_) return false;
+    held_.push_back(std::move(run));
+    return true;
+  }
+  void releaseHeld() {
+    holding_ = false;
+    std::deque<std::function<void()>> runs;
+    runs.swap(held_);
+    // An input that starts a new hold keeps the rest behind it, in order.
+    while (!runs.empty()) {
+      auto run = std::move(runs.front()); runs.pop_front();
+      if (holding_) held_.push_back(std::move(run)); else run();
+    }
+  }
   std::string lastSelection_;
   std::string findText_; guint findCount_ = 0, findActive_ = 0, findIdentifier_ = 0; bool findCounted_ = false, findFound_ = false;
   bool findPending_ = false, findForward_ = true;
@@ -677,6 +715,7 @@ void WpeView::commit(const std::string& text) {
 }
 
 void WpeView::key(const KeyInput& key) {
+  if (hold([this, key] { this->key(key); })) return;
   uint32_t modifiers = keyboardModifiers(key.modifiers);
   if (key.type == "char") {
     // CEF-style down/char/up: the keydown already inserted its own printable text.
@@ -703,6 +742,8 @@ void WpeView::key(const KeyInput& key) {
 }
 
 void WpeView::mouse(const MouseInput& mouse) {
+  if (hold([this, mouse] { this->mouse(mouse); })) return;
+  if (mouse.type == "down" || mouse.type == "up") lastButtonUs_ = g_get_monotonic_time();
   // libwpe buttons follow evdev order: 1 left, 2 right, 3 middle.
   uint32_t button = mouse.button == "left" ? 1 : mouse.button == "right" ? 2 : 3;
   uint32_t mask = button == 1 ? wpe_input_pointer_modifier_button1 : button == 2 ? wpe_input_pointer_modifier_button2 : wpe_input_pointer_modifier_button3;
@@ -751,6 +792,7 @@ void WpeView::mouse(const MouseInput& mouse) {
 }
 
 void WpeView::wheel(const WheelInput& wheel) {
+  if (hold([this, wheel] { this->wheel(wheel); })) return;
   // Pixel deltas as a smooth 2D axis event. cef-v1 delta_y < 0 scrolls down. WebKit's WPE
   // event factory reports DOM deltaY = -y_axis / device_scale (measured, CI run 39295936869:
   // y_axis +400 at 2x gave deltaY -200), so the cef-v1 CSS-pixel delta is sent scaled, same sign.
