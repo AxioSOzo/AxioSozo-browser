@@ -49,7 +49,7 @@ env:
   # published the unstripped libxul used to symbolize profiles). With this checkout's chrome JS
   # (TEST-ONLY overlay) and hosts, the defaults are memfd frames + native receiver.
   ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39362552105' }}
-  PROFILE_PASSES: ${{ inputs.passes || 'plain' }}  # perf-phase3 diag push: TEMPORARY
+  PROFILE_PASSES: ${{ inputs.passes || 'plain,profile' }}  # perf-phase3 push: TEMPORARY (upstream default plain,trace,profile)
   # Same-job control (perf-phase3): when set, every engine job runs zen_profile a second time with these
   # options (label <label>-control), e.g. the phase-3 features off, on the same runner.
   PROFILE_CONTROL: ${{ inputs.control || '--pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false' }}  # perf-phase3 diag push: TEMPORARY
