@@ -379,19 +379,25 @@ export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read
 
 /**
  * Native receiver (docs/perf/pixel-path.md, "Native receiver"; Linux, memfd frames only, pref
- * `axiosozo.engines.linux.native_receiver`, default false): the engine-view component
+ * `axiosozo.engines.linux.native_receiver`, NATIVE_RECEIVER_DEFAULT): the engine-view component
  * (apps/browser/native/engine-view/linux, nsIAxioFrameReceiverService) maps the host's ring and
  * keeps each target's whole frame off the main thread; presented frames go to the canvas's async
  * ImageContainer as B8G8R8X8 images. No pixel crosses JS. Null (the JS path) without the pref,
  * without the component (an app built before it), or when the ring cannot be mapped.
  */
 export const NATIVE_RECEIVER_PREF = "axiosozo.engines.linux.native_receiver";
+/**
+ * On by default where the component exists (an app built with apps/browser/native/engine-view/linux):
+ * same-job A/B linux-perf 39364874251 — Zen parent CPU at 2× −49…−53 % for both engines, WebKit 2×
+ * key → frame −18…−20 %. Apps without the component (or with the pref false) use the frame worker.
+ */
+export const NATIVE_RECEIVER_DEFAULT = true;
 const NATIVE_RECEIVER_CONTRACT = "@axiosozo.nl/frame-receiver;1";
 let nativeReceiverError = null;
 export function nativeReceiverStatus() { return nativeReceiverError; }
 export function nativeFrameRing(pid, capability, { prefs = globalThis.Services?.prefs, Cc = globalThis.Cc, Ci = globalThis.Ci } = {}) {
   try {
-    if (!prefs?.getBoolPref(NATIVE_RECEIVER_PREF, false)) return null;
+    if (!(prefs ? prefs.getBoolPref(NATIVE_RECEIVER_PREF, NATIVE_RECEIVER_DEFAULT) : NATIVE_RECEIVER_DEFAULT)) return null;
     if (!Ci?.nsIAxioFrameReceiverService || !Cc?.[NATIVE_RECEIVER_CONTRACT]) { nativeReceiverError = "component_unavailable"; return null; }
     const service = Cc[NATIVE_RECEIVER_CONTRACT].getService(Ci.nsIAxioFrameReceiverService);
     return service.openRing(pid, capability.fd, capability.slot_bytes, capability.slots);

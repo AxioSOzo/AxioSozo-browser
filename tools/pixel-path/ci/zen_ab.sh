@@ -23,8 +23,8 @@ prefs_for() {
   case $1 in
     memfd) echo "--pref axiosozo.engines.linux.memfd_frames=true" ;;
     pipe) echo "--pref axiosozo.engines.linux.memfd_frames=false" ;;
-    worker) echo "--pref axiosozo.engines.linux.frame_worker=true" ;;
-    jsmain) echo "--pref axiosozo.engines.linux.frame_worker=false" ;;
+    worker) echo "--pref axiosozo.engines.linux.native_receiver=false --pref axiosozo.engines.linux.frame_worker=true" ;;
+    jsmain) echo "--pref axiosozo.engines.linux.native_receiver=false --pref axiosozo.engines.linux.frame_worker=false" ;;
     nativeworker) echo "--pref axiosozo.engines.linux.frame_worker=true --pref axiosozo.engines.linux.native_receiver=true" ;;
     native) echo "--pref axiosozo.engines.linux.native_receiver=true" ;;
     imagedata) echo "--pref axiosozo.engines.linux.frame_upload=imagedata" ;;

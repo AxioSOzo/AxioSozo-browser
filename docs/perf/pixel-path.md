@@ -400,3 +400,27 @@ PASS, transport memfd + worker in every window, no fallback, Zen parent RSS 698�
 trend (−2.8 MB from cycle 2 to 30; the per-frame slot buffers of the main-thread path are gone),
 host descriptors flat; medians WebKit 57.8 fps / p99 23.4 ms / scroll 56.0 fps / key 21.1 ms,
 Chromium 60.0 fps / 21.4 ms / 59.0 fps / 12.9 ms, Gecko 59.0 fps.
+
+## Native receiver A/B (run 39364874251) → default on where built
+
+App: this branch's build (linux-perf-build **39362552105**, `35782ef`, Gecko GUI smoke PASS) for all
+variants. base = cloud/integration chrome JS + hosts; cand = this branch's defaults at the time
+(memfd + frame worker; the native receiver off); native = cand + `axiosozo.engines.linux.native_receiver`
+(diagnostics `frameUpload: "native"`, `frameTransport: "memfd"`). 2 reps × 2 rounds, 24/24 PASS per engine.
+
+| | Chromium base → cand → native | WebKit base → cand → native |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 55.5 → 39.6 → **31.6** / 51.6 → 38.7 → **31.8 %** | 42.8 → 28.7 → **24.2** / 40.7 → 27.5 → **23.4 %** |
+| 1× key → presented frame | 20.9 → 12.4 → 11.9 / 20.0 → 12.0 → 11.7 ms | 24.7 → 17.1 → 15.9 / 23.5 → 15.9 → 16.3 ms |
+| 2× rAF CPU, Zen parent | 121.9 → 73.6 → **62.8** / 126.3 → 73.3 → **59.3 %** | 115.1 → 68.4 → **53.6** / 109.0 → 68.8 → **51.8 %** |
+| 2× rAF CPU, whole browser | 166.2 → 115.6 → 106.2 / 172.1 → 115.3 → 101.8 % | 268.0 → 218.9 → 198.2 / 254.6 → 217.5 → 189.6 % |
+| 2× rAF p99 interval | 31.4 → 23.4 → 22.2 / 28.8 → 23.2 → 23.5 ms | 28.4 → 27.9 → **23.2** / 28.7 → 28.0 → **24.6 ms** |
+| 2× key → presented frame | 19.9 → 12.3 → 12.4 / 21.5 → 12.7 → 12.1 ms | 26.7 → 26.2 → **21.9** / 28.9 → 27.6 → **23.1 ms** |
+| 2× scroll fps (p99) | 28.5 → 58.8 → 59.9 (76 → 31 → 22) / 29.2 → 60.0 → 59.5 | 26.8 → 54.2 → 56.0 (75 → 33 → 33) / 26.4 → 53.5 → 56.0 |
+| main-thread ms per presented frame (2×) | 3.6 → 2.3 → **0.02** | 3.4 → 2.5 → **0.015** |
+
+The native receiver halves the Zen parent's CPU at 2× against cloud/integration for both engines
+and is the first variant that also improves WebKit's 2× key → frame (−18…−20 %); the main thread
+spends ~20 µs per frame on presentation. `NATIVE_RECEIVER_DEFAULT = true`: apps that contain the
+component (built from this branch on) use it; older app builds have no component and use the frame
+worker; the pref `axiosozo.engines.linux.native_receiver=false` returns to the worker.
