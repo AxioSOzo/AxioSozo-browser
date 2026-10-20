@@ -1,0 +1,97 @@
+44472-00:05:26    Compiling toml v0.5.999 (/home/runner/axiosozo-build/zen/source/engine/build/rust/toml)
+44473-00:05:26      Running `CARGO=/home/runner/axiosozo-build/toolchains/zen/rust/bin/cargo CARGO_CRATE_NAME=toml CARGO_MANIFEST_DIR=/home/runner/axiosozo-build/zen/source/engine/build/rust/toml CARGO_MANIFEST_PATH=/home/runner/axiosozo-build/zen/source/engine/build/rust/toml/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE=MIT/Apache-2.0 CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=toml CARGO_PKG_README='' CARGO_PKG_REPOSITORY='' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=0.5.999 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=5 CARGO_PKG_VERSION_PATCH=999 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/home/runner/axiosozo-build/zen/obj/release/deps /home/runner/axiosozo-build/toolchains/zen/sccache/sccache /home/runner/axiosozo-build/toolchains/zen/rust/bin/rustc --crate-name toml --edition=2018 build/rust/toml/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=1 -C embed-bitcode=no --cfg 'feature="default"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "indexmap", "preserve-order"))' -C metadata=fd52fd8a063c45fc -C extra-filename=-2fda4e84bcf036bb --out-dir /home/runner/axiosozo-build/zen/obj/release/deps -C linker=/home/runner/axiosozo-build/zen/source/engine/build/cargo-linker -C strip=debuginfo -L dependency=/home/runner/axiosozo-build/zen/obj/release/deps --extern toml=/home/runner/axiosozo-build/zen/obj/release/deps/libtoml-e73b766c12ba9f23.rmeta`
+44474-00:05:26    Compiling error-graph v0.1.1
+44476-00:05:26    Compiling socket2 v0.6.3
+44478-00:05:26 possible intended.
+44480-00:05:26    Compiling crash-context v0.6.1
+44482-00:05:26 warning: unused import: `expect`
+44484-00:05:26   |
+44485-00:05:26 1 | use crate::{expect, ProcResult};
+44486-00:05:26   |             ^^^^^^
+44487-00:05:26   |
+--
+65528-00:08:40   191 |       mozilla::gfx::IntSize size(int32_t(mWidth), int32_t(mHeight));
+65529-00:08:40       |                                  ^
+65530-00:08:40       |                                  (              )
+65531:00:08:40 /home/runner/axiosozo-build/zen/source/src/zen/axiosozo-native/engine-view/linux/AxioFrameReceiver.cpp:196:28: error: no viable conversion from 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)') to 'gfx::IntSize' (aka 'IntSizeTyped<UnknownUnits>')
+65532-00:08:40   196 |           shared->Allocate(size, mozilla::gfx::SurfaceFormat::B8G8R8X8)) {
+65533-00:08:40       |                            ^~~~
+65534-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/2d/Point.h:286:24: note: candidate constructor (the implicit copy constructor) not viable: no known conversion from 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)') to 'const IntSizeTyped<UnknownUnits> &' for 1st argument
+65535-00:08:40   286 | struct MOZ_EMPTY_BASES IntSizeTyped
+65536-00:08:40       |                        ^~~~~~~~~~~~
+65537-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/2d/Point.h:286:24: note: candidate constructor (the implicit move constructor) not viable: no known conversion from 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)') to 'IntSizeTyped<UnknownUnits> &&' for 1st argument
+65538-00:08:40   286 | struct MOZ_EMPTY_BASES IntSizeTyped
+65539-00:08:40       |                        ^~~~~~~~~~~~
+65540-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/layers/ipc/SharedRGBImage.h:44:30: note: passing argument to parameter 'aSize' here
+65541-00:08:40    44 |   bool Allocate(gfx::IntSize aSize, gfx::SurfaceFormat aFormat);
+65542-00:08:40       |                              ^
+65543:00:08:40 /home/runner/axiosozo-build/zen/source/src/zen/axiosozo-native/engine-view/linux/AxioFrameReceiver.cpp:203:27: error: invalid operands to binary expression ('gfx::IntSize' (aka 'IntSizeTyped<UnknownUnits>') and 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)'))
+65544-00:08:40   203 |               mapped.size == size && mapped.stride >= int32_t(mWidth * 4)) {
+65545-00:08:40       |               ~~~~~~~~~~~ ^  ~~~~
+65546-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/2d/2D.h:1136:20: note: candidate function not viable: no known conversion from 'gfx::IntSize' (aka 'IntSizeTyped<UnknownUnits>') to 'const Glyph' for 1st argument
+65547-00:08:40  1136 | static inline bool operator==(const Glyph& aOne, const Glyph& aOther) {
+65548-00:08:40       |                    ^          ~~~~~~~~~~~~~~~~~
+65549-00:08:40 /home/runner/axiosozo-build/zen/source/engine/layout/style/nsChangeHint.h:252:13: note: candidate function not viable: no known conversion from 'gfx::IntSize' (aka 'IntSizeTyped<UnknownUnits>') to 'nsChangeHint' for 1st argument
+65550-00:08:40   252 | inline void operator==(nsChangeHint s1, nsChangeHint s2) {}
+65551-00:08:40       |             ^          ~~~~~~~~~~~~~~~
+65552-00:08:40 /home/runner/axiosozo-build/zen/source/engine/ipc/chromium/src/base/string_piece.h:160:6: note: candidate function not viable: no known conversion from 'gfx::IntSize' (aka 'IntSizeTyped<UnknownUnits>') to 'const ::StringPiece' for 1st argument
+65553-00:08:40   160 | bool operator==(const ::StringPiece& x, const ::StringPiece& y);
+65554-00:08:40       |      ^          ~~~~~~~~~~~~~~~~~~~~~~
+65555-00:08:40 /home/runner/axiosozo-build/zen/source/engine/mfbt/RefPtr.h:500:13: note: candidate template ignored: could not match 'RefPtr' against 'gfx::IntSizeTyped'
+--
+65610-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/2d/BaseSize.h:50:8: note: candidate function not viable: no known conversion from 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)') to 'const mozilla::gfx::IntSizeTyped<mozilla::gfx::UnknownUnits>' for 1st argument
+65611-00:08:40    50 |   bool operator==(const Sub& aSize) const {
+65612-00:08:40       |        ^          ~~~~~~~~~~~~~~~~
+65613:00:08:40 /home/runner/axiosozo-build/zen/source/src/zen/axiosozo-native/engine-view/linux/AxioFrameReceiver.cpp:214:17: error: reference to type 'const IntSize' (aka 'const IntSizeTyped<UnknownUnits>') could not bind to an lvalue of type 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)')
+65614-00:08:40   214 |                 size, mozilla::gfx::SurfaceFormat::B8G8R8X8);
+65615-00:08:40       |                 ^~~~
+65616-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/2d/2D.h:2272:22: note: passing argument to parameter 'aSize' here
+65617-00:08:40  2272 |       const IntSize& aSize, SurfaceFormat aFormat, bool aZero = false);
+65618-00:08:40       |                      ^
+65619:00:08:40 /home/runner/axiosozo-build/zen/source/src/zen/axiosozo-native/engine-view/linux/AxioFrameReceiver.cpp:228:21: error: no matching constructor for initialization of 'mozilla::layers::SourceSurfaceImage'
+65620-00:08:40   228 |         image = new mozilla::layers::SourceSurfaceImage(size, surface);
+65621-00:08:40       |                     ^                                   ~~~~~~~~~~~~~
+65622-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/layers/ImageContainer.h:1046:3: note: candidate constructor not viable: no known conversion from 'mozilla::gfx::IntSize (int32_t, int32_t)' (aka 'IntSizeTyped<UnknownUnits> (int, int)') to 'const gfx::IntSize' (aka 'const IntSizeTyped<UnknownUnits>') for 1st argument
+65623-00:08:40  1046 |   SourceSurfaceImage(const gfx::IntSize& aSize,
+65624-00:08:40       |   ^                  ~~~~~~~~~~~~~~~~~~~~~~~~~
+65625-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/layers/ImageContainer.h:1048:12: note: candidate constructor not viable: requires single argument 'aSourceSurface', but 2 arguments were provided
+65626-00:08:40  1048 |   explicit SourceSurfaceImage(gfx::SourceSurface* aSourceSurface);
+65627-00:08:40       |            ^                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+65628-00:08:40 /home/runner/axiosozo-build/zen/source/engine/gfx/layers/ImageContainer.h:1032:7: note: candidate constructor (the implicit copy constructor) not viable: requires 1 argument, but 2 were provided
+65629-00:08:40  1032 | class SourceSurfaceImage final : public Image {
+65630-00:08:40       |       ^~~~~~~~~~~~~~~~~~
+65631-00:08:40 1 warning and 4 errors generated.
+65632:00:08:40 gmake[4]: *** [/home/runner/axiosozo-build/zen/source/engine/config/rules.mk:656: AxioFrameReceiver.o] Error 1
+65633-00:08:40 gmake[4]: Target 'target-objects' not remade because of errors.
+65634:00:08:40 gmake[3]: *** [/home/runner/axiosozo-build/zen/source/engine/config/recurse.mk:79: zen/axiosozo-native/engine-view/linux/target-objects] Error 2
+65635-00:08:40 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/media/ffvpx/libavcodec/x86'
+65636-00:08:40 media/ffvpx/libavcodec/x86/vp9intrapred_16bpp.o
+65637-00:08:40 gmake[4]: Leaving directory '/home/runner/axiosozo-build/zen/obj/media/ffvpx/libavcodec/x86'
+65638-00:08:40 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/security/manager/ssl/tests/unit/test_trust_anchors/dynamic-library'
+65639-00:08:40 /home/runner/axiosozo-build/zen/mozbuild/srcdirs/engine-58c8d4c7ff1f/_virtualenvs/build/bin/python -m mozbuild.action.file_generate /home/runner/axiosozo-build/zen/source/engine/python/mozbuild/mozbuild/action/generate_symbols_file.py generate_symbols_file libtest_trust_anchors.so.symbols .deps/libtest_trust_anchors.so.symbols.pp .deps/libtest_trust_anchors.so.symbols.stub /home/runner/axiosozo-build/zen/source/engine/security/manager/ssl/tests/unit/test_trust_anchors/dynamic-library/trust-anchors.symbols -DNDEBUG=1 -DTRIMMED=1
+65640-00:08:40 gmake[4]: Leaving directory '/home/runner/axiosozo-build/zen/obj/security/manager/ssl/tests/unit/test_trust_anchors/dynamic-library'
+65641-00:08:40 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/security/manager/ssl/tests/unit/test_trust_anchors/dynamic-library'
+65642-00:08:40 gmake[4]: Leaving directory '/home/runner/axiosozo-build/zen/obj/security/manager/ssl/tests/unit/test_trust_anchors/dynamic-library'
+65643-00:08:40 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/media/ffvpx/libavcodec/x86'
+65644-00:08:40 media/ffvpx/libavcodec/x86/vp9itxfm.o
+65645-00:08:40 gmake[4]: Leaving directory '/home/runner/axiosozo-build/zen/obj/media/ffvpx/libavcodec/x86'
+65646-00:08:40 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/media/ffvpx/libavcodec/x86'
+--
+88989-00:10:50 gmake[4]: Entering directory '/home/runner/axiosozo-build/zen/obj/netwerk/test/http3server'
+88990-00:10:50 gmake[4]: Leaving directory '/home/runner/axiosozo-build/zen/obj/netwerk/test/http3server'
+88991-00:10:50 gmake[3]: Target 'recurse_compile' not remade because of errors.
+88992:00:10:50 gmake[2]: *** [/home/runner/axiosozo-build/zen/source/engine/config/recurse.mk:34: compile] Error 2
+88993:00:10:50 gmake[1]: *** [/home/runner/axiosozo-build/zen/source/engine/config/rules.mk:345: default] Error 2
+88994:00:10:50 gmake: *** [client.mk:58: build] Error 2
+88995-00:10:50 162 compiler warnings present.
+88996-00:10:51 Streaming resource usage profile to: /home/runner/axiosozo-build/zen/obj/.mozbuild/logs/build/profile_log_20261020_025343.json
+88997-{"status": "BLOCKED_ENV", "error": "Command '['/usr/bin/python3', '/home/runner/work/AxioSozo-browser/AxioSozo-browser/scripts/storage.py', 'exec', '--', 'npm', 'run', 'build', '--', '--jobs', '4']' returned non-zero exit status 1."}
+88998-SETUP gate summary (Linux x86_64):
+88999-  BLOCKED_ENV exit=20  scripts/zen.py setup
+89000-SETUP: 0 PASS, 0 FAIL, 1 BLOCKED_ENV
+89001-SETUP: incomplete; see component results
+89002-Command exited with non-zero status 2
+89003-	Command being timed: "./dev setup --only zen"
+89004-	User time (seconds): 1559.96
+89005-	System time (seconds): 290.15
+89006-	Percent of CPU this job got: 191%
