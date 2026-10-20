@@ -254,6 +254,7 @@ test("direct compositing: the panel's rounded clip is lifted while the view fill
   const rect = (left, top, width, height) => ({ left, top, width, height, right: left + width, bottom: top + height });
   const removed = [];
   const element = () => ({ style: style(), attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+    children: [], appendChild(child) { this.children.push(child); }, get firstChild() { return this.children[0]; },
     remove() { removed.push(this); } });
   const root = { parentElement: null, bg: "rgba(0, 0, 0, 0)" };
   const app = { parentElement: root, bg: "rgba(10, 20, 30, 0.5)" };
@@ -269,7 +270,7 @@ test("direct compositing: the panel's rounded clip is lifted while the view fill
     document: { createElementNS: () => element(), getElementById: id => (id === "zen-browser-background" ? background : null) },
     getComputedStyle: node => node === panel
       ? { overflowX: panel.style.getPropertyValue("overflow") || "clip", overflowY: panel.style.getPropertyValue("overflow") || "clip",
-          borderTopLeftRadius: "5px", backgroundColor: "rgba(0, 0, 0, 0)" }
+          borderTopLeftRadius: "5px", backgroundColor: "rgba(0, 0, 0, 0)", boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px 0px" }
       : { backgroundColor: node.bg ?? "rgba(0, 0, 0, 0)" },
     ResizeObserver: class { constructor(callback) { observed = callback; } observe() {} disconnect() { observed = null; } },
   };
@@ -287,6 +288,8 @@ test("direct compositing: the panel's rounded clip is lifted while the view fill
   assert.equal(topLeft.style.backgroundPosition, "-100px -40px");
   assert.equal(bottomRight.style.backgroundPosition, "-895px -635px");
   assert.match(topLeft.style.mask, /circle 5px at 100% 100%/);
+  assert.match(bottomRight.firstChild.style.text, /left:-795px;top:-595px;width:800px;height:600px;border-radius:5px/);
+  assert.equal(bottomRight.firstChild.style.boxShadow, "rgba(0, 0, 0, 0.24) 0px 3px 8px 0px", "the panel's shadow over the backdrop");
   assert.equal(directComposite(win, record), control, "once per record");
   // A view that no longer covers the panel gives the clip back.
   overlay.rect = rect(100, 80, 800, 560); observed();

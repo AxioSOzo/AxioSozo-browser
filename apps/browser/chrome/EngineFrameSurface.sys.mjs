@@ -557,6 +557,8 @@ export function directComposite(win, record, { prefs = globalThis.Services?.pref
   };
   const paintCaps = (element, rect, radius) => {
     const background = windowBackground(win, element);
+    // The panel's own shadow shows outside its rounded corners too (Zen: offset 3 px down).
+    const shadow = win.getComputedStyle(element).boxShadow;
     const image = doc.getElementById("zen-browser-background");
     const imageRect = image?.getBoundingClientRect();
     CORNERS.forEach(([v, h], index) => {
@@ -565,11 +567,20 @@ export function directComposite(win, record, { prefs = globalThis.Services?.pref
         cap = caps[index] = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
         cap.setAttribute("aria-hidden", "true");
         cap.className = "axiosozo-engine-corner";
+        cap.appendChild(doc.createElementNS("http://www.w3.org/1999/xhtml", "div"));
         overlay.appendChild(cap);
       }
       const x = h === "left" ? rect.left : rect.right - radius, y = v === "top" ? rect.top : rect.bottom - radius;
       const style = cap.style;
-      style.cssText = `position:absolute;${v}:0;${h}:0;width:${radius}px;height:${radius}px;z-index:2;pointer-events:none;`;
+      style.cssText = `position:absolute;${v}:0;${h}:0;width:${radius}px;height:${radius}px;z-index:2;pointer-events:none;`
+        + "overflow:hidden;";
+      // Over the backdrop: the panel's shadow, from a transparent copy of the panel's rounded box.
+      const shade = cap.firstChild;
+      if (shade?.style) {
+        shade.style.cssText = `position:absolute;left:${rect.left - x}px;top:${rect.top - y}px;width:${rect.width}px;`
+          + `height:${rect.height}px;border-radius:${radius}px;`;
+        shade.style.boxShadow = shadow && shadow !== "none" ? shadow : "";
+      }
       style.backgroundColor = background;
       if (imageRect?.width && imageRect.height) {
         // Zen's gradient/grain layer, aligned with where it is painted under the panel.
