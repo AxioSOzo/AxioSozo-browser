@@ -207,7 +207,10 @@ const HOST_BRAND = Symbol.for("axiosozo.engine-stream.host-connection");
 
 /**
  * `profile`: { engine, readyFields: [...], validateReady(ready, {instance, frameDamage}) (throws),
- * restoreStatuses: [...], cursors: Set, imeLimit }.
+ * restoreStatuses: [...], cursors: Set, imeLimit }, and optionally a profile's additive
+ * extensions (engine-stream-v1 §1): `hello` (extra hello keys), `events` ({name: [keys]},
+ * target events only), `validateCommand(method, fields)` and `validateInput(method, fields)`
+ * (return the exact fields or throw) for methods the host announced.
  */
 export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
@@ -259,7 +262,7 @@ export class EngineStreamHost {
     const hello = { version: 1, method: "hello", token: this.#token, engine_instance: this.instance,
       fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}),
       ...(this.damagePayload ? { damage_payload: true } : {}),
-      ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}) };
+      ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}), ...(this.profile.hello ?? {}) };
     await this.#write(hello);
     await this.#readyWait.promise;
     this.status = "connected";
@@ -381,9 +384,11 @@ export class EngineStreamHost {
       }
       this.readPhase = "event_validate";
       if (value.event === "ready") { this.#acceptReady(value); continue; }
-      const fields = EVENT_FIELDS[value.event];
+      const extension = !Object.hasOwn(EVENT_FIELDS, value.event) && Object.hasOwn(this.profile.events ?? {}, value.event);
+      const fields = extension ? this.profile.events[value.event] : EVENT_FIELDS[value.event];
       if (!fields || Object.keys(value).some(key => !["version", "event", "target", ...fields].includes(key))) throw new Error("INVALID_ENGINE_EVENT");
       if (!this.#ready) throw new Error("INVALID_ENGINE_EVENT");
+      if (extension && !value.target) throw new Error("MISSING_ENGINE_TARGET");
       if (value.event === "heartbeat") { this.#acceptHeartbeat(value); continue; }
       let adapter = null;
       if (value.target) {
@@ -722,9 +727,18 @@ export class EngineStreamTarget {
     if (this.#host.capabilities?.edit !== true) return Promise.resolve({ status: "unsupported", reason: "EDIT_UNSUPPORTED" });
     return this.#request("edit", { action });
   }
+  /** A profile-announced command (e.g. a browser-UI reply) for the exact current target. */
+  extension(target, method, fields) {
+    this.resolve(target);
+    const validated = this.#host.profile.validateCommand?.(method, fields);
+    if (!validated) throw new Error("INVALID_ENGINE_COMMAND");
+    return this.#request(method, validated);
+  }
   input(target, method, fields) {
     this.resolve(target);
-    const validated = validateStreamInput(method, fields, this.surface,
+    // Profile input methods (IME composition, paste) keep their order with keys and pointer.
+    const profileInput = this.#host.profile.validateInput?.(method, fields, this.surface) ?? null;
+    const validated = profileInput ?? validateStreamInput(method, fields, this.surface,
       { ...this.inputFeatures, imeLimit: this.#host.profile.imeLimit ?? 1024 });
     if (this.#inputQueue.length >= MAX_QUEUED_INPUT) {
       // Dropping input could strand a key-up or pointer-up: stop the engine instead.

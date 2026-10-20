@@ -96,7 +96,8 @@ test("presenter factories are registered by the owning workstream, never built b
 test("with two available engines the tab menu is the single toggle item, as today", () => {
   const w = windowWith();
   assert.deepEqual(tabMenuModel("gecko", w), { mode: "toggle", label: "Open in Chromium",
-    items: [{ id: "chromium", label: "Chromium", checked: false, disabled: false, reason: null }] });
+    items: [{ id: "chromium", label: "Chromium", checked: false, disabled: false, reason: null, note: "Experimental" }] });
+  assert.equal(tabMenuModel("chromium", w).items[0].note, "", "Firefox is not experimental");
   assert.equal(tabMenuModel("chromium", w).label, "Open in Firefox");
   assert.equal(tabMenuModel("firefox", w).label, "Open in Chromium", "legacy spelling");
   assert.equal(nextEngine("gecko", w), "chromium");

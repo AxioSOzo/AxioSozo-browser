@@ -16,7 +16,7 @@ A specification is not runtime evidence. Results are recorded under
 | Profile | Host | `target.engine` | Status |
 | --- | --- | --- | --- |
 | `cef-v1` | `native/chromium-host` (CEF 154, macOS arm64) | `chromium` | fixture + web mode; see cef-v1 |
-| `webkit-fixture-v1` | `native/webkit-host` (WPE WebKit 2.48.3, Linux) | `webkit` | fixture mode only |
+| `webkit-fixture-v1` | `native/webkit-host` (WPE WebKit 2.48.3, Linux) | `webkit` | fixture mode only; optional browser UI (§8.2) |
 
 Everything in sections 2–7 is common to all profiles and is normative. A profile may
 add methods, events, capabilities and hello keys only as announced capabilities;
@@ -242,6 +242,66 @@ editable element is focused, else as key presses.
 | 21 | Wheel | pixel deltas, cef sign | `delta_x/delta_y` CSS px as a smooth 2-D libwpe axis event; verified: `delta_y:-400` at 2x gives one DOM `wheel` with `deltaY:400` and scrolls 400 CSS px |
 | 22 | First frame of a document | CEF paints the new document | WebKit re-renders the previous document's frozen layer tree for a few frames after commit. The host holds buffers after every commit until the committed document (asked from an isolated script world) has rendered three animation frames; a 2 s fallback covers pages where that script cannot run. No wire change: Zen simply never receives old-document pixels under a new generation |
 | 23 | Back/forward | CEF back/forward cache | WebKit's back/forward cache (cache model `web-browser`, in the private profile): `back` restores without a fetch; `load.http_status` is then 200; WebKit clears `autocomplete=off` fields on restore |
+
+### 8.2 Browser UI (optional, additive; hello `browser_ui`)
+
+`hello.browser_ui:true` makes a WebKit host hand every UI request to Zen. A host whose engine
+cannot do this (the macOS WKWebView scaffold) answers `capabilities.browser_ui:false`, and then
+everything above is unchanged. Without the key the host behaves exactly as §8 (denials with
+`error` codes); its tests are unchanged. With it, `ready.capabilities` reports `browser_ui`,
+`javascript_dialogs`, `context_menu`, `option_menu`, `permissions`, `file_dialogs`, `find`,
+`zoom`, `favicon`, `clipboard`, `ime` and `text_input` as `true`, plus `cursor_set:"css"`.
+`downloads`, `popups`, `http_auth`, `media_capture`, `accessibility` and `devtools` stay `false`,
+and fixture mode (§7) is unchanged. The browser-UI methods below exist only when negotiated;
+otherwise they are unknown methods (exit 64).
+
+**Prompts** follow cef-v1 "Browser UI delegation" exactly: the same `prompt {prompt_id, kind,
+timeout_ms, details}` and `prompt_closed {prompt_id, reason}` events, the same details schemas
+and reply commands, single use and bound to the issuing target. A reply to a prompt that is
+closed, kind-mismatched or issued for another target gets the non-fatal `error
+{code:"stale_prompt"}`. Navigation (before the generations advance), tab close, shutdown and
+timeouts answer with the safe default. The limits are 8 open prompts per tab and 64 per host;
+a prompt whose event would not fit the metadata bound is declined (`error prompt_too_large`).
+
+| kind | WebKit source | reply | timeout |
+| --- | --- | --- | --- |
+| `dialog` | `script-dialog` alert/confirm/prompt | `dialog_reply {accept, text}` | 300 s |
+| `before_unload` | `script-dialog` BEFORE_UNLOAD_CONFIRM (`is_reload:false`) | `dialog_reply` (accept = leave) | 300 s |
+| `context_menu` | `context-menu` signal + hit test + the selection (read in an isolated world) | `context_menu_command` | 120 s |
+| `permission` | `permission-request` (geolocation → `geolocation`, notification → `notifications`, website data access → `storage_access`; user media → `error media_capture_unavailable`, others → `permission_denied`) | `permission_reply` | 300 s |
+| `file_dialog` | `run-file-chooser` (`open`/`open_multiple`, MIME filters) | `file_dialog_reply {paths}`: existing regular files only, no `..` | 600 s |
+| `option_menu` (WebKit only) | `show-option-menu`; details `{x, y, width, height, items[≤512] {label ≤256, group, child, enabled, selected}}` | `option_menu_reply {prompt_id, index}` (−1 = dismissed); WebKit's own close → `prompt_closed withdrawn` | 120 s |
+
+Context-menu `save_link`/`save_image` answer `error download_denied`. `copy_image` and the
+other actions with no fixture implementation answer `error action_unavailable`. `paste` is
+done by Zen (`paste_text`).
+
+**Commands** (bound to the current target, completed `success` or `unsupported not_available`):
+`find {text, forward, match_case, find_next}` (WebKitFindController with wrap-around and
+case-insensitive unless `match_case`; results `find_result {identifier, count, active, final}`,
+with `active` counted by the host); `stop_finding {clear_selection}`; `zoom {level}`
+(cef-v1 level, factor 1.2^level, set as WebKit's page zoom); `paste_text {text ≤4096 [, x, y]}`
+(inserts into the focused editable, after focusing the editable at `x, y` if given: Zen's
+clipboard and the X11 PRIMARY selection); `ime_set_composition {text ≤1024, selection_start,
+selection_end}` (WebKitInputMethodContext preedit, shown underlined by WebKit),
+`ime_cancel_composition {}`, `ime_finish_composing {}`, and `ime_commit_text` (§8) also ends a
+composition.
+
+**Events**:
+- `clipboard_text` after a Zen `edit copy|cut` (WebKit's pasteboard is private to the sandboxed
+  host).
+- `text_selection` (the page's selection after a left-button release, a shifted key release or
+  `select_all`; never for password fields; repeated text is not resent) for X11 PRIMARY.
+- Both carry `{text ≤1800 UTF-16, part, parts ≤36}` chunks, reassembled in order by Zen.
+- `text_input {mode, caret_x, caret_y, caret_width, caret_height}` (cef-v1 shape) on editable
+  focus changes and caret moves.
+- `favicon {icon}` after each load: the page's declared icon (else `/favicon.ico`), drawn at
+  32 px in an isolated script world, as `data:image/png;base64,…` of at most 5400 bytes, or `""`.
+- `cursor` carries the element's computed CSS cursor keyword (`auto` resolved like Gecko: link →
+  `pointer`, editable or text → `text`, else `default`).
+
+The host also emulates double/triple-click word/paragraph selection in an isolated world when
+WebKit's libwpe input path left the selection collapsed.
 
 ## 9. Versioning
 

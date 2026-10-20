@@ -79,6 +79,10 @@ fi
 log "Zen runtime libraries + GUI harness tools (scripts/linux_packages.py gui)"
 # shellcheck disable=SC2046
 apt-get install -y --no-install-recommends $(python3 "$REPO/scripts/linux_packages.py" gui) >"$OUT/apt-gui.log" 2>&1
+if [ "${FEEL:-0}" = 1 ]; then
+  # The feel matrix composes Japanese text (IME preedit): a CJK font for legible screenshots, both engines.
+  apt-get install -y --no-install-recommends fonts-noto-cjk >"$OUT/apt-fonts.log" 2>&1 || log "fonts-noto-cjk unavailable"
+fi
 chown -R axio:axio "$AXIOSOZO_BUILD_ROOT" "$REPO"
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort >"$OUT/dpkg-installed.tsv"
 ( cd /var/cache/apt/archives && sha256sum ./*.deb 2>/dev/null | sed 's#\./##' ) >"$OUT/deb-sha256.txt" || true
@@ -142,7 +146,17 @@ log "round trip Gecko -> WebKit -> Gecko, host failure, three engines (optional)
 as_axio python3 "$REPO/scripts/webkit_zen_e2e.py" --app fetched --evidence-dir "$OUT/roundtrip" \
   >"$OUT/roundtrip.log" 2>&1 || rstatus=$?
 log "roundtrip exit $rstatus"
+fstatus=0
+if [ "${FEEL:-0}" = 1 ]; then
+  # webkit-feel: the native-feel matrix of WebKit tabs (scripts/webkit_feel_e2e.py).
+  log "WebKit feel matrix (dialogs, menus, select, clipboard, IME, find, zoom, cursors, wheel, HiDPI, crash retry)"
+  as_axio python3 "$REPO/scripts/webkit_feel_e2e.py" --app fetched --evidence-dir "$OUT/feel" \
+    >"$OUT/feel.log" 2>&1 || fstatus=$?
+  log "feel exit $fstatus"
+  tail -n 40 "$OUT/feel.log"
+fi
 ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"
 chmod -R a+rX "$OUT"
 [ "$gstatus" = 0 ] || exit "$gstatus"
-exit "$rstatus"
+[ "$rstatus" = 0 ] || exit "$rstatus"
+exit "$fstatus"
