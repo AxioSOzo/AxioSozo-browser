@@ -5,7 +5,8 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
   RENDER_PATH_PIPE, WHEEL_PHASES, surfaceTargetId } from "./CEFEngineAdapter.sys.mjs";
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
-import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect } from "./EngineFrameSurface.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
+  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -20,6 +21,17 @@ const TITLE_VALUE = "axiosozo-chromium-title";
 const ERROR_ICONS = { certificate_error: "chrome://global/skin/icons/warning.svg", load_failed: "chrome://global/skin/icons/info.svg" };
 // Tab state Gecko's hidden about:blank browser would otherwise overwrite.
 const TAB_STATE = ["image", "busy", "progress"];
+
+/**
+ * Loopback hosts are potentially trustworthy origins (W3C Secure Contexts §3.2): neither
+ * Firefox nor Chromium marks them "Not secure", so a Chromium tab does not either.
+ */
+export function loopbackURL(value) {
+  let host;
+  try { host = new URL(value).hostname; } catch { return false; }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]"
+    || /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/u.test(host);
+}
 
 /** Firefox's tab label for a page without a title: its address without the scheme. */
 export function addressLabel(url) {
@@ -555,7 +567,7 @@ export class CEFPresenter {
   }
   #updateBadge(record = this.active) {
     if (!this.badge || !record || this.active !== record) return;
-    const insecure = record.latestURL?.startsWith("http:") && this.#urlbarShowsPage();
+    const insecure = record.latestURL?.startsWith("http:") && !loopbackURL(record.latestURL) && this.#urlbarShowsPage();
     this.badge.toggleAttribute("insecure", !!insecure);
   }
 
@@ -776,16 +788,24 @@ export class CEFPresenter {
    */
   #draw(record, metadata, pixels) {
     if (this.disposed) return;
-    record.frames ??= new EngineFrameSurface(this.window, record.canvas, {
-      // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
-      isPaintable: () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden)),
-      onPaint: paint => {
-        record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
-        record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
-        record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
-        record.firstFrameAt ??= this.window.performance.now();
-        record.lastFrameId = paint.frameId;
-      } });
+    const isPaintable = () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden));
+    const onPaint = paint => {
+      record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
+      record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
+      record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+      record.firstFrameAt ??= this.window.performance.now();
+      record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
+    };
+    if (pixels instanceof NativeFrame) {
+      // Native receiver: the component presents the frame; nothing to convert here.
+      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
+      if (paint) { if (paint !== true) onPaint(paint); return; }
+      const fallback = nativeFallbackFrame(metadata, pixels);
+      if (!fallback) return;
+      ({ metadata, pixels } = fallback);
+    }
+    // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, { isPaintable, onPaint });
     record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
@@ -820,6 +840,7 @@ export class CEFPresenter {
     if (event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); }
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
+    if (event.event === "text_selection") this.#primarySelection(record, event.text);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -847,6 +868,24 @@ export class CEFPresenter {
       this.#action(record, target => record.adapter.focus(target, true));
     }
     if (record.committed) this.#syncChrome(record);
+  }
+  /**
+   * Linux: the desktop PRIMARY selection follows a Chromium tab's selection as it follows a
+   * Firefox page's, so middle-click paste works across tabs and applications. Like Gecko's
+   * auto-copy (mouse, keyboard or select-all reasons only), only a selection made by the
+   * user's own input in this view is published; script selections are not.
+   */
+  #primarySelection(record, text) {
+    if (this.keyPlatform !== "linux" || !record.committed || typeof text !== "string" || !text) return;
+    const input = record.userInputAt ?? -Infinity;
+    if (this.window.performance.now() - input > 1000) return;
+    try {
+      const { Cc, Ci } = this.window;
+      const clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+      if (!clipboard.isClipboardTypeSupported(Ci.nsIClipboard.kSelectionClipboard)) return;
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper)
+        .copyStringToClipboard(text, Ci.nsIClipboard.kSelectionClipboard);
+    } catch (error) { this.onFailure(error); }
   }
   #openInNewTab(record, url, background) {
     const gBrowser = this.window.gBrowser;
@@ -905,6 +944,12 @@ export class CEFPresenter {
     if (this.#labelTitle(record)) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
+    // Firefox disables reloading for the blank Gecko document a web-mode Chromium tab keeps
+    // hidden, which made F5, Ctrl+R and the reload button dead over Chromium pages. The tab's
+    // page is Chromium's; Firefox recomputes these for its own tabs on their next location change.
+    for (const id of ["Browser:Reload", "Browser:ReloadSkipCache", "Browser:ReloadOrDuplicate"]) {
+      this.window.document.getElementById?.(id)?.removeAttribute("disabled");
+    }
     // The explicit nsIURI updates address text; Gecko security UI is masked.
     const shown = record.latestURL === "about:blank" ? null : record.latestURL;
     if (!this.window.gURLBar.focused) {
@@ -914,10 +959,14 @@ export class CEFPresenter {
   }
   /** The tab label: Firefox's error-page title while an error page shows, else the page title, else its address. */
   #labelTitle(record) { return record.errorTitle || record.title || addressLabel(record.latestURL); }
-  #setLabel(record) { this.#setTabLabel(record.tab, this.#labelTitle(record)); }
-  #setTabLabel(tab, title) {
+  #setLabel(record) {
+    // Firefox puts a tab's label in the window title only when it is a document title
+    // (an error page's title counts); an address-only label leaves just the brand.
+    this.#setTabLabel(record.tab, this.#labelTitle(record), !!(record.errorTitle || record.title));
+  }
+  #setTabLabel(tab, title, isContentTitle = true) {
     const gBrowser = this.window.gBrowser;
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title);
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title, { isContentTitle });
     else tab.label = title;
   }
   // ---- Tab icon and throbber ---------------------------------------------------
@@ -1078,6 +1127,7 @@ export class CEFPresenter {
       if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
+      if (type !== "pointermove" || event.buttons) record.userInputAt = this.window.performance.now();
       event.preventDefault();
       const position = point(event);
       let count = record.clicks.count;
@@ -1202,10 +1252,12 @@ export class CEFPresenter {
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
+        record.userInputAt = this.window.performance.now(); // Ctrl+A selects: Gecko auto-copies select-all too
         if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event)));
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
+      record.userInputAt = this.window.performance.now();
       const fields = cefKey(event, type, platform); send("key", fields);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });
@@ -1481,7 +1533,8 @@ export class CEFPresenter {
     }
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
-    record.canvas.width = 1; record.canvas.height = 1;
+    // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
+    try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
     record.tab.toggleAttribute?.("busy", false); record.tab.toggleAttribute?.("progress", false);
     // Back in Firefox, Firefox's page sets its own icon. A kept engine keeps the
     // icon so Zen's session (and a closing window) remembers it.
@@ -1522,6 +1575,10 @@ export class CEFPresenter {
     return { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
       frameTransport:record.surfaceMode ? null : record.adapter.frameTransport ?? "pipe",
+      memfdFallback:record.surfaceMode ? null : record.adapter.memfdFallback ?? null,
+      // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
+      frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
+      nativeReceiver:record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).
@@ -1542,7 +1599,8 @@ export class CEFPresenter {
     }
     // Explicit diagnostic call in privileged chrome only, never a content API or
     // continuous page capture. The outer Zen window must be evidenced separately.
-    return { png:record.canvas.toDataURL("image/png"), diagnostics:this.diagnostics() };
+    return { png:(record.nativeSink && nativeFramePNG(this.window, record.nativeSink)) || record.canvas.toDataURL("image/png"),
+      diagnostics:this.diagnostics() };
   }
   async dispose() {
     this.disposed = true;

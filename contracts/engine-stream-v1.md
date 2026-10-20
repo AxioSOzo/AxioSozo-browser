@@ -150,7 +150,7 @@ damage. `capabilities.damage_payload` is false (or absent from older hosts) with
 Zen negotiates it on Linux whenever it negotiates frame damage (docs/perf/pixel-path.md).
 Hosts enlarge their stdout pipe to 1 MiB on Linux (`F_SETPIPE_SZ`, best effort).
 
-### 6.3 memfd frames (optional, additive, Linux, EXPERIMENTAL)
+### 6.3 memfd frames (optional, additive, Linux; Zen's default on Linux)
 
 `hello.frame_transport:"memfd"` asks the host to keep frame pixels out of the pipe. The host
 creates one `memfd` (`MFD_CLOEXEC`, sealed `F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_SEAL`, so helpers
@@ -168,7 +168,19 @@ direct child; the fd number comes only from its authenticated ready event) befor
 frame's `frame_ack`. One frame is in flight (§6), so the host rewrites a slot only after the
 frame that used it was acknowledged; slots alternate. Everything else (metadata validation,
 target binding, damage, coalescing) is unchanged. Zen negotiates it only with the pref
-`axiosozo.engines.linux.memfd_frames` (default false) and never on macOS or in surface mode.
+`axiosozo.engines.linux.memfd_frames` (default `MEMFD_FRAMES_DEFAULT` in
+EngineFrameSurface.sys.mjs: true since the soak in docs/perf/pixel-path.md), only after listing the spawned host's `/proc/<pid>/fd` succeeded
+(the same ptrace-read access a slot read needs), and never on macOS or in surface mode.
+
+**Fallback.** When Zen cannot read a frame's slot (one retry), it drops that frame (never
+presents it, forgets its target's assembled frame) and acknowledges it with
+`frame_ack {frame_id, frame_transport:"pipe"}`. The host accepts that key only while memfd
+frames are active, switches before the ack releases the credit, and from then on writes every
+frame with its payload in the pipe (no `slot`/`payload_bytes`); each target's next frame names
+the whole surface (pending damaged frames are made whole or re-sent) and the host repaints
+every view so a static page is restored. The ring stays mapped until the host exits. Zen then
+asks every later host of the session for the pipe. Any other value, or the key while memfd
+frames are not active, is a protocol error.
 
 ## 7. Fixture security policy (all profiles)
 

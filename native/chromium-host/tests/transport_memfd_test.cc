@@ -50,6 +50,52 @@ static long number(const std::string& json, const char* key) {
   return strtol(json.c_str() + at + strlen(key) + 3, nullptr, 10);
 }
 
+#ifdef __linux__
+// §6.3 fallback (frame_ack frame_transport "pipe"): disableMemfd before the ack that asked for it.
+// The pending partial frame becomes whole and travels in the pipe with its payload.
+static void fallbackScenario() {
+  int input[2], output[2];
+  assert(pipe(input) == 0 && pipe(output) == 0);
+  pid_t child = fork();
+  assert(child >= 0);
+  if (!child) {
+    close(input[1]); close(output[0]);
+    assert(dup2(input[0], 0) >= 0 && dup2(output[1], 1) >= 0);
+    close(input[0]); close(output[1]);
+    axio::Transport transport;
+    assert(transport.start());
+    assert(!transport.disableMemfd());  // nothing to disable before the ring exists
+    assert(transport.enableMemfd(2, 64) >= 0 && transport.memfdActive());
+    transport.setDamagePayload(true);
+    std::vector<uint8_t> a(64, 0xa1), b(64, 0xb2);
+    const uint32_t whole[4] = {0, 0, 4, 4}, band[4] = {0, 1, 4, 2};
+    assert(transport.frameWithDamage("tab", "{\"frame_id\":1}", "t", 1, a.data(), 4, 4, whole));
+    assert(take(transport) == "one\n");
+    // Pending while frame 1 is in flight: a damage band against frame 1, which Zen dropped.
+    assert(transport.frameWithDamage("tab", "{\"frame_id\":2}", "t", 2, b.data(), 4, 4, band));
+    assert(transport.disableMemfd() && !transport.memfdActive());
+    assert(!transport.disableMemfd());  // once
+    assert(transport.acknowledge(1, "t"));
+    assert(take(transport) == "two\n");
+    transport.stop();
+    _exit(0);
+  }
+  close(input[0]); close(output[1]);
+  auto send = [&](const char* text) { assert(write(input[1], text, strlen(text)) == ssize_t(strlen(text))); };
+  uint32_t payload = 0;
+  std::string one = packet(output[0], payload);
+  assert(one == "{\"frame_id\":1,\"damage\":[[0,0,4,4]],\"slot\":0,\"payload_bytes\":64}" && payload == 0);
+  send("one\n");
+  std::string two = packet(output[0], payload);
+  assert(two == "{\"frame_id\":2,\"damage\":[[0,0,4,4]]}" && payload == 64);
+  send("two\n");
+  close(input[1]); close(output[0]);
+  int status = 0;
+  assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+  printf("PASS: memfd fallback: later frames travel in the pipe and the pending damaged frame is sent whole\n");
+}
+#endif
+
 int main() {
 #ifndef __linux__
   printf("SKIPPED: memfd frames are Linux only\n");
@@ -120,6 +166,7 @@ int main() {
   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
   printf("PASS: memfd frames carry no pipe payload, name alternating slots the parent reads through "
          "/proc/<pid>/fd, compose with damage_payload, and an oversized frame fails closed\n");
+  fallbackScenario();
   return 0;
 #endif
 }

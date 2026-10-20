@@ -4,7 +4,9 @@
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
-import { DamagePayloadAssembler, MEMFD_FRAMES_PREF, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
+  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -330,6 +332,8 @@ const EVENT_FIELDS = {
   favicon: ["icon"],
   // Proposed with `ime`: the focused editable's kind and caret, in logical points.
   text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
+  // Linux web sessions: the page's selected text, for the desktop PRIMARY selection.
+  text_selection: ["text"],
   // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
   prompt: ["prompt_id", "kind", "details", "timeout_ms"], prompt_closed: ["prompt_id", "reason"],
   download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
@@ -412,7 +416,7 @@ export class CEFHostConnection {
   // Heartbeat watchdog (armed by a ready capability): last accepted sequence, the time anything
   // was last heard or the watchdog last reset, the pending check timer and the wake observer.
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatInterval = null; #heartbeatSeen = 0;
-  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers; #assembler = null; #readSlot = null; #slotReader = null;
+  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers; #assembler = null; #readSlot = null; #slotReader = null; #native = null;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
     shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
     now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64", damagePayload = true,
@@ -633,6 +637,24 @@ export class CEFHostConnection {
     if (!adapter || (created ? adapter.target : adapter.target?.native_target_id !== target.native_target_id)) return null;
     return adapter;
   }
+  /**
+   * engine-stream-v1 §6.3 fallback: a slot could not be read. The frame is dropped (never
+   * presented), its target's assembled frame is forgotten, and its frame_ack asks the host to
+   * send every later frame through the pipe, each target's next one whole.
+   */
+  async #memfdFallback(value) {
+    this.readPhase = "frame_validate";
+    if (value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_CEF_FRAME");
+    this.lastFrame = value.frame_id;
+    this.memfd = null; this.frameTransport = "pipe";
+    this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
+    this.#assembler?.forget(value.target?.native_target_id);
+    // The native receiver takes memfd frames only: the JS path draws the pipe frames from now on.
+    if (this.#native && !this.#native.acceptsBuffers) { this.#native.close(); this.#native = null; this.nativeReceiver = false; }
+    console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: "chromium", frameId: value.frame_id }));
+    this.readPhase = "frame_ack";
+    await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
+  }
   #targetFailed(adapter, error) {
     const code = READ_FAILURE_CODES.has(error?.message) ? error.message : "CEF_PROTOCOL_OR_EOF";
     if (!(error instanceof TargetError) || !this.shared || !adapter) throw new Error(code);
@@ -646,10 +668,18 @@ export class CEFHostConnection {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd && !this.#endpoint) {
         this.readPhase = "frame_memfd";
-        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+        // Native receiver or frame worker: the slot is read off the main thread; no pixels reach JS.
+        try { pixels = this.#native ? await this.#native.apply(value) : await this.#slotReader(value.slot, value.payload_bytes); }
+        catch (error) {
+          if (error?.message !== "MEMFD_READ_FAILED") throw error;
+          await this.#memfdFallback(value);
+          continue;
+        }
       }
       // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
-      if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
+      // After a memfd fallback, a frame worker's targets take the pipe payloads too.
+      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -686,10 +716,11 @@ export class CEFHostConnection {
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_CEF_CREATION");
         adapter = creation?.abandoned ? null : this.#adapterFor(value.target, value.event === "created");
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
-        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
+        if (value.event === "closed") { this.#assembler?.forget(value.target.native_target_id); this.#native?.forget(value.target.native_target_id); }
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
-      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
+      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "text_selection",
+          "favicon"].includes(value.event)
           || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
@@ -753,6 +784,10 @@ export class CEFHostConnection {
       try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
       catch { throw new Error("UNVERIFIED_CEF_RUNTIME"); }
       this.memfd = memfd;
+      // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
+      this.#native = ring ? new NativeFrameSinks(ring) : null;
+      this.nativeReceiver = !!this.#native;
     }
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
@@ -800,7 +835,7 @@ export class CEFHostConnection {
   }
   fail(reason) {
     if (this.#ended) return;
-    this.#ended = true; this.status = "failed";
+    this.#ended = true; this.status = "failed"; this.#native?.close(); this.#native = null;
     this.#stopHeartbeatWatchdog();
     // Fixed metadata only: no URLs, input, target IDs, profile paths or tokens.
     console.error("AXIOSOZO_CEF_DIAGNOSTIC", JSON.stringify({ code:reason, phase:this.readPhase,
@@ -827,7 +862,7 @@ export class CEFHostConnection {
       await done;
       const result = await this.#process.wait();
       if (result.exitCode !== 0) throw new Error("CEF_SHUTDOWN_FAILED");
-      this.#ended = true; this.status = "closed";
+      this.#ended = true; this.status = "closed"; this.#native?.close(); this.#native = null;
       this.#stopHeartbeatWatchdog();
       const unavailable = new Error("CEF_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
@@ -885,6 +920,8 @@ export class CEFEngineAdapter {
   get surfaceMode() { return this.#host.surfaceMode === true; }
   /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
   get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
+  get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
   /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
   get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }
@@ -1026,6 +1063,8 @@ export class CEFEngineAdapter {
     if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
         || ![value.caret_x, value.caret_y, value.caret_width, value.caret_height]
           .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
+    if (value.event === "text_selection" && (this.browsingMode !== "web" || typeof value.text !== "string"
+        || !value.text.length || value.text.length > 16384)) throw targetError("INVALID_CEF_TEXT_SELECTION");
     if (AX_EVENTS.has(value.event)) {
       if (this.#host.capabilities?.accessibility !== true) throw targetError("INVALID_CEF_ACCESSIBILITY");
       try { (value.event === "ax_tree_update" ? validateAXTreeUpdate : validateAXLocation)(value); }
@@ -1330,8 +1369,11 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     const cleanup = () => IOUtils.remove(profile, { recursive: true });
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
-  // engine-stream-v1 §6.3 memfd frames: EXPERIMENTAL, Linux pipe mode only, off unless the pref is set.
-  const frameTransport = !endpoint && platform !== "macosarm64" && Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe";
+  // engine-stream-v1 §6.3 memfd frames: Linux pipe mode only (pref, MEMFD_FRAMES_DEFAULT), and only
+  // when this child's /proc/<pid>/fd is readable; otherwise the pipe.
+  const frameTransport = !endpoint && platform !== "macosarm64" && memfdFramesWanted()
+    && await memfdProcReadable(process.pid) ? "memfd" : "pipe";
+  if (frameTransport === "memfd" && frameWorkerWanted()) await frameWorkersUsable();
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
     shared: browsingMode === "web", platform, frameTransport,
     surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });

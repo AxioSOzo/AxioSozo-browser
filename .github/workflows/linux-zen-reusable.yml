@@ -144,6 +144,8 @@ jobs:
         run: |
           tail -n 4000 zen-setup.log > "$EVIDENCE_OUT/zen-setup.tail.log" 2>/dev/null || true
           grep -nE "^(error|ERROR)|error:|Error |FAIL|Traceback" zen-setup.log | head -200 > "$EVIDENCE_OUT/zen-setup.errors.txt" 2>/dev/null || true
+          # C/C++/IDL failures only (the list above fills up with Rust lint lines), with context.
+          grep -nE -B3 -A12 "(error: |fatal error|Error [0-9]+$|xpidl.*Error|IDLError)" zen-setup.log | grep -v "third_party/rust" | head -400 > "$EVIDENCE_OUT/zen-setup.compile-errors.txt" 2>/dev/null || true
           for f in zen/obj/config.log zen/source/mozconfig; do
             [ -f "$AXIOSOZO_BUILD_ROOT/$f" ] && tail -n 2000 "$AXIOSOZO_BUILD_ROOT/$f" > "$EVIDENCE_OUT/$(basename "$f").tail" || true
           done

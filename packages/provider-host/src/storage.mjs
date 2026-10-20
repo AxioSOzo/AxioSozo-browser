@@ -24,8 +24,23 @@ function linuxBuildRoot() {
   return path.join(configured, 'providers');
 }
 
+/**
+ * macOS CI: scripts/storage.py's macOS CI build root (docs/MACOS_CI.md). Only with
+ * AXIOSOZO_MACOS_CI=1 on a GitHub Actions runner without the owner's layout (T9,
+ * dev-external, mount-dev-storage); refused wherever that layout exists, so the
+ * T9-backed volume stays required on the owner's Mac. Null when not requested.
+ */
+export function macosCiBuildRoot() {
+  if (process.platform !== 'darwin' || process.env.AXIOSOZO_MACOS_CI !== '1') return null;
+  requireValue(process.env.GITHUB_ACTIONS === 'true', 'BLOCKED_ENV', 'AXIOSOZO_MACOS_CI=1 is only for GitHub Actions macOS runners');
+  requireValue(!['/Volumes/T9', '/Users/wout/.local/bin/dev-external', '/Users/wout/.local/bin/mount-dev-storage'].some(existsSync),
+    'BLOCKED_ENV', 'AXIOSOZO_MACOS_CI=1 refused: the owner macOS layout exists');
+  requireValue(Boolean(process.env.AXIOSOZO_BUILD_ROOT), 'BLOCKED_ENV', 'AXIOSOZO_MACOS_CI=1 requires an explicit AXIOSOZO_BUILD_ROOT');
+  return process.env.AXIOSOZO_BUILD_ROOT;
+}
+
 export function providerBuildRoot() {
-  if (process.platform === 'linux') return linuxBuildRoot();
+  if (process.platform === 'linux' || macosCiBuildRoot() !== null) return linuxBuildRoot();
   const configured = process.env.AXIOSOZO_BUILD_ROOT ?? '/Volumes/AxioSozoBuild';
   requireValue(path.isAbsolute(configured), 'BLOCKED_ENV', 'AXIOSOZO_BUILD_ROOT must be absolute');
   const resolved = path.resolve(configured);

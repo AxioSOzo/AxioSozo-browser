@@ -1,0 +1,83 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+webidl Element;
+
+/**
+ * One native target's frames (engine-stream-v1 §6.3 memfd frames, Linux). The
+ * sink keeps the target's whole BGRA frame off the main thread: every
+ * delivered frame's payload (whole, or the damage rectangle's rows with
+ * §6.2) is copied from its ring slot into it on the ring's task queue, and a
+ * presented frame is posted as a B8G8R8X8 SharedRGBImage to the bound
+ * canvas's async ImageContainer (HTMLCanvasElement::SetAxioExternalImageContainer):
+ * no pixel crosses JS, no swizzle, WebRender gets it through the ImageBridge.
+ * Main thread only.
+ */
+[scriptable, builtinclass, uuid(effa0640-9999-40e2-8ee4-e7a0343587a1)]
+interface nsIAxioFrameSink : nsISupports {
+  /**
+   * Presents into this chrome <canvas> from now on. It must have no rendering
+   * context, no offscreen control and no other external container; throws
+   * otherwise (the caller keeps its 2D path).
+   */
+  void bindCanvas(in Element aCanvas);
+
+  /**
+   * Applies one delivered frame: `aPayloadBytes` at slot `aSlot` of the ring
+   * are the rows of the rectangle (aX, aY, aW, aH) of a aWidth x aHeight
+   * frame (the whole frame when the rectangle is). Resolves once the slot was
+   * read (the frame may then be acknowledged); rejects with
+   * NS_ERROR_DOM_OPERATION_ERR when the payload does not fit the ring or a
+   * partial payload has no whole frame of its size before it.
+   */
+  [implicit_jscontext] Promise applyFrame(in unsigned long aSlot,
+                                          in unsigned long aPayloadBytes,
+                                          in unsigned long aWidth,
+                                          in unsigned long aHeight,
+                                          in unsigned long aX, in unsigned long aY,
+                                          in unsigned long aW, in unsigned long aH);
+
+  /**
+   * Posts the current whole frame to the bound canvas (after every frame
+   * applied before this call). Superseded presents are skipped.
+   */
+  void present(in unsigned long long aFrameId);
+
+  /** Width/height of the current whole frame (0 before the first). */
+  readonly attribute unsigned long width;
+  readonly attribute unsigned long height;
+
+  /**
+   * A copy of the current whole frame, premultiplied BGRA, as an ArrayBuffer
+   * (diagnostics and fallbacks only), or null before the first frame.
+   */
+  [implicit_jscontext] jsval copyFrame();
+
+  /** Counters: applied, presented, skipped, copy and present microseconds. */
+  readonly attribute ACString statsJSON;
+
+  /** Unbinds the canvas and drops the frame. */
+  void close();
+};
+
+/** One host's frame ring, mapped read-only. */
+[scriptable, builtinclass, uuid(000bad46-f649-46e8-a5de-de31b584841b)]
+interface nsIAxioFrameRing : nsISupports {
+  nsIAxioFrameSink createSink();
+  void close();
+};
+
+/**
+ * Parent process only. Maps a host's sealed frame memfd: `aHostPid` must be a
+ * direct child of this process, `aFd` its descriptor number from the
+ * authenticated ready event; the file must be exactly aSlots x aSlotBytes and
+ * sealed against shrinking and growing.
+ */
+[scriptable, uuid(b107abd4-5a84-40b0-be4a-e20e8424efda)]
+interface nsIAxioFrameReceiverService : nsISupports {
+  nsIAxioFrameRing openRing(in long aHostPid, in long aFd,
+                            in unsigned long aSlotBytes, in unsigned long aSlots);
+};

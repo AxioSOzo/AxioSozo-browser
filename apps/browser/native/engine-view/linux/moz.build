@@ -1,0 +1,35 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# AxioSozo Linux frame receiver (docs/perf/pixel-path.md, "Native receiver"): an
+# engine host's memfd frame ring (engine-stream-v1 §6.3) mapped read-only, frames
+# copied off the main thread into B8G8R8X8 SharedRGBImages on the bound chrome
+# <canvas>'s async ImageContainer (HTMLCanvasElement::SetAxioExternalImageContainer,
+# patches/zen/firefox-native.json). Chrome JS uses it behind the pref
+# axiosozo.engines.linux.native_receiver; without this component the JS path runs.
+#
+# Built only through engine-view/moz.build `DIRS += ["linux"]` on GTK.
+
+XPIDL_SOURCES += [
+    "nsIAxioFrameReceiver.idl",
+]
+XPIDL_MODULE = "axio_frame_receiver"
+
+EXPORTS.mozilla.axio += [
+    "AxioFrameReceiver.h",
+]
+SOURCES += [
+    "AxioFrameReceiver.cpp",
+]
+XPCOM_MANIFESTS += [
+    "components.conf",
+]
+LOCAL_INCLUDES += [
+    "/dom/base",
+    "/gfx/layers",
+]
+
+include("/ipc/chromium/chromium-config.mozbuild")
+
+FINAL_LIBRARY = "xul"
