@@ -158,6 +158,9 @@ def scenario(session, origin, directory):
     results['ime'] = wait_state(session, lambda s: s.get('t') == 'pasted日本')['t']
     results['text_input'] = text_input
     click(session, *AT['ed'])
+    # Pointer input queues in WebKit's UI process while input-method signals do not: compose once
+    # the caret is in the contenteditable (as a user does).
+    event(session, 'text_input', lambda item: item['mode'] == 'text' and item['caret_y'] >= 290)
     session.completed(session.command('ime_set_composition', text='かな', selection_start=2, selection_end=2))
     session.command('ime_commit_text', text='仮名')
     results['ime_contenteditable'] = wait_state(session, lambda s: s.get('e') == '仮名')['e']
