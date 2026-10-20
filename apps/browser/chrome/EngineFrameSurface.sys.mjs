@@ -185,6 +185,28 @@ export class EngineFrameSurface {
   /** "videoframe" or "imagedata" (after a VideoFrame failure: "imagedata", with `uploadError`). */
   get upload() { return this.#upload; }
   get uploadError() { return this.#uploadError; }
+  /**
+   * Diagnostics only (never on the frame path): what the last accepted source is and the
+   * centre pixel of the source and of the canvas, so a test can tell a black canvas from a
+   * black source (`[b, g, r, a]` for the source, `[r, g, b, a]` for the canvas).
+   */
+  pixelProbe() {
+    const out = { source: null, canvas: null };
+    try {
+      const source = this.#source, width = this.#width, height = this.#height;
+      if (source && width && height) {
+        const bytes = new Uint8Array(source), at = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
+        out.source = { tag: Object.prototype.toString.call(source), byteLength: bytes.byteLength,
+          expected: width * height * 4, center: [...bytes.subarray(at, at + 4)] };
+      }
+      if (this.#current && this.#canvas.width && this.#canvas.height) {
+        const context = this.#canvas.getContext("2d", this.#contextOptions);
+        const data = context.getImageData(Math.floor(this.#canvas.width / 2), Math.floor(this.#canvas.height / 2), 1, 1).data;
+        out.canvas = { center: [...data] };
+      }
+    } catch (error) { out.error = String(error?.message ?? error); }
+    return out;
+  }
   /** A frame from the host: recorded now, converted and uploaded at the next refresh tick. */
   accept(metadata, pixels) {
     if (this.#disposed) return;

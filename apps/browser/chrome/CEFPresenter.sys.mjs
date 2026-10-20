@@ -1741,6 +1741,9 @@ export class CEFPresenter {
       memfdFallback:record.surfaceMode ? null : record.adapter.memfdFallback ?? null,
       // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
       frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
+      frameUploadError:record.frames?.uploadError ?? null,
+      // JS frame path only: centre pixel of the last source frame and of the canvas.
+      framePixels:record.frames?.pixelProbe?.() ?? null,
       nativeReceiver:record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,

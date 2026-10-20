@@ -16,7 +16,7 @@
 name: linux-cef-zen
 on:
   push:
-    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel, claude/cef-feel-2-xrbczc, claude/cef-feel-2-xrbczc-rgjgez, cloud/cef-feel-2, claude/perf-phase3-uvmfis]  # perf-phase3: regression runs
+    branches: [cloud/integration, dev, cloud/final-review]
     paths:
       - apps/browser/chrome/CEF*.sys.mjs
       - apps/browser/chrome/Chromium*.sys.mjs
@@ -46,7 +46,7 @@ env:
   ARTIFACT: axiosozo-zen-linux-x86_64
   # The prebuilt app to test (linux-perf-build: SWGL address-bar crash fix + native frame
   # receiver + memfd frames). The newest unexpired artifact is used if this one expired.
-  ZEN_RUN: "39362552105"
+  ZEN_RUN: "39383407870"
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -197,13 +197,15 @@ jobs:
           out = pathlib.Path(sys.argv[1])
           variants = [('default', []),
                       ('worker-off', ['axiosozo.engines.linux.frame_worker=false']),
+                      ('js-memfd', ['axiosozo.engines.linux.native_receiver=false',
+                                    'axiosozo.engines.linux.frame_worker=false']),
                       ('memfd-off', ['axiosozo.engines.linux.memfd_frames=false']),
                       ('memfd-off-receiver-off', ['axiosozo.engines.linux.memfd_frames=false',
                                                   'axiosozo.engines.linux.native_receiver=false'])]
           probe, chosen = {}, None
           for name, prefs in variants:
               cmd = ['timeout', '420', 'python3', 'scripts/cef_zen_e2e.py', '--app', 'fetched', '--mode', 'web',
-                     '--scenario', 'launch,chrome,switch,typing', '--evidence-dir', str(out / f'framepath-{name}')]
+                     '--scenario', 'launch,chrome,frame_selftest,switch,typing', '--evidence-dir', str(out / f'framepath-{name}')]
               for pref in prefs:
                   cmd += ['--pref', pref]
               with open(out / f'framepath-{name}.log', 'w') as log:

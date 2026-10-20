@@ -51,7 +51,7 @@ FEEL = ROOT / 'tests/fixtures/cef-zen-feel.html'
 ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
 # Address-bar focus checks run last: the Linux parent process has a known WebRender crash around
 # address-bar input (owned by cloud/linux-platform), and a crash ends the session.
-WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'fonts', 'scrollbars', 'badge', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
+WEB_SCENARIOS = ('launch', 'chrome', 'frame_selftest', 'switch', 'fonts', 'scrollbars', 'badge', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
                  'history', 'beforeunload', 'download', 'permission', 'file_chooser', 'cert_error', 'devtools', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
                  'urlbar_gecko', 'ctrl_t_gecko')
@@ -91,6 +91,44 @@ return JSON.parse(JSON.stringify({engine: probe?.engineOf?.(tab) ?? 'gecko', nat
   scale: devicePixelRatio, tabs: gBrowser.tabs.length, tabIndex: gBrowser.tabs.indexOf(tab), tabId: tab.linkedPanel,
   label: tab.label, urlbarFocused: !!gURLBar.focused, urlbar: gURLBar.value,
   focus: active === canvas ? 'canvas' : (overlay?.contains(active) ? 'proxy-' + active.localName : (active?.id || active?.localName || null))}));
+"""
+# The JS memfd frame path without a host (diagnosis of the black-frame regression): a known
+# BGRA frame in a temporary file, read the way memfdSlotReader reads a slot (IOUtils.read with
+# offset/maxBytes), through DamagePayloadAssembler, painted by EngineFrameSurface on a chrome
+# canvas with each upload mode; reports types and centre pixels of every stage.
+FRAME_SELFTEST = """
+return (async () => {
+  const m = ChromeUtils.importESModule('chrome://browser/content/axiosozo/EngineFrameSurface.sys.mjs');
+  const W = 33, H = 9, slot = W * H * 4, bytes = new Uint8Array(slot * 2);
+  for (let i = 0; i < W * H; i++) bytes.set([0x30, 0x60, 0x90, 0xff], slot + i * 4); // B,G,R,A of slot 1
+  const path = PathUtils.join(PathUtils.tempDir, 'axiosozo-frame-selftest.bin');
+  await IOUtils.write(path, bytes);
+  const out = {};
+  const raw = await IOUtils.read(path, { offset: slot, maxBytes: slot });
+  out.read = { tag: Object.prototype.toString.call(raw), byteOffset: raw.byteOffset, byteLength: raw.byteLength,
+    bufferTag: Object.prototype.toString.call(raw.buffer), bufferBytes: raw.buffer.byteLength, first: [...raw.subarray(0, 4)] };
+  const reader = m.memfdSlotReader(4242, { fd: 9, slot_bytes: slot, slots: 2 }, (p, o) => IOUtils.read(path, o));
+  const pixels = await reader(1, slot);
+  out.slot = { tag: Object.prototype.toString.call(pixels), isView: ArrayBuffer.isView(pixels),
+    byteLength: pixels.byteLength, first: [...new Uint8Array(pixels).subarray(0, 4)] };
+  const meta = { version: 1, target: { native_target_id: 'selftest' }, frame_id: 1, width: W, height: H, stride: W * 4,
+    device_scale: 1, format: 'BGRA8', damage: [[0, 0, W, H]] };
+  const frame = new m.DamagePayloadAssembler().apply(meta, pixels);
+  out.assembled = { tag: Object.prototype.toString.call(frame), first: [...new Uint8Array(frame).subarray(0, 4)] };
+  for (const upload of ['videoframe', 'imagedata']) {
+    const canvas = document.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
+    const surface = new m.EngineFrameSurface(window, canvas, { upload });
+    surface.accept(meta, frame);
+    let painted = null;
+    try { painted = surface.paint(); } catch (error) { painted = 'throw: ' + error; }
+    const probe = surface.pixelProbe();
+    out[upload] = { painted, upload: surface.upload, uploadError: surface.uploadError, probe };
+    surface.dispose();
+  }
+  out.videoFrameProbe = m.videoFrameUploadProbe();
+  await IOUtils.remove(path);
+  return out;
+})();
 """
 CLIPBOARD_READ = """
 const trans = Cc['@mozilla.org/widget/transferable;1'].createInstance(Ci.nsITransferable);
@@ -556,12 +594,23 @@ class CEFZenHarness(gui_test.Harness):
         self.gate('e1_render_in_content_area', 'PASS' if black is not None and black < 0.5 else 'FAIL', screenshot='02-chromium.png',
                   seconds=seconds, surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'),
                   black_fraction=black, frame_path={k: native.get(k) for k in ('frameUpload', 'nativeReceiver', 'memfdFallback',
-                                                                              'frameTransport', 'frameWorker')})
+                                                                              'frameTransport', 'frameWorker', 'frameUploadError',
+                                                                              'framePixels')})
         if black is None or black >= 0.5:
             raise AssertionError(f'the Chromium view is {black} black in 02-chromium.png; frame path {native}')
         return {'menu': menu, 'seconds': seconds, 'gecko_page': gecko, 'state': {k: state[k] for k in
                 ('engine', 'mode', 'view', 'geckoHidden', 'geckoURL', 'overlay', 'label', 'tabs', 'focus')},
                 'native': native}
+
+    def scenario_frame_selftest(self):
+        out = self.chrome_script(FRAME_SELFTEST)
+        want_canvas = [0x90, 0x60, 0x30, 255]
+        ok = all(abs(a - b) <= 2 for upload in ('videoframe', 'imagedata')
+                 for a, b in zip(((out.get(upload) or {}).get('probe') or {}).get('canvas', {}).get('center') or [0, 0, 0, 0], want_canvas))
+        self.gate('frame_path_selftest', 'PASS' if ok else 'FAIL', **out)
+        if not ok:
+            raise AssertionError(f'JS frame path self-test: {out}')
+        return out
 
     def scenario_fonts(self):
         """The same text in each CSS generic family has the same width in Chromium as in the Gecko tab
