@@ -138,27 +138,33 @@ def render(reports):
         lines.append('')
         traced = [r for r in report['windows'] if (r.get('metrics') or {}).get('frames')]
         if traced:
-            lines += ['Frame path per frame (median ms; hooks): header wait = idle until the next frame header; pixel read = '
-                      'Subprocess read(size) call → resolve; convert = pixels → ImageData; put = putImageData.', '',
-                      '| pass | window | recv fps | MB/s | stdout reads | header wait | pixel read | convert | put | put→chrome paint | main-thread share |',
-                      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+            lines += ['Frame path (median ms per frame; hooks). recv/paint fps = frames read / surface paints per s; '
+                      'header wait = idle until the next AXCF header; payload read = Subprocess read(size) call → resolve; '
+                      'assemble = damage payload → whole frame; tick wait = accept → rAF paint start; paint = convert + putImageData '
+                      'of the damage union; main-thread share = (payload reads + assembly + paints) / window.', '',
+                      '| pass | window | recv fps | paint fps | superseded | MB/s | payload KB | damage share | header wait | payload read | assemble | tick wait | paint | convert | put | paint→MozAfterPaint | main-thread share |',
+                      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
             for row in traced:
                 f = row['metrics']['frames']
-                lines.append(f"| {row['pass_']} | {row['window']} | {fmt(f.get('received_fps'))} | {fmt(f.get('received_mb_per_s'))} | "
-                             f"{fmt(f.get('stdout_reads'))} | {fmt(f.get('header_wait_ms'))} | {fmt(f.get('pixel_read_ms'))} | "
-                             f"{fmt(f.get('convert_ms'))} | {fmt(f.get('put_ms'))} | {fmt(f.get('put_to_chrome_paint_ms'))} | "
-                             f"{fmt(f.get('main_thread_pipeline_share'), 3)} |")
+                kb = f.get('payload_bytes_per_frame')
+                lines.append(f"| {row['pass_']} | {row['window']} | {fmt(f.get('received_fps'))} | {fmt(f.get('painted_fps'))} | "
+                             f"{fmt(f.get('frames_superseded'))} | {fmt(f.get('received_mb_per_s'))} | {fmt(kb / 1024 if kb else None)} | "
+                             f"{fmt(f.get('damage_share'), 2)} | {fmt(f.get('header_wait_ms'))} | {fmt(f.get('pixel_read_ms'))} | "
+                             f"{fmt(f.get('assemble_ms'), 2)} | {fmt(f.get('accept_to_paint_start_ms'))} | {fmt(f.get('surface_paint_ms'), 2)} | "
+                             f"{fmt(f.get('convert_ms'), 2)} | {fmt(f.get('put_ms'), 2)} | {fmt(f.get('paint_to_chrome_paint_ms'))} | "
+                             f"{fmt(f.get('main_thread_frame_work_share'), 3)} |")
             lines.append('')
         keyed = [r for r in report['windows'] if (r.get('metrics') or {}).get('key_breakdown_median')]
         if keyed:
             lines += ['Key → paint breakdown (median ms; hooks):', '',
-                      '| pass | keydown→send | send→frame header (host) | pixel transport | convert | put | put→chrome paint | keydown→put end | keydown→chrome paint |',
-                      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+                      '| pass | keydown→send | send→frame header (host) | payload transport | received→accept | tick wait | surface paint | paint→MozAfterPaint | keydown→surface paint end | keydown→MozAfterPaint |',
+                      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
             for row in keyed:
                 k = row['metrics']['key_breakdown_median']
                 lines.append(f"| {row['pass_']} | {fmt(k.get('keydown_to_send_ms'))} | {fmt(k.get('send_to_frame_header_ms'))} | "
-                             f"{fmt(k.get('pixel_transport_ms'))} | {fmt(k.get('convert_ms'))} | {fmt(k.get('put_ms'))} | "
-                             f"{fmt(k.get('put_to_chrome_paint_ms'))} | {fmt(k.get('keydown_to_put_end_ms'))} | {fmt(k.get('keydown_to_chrome_paint_ms'))} |")
+                             f"{fmt(k.get('pixel_transport_ms'))} | {fmt(k.get('received_to_accept_ms'))} | {fmt(k.get('accept_to_paint_start_ms'))} | "
+                             f"{fmt(k.get('surface_paint_ms'))} | {fmt(k.get('paint_to_chrome_paint_ms'))} | "
+                             f"{fmt(k.get('keydown_to_surface_paint_end_ms'))} | {fmt(k.get('keydown_to_chrome_paint_ms'))} |")
             lines.append('')
         for row in report['windows']:
             timeline = (row.get('metrics') or {}).get('switch_timeline')
@@ -191,6 +197,11 @@ def render(reports):
                     gc = {k: v for k, v in main.get('markers', {}).items() if k.startswith(('GC', 'CC'))}
                     if gc:
                         lines.append('  - GC/CC markers: ' + ', '.join(f"{k} {v['count']}× {v['total_ms']:.0f} ms" for k, v in list(gc.items())[:5]))
+                render = entry.get('webrender')
+                if render:
+                    lines.append('  - WebRender/compositor threads: ' + '; '.join(
+                        f"{name} {v['cpu_ms']:.0f} ms (top self: " + ', '.join(f"`{f['frame'][:50]}` {f['ms']:.0f}" for f in v['top_self'][:3]) + ')'
+                        for name, v in list(render.items())[:3]))
                 worker = entry.get('busiest_worker')
                 if worker:
                     buckets = ', '.join(f'{k} {v:.0f}' for k, v in list(worker['buckets_inclusive_ms'].items())[:6])
@@ -206,7 +217,7 @@ def combine(directories, out):
         for path in sorted(Path(directory).rglob('report-*.json')):
             reports.append(json.loads(path.read_text()))
     order = {'gecko': 0, 'chromium': 1, 'gecko-debian': 2, 'webkit': 3}
-    reports.sort(key=lambda r: order.get(r['label'], 9))
+    reports.sort(key=lambda r: (order.get(r['label'].removesuffix('-2x'), 9), r['label']))
     Path(out).mkdir(parents=True, exist_ok=True)
     (Path(out) / 'profile-report.md').write_text(render(reports))
     (Path(out) / 'profile-report.json').write_text(json.dumps(reports, indent=1) + '\n')

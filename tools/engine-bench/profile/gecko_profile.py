@@ -23,6 +23,7 @@ import argparse
 import bisect
 import gzip
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -35,7 +36,9 @@ TOP = 20
 BUCKETS = [
     ('subprocess_pipe_io', r'subprocess_(common|unix|worker)|Subprocess\.sys|readBuffer|checkPendingReads|fillBuffer|onInput|InputPipe|Pipe\.read'),
     ('engine_stream_read', r'readStreamPacket|readPacket|EngineStreamClient|CEFEngineAdapter.*#read|#read \('),
-    ('bgra_to_rgba', r'bgraToRGBA|bgraRegionToRGBA'),
+    ('bgra_to_rgba', r'bgraToRGBA|bgraRegionToRGBA|convertBGRARect|convertBGRAInPlace|swizzleRun|unpremultiply'),
+    ('frame_surface_paint', r'(?m)^(?:paint|accept) \(chrome://\S*EngineFrameSurface'),
+    ('damage_payload_assemble', r'(?m)^apply \(chrome://\S*EngineFrameSurface'),
     ('put_image_data', r'putImageData|PutImageData'),
     ('draw_image', r'drawImage|DrawImage'),
     ('canvas_2d', r'CanvasRenderingContext2D|DrawTarget|CanvasRenderingContext'),
@@ -107,7 +110,12 @@ class Symbols:
 
     @staticmethod
     def debug_file(path, code_id):
-        """Separate debug symbols by ELF build-id (e.g. libc6-dbg), else the library itself."""
+        """Separate debug symbols by ELF build-id (e.g. libc6-dbg), an unstripped copy of the same
+        build in $AXIOSOZO_PROFILE_SYMBOLS (the build's axiosozo-zen-linux-x86_64-libxul-symbols
+        artifact; the workflow checks its GNU build id), else the library itself."""
+        extra = os.environ.get('AXIOSOZO_PROFILE_SYMBOLS')
+        if extra and path and (Path(extra) / Path(path).name).is_file():
+            return str(Path(extra) / Path(path).name)
         if code_id and len(code_id) > 2:
             candidate = Path('/usr/lib/debug/.build-id') / code_id[:2].lower() / (code_id[2:].lower() + '.debug')
             if candidate.is_file():

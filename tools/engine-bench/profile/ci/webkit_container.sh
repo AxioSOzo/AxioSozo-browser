@@ -77,7 +77,16 @@ log "TEST-ONLY chrome overlay of the prebuilt app (scripts/webkit_package.py)"
 as_axio python3 "$REPO/scripts/webkit_package.py" overlay-chrome --app "$APP" --out "$OUT/chrome-overlay.json" >"$OUT/chrome-overlay.log" 2>&1 \
   || { log "overlay FAILED"; cat "$OUT/chrome-overlay.log"; exit 1; }
 
-install -d -o axio -g axio "$OUT/webkit" "$OUT/gecko-debian"
+# Profile symbols: the build's unstripped libxul (/symbols, read-only) only if its GNU build id
+# is the shipped library's.
+SYMBOLS=
+if [ -f /symbols/libxul.so ]; then
+  a=$(readelf -n "$APP/libxul.so" | grep -m1 'Build ID'); b=$(readelf -n /symbols/libxul.so | grep -m1 'Build ID')
+  { echo "shipped: $a"; echo "unstripped: $b"; } >"$OUT/libxul-symbols.txt"
+  if [ "$a" = "$b" ]; then SYMBOLS=/symbols; else echo "build id mismatch: not used" >>"$OUT/libxul-symbols.txt"; fi
+else echo "no unstripped libxul artifact" >"$OUT/libxul-symbols.txt"; fi
+
+install -d -o axio -g axio "$OUT/webkit" "$OUT/gecko-debian" "$OUT/webkit-2x"
 wstatus=0
 log "zen_profile --engine webkit ($PASSES)"
 as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --app fetched --chrome-overlay "$OUT/chrome-overlay.json" \
@@ -89,9 +98,15 @@ log "zen_profile --engine gecko in the same container ($PASSES)"
 as_axio timeout -k 10 1800 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine gecko --label gecko-debian --app fetched --chrome-overlay "$OUT/chrome-overlay.json" \
   --out "$OUT/gecko-debian" --passes "$PASSES" >"$OUT/zen-profile-gecko-debian.log" 2>&1 || gstatus=$?
 log "gecko (debian) profile exit $gstatus"
+w2status=0
+log "zen_profile --engine webkit at 2x (TEST-ONLY layout.css.devPixelsPerPx=2, 2304x1440) ($PASSES)"
+as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --label webkit-2x --device-scale 2 --size 2304x1440 \
+  --app fetched --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-2x" --passes "$PASSES" >"$OUT/zen-profile-webkit-2x.log" 2>&1 || w2status=$?
+log "webkit 2x profile exit $w2status"
 log "summarize profiles (report.py process)"
-as_axio python3 "$REPO/tools/engine-bench/profile/report.py" process "$OUT/webkit" >>"$OUT/steps.log" 2>&1 || log "report webkit FAILED"
-as_axio python3 "$REPO/tools/engine-bench/profile/report.py" process "$OUT/gecko-debian" >>"$OUT/steps.log" 2>&1 || log "report gecko-debian FAILED"
+for d in webkit gecko-debian webkit-2x; do
+  as_axio env AXIOSOZO_PROFILE_SYMBOLS="$SYMBOLS" python3 "$REPO/tools/engine-bench/profile/report.py" process "$OUT/$d" >>"$OUT/steps.log" 2>&1 || log "report $d FAILED"
+done
 ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"
 chmod -R a+rX "$OUT"
 exit "$wstatus"

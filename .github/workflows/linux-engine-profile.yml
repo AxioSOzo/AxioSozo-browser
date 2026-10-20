@@ -14,7 +14,7 @@
 name: linux-engine-profile
 on:
   push:
-    branches: [claude/engine-profile-nipd8o, cloud/engine-profile]
+    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, cloud/engine-profile]
     paths:
       - tools/engine-bench/profile/**
       - .github/workflows/linux-engine-profile.yml
@@ -37,8 +37,9 @@ concurrency:
 env:
   # upstreams.lock.json webkit.ci_image
   WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
-  # Default: the app of the docs/PERFORMANCE.md baseline (linux-zen-build 39325384904, 832ac3e).
-  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39325384904' }}
+  # Default: the newest prebuilt app on the cloud/integration line (gecko-linux-feel linux-zen-build
+  # 39346931130, 6ea1bde; it also published the unstripped libxul used to symbolize profiles).
+  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39346931130' }}
   PROFILE_PASSES: ${{ inputs.passes || 'plain,trace,profile' }}
 
 jobs:
@@ -72,6 +73,7 @@ jobs:
       fail-fast: false
       matrix:
         engine: [gecko, chromium]
+        scale: ['1', '2']
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
@@ -83,16 +85,21 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
-      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-profile-${{ matrix.engine }}
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-profile-${{ matrix.engine }}-${{ matrix.scale }}x
       RUN_ID: ${{ needs.zen-source.outputs.run_id }}
       ENGINE: ${{ matrix.engine }}
+      SCALE: ${{ matrix.scale }}
+      # 1x: zen_bench's default window; 2x: TEST-ONLY layout.css.devPixelsPerPx=2 on a 2304x1440
+      # screen (the docs/perf/pixel-path.md 2x setup).
+      LABEL: ${{ matrix.scale == '2' && format('{0}-2x', matrix.engine) || matrix.engine }}
+      AXIOSOZO_PROFILE_SYMBOLS: /home/runner/libxul-symbols
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: GUI packages (scripts/linux_packages.py gui) and the CEF runtime
         run: |
-          mkdir -p "$EVIDENCE_OUT/$ENGINE" "$AXIOSOZO_BUILD_ROOT"
+          mkdir -p "$EVIDENCE_OUT/$LABEL" "$AXIOSOZO_BUILD_ROOT"
           echo '${{ needs.zen-source.outputs.artifact }}' > "$EVIDENCE_OUT/zen-artifact.json"
           sudo apt-get update -qq
           extra="binutils libc6-dbg"
@@ -109,6 +116,15 @@ jobs:
           run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
+      - name: Download the unstripped libxul of the same build (profile symbols)
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: /home/runner/libxul-symbols
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
       - name: Verify and unpack (./dev fetch-build), TEST-ONLY chrome overlay
         run: |
           set -o pipefail
@@ -117,6 +133,13 @@ jobs:
           python3 scripts/webkit_package.py overlay-chrome --app "$app" --out "$EVIDENCE_OUT/chrome-overlay.json" > "$EVIDENCE_OUT/chrome-overlay.log"
           # What the profiler can resolve natively in this package (stripped or not).
           { file "$app"/libxul.so; nm -D --defined-only "$app"/libxul.so | wc -l; nm --defined-only "$app"/libxul.so 2>&1 | wc -l; } > "$EVIDENCE_OUT/libxul-symbols.txt" 2>&1 || true
+          # The unstripped copy is used only if its GNU build id is the shipped library's.
+          sym="$AXIOSOZO_PROFILE_SYMBOLS/libxul.so"
+          if [ -f "$sym" ]; then
+            a=$(readelf -n "$app/libxul.so" | grep -m1 'Build ID'); b=$(readelf -n "$sym" | grep -m1 'Build ID')
+            { echo "shipped: $a"; echo "unstripped: $b"; nm --defined-only "$sym" | wc -l; } >> "$EVIDENCE_OUT/libxul-symbols.txt"
+            [ "$a" = "$b" ] || { echo "build id mismatch: not used" >> "$EVIDENCE_OUT/libxul-symbols.txt"; rm -f "$sym"; }
+          else echo "no unstripped libxul artifact" >> "$EVIDENCE_OUT/libxul-symbols.txt"; fi
       - name: Restore pinned CEF archive
         if: matrix.engine == 'chromium'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -129,24 +152,25 @@ jobs:
           python3 native/chromium-host/probe.py setup 2>&1 | tail -n 5 | tee "$EVIDENCE_OUT/cef-setup.log"
           python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
           python3 native/chromium-host/probe.py check 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
-      - name: Zen profile (${{ matrix.engine }} tabs)
+      - name: Zen profile (${{ matrix.engine }} tabs, ${{ matrix.scale }}x)
         run: |
           set -o pipefail
-          timeout 2700 python3 tools/engine-bench/profile/zen_profile.py --engine "$ENGINE" --app fetched --out "$EVIDENCE_OUT/$ENGINE" \
-            --passes "$PROFILE_PASSES" --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
+          scale=(); [ "$SCALE" = 2 ] && scale=(--device-scale 2 --size 2304x1440)
+          timeout 2700 python3 tools/engine-bench/profile/zen_profile.py --engine "$ENGINE" --label "$LABEL" "${scale[@]}" --app fetched \
+            --out "$EVIDENCE_OUT/$LABEL" --passes "$PROFILE_PASSES" --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
       - name: Upload raw profiles (14 days)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: raw-profiles-${{ matrix.engine }}
-          path: ${{ env.EVIDENCE_OUT }}/${{ matrix.engine }}/profiles/*.json
+          name: raw-profiles-${{ matrix.engine }}-${{ matrix.scale }}x
+          path: ${{ env.EVIDENCE_OUT }}/${{ env.LABEL }}/profiles/*.json
           retention-days: 14
           if-no-files-found: ignore
       - name: Summarize profiles (report.py process)
         if: always()
         run: |
-          python3 tools/engine-bench/profile/report.py process "$EVIDENCE_OUT/$ENGINE" 2>&1 | tee "$EVIDENCE_OUT/report.log"
-          cat "$EVIDENCE_OUT/$ENGINE"/report-*.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          python3 tools/engine-bench/profile/report.py process "$EVIDENCE_OUT/$LABEL" 2>&1 | tee "$EVIDENCE_OUT/report.log"
+          cat "$EVIDENCE_OUT/$LABEL"/report-*.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
       - name: Keep evidence small
         if: always()
         run: find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
@@ -154,11 +178,11 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
-          name: profile-${{ matrix.engine }}
+          name: profile-${{ matrix.engine }}-${{ matrix.scale }}x
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: report-${{ matrix.engine }}
+          name: report-${{ matrix.engine }}-${{ matrix.scale }}x
           path: ${{ env.EVIDENCE_OUT }}/**/report-*.json
           retention-days: 30
           if-no-files-found: ignore
@@ -167,7 +191,7 @@ jobs:
     needs: zen-source
     if: needs.zen-source.outputs.run_id != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: write  # publish-ci-results
       actions: read    # download the build artifact of another run
@@ -191,13 +215,24 @@ jobs:
           run-id: ${{ env.ZEN_RUN_ID }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
+      - name: Download the unstripped libxul of the same build (profile symbols)
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: ${{ github.workspace }}/../libxul-symbols
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
       - name: CI environment - allow unprivileged user namespaces (bubblewrap)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Zen + WebKit host + zen_profile in debian:13 (pinned)
         run: |
           docker pull -q "$WEBKIT_IMAGE"
           start=$(date +%s); set +e
+          mkdir -p "$GITHUB_WORKSPACE/../libxul-symbols"
           docker run --rm --shm-size=2g -e ZEN_RUN_ID -e PROFILE_PASSES \
+            -v "$GITHUB_WORKSPACE/../libxul-symbols:/symbols:ro" \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
             "$WEBKIT_IMAGE" sh /src/tools/engine-bench/profile/ci/webkit_container.sh

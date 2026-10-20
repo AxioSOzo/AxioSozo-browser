@@ -94,7 +94,28 @@ class HookAnalysisTest(unittest.TestCase):
         return [['key', 100.0, 100.5], ['write', 1, 'key', 101.0],
                 ['read', 1, 16, 102.0, 110.0, 16], ['read', 1, 300, 110.1, 110.2, 300],
                 ['read', 1, 2_340_000, 110.2, 114.0, 2_340_000],
-                ['imagedata', 116.0], ['put', 116.5, 117.0, 585000], ['paint', 125.0]]
+                ['imagedata', 116.0], ['put', 116.5, 117.0, 585000], ['write', 1, 'frame_ack', 117.2], ['paint', 125.0]]
+
+    def surface_events(self):
+        # EngineFrameSurface path: damage payload 40 KB (assembled), accepted at 114.5, acked at 114.8,
+        # a second frame accepted at 118.5 (supersedes it), one rAF paint 120-122 (put 121-122), paint 125.
+        return [['key', 100.0, 100.5], ['write', 1, 'key', 101.0],
+                ['read', 1, 16, 102.0, 110.0, 16], ['read', 1, 300, 110.1, 110.2, 300], ['read', 1, 40000, 110.2, 114.0, 40000],
+                ['assemble', 114.1, 114.3, 40000], ['accept', 114.5, 10000, 2_340_000], ['write', 1, 'frame_ack', 114.8],
+                ['read', 1, 16, 115.0, 118.0, 16], ['read', 1, 300, 118.0, 118.1, 300], ['read', 1, 40000, 118.1, 118.4, 40000],
+                ['accept', 118.5, 10000, 2_340_000], ['write', 1, 'frame_ack', 118.6],
+                ['fpaint', 120.0, 122.0, 1], ['put', 121.0, 122.0, 10000], ['paint', 125.0]]
+
+    def test_surface_frames(self):
+        f = self.zp.frame_summary(self.surface_events(), 1.0)
+        self.assertEqual((f['frames_received'], f['surface_paints'], f['frames_superseded']), (2, 1, 1))
+        self.assertEqual(f['accept_to_paint_start_ms']['median'], 1.5)
+        self.assertEqual(f['surface_paint_ms']['median'], 2.0)
+        k = self.zp.key_breakdown(self.surface_events())
+        self.assertEqual(k['send_to_frame_header_ms']['median'], 9.0)
+        self.assertEqual(k['accept_to_paint_start_ms']['median'], 5.5)
+        self.assertEqual(k['keydown_to_surface_paint_end_ms']['median'], 22.0)
+        self.assertEqual(k['keydown_to_chrome_paint_ms']['median'], 25.0)
 
     def test_key_breakdown(self):
         k = self.zp.key_breakdown(self.events())

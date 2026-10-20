@@ -136,37 +136,81 @@ def describe(values):
 
 
 def frames_from_events(events):
-    """Per presented-candidate frame: header wait, pixel transport, convert, upload, chrome paint."""
-    reads = [e for e in events if e[0] == 'read']
+    """One record per frame the host delivered, anchored on its `frame_ack` write.
+
+    Per tag (spawned host), the reads before an ack are AXCF header (16 B), metadata, payload
+    (none for memfd/empty frames). Then, in chrome: damage payload assembly, EngineFrameSurface
+    accept, the next rAF-paced surface paint (convert + putImageData of the damage union; a frame
+    whose paint also covers a newer accept is `superseded`) and the next chrome MozAfterPaint.
+    Pre-EngineFrameSurface presenters (no accept events) fall back to ImageData/putImageData.
+    """
+    reads_by_tag, acks = {}, []
+    for e in events:
+        if e[0] == 'read':
+            reads_by_tag.setdefault(e[1], []).append(e)
+        elif e[0] == 'write' and e[2] == 'frame_ack':
+            acks.append((e[3], e[1]))
+    for items in reads_by_tag.values():
+        items.sort(key=lambda e: e[4])
+    accepts = sorted(e[1] for e in events if e[0] == 'accept')
+    accept_damage = {e[1]: (e[2], e[3]) for e in events if e[0] == 'accept'}
+    fpaints = sorted((e[1], e[2]) for e in events if e[0] == 'fpaint' and e[3])
+    assembles = sorted((e[1], e[2]) for e in events if e[0] == 'assemble')
     images = sorted(e[1] for e in events if e[0] == 'imagedata')
     puts = sorted((e[1], e[2], e[3]) for e in events if e[0] == 'put')
     paints = sorted(e[1] for e in events if e[0] == 'paint')
+
     frames = []
-    by_tag = {}
-    for read in reads:
-        by_tag.setdefault(read[1], []).append(read)
-    for tag, items in by_tag.items():
-        items.sort(key=lambda e: e[3])
-        for index, (_, _, length, called, resolved, n) in enumerate(items):
-            if not length or length < 65536:
-                continue
-            header = next((items[j] for j in range(index - 1, max(-1, index - 4), -1) if items[j][2] == 16), None)
-            frame = dict(tag=tag, bytes=n, pixel_call=called, pixel_done=resolved,
-                         pixel_read_ms=resolved - called,
-                         header_wait_ms=(header[4] - header[3]) if header else None,
-                         header_done=header[4] if header else None)
-            image = next((t for t in images if t >= resolved), None)
-            put = next((p for p in puts if p[0] >= resolved), None)
-            if image is not None and image - resolved < 100:
-                frame['convert_ms'] = image - resolved  # pixels in JS -> ImageData built (validation + bgraToRGBA)
-            if put is not None and put[0] - resolved < 100:
+    used_reads = set()
+    for ack_time, tag in sorted(acks):
+        reads = [r for r in reads_by_tag.get(tag, []) if r[4] <= ack_time and id(r) not in used_reads]
+        header_index = next((i for i in range(len(reads) - 1, -1, -1) if reads[i][2] == 16), None)
+        if header_index is None:
+            continue
+        mine = reads[header_index:]
+        used_reads.update(id(r) for r in reads)
+        header = mine[0]
+        payload = mine[2] if len(mine) >= 3 else None
+        received = (payload or mine[-1])[4]
+        frame = dict(tag=tag, ack=ack_time, header_call=header[3], header_done=header[4],
+                     header_wait_ms=header[4] - header[3], payload_bytes=payload[5] if payload else 0,
+                     pixel_done=received, pixel_read_ms=(payload[4] - payload[3]) if payload else 0.0,
+                     received_to_ack_ms=ack_time - received)
+        assemble = next((a for a in assembles if a[0] >= received - 0.01 and a[0] <= ack_time), None)
+        if assemble:
+            frame['assemble_ms'] = assemble[1] - assemble[0]
+        accept = next((t for t in accepts if received - 0.01 <= t <= ack_time), None)
+        if accept is not None:
+            frame['accept'] = accept
+            frame['damage_pixels'], frame['frame_pixels'] = accept_damage.get(accept, (None, None))
+            paint = next((fp for fp in fpaints if fp[0] >= accept), None)
+            if paint is not None and paint[0] - accept < 1000:
+                newer = next((t for t in accepts if accept < t <= paint[0]), None)
+                frame['superseded'] = newer is not None
+                frame['accept_to_paint_start_ms'] = paint[0] - accept   # waiting for the refresh tick
+                frame['surface_paint_ms'] = paint[1] - paint[0]         # convert + putImageData
+                put = next((q for q in puts if paint[0] <= q[0] <= paint[1]), None)
+                if put is not None:
+                    frame['put_start'], frame['put_end'], frame['put_pixels'] = put
+                    frame['put_ms'] = put[1] - put[0]
+                    frame['convert_ms'] = (paint[1] - paint[0]) - frame['put_ms']
+                frame['paint_end'] = paint[1]
+        else:
+            # Older presenters: ImageData construction ends the conversion, then putImageData.
+            image = next((t for t in images if t >= received), None)
+            put = next((q for q in puts if q[0] >= received), None)
+            if image is not None and image - received < 100:
+                frame['convert_ms'] = image - received
+            if put is not None and put[0] - received < 100:
                 frame['put_start'], frame['put_end'], frame['put_pixels'] = put
                 frame['put_ms'] = put[1] - put[0]
-                paint = next((t for t in paints if t >= put[1]), None)
-                if paint is not None and paint - put[1] < 200:
-                    frame['paint'] = paint
-                    frame['put_to_chrome_paint_ms'] = paint - put[1]
-            frames.append(frame)
+                frame['paint_end'] = put[1]
+        if 'paint_end' in frame:
+            chrome_paint = next((t for t in paints if t >= frame['paint_end']), None)
+            if chrome_paint is not None and chrome_paint - frame['paint_end'] < 200:
+                frame['chrome_paint'] = chrome_paint
+                frame['paint_to_chrome_paint_ms'] = chrome_paint - frame['paint_end']
+        frames.append(frame)
     frames.sort(key=lambda f: f['pixel_done'])
     return frames
 
@@ -177,27 +221,38 @@ def frame_summary(events, seconds):
         return None
     done = [f['pixel_done'] for f in frames]
     gaps = [b - a for a, b in zip(done, done[1:])]
-    pipeline = [f['pixel_read_ms'] + f.get('convert_ms', 0) + f.get('put_ms', 0) for f in frames]
+    painted = [f for f in frames if 'surface_paint_ms' in f and not f.get('superseded')]
     reads = [e for e in events if e[0] == 'read']
     total_bytes = sum(max(0, e[5]) for e in reads)
+    paint_ms = [e[2] - e[1] for e in events if e[0] == 'fpaint' and e[3]]
+    pipeline = [f['pixel_read_ms'] + f.get('assemble_ms', 0) for f in frames] + paint_ms
+    def share(values):
+        return round(sum(v for v in values if v) / (seconds * 1000), 4) if seconds else None
     return dict(measured_in='zen-chrome TEST-ONLY hooks (hooks.js)', frames_received=len(frames),
-                frames_drawn=sum(1 for f in frames if 'put_ms' in f),
+                frames_painted=len(painted), surface_paints=len(paint_ms),
+                frames_superseded=sum(1 for f in frames if f.get('superseded')),
                 received_fps=round(len(frames) / seconds, 2) if seconds else None,
-                bytes_per_frame=describe([f['bytes'] for f in frames]),
+                painted_fps=round(len(paint_ms) / seconds, 2) if seconds else None,
+                payload_bytes_per_frame=describe([f['payload_bytes'] for f in frames]),
+                damage_share=describe([f['damage_pixels'] / f['frame_pixels'] for f in frames if f.get('frame_pixels')]),
                 received_mb_per_s=round(total_bytes / seconds / 1e6, 1) if seconds else None,
                 stdout_reads=len(reads),
                 header_wait_ms=describe([f['header_wait_ms'] for f in frames]),
                 pixel_read_ms=describe([f['pixel_read_ms'] for f in frames]),
+                assemble_ms=describe([f.get('assemble_ms') for f in frames]),
+                received_to_ack_ms=describe([f['received_to_ack_ms'] for f in frames]),
+                accept_to_paint_start_ms=describe([f.get('accept_to_paint_start_ms') for f in painted]),
+                surface_paint_ms=describe(paint_ms),
                 convert_ms=describe([f.get('convert_ms') for f in frames]),
                 put_ms=describe([f.get('put_ms') for f in frames]),
-                put_to_chrome_paint_ms=describe([f.get('put_to_chrome_paint_ms') for f in frames]),
+                paint_to_chrome_paint_ms=describe([f.get('paint_to_chrome_paint_ms') for f in painted]),
                 receive_to_receive_ms=describe(gaps),
-                main_thread_pipeline_ms=describe(pipeline),
-                main_thread_pipeline_share=round(sum(pipeline) / (seconds * 1000), 3) if seconds else None)
+                main_thread_frame_work_share=share(pipeline),
+                main_thread_frame_work_note='pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window')
 
 
 def key_breakdown(events):
-    """Per chrome keydown: -> host `key` request written -> next frame header -> pixels -> ImageData -> put -> paint."""
+    """Per chrome keydown: -> host `key` request written -> next frame header -> payload -> accept -> rAF paint -> MozAfterPaint."""
     keys = sorted((e[1], e[2]) for e in events if e[0] == 'key')
     writes = sorted((e[3], e[2]) for e in events if e[0] == 'write')
     frames = frames_from_events(events)
@@ -209,23 +264,26 @@ def key_breakdown(events):
             rows.append(row)
             continue
         row['keydown_to_send_ms'] = send - stamp
-        frame = next((f for f in frames if f.get('header_done') is not None and f['header_done'] >= send), None)
+        # The first frame whose header arrived after the send (the host's response to the key).
+        frame = next((f for f in frames if f['header_done'] >= send), None)
         if frame is None:
             rows.append(row)
             continue
         row['send_to_frame_header_ms'] = frame['header_done'] - send   # host input + render + first bytes seen by the parent
         row['pixel_transport_ms'] = frame['pixel_done'] - frame['header_done']
-        if 'convert_ms' in frame:
-            row['convert_ms'] = frame['convert_ms']
-        if 'put_ms' in frame:
-            row['put_ms'] = frame['put_ms']
-            row['keydown_to_put_end_ms'] = frame['put_end'] - stamp
-        if 'paint' in frame:
-            row['put_to_chrome_paint_ms'] = frame['put_to_chrome_paint_ms']
-            row['keydown_to_chrome_paint_ms'] = frame['paint'] - stamp
+        if 'accept' in frame:
+            row['received_to_accept_ms'] = frame['accept'] - frame['pixel_done']
+        for field in ('accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms', 'paint_to_chrome_paint_ms'):
+            if field in frame:
+                row[field] = frame[field]
+        if 'paint_end' in frame:
+            row['keydown_to_surface_paint_end_ms'] = frame['paint_end'] - stamp
+        if 'chrome_paint' in frame:
+            row['keydown_to_chrome_paint_ms'] = frame['chrome_paint'] - stamp
         rows.append(row)
-    fields = ['chrome_handler_ms', 'keydown_to_send_ms', 'send_to_frame_header_ms', 'pixel_transport_ms', 'convert_ms',
-              'put_ms', 'put_to_chrome_paint_ms', 'keydown_to_put_end_ms', 'keydown_to_chrome_paint_ms']
+    fields = ['chrome_handler_ms', 'keydown_to_send_ms', 'send_to_frame_header_ms', 'pixel_transport_ms', 'received_to_accept_ms',
+              'accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms', 'paint_to_chrome_paint_ms',
+              'keydown_to_surface_paint_end_ms', 'keydown_to_chrome_paint_ms']
     return dict(measured_in='zen-chrome TEST-ONLY hooks (hooks.js); chrome event timeStamp and performance.now share one clock',
                 keys=len(keys), keys_with_frame=sum(1 for r in rows if 'pixel_transport_ms' in r),
                 **{field: describe([r.get(field) for r in rows]) for field in fields})
@@ -247,7 +305,11 @@ def switch_timeline(events, start):
         elif kind == 'write':
             note(f'write {event[2]}', event[3])
         elif kind == 'read':
-            note('first stdout read resolved' if event[5] < 65536 else 'first pixel read resolved', event[4])
+            note('first stdout read resolved' if event[5] < 65536 else 'first large (>=64 KiB) read resolved', event[4])
+        elif kind == 'accept':
+            note('first frame accepted (EngineFrameSurface)', event[1])
+        elif kind == 'fpaint' and event[3]:
+            note('first surface paint end', event[2])
         elif kind == 'imagedata':
             note('first ImageData', event[1])
         elif kind == 'put':
@@ -423,8 +485,10 @@ def compact(windows):
         if 'frames' in w:
             f = w['frames']
             row['frames'] = {k: (f[k].get('median') if isinstance(f[k], dict) else f[k]) for k in
-                             ('received_fps', 'received_mb_per_s', 'stdout_reads', 'header_wait_ms', 'pixel_read_ms', 'convert_ms',
-                              'put_ms', 'put_to_chrome_paint_ms', 'main_thread_pipeline_ms', 'main_thread_pipeline_share') if k in f}
+                             ('received_fps', 'painted_fps', 'frames_superseded', 'received_mb_per_s', 'stdout_reads',
+                              'payload_bytes_per_frame', 'damage_share', 'header_wait_ms', 'pixel_read_ms', 'assemble_ms',
+                              'received_to_ack_ms', 'accept_to_paint_start_ms', 'surface_paint_ms', 'convert_ms', 'put_ms',
+                              'paint_to_chrome_paint_ms', 'main_thread_frame_work_share') if k in f}
         if 'key_breakdown' in w:
             k = w['key_breakdown']
             row['key_breakdown_median'] = {key: value.get('median') for key, value in k.items() if isinstance(value, dict)}
@@ -448,6 +512,8 @@ def main():
     parser.add_argument('--samples', type=int, default=20)
     parser.add_argument('--keep-events', action='store_true', help='also write the raw hook events per window')
     parser.add_argument('--size', default='1280x800')
+    parser.add_argument('--device-scale', type=float,
+                        help="TEST-ONLY layout.css.devPixelsPerPx (zen_bench.py's 2x mode; use with --size 2304x1440)")
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--launch-timeout', type=float, default=240)
     args = parser.parse_args()
@@ -455,6 +521,8 @@ def main():
     if not args.passes or any(p not in PASSES for p in args.passes):
         parser.error('--passes: a comma list of ' + ','.join(PASSES))
     args.screenshot, args.hold = None, 0
+    if args.device_scale:
+        gui_test.TEST_PREFS['layout.css.devPixelsPerPx'] = str(args.device_scale)
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     harness = ZenProfile(args, engines[args.engine], out)
@@ -478,6 +546,7 @@ def main():
             'replaced': len(overlay.get('replaced') or []), 'added': len(overlay.get('added') or [])}
     harness.result['compact'] = compact(harness.result.get('windows', []))
     harness.result.update(status=status, schema='axiosozo-zen-profile-v1', label=harness.label, engine=args.engine,
+                          device_scale=args.device_scale,
                           test_only=['GUI harness (Marionette, throwaway profile)', 'engine fixture mode',
                                      'TEST-ONLY chrome overlay' if args.chrome_overlay else None,
                                      'runtime timing hooks (trace/profile passes)', 'Gecko profiler (profile pass)'],

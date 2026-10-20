@@ -12,7 +12,11 @@
 //                                 the line is read: it carries the host token)
 //   process.stdout.read(n)        call and resolve time and byte count of each read (the
 //                                 AXCF header, metadata and pixel reads)
-//   ImageData constructor         end of the BGRA->RGBA conversion (its argument)
+//   ImageData constructor         end of a BGRA->RGBA conversion (pre-EngineFrameSurface presenters)
+//   EngineFrameSurface            accept (frame handed to the presenter surface) and paint
+//     .prototype.accept/paint     (rAF-paced convert + upload) start/end and uploaded pixels
+//   DamagePayloadAssembler        damage payload patched into the target's whole frame
+//     .prototype.apply
 //   putImageData                  canvas upload start/end and pixel count
 //   MozAfterPaint, keydown        chrome paints and chrome key events
 //
@@ -81,6 +85,43 @@ if (!S) {
     return promise;
   };
   S.installed.push(Object.isFrozen(Subprocess) || Subprocess.call === originalCall ? "SubprocessImpl.call FAILED" : "SubprocessImpl.call");
+
+  // The shared pixel path of both presenters (perf-pixel-path). Same module instance as the
+  // presenters' (same URL, shared global); methods are wrapped on the prototype.
+  try {
+    const { EngineFrameSurface, DamagePayloadAssembler } =
+      ChromeUtils.importESModule("chrome://browser/content/axiosozo/EngineFrameSurface.sys.mjs");
+    const surface = EngineFrameSurface.prototype;
+    const accept = surface.accept, paint = surface.paint;
+    surface.accept = function (metadata, pixels) {
+      if (S.enabled) {
+        const damage = metadata?.damage?.[0];
+        push(["accept", now(), damage ? damage[2] * damage[3] : (metadata?.width * metadata?.height || 0),
+              metadata?.width * metadata?.height || 0]);
+      }
+      return accept.call(this, metadata, pixels);
+    };
+    surface.paint = function (...args) {
+      if (!S.enabled) return paint.apply(this, args);
+      const t = now();
+      let painted = false;
+      try { painted = paint.apply(this, args); return painted; }
+      finally {
+        push(["fpaint", t, now(), painted ? 1 : 0]);
+        if (painted) marker("AxioSozoSurfacePaint", t, "");
+      }
+    };
+    const apply = DamagePayloadAssembler.prototype.apply;
+    DamagePayloadAssembler.prototype.apply = function (metadata, payload) {
+      if (!S.enabled) return apply.call(this, metadata, payload);
+      const t = now();
+      try { return apply.call(this, metadata, payload); }
+      finally { push(["assemble", t, now(), bytes(payload)]); }
+    };
+    S.installed.push("EngineFrameSurface.accept/paint", "DamagePayloadAssembler.apply");
+  } catch (error) {
+    S.installed.push("EngineFrameSurface FAILED: " + String(error).slice(0, 120));
+  }
 
   const OriginalImageData = win.ImageData;
   const WrappedImageData = new Proxy(OriginalImageData, {
