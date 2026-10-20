@@ -79,6 +79,10 @@ fi
 log "Zen runtime libraries + GUI harness tools (scripts/linux_packages.py gui)"
 # shellcheck disable=SC2046
 apt-get install -y --no-install-recommends $(python3 "$REPO/scripts/linux_packages.py" gui) >"$OUT/apt-gui.log" 2>&1
+if [ "${FEEL:-0}" = 1 ]; then
+  # The feel matrix composes Japanese text (IME preedit): a CJK font for legible screenshots, both engines.
+  apt-get install -y --no-install-recommends fonts-noto-cjk >"$OUT/apt-fonts.log" 2>&1 || log "fonts-noto-cjk unavailable"
+fi
 chown -R axio:axio "$AXIOSOZO_BUILD_ROOT" "$REPO"
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort >"$OUT/dpkg-installed.tsv"
 ( cd /var/cache/apt/archives && sha256sum ./*.deb 2>/dev/null | sed 's#\./##' ) >"$OUT/deb-sha256.txt" || true

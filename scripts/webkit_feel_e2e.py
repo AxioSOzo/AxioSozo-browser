@@ -890,35 +890,36 @@ class FeelHarness(gui_test.Harness):
 
     def zoom_cycle(self):
         self.click_at(*AT['blank'])
-        base = self.page()['z'][0]
-        out = {'base': base}
+        # Page zoom narrows the CSS viewport in both engines (Gecko also raises devicePixelRatio, WebKit does not).
+        base = self.page()['z'][1]
+        out = {'base': base, 'dpr': self.page()['z'][0]}
         self.key('ctrl+equal')
-        out['ctrl_equal'] = self.wait_page(lambda page: page['z'][0] > base * 1.05, 'Ctrl+= zooms', timeout=10)['z'][0]
+        out['ctrl_equal'] = self.wait_page(lambda page: page['z'][1] < base * 0.95, 'Ctrl+= zooms', timeout=10)['z'][1]
         self.screenshot(f'17-zoomed-{self.state()["engine"]}')
         out['urlbar_zoom_button'] = self.chrome_script('const b = document.getElementById("urlbar-zoom-button");'
                                                        'return b ? {hidden: b.hidden, label: b.getAttribute("label")} : null;')
         self.key('ctrl+0')
         try:
-            out['ctrl_0'] = self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, 'Ctrl+0 resets', timeout=6)['z'][0]
+            out['ctrl_0'] = self.wait_page(lambda page: page['z'][1] == base, 'Ctrl+0 resets', timeout=6)['z'][1]
         except AssertionError:
-            out['ctrl_0'] = self.page()['z'][0]
+            out['ctrl_0'] = self.page()['z'][1]
         self.chrome_script('FullZoom.reset(); return true;')
-        self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, "Zen's FullZoom.reset", timeout=10)
+        self.wait_page(lambda page: page['z'][1] == base, "Zen's FullZoom.reset", timeout=10)
         self.key('ctrl+minus')
-        out['ctrl_minus'] = self.wait_page(lambda page: page['z'][0] < base * 0.95, 'Ctrl+- zooms out', timeout=10)['z'][0]
+        out['ctrl_minus'] = self.wait_page(lambda page: page['z'][1] > base * 1.05, 'Ctrl+- zooms out', timeout=10)['z'][1]
         self.chrome_script('FullZoom.reset(); return true;')
-        self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, 'back to 100%', timeout=10)
+        self.wait_page(lambda page: page['z'][1] == base, 'back to 100%', timeout=10)
         if self.state()['engine'] == 'webkit':
             self.move(*AT['blank'])
             self.xdotool('keydown', 'ctrl')
             self.xdotool('click', '4')
             self.xdotool('keyup', 'ctrl')
             try:
-                out['ctrl_wheel'] = self.wait_page(lambda page: page['z'][0] > base * 1.05, 'Ctrl+wheel zooms', timeout=8)['z'][0]
+                out['ctrl_wheel'] = self.wait_page(lambda page: page['z'][1] < base * 0.95, 'Ctrl+wheel zooms', timeout=8)['z'][1]
             except AssertionError:
-                out['ctrl_wheel'] = self.page()['z'][0]
+                out['ctrl_wheel'] = self.page()['z'][1]
             self.chrome_script('FullZoom.reset(); return true;')
-            self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, 'back to 100%', timeout=10)
+            self.wait_page(lambda page: page['z'][1] == base, 'back to 100%', timeout=10)
         return out
 
     def scenario_zoom(self):
@@ -928,8 +929,8 @@ class FeelHarness(gui_test.Harness):
         self.select_tab(self.wk_tab)
         self.wait(lambda: self.webkit_ready(), 'WebKit tab presented', timeout=15)
         webkit = self.zoom_cycle()
-        same_ctrl_0 = (abs(webkit['ctrl_0'] - webkit['base']) < 0.01) == (abs(gecko['ctrl_0'] - gecko['base']) < 0.01)
-        status = 'PASS' if same_ctrl_0 and webkit.get('ctrl_wheel', 0) > webkit['base'] else 'EXPERIMENTAL'
+        same_ctrl_0 = (webkit['ctrl_0'] == webkit['base']) == (gecko['ctrl_0'] == gecko['base'])
+        status = 'PASS' if same_ctrl_0 and webkit.get('ctrl_wheel', webkit['base']) < webkit['base'] else 'EXPERIMENTAL'
         self.gate('page_zoom', status, screenshot='17-zoomed-webkit.png', webkit=webkit, gecko=gecko)
         return {'webkit': webkit, 'gecko': gecko}
 
@@ -1026,12 +1027,18 @@ class FeelHarness(gui_test.Harness):
         os.kill(pids[0], signal.SIGKILL)
         self.wait(lambda: (lambda s: s if s['engine'] == 'gecko' and not s['geckoHidden'] else None)(self.state()),
                   'the Gecko tab shown again after the host died', timeout=30)
-        notice = self.wait(lambda: self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped']), 'the stopped notice', timeout=10)
-        time.sleep(0.8)
+        self.wait(lambda: self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped']), 'the stopped notice', timeout=10)
+        # Zen slides the notice in: click once its button is laid out and has stopped moving.
+        def settled():
+            first = self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped'])
+            time.sleep(0.4)
+            second = self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped'])
+            pick = lambda n: next((b for b in (n or {}).get('buttons', []) if 'Try again' in str(b['label'])), None)
+            a, b = pick(first), pick(second)
+            return second if a and b and b['box']['w'] > 0 and a['box'] == b['box'] else None
+        notice = self.wait(settled, 'the notice and its retry button in place', timeout=15)
         self.screenshot('22-crash-notice')
-        retry = next((b for b in notice['buttons'] if 'Try again' in str(b['label'])), None)
-        if not retry:
-            raise AssertionError('no retry button: ' + repr(notice))
+        retry = next(b for b in notice['buttons'] if 'Try again' in str(b['label']))
         self.click_screen(retry['box'], notice['scale'])
         self.wait(lambda: self.webkit_ready(), 'back in WebKit after "Try again in WebKit"', timeout=60)
         time.sleep(1)

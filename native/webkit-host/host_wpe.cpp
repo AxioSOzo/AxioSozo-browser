@@ -243,6 +243,15 @@ const std::set<std::string>& cssCursors() {
     "nesw-resize", "nwse-resize", "col-resize", "row-resize", "all-scroll", "zoom-in", "zoom-out"};
   return cursors;
 }
+// URLs go to Zen whole or not at all (cef-v1): spaces and control characters percent-encoded.
+std::string urlText(const std::string& url) {
+  std::string out;
+  for (unsigned char c : url) {
+    if (c <= 0x20 || c == 0x7F) { char escaped[4]; snprintf(escaped, sizeof escaped, "%%%02X", c); out += escaped; }
+    else out += char(c);
+  }
+  return out;
+}
 bool webLink(const std::string& url) { return url.size() <= 2048 && (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0); }
 bool resourceLink(const std::string& url) { return webLink(url) || ((url.rfind("data:", 0) == 0 || url.rfind("blob:", 0) == 0) && url.size() <= 2048); }
 
@@ -1123,7 +1132,9 @@ void WpeView::contextMenuFallback(double x, double y) {
   });
 }
 
-void WpeView::openContextMenu(const MenuInfo& info, double x, double y) {
+void WpeView::openContextMenu(const MenuInfo& source, double x, double y) {
+  MenuInfo info = source;
+  info.link = urlText(info.link); info.image = urlText(info.image);
   const std::string& selection = info.selection;
   bool editable = info.editable;
   bool link = !info.link.empty(), image = !info.image.empty() && resourceLink(info.image);
