@@ -2,9 +2,10 @@ Status: PARTIAL
 
 # Handoff: cef-feel-2 (Chromium tabs inside Zen on Linux, round 2)
 
-PR (draft, into `cloud/integration`): https://github.com/AxioSOzo/AxioSozo-browser/pull/17
-Branch: `claude/cef-feel-2-xrbczc` (this session's designated branch; the workflow also
-triggers on `cloud/cef-feel-2`).
+PR (draft, into `cloud/integration`): https://github.com/AxioSOzo/AxioSozo-browser/pull/18
+(supersedes #17, whose branch `claude/cef-feel-2-xrbczc` was the first session's).
+Branch: `claude/cef-feel-2-xrbczc-rgjgez` (session 2's designated branch; linux-cef-zen
+triggers on it, on `claude/cef-feel-2-xrbczc` and on `cloud/cef-feel-2`).
 
 Work in progress. This file is updated after each run; the final version lists every run id.
 
@@ -25,6 +26,15 @@ Work in progress. This file is updated after each run; the final version lists e
   - The AT-SPI press raced the mirror rebuild; the harness now retries.
 - Find: the first match reads "1 of 3" like Firefox. Find-next stayed at "1 of 3" where
   Firefox shows "2 of 3": FAIL, fix pushed.
+
+## Run 39372285095 (commit 90a79973, before the 3437ae48 fixes)
+- Certificate error: Chromium FAILS CLOSED with Zen's panel ("Be careful. Something doesn't
+  look right.", NET::ERR_CERT_AUTHORITY_INVALID, Go back / Open in Firefox), screenshot
+  37-cert-error-chromium.png inspected. The gate failed only because the harness then waited
+  for a feel page on that tab (fixed in session 2), which also cascaded into devtools/to_gecko.
+- Popups: `<select>` PASS; the datalist probe threw on PopupAutoComplete.view (fixed).
+- Permission: no Zen prompt within 15 s; the view was black (native receiver) so no visual
+  clue; diagnostics added.
 
 ## Found: Chromium pixels capture black on the native Linux frame receiver (frame path, not this workstream)
 - With the product-default native receiver (engine-view/linux, app 39362552105), every
