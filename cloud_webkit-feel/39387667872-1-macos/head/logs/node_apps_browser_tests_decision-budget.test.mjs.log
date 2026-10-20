@@ -1,0 +1,32 @@
+✔ construction is inert; omitted limit alone defaults to thirty (4.781ms)
+✔ snapshot and initial history are immutable copies; duplicate calls count separately (0.784166ms)
+✔ actual configured zero, reductions and increases are read synchronously (0.14525ms)
+✔ hour boundary expires only calls outside the rolling hour (0.112833ms)
+✔ future calls are retained and prohibit rollback reservations (0.148375ms)
+✔ high-water clock prevents reopening history after expiry then rollback (0.100833ms)
+✔ rollback during transaction leaves history unchanged (0.143333ms)
+✔ interleaved Promise jobs share one atomic thirty-call limit (0.618375ms)
+✔ nested mutation fails before callback and cannot double spend (0.282209ms)
+✔ clock and limit callback reentrancy cannot obtain mutation authority (0.217375ms)
+✔ limit reduction during callback is checked before commit (0.116834ms)
+✔ entry ceiling prevents a reentrant increase from enlarging that transaction (0.120375ms)
+✔ candidate cannot refund, reorder, replace or append more than one current call (0.189667ms)
+✔ callback throw or rejected asynchronous contract never commits (0.17725ms)
+✔ passive closed data validation never evaluates accessors (0.248542ms)
+✔ unreadable or invalid current limit never silently defaults (0.29475ms)
+✔ actual checkpoints adapter reserves once and failed dispatch has no refund path (0.15425ms)
+✔ older trusted checkpoint timestamp is stamped at owner reservation time (0.059291ms)
+✔ actual watch adapter shares owner with site rules and constructor handoff guard (6.199375ms)
+✔ site reservation while watch opens wins the last shared slot (1.254291ms)
+✔ watch pending reply consumes a slot and uncertain write never refunds it (5.946584ms)
+✔ production watch authorization remains closed with zero budget/native/host work (0.79525ms)
+✔ per-request onSending cannot replace the trusted constructor hook (1.454416ms)
+✔ rejected canonical native Promise callbacks are denied without unhandled rejection (5.725042ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.342375
