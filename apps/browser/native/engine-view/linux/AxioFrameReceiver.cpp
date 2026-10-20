@@ -9,8 +9,10 @@
 //
 // Threads: the XPCOM objects are main-thread only. Pixels are touched only on
 // the ring's background task queue (one per host, FIFO): ApplyFrame copies the
-// slot's rows into the target's whole frame, Present copies the whole frame
-// into a recycled B8G8R8X8 SharedRGBImage and sets it on the container (the
+// slot's rows into the target's whole frame, Present copies into a recycled
+// B8G8R8X8 SharedRGBImage only what changed since that texture last held a
+// frame (the damage of the frames applied since, from a short history; the
+// whole frame for a new texture) and sets it on the container (the
 // ImageBridge forwards it to the compositor without the main thread). The
 // ApplyFrame promise resolves on the main thread after the slot copy: chrome
 // JS acknowledges the frame then, which is the slot's reuse barrier (§6).
@@ -22,6 +24,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -60,6 +64,31 @@ namespace {
 constexpr uint32_t kMaxSide = 4096;
 constexpr uint64_t kMaxSlotBytes = 33554432;  // engine-stream-v1 §6.3
 constexpr uint32_t kMaxSlots = 4;
+// Damage rectangles remembered per sink: a recycled texture older than this
+// many frames is rewritten whole. The recycle allocator pools a few textures,
+// so a texture normally comes back after 2-4 frames.
+constexpr uint32_t kDamageHistory = 16;
+constexpr uint32_t kTrackedTextures = 8;
+
+struct Rect {
+  uint32_t x = 0, y = 0, w = 0, h = 0;
+  bool Empty() const { return !w || !h; }
+  void Unite(const Rect& aOther) {
+    if (aOther.Empty()) {
+      return;
+    }
+    if (Empty()) {
+      *this = aOther;
+      return;
+    }
+    uint32_t right = std::max(x + w, aOther.x + aOther.w);
+    uint32_t bottom = std::max(y + h, aOther.y + aOther.h);
+    x = std::min(x, aOther.x);
+    y = std::min(y, aOther.y);
+    w = right - x;
+    h = bottom - y;
+  }
+};
 #ifndef F_GET_SEALS
 constexpr int F_GET_SEALS = 1034;
 constexpr int F_SEAL_SHRINK = 0x0002;
@@ -124,7 +153,17 @@ struct SinkState {
   std::vector<uint8_t> mFrame;
   uint32_t mWidth = 0, mHeight = 0;
   bool mValid = false;
-  // Queue only.
+  // Queue only. Every applied frame is one generation; its damage (the whole
+  // frame for a whole payload or a new size) is kept for the last
+  // kDamageHistory generations, and each texture written remembers the
+  // generation it holds (by TextureClient serial, never reused).
+  uint64_t mGeneration = 0;
+  std::array<Rect, kDamageHistory> mDamage{};
+  struct TrackedTexture {
+    uint64_t mSerial = 0, mGeneration = 0;
+  };
+  std::array<TrackedTexture, kTrackedTextures> mTextures{};
+  uint32_t mNextTexture = 0;
   RefPtr<ImageContainer> mContainer;
   ImageContainer::ProducerID mProducerId = ImageContainer::AllocateProducerID();
   ImageContainer::FrameID mNextFrameId = 1;
@@ -134,6 +173,8 @@ struct SinkState {
   std::atomic<uint64_t> mApplied{0}, mPresented{0}, mSkipped{0}, mFailed{0};
   std::atomic<uint64_t> mApplyMicros{0}, mPresentMicros{0};
   std::atomic<uint64_t> mSharedImages{0}, mSurfaceImages{0};
+  // Texture writes: damage only (recycled texture) or whole; pixels copied.
+  std::atomic<uint64_t> mPartialCopies{0}, mWholeCopies{0}, mCopiedPixels{0};
 
   // Queue: slot rows -> whole frame. False when the payload does not fit.
   bool Apply(uint32_t aSlot, uint32_t aBytes, uint32_t aWidth, uint32_t aHeight,
@@ -163,9 +204,13 @@ struct SinkState {
                  source + row * rowBytes, rowBytes);
         }
       }
+      Rect damage = whole || mWidth != aWidth || mHeight != aHeight
+                        ? Rect{0, 0, aWidth, aHeight}
+                        : Rect{aX, aY, aW, aH};
       mWidth = aWidth;
       mHeight = aHeight;
       mValid = true;
+      mDamage[++mGeneration % kDamageHistory] = damage;
     }
     mApplied++;
     mApplyMicros += uint64_t((TimeStamp::Now() - start).ToMicroseconds());
@@ -201,7 +246,10 @@ struct SinkState {
           mozilla::layers::MappedTextureData mapped;
           if (autoLock.Succeeded() && texture->BorrowMappedData(mapped) &&
               mapped.size == size && mapped.stride >= int32_t(mWidth * 4)) {
-            CopyRows(mapped.data, size_t(mapped.stride));
+            // A recycled texture already holds an older frame of this sink.
+            CopyRect(mapped.data, size_t(mapped.stride),
+                     Stale(texture->GetSerial()));
+            Remember(texture->GetSerial());
             image = shared;
             mSharedImages++;
           }
@@ -237,8 +285,58 @@ struct SinkState {
     mPresentMicros += uint64_t((TimeStamp::Now() - start).ToMicroseconds());
   }
 
+  // Under mLock: what a texture lacks (everything if it is new to this sink
+  // or older than the damage history).
+  Rect Stale(uint64_t aSerial) {
+    const TrackedTexture* known = nullptr;
+    for (const TrackedTexture& tracked : mTextures) {
+      if (tracked.mSerial == aSerial && tracked.mGeneration) {
+        known = &tracked;
+      }
+    }
+    if (!known || known->mGeneration > mGeneration ||
+        mGeneration - known->mGeneration >= kDamageHistory) {
+      mWholeCopies++;
+      return Rect{0, 0, mWidth, mHeight};
+    }
+    Rect rect;
+    for (uint64_t g = known->mGeneration + 1; g <= mGeneration; ++g) {
+      rect.Unite(mDamage[g % kDamageHistory]);
+    }
+    mPartialCopies++;
+    return rect;
+  }
+
+  void Remember(uint64_t aSerial) {
+    for (TrackedTexture& tracked : mTextures) {
+      if (tracked.mSerial == aSerial) {
+        tracked.mGeneration = mGeneration;
+        return;
+      }
+    }
+    mTextures[mNextTexture++ % kTrackedTextures] = {aSerial, mGeneration};
+  }
+
+  // Under mLock.
+  void CopyRect(uint8_t* aTarget, size_t aStride, const Rect& aRect) {
+    if (aRect.Empty()) {
+      return;
+    }
+    if (aRect.w == mWidth && aRect.h == mHeight) {
+      CopyRows(aTarget, aStride);
+      return;
+    }
+    size_t frameStride = size_t(mWidth) * 4, rowBytes = size_t(aRect.w) * 4;
+    for (uint32_t row = aRect.y; row < aRect.y + aRect.h; ++row) {
+      memcpy(aTarget + row * aStride + size_t(aRect.x) * 4,
+             mFrame.data() + row * frameStride + size_t(aRect.x) * 4, rowBytes);
+    }
+    mCopiedPixels += uint64_t(aRect.w) * aRect.h;
+  }
+
   // Under mLock.
   void CopyRows(uint8_t* aTarget, size_t aStride) {
+    mCopiedPixels += uint64_t(mWidth) * mHeight;
     size_t rowBytes = size_t(mWidth) * 4;
     if (aStride == rowBytes) {
       memcpy(aTarget, mFrame.data(), rowBytes * mHeight);
@@ -499,7 +597,8 @@ FrameSink::GetStatsJSON(nsACString& aStats) {
   aStats.AppendPrintf(
       "{\"applied\":%llu,\"presented\":%llu,\"skipped\":%llu,\"failed\":%llu,"
       "\"applyMicros\":%llu,\"presentMicros\":%llu,\"sharedImages\":%llu,"
-      "\"surfaceImages\":%llu,\"bound\":%s}",
+      "\"surfaceImages\":%llu,\"partialCopies\":%llu,\"wholeCopies\":%llu,"
+      "\"copiedPixels\":%llu,\"bound\":%s}",
       (unsigned long long)s.mApplied.load(),
       (unsigned long long)s.mPresented.load(),
       (unsigned long long)s.mSkipped.load(),
@@ -507,7 +606,10 @@ FrameSink::GetStatsJSON(nsACString& aStats) {
       (unsigned long long)s.mApplyMicros.load(),
       (unsigned long long)s.mPresentMicros.load(),
       (unsigned long long)s.mSharedImages.load(),
-      (unsigned long long)s.mSurfaceImages.load(), mCanvas ? "true" : "false");
+      (unsigned long long)s.mSurfaceImages.load(),
+      (unsigned long long)s.mPartialCopies.load(),
+      (unsigned long long)s.mWholeCopies.load(),
+      (unsigned long long)s.mCopiedPixels.load(), mCanvas ? "true" : "false");
   return NS_OK;
 }
 

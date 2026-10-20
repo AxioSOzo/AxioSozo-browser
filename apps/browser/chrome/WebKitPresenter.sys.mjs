@@ -11,7 +11,7 @@
 import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame, isNativeFrame } from "./EngineFrameSurface.sys.mjs";
 import { WebKitBrowserUI } from "./WebKitBrowserUI.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
@@ -364,6 +364,7 @@ export class WebKitPresenter {
         ?? (this.window.gBrowser.selectedTab === record.tab && record.priorDocShellIsActive);
     }
     record.stack.style.position = record.priorPosition;
+    record.directComposite?.restore(); // perf: the panel's rounded clip comes back with Gecko
     record.overlay.remove();
     // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
     try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
@@ -401,7 +402,7 @@ export class WebKitPresenter {
       record.firstFrameAt ??= this.window.performance.now();
       record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
     };
-    if (pixels instanceof NativeFrame) {
+    if (isNativeFrame(pixels)) {
       // Native receiver: the component presents the frame; nothing to convert here.
       const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
       if (paint) { if (paint !== true) onPaint(paint); return; }
@@ -499,6 +500,7 @@ export class WebKitPresenter {
     if (typeof record.browser.docShellIsActive === "boolean" && record.committed) record.browser.docShellIsActive = false;
     if (record.visible === visible || !record.adapter?.target) return;
     record.visible = visible;
+    if (visible) representNativeFrame(record); // a frame applied while hidden
     this.#action(record, target => record.adapter.visibility(target, visible));
   }
   /** Resolves to the host result, or null when it failed (already handled). */

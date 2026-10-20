@@ -6,11 +6,13 @@
 # linux-perf.yml. The receiver is pref-gated (axiosozo.engines.linux.native_receiver, default
 # false): with the pref off the app behaves like cloud/integration's.
 # Results: ci-results branch, cloud_perf-phase2/<run>-<attempt>-zen-native-{build,gui-gecko}/.
+# perf-phase3 (claude/perf-phase3-uvmfis, cloud/perf-phase3) builds its native receiver changes
+# (damage-only texture writes) the same way.
 name: linux-perf-build
 
 on:
   push:
-    branches: [cloud/perf-phase2]
+    branches: [cloud/perf-phase2, claude/perf-phase3-uvmfis]
     paths:
       - apps/browser/native/**
       - patches/zen/**
