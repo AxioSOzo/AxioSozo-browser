@@ -971,7 +971,12 @@ class FeelHarness(gui_test.Harness):
         webkit = self.zoom_cycle()
         same_ctrl_0 = (webkit['ctrl_0'] == webkit['base']) == (gecko['ctrl_0'] == gecko['base'])
         status = 'PASS' if same_ctrl_0 and webkit.get('ctrl_wheel', webkit['base']) < webkit['base'] else 'EXPERIMENTAL'
-        self.gate('page_zoom', status, screenshot='17-zoomed-webkit.png', webkit=webkit, gecko=gecko)
+        zoom_keys = self.chrome_script(
+            'return [...document.querySelectorAll("key")].filter(k => /zoom/i.test(k.id + " " + (k.getAttribute("command") || "")'
+            ' + " " + (k.getAttribute("oncommand") || ""))).map(k => ({id: k.id, key: k.getAttribute("key"), keycode: k.getAttribute("keycode"),'
+            ' modifiers: k.getAttribute("modifiers"), disabled: k.getAttribute("disabled"), command: k.getAttribute("command"),'
+            ' l10n: k.getAttribute("data-l10n-id"), parent: k.parentNode?.id || k.parentNode?.localName}));')
+        self.gate('page_zoom', status, screenshot='17-zoomed-webkit.png', webkit=webkit, gecko=gecko, zoom_keys=zoom_keys)
         return {'webkit': webkit, 'gecko': gecko}
 
     def compose(self, engine, field):
