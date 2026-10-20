@@ -95,7 +95,8 @@ class Lane:
                if key not in ('AXIOSOZO_BUILD_ROOT', 'AXIOSOZO_MACOS_CI')}
         env.update(PYTHONDONTWRITEBYTECODE='1', CARGO_TARGET_DIR=str(self.target),
                    AXIOSOZO_CORE_BINARY=str(self.core))
-        if ci_root:
+        if ci_root and os.environ.get('GITHUB_ACTIONS') == 'true':
+            # Elsewhere (the owner's Mac) these gates use the normal T9 layout.
             env.update(AXIOSOZO_MACOS_CI='1', AXIOSOZO_BUILD_ROOT=str(self.build))
         env.update(extra or {})
         return env
