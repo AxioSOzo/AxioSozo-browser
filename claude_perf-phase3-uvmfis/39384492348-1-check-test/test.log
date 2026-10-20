@@ -1,0 +1,1145 @@
+   Compiling serde_core v1.0.228
+   Compiling zmij v1.0.23
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.149
+   Compiling browser-core v0.1.0 (/home/runner/work/AxioSozo-browser/AxioSozo-browser/crates/browser-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.95s
+     Running unittests src/lib.rs (/home/runner/axiosozo-build/cargo-target/debug/deps/browser_core-67c31d366e9d7a1c)
+
+running 11 tests
+test tests::authentication_and_session_isolation ... ok
+test tests::chrome_registration_preserves_real_target_and_rejects_rebinding ... ok
+test tests::forged_engine_identity_fails ... ok
+test tests::generations_are_lossless_in_javascript ... ok
+test tests::no_web_origin_or_extra_fields ... ok
+test tests::expiry_scope_and_one_use ... ok
+test tests::private_context_never_granted ... ok
+test tests::stale_document_invalidates_grant ... ok
+test tests::target_ids_are_browser_minted_and_unique ... ok
+test tests::replay_and_reconnect_never_repeat_action ... ok
+test tests::webkit_engine_is_its_own_identity ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling browser-core v0.1.0 (/home/runner/work/AxioSozo-browser/AxioSozo-browser/crates/browser-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.83s
+TAP version 13
+# Subtest: the option a client refused is read from its own error text, for every parser we know
+ok 1 - the option a client refused is read from its own error text, for every parser we know
+  ---
+  duration_ms: 5.031225
+  type: 'test'
+  ...
+# Subtest: request inspection: tools, leaked customizations and missing own instructions are refusals
+ok 2 - request inspection: tools, leaked customizations and missing own instructions are refusals
+  ---
+  duration_ms: 1.492208
+  type: 'test'
+  ...
+# Subtest: loopback stand-in answers both APIs, records shape facts only and never keeps headers
+ok 3 - loopback stand-in answers both APIs, records shape facts only and never keeps headers
+  ---
+  duration_ms: 70.72793
+  type: 'test'
+  ...
+# Subtest: checkClient never rejects; a missing client is not-installed without starting anything
+ok 4 - checkClient never rejects; a missing client is not-installed without starting anything
+  ---
+  duration_ms: 6.654326
+  type: 'test'
+  ...
+# Subtest: describeCheck names the client, version and exact reason
+ok 5 - describeCheck names the client, version and exact reason
+  ---
+  duration_ms: 0.328632
+  type: 'test'
+  ...
+# Subtest: Claude: the client's own init report must show no tools and no MCP servers; unknown events are ignored
+ok 6 - Claude: the client's own init report must show no tools and no MCP servers; unknown events are ignored
+  ---
+  duration_ms: 4.523831
+  type: 'test'
+  ...
+# Subtest: Claude failure results map to fixed reasons only
+ok 7 - Claude failure results map to fixed reasons only
+  ---
+  duration_ms: 1.389697
+  type: 'test'
+  ...
+# Subtest: Codex check loop: a removed feature of ours is dropped and re-checked; required keys and flags are refusals
+ok 8 - Codex check loop: a removed feature of ours is dropped and re-checked; required keys and flags are refusals
+  ---
+  duration_ms: 4.323107
+  type: 'test'
+  ...
+# Subtest: reader keeps only the documented core and ignores everything else
+ok 9 - reader keeps only the documented core and ignores everything else
+  ---
+  duration_ms: 4.142782
+  type: 'test'
+  ...
+# Subtest: a turn streams the agent message, completes, and later turns carry a bounded transcript
+ok 10 - a turn streams the agent message, completes, and later turns carry a bounded transcript
+  ---
+  duration_ms: 131.317989
+  type: 'test'
+  ...
+# Subtest: several agent messages are joined; unknown events and fields never break a turn
+ok 11 - several agent messages are joined; unknown events and fields never break a turn
+  ---
+  duration_ms: 46.112622
+  type: 'test'
+  ...
+# Subtest: rate: the turn ends failed (RATE_LIMITED) with a fixed reason and the process is reaped
+ok 12 - rate: the turn ends failed (RATE_LIMITED) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 85.518711
+  type: 'test'
+  ...
+# Subtest: auth: the turn ends failed (PROVIDER_AUTH) with a fixed reason and the process is reaped
+ok 13 - auth: the turn ends failed (PROVIDER_AUTH) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 97.065233
+  type: 'test'
+  ...
+# Subtest: exit: the turn ends uncertain (PROCESS_EXIT) with a fixed reason and the process is reaped
+ok 14 - exit: the turn ends uncertain (PROCESS_EXIT) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 87.899905
+  type: 'test'
+  ...
+# Subtest: tool: the turn ends failed (PROVIDER_TOOLS_ENABLED) with a fixed reason and the process is reaped
+ok 15 - tool: the turn ends failed (PROVIDER_TOOLS_ENABLED) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 349.205084
+  type: 'test'
+  ...
+# Subtest: malformed: the turn ends uncertain (MALFORMED_MESSAGE) with a fixed reason and the process is reaped
+ok 16 - malformed: the turn ends uncertain (MALFORMED_MESSAGE) with a fixed reason and the process is reaped
+  ---
+  duration_ms: 98.025066
+  type: 'test'
+  ...
+# Subtest: Stop ends the running turn as cancelled; the next turn starts a fresh process
+ok 17 - Stop ends the running turn as cancelled; the next turn starts a fresh process
+  ---
+  duration_ms: 161.996031
+  type: 'test'
+  ...
+# Subtest: binding, busy and migration rules match the other adapters
+ok 18 - binding, busy and migration rules match the other adapters
+  ---
+  duration_ms: 7.057667
+  type: 'test'
+  ...
+# Subtest: Providers declare capabilities; Jev has no image input; OpenAI is UNVERIFIED_SHAPE and NOT_AUTHORIZED live
+ok 19 - Providers declare capabilities; Jev has no image input; OpenAI is UNVERIFIED_SHAPE and NOT_AUTHORIZED live
+  ---
+  duration_ms: 2.495363
+  type: 'test'
+  ...
+# Subtest: Provider defaults to jev, may be named explicitly, and an unknown provider is INVALID_INPUT without any call
+ok 20 - Provider defaults to jev, may be named explicitly, and an unknown provider is INVALID_INPUT without any call
+  ---
+  duration_ms: 38.779244
+  type: 'test'
+  ...
+# Subtest: A screen request to Jev is IMAGE_UNSUPPORTED with zero Keychain reads and zero network calls
+ok 21 - A screen request to Jev is IMAGE_UNSUPPORTED with zero Keychain reads and zero network calls
+  ---
+  duration_ms: 2.25649
+  type: 'test'
+  ...
+# Subtest: Screen observation validation: PNG signature, IHDR matches declared size ≤ 1280, decoded ≤ 1 MiB, exact keys
+ok 22 - Screen observation validation: PNG signature, IHDR matches declared size ≤ 1280, decoded ≤ 1 MiB, exact keys
+  ---
+  duration_ms: 37.65517
+  type: 'test'
+  ...
+# Subtest: The raised 1.5 MiB state cap applies only to screen requests
+ok 23 - The raised 1.5 MiB state cap applies only to screen requests
+  ---
+  duration_ms: 28.486733
+  type: 'test'
+  ...
+# Subtest: OpenAI is refused with UNVERIFIED_SHAPE in the product configuration: no Keychain read, no fetch
+ok 24 - OpenAI is refused with UNVERIFIED_SHAPE in the product configuration: no Keychain read, no fetch
+  ---
+  duration_ms: 1.186138
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture route: own key, own endpoint, image moved out of state, probabilities optional, confidence reported
+ok 25 - OpenAI fixture route: own key, own endpoint, image moved out of state, probabilities optional, confidence reported
+  ---
+  duration_ms: 2.322493
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture route fails closed: low confidence, unlisted choice, wrong model, bad probabilities, no key
+ok 26 - OpenAI fixture route fails closed: low confidence, unlisted choice, wrong model, bad probabilities, no key
+  ---
+  duration_ms: 4.847844
+  type: 'test'
+  ...
+# Subtest: watch_v1 asks one fixed-instruction question over the user outcomes plus reserved unknown
+ok 27 - watch_v1 asks one fixed-instruction question over the user outcomes plus reserved unknown
+  ---
+  duration_ms: 2.388636
+  type: 'test'
+  ...
+# Subtest: watch_v1 strict validation: 2–6 unique outcomes, reserved unknown, caps and unknown keys
+ok 28 - watch_v1 strict validation: 2–6 unique outcomes, reserved unknown, caps and unknown keys
+  ---
+  duration_ms: 3.774296
+  type: 'test'
+  ...
+# Subtest: Host decision/watch shares the decision budget and cancellation
+ok 29 - Host decision/watch shares the decision budget and cancellation
+  ---
+  duration_ms: 2.731304
+  type: 'test'
+  ...
+# Subtest: stdio admits a line over 72 KiB only for a screen decision; other long lines close the host
+ok 30 - stdio admits a line over 72 KiB only for a screen decision; other long lines close the host
+  ---
+  duration_ms: 558.779744
+  type: 'test'
+  ...
+# Subtest: Jev off never calls network
+ok 31 - Jev off never calls network
+  ---
+  duration_ms: 1.579811
+  type: 'test'
+  ...
+# Subtest: Jev validates pinned model/schema and never authorizes an action
+ok 32 - Jev validates pinned model/schema and never authorizes an action
+  ---
+  duration_ms: 29.543882
+  type: 'test'
+  ...
+# Subtest: Jev malformed, unexpected model, invalid probability and low confidence fail closed
+ok 33 - Jev malformed, unexpected model, invalid probability and low confidence fail closed
+  ---
+  duration_ms: 2.564103
+  type: 'test'
+  ...
+# Subtest: Jev deadline cancels the actual fetch, no retry
+ok 34 - Jev deadline cancels the actual fetch, no retry
+  ---
+  duration_ms: 31.473654
+  type: 'test'
+  ...
+# Subtest: Jev caller cancellation, oversized response and Keychain failure
+ok 35 - Jev caller cancellation, oversized response and Keychain failure
+  ---
+  duration_ms: 1.523627
+  type: 'test'
+  ...
+# Subtest: Jev refuses private/real context and stale schema
+ok 36 - Jev refuses private/real context and stale schema
+  ---
+  duration_ms: 0.729689
+  type: 'test'
+  ...
+# Subtest: Keychain missing helper never falls back to plaintext storage
+ok 37 - Keychain missing helper never falls back to plaintext storage
+  ---
+  duration_ms: 0.460488
+  type: 'test'
+  ...
+# Subtest: Host opens lazily, streams actual child protocol, binds identity and closes owned child
+ok 38 - Host opens lazily, streams actual child protocol, binds identity and closes owned child
+  ---
+  duration_ms: 72.424311
+  type: 'test'
+  ...
+# Subtest: Host cancels a pending turn and remains responsive while a request is running
+ok 39 - Host cancels a pending turn and remains responsive while a request is running
+  ---
+  duration_ms: 60.680113
+  type: 'test'
+  ...
+# Subtest: Host deadline kills and reaps a held provider without reporting completed
+ok 40 - Host deadline kills and reaps a held provider without reporting completed
+  ---
+  duration_ms: 116.17693
+  type: 'test'
+  ...
+# Subtest: Unknown fields cannot grant shell, executable, cwd, environment or credentials
+ok 41 - Unknown fields cannot grant shell, executable, cwd, environment or credentials
+  ---
+  duration_ms: 0.876011
+  type: 'test'
+  ...
+# Subtest: Malformed/oversized JSONL and EOF close host without starting clients
+ok 42 - Malformed/oversized JSONL and EOF close host without starting clients
+  ---
+  duration_ms: 2.061557
+  type: 'test'
+  ...
+# Subtest: Closing browser during provider startup reaps the newly connected child
+ok 43 - Closing browser during provider startup reaps the newly connected child
+  ---
+  duration_ms: 44.664673
+  type: 'test'
+  ...
+# Subtest: Actual stdio host exits cleanly at idle even when browser stdin remains open
+ok 44 - Actual stdio host exits cleanly at idle even when browser stdin remains open
+  ---
+  duration_ms: 189.268076
+  type: 'test'
+  ...
+# Subtest: keys/status reports presence only, per provider, with capabilities and shape status
+ok 45 - keys/status reports presence only, per provider, with capabilities and shape status
+  ---
+  duration_ms: 4.642812
+  type: 'test'
+  ...
+# Subtest: keys/store writes each provider to its own item and never echoes the key
+ok 46 - keys/store writes each provider to its own item and never echoes the key
+  ---
+  duration_ms: 1.148558
+  type: 'test'
+  ...
+# Subtest: keys/store rejects bad keys, providers and fields before touching the Keychain; failures use fixed codes
+ok 47 - keys/store rejects bad keys, providers and fields before touching the Keychain; failures use fixed codes
+  ---
+  duration_ms: 2.270466
+  type: 'test'
+  ...
+# Subtest: keys/remove deletes only the named provider item; missing counts as removed
+ok 48 - keys/remove deletes only the named provider item; missing counts as removed
+  ---
+  duration_ms: 4.833888
+  type: 'test'
+  ...
+# Subtest: MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper)
+ok 49 - MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed second argument (fake helper) # SKIP
+  ---
+  duration_ms: 0.119312
+  type: 'test'
+  ...
+# Subtest: SecretServiceKeychain keeps the same argv/exit contract on Linux (fake helper)
+ok 50 - SecretServiceKeychain keeps the same argv/exit contract on Linux (fake helper)
+  ---
+  duration_ms: 41.173236
+  type: 'test'
+  ...
+# Subtest: platformKeychain selects the platform store and refuses unknown providers
+ok 51 - platformKeychain selects the platform store and refuses unknown providers
+  ---
+  duration_ms: 0.464795
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks jev site_rule before store, fetch and budget
+ok 52 - Browser capability blocks jev site_rule before store, fetch and budget
+  ---
+  duration_ms: 2.773062
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks openai site_rule before store, fetch and budget
+ok 53 - Browser capability blocks openai site_rule before store, fetch and budget
+  ---
+  duration_ms: 0.31097
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks jev watch before store, fetch and budget
+ok 54 - Browser capability blocks jev watch before store, fetch and budget
+  ---
+  duration_ms: 0.588976
+  type: 'test'
+  ...
+# Subtest: Browser capability blocks openai watch before store, fetch and budget
+ok 55 - Browser capability blocks openai watch before store, fetch and budget
+  ---
+  duration_ms: 0.228325
+  type: 'test'
+  ...
+# Subtest: Default Jev selection is blocked by the browser capability
+ok 56 - Default Jev selection is blocked by the browser capability
+  ---
+  duration_ms: 0.34968
+  type: 'test'
+  ...
+# Subtest: OpenAI fixture permission cannot bypass the browser capability
+ok 57 - OpenAI fixture permission cannot bypass the browser capability
+  ---
+  duration_ms: 0.315547
+  type: 'test'
+  ...
+# Subtest: Strict validation runs before NOT_AUTHORIZED, and request fields cannot enable it
+ok 58 - Strict validation runs before NOT_AUTHORIZED, and request fields cannot enable it
+  ---
+  duration_ms: 1.852127
+  type: 'test'
+  ...
+# Subtest: Browser capability covers diagnostic requests after their strict validation
+ok 59 - Browser capability covers diagnostic requests after their strict validation
+  ---
+  duration_ms: 0.485414
+  type: 'test'
+  ...
+# Subtest: Only literal true grants the host capability
+ok 60 - Only literal true grants the host capability
+  ---
+  duration_ms: 1.014037
+  type: 'test'
+  ...
+# Subtest: Explicit authorized diagnostic uses the injected fake fetch
+ok 61 - Explicit authorized diagnostic uses the injected fake fetch
+  ---
+  duration_ms: 21.127897
+  type: 'test'
+  ...
+# Subtest: Legacy injected fake Jev path retains its default behavior
+ok 62 - Legacy injected fake Jev path retains its default behavior
+  ---
+  duration_ms: 1.073408
+  type: 'test'
+  ...
+# Subtest: Legacy OpenAI canned fixture path retains its separate fake store and fetch
+ok 63 - Legacy OpenAI canned fixture path retains its separate fake store and fetch
+  ---
+  duration_ms: 0.822541
+  type: 'test'
+  ...
+# Subtest: Decision host with the disabled browser factory returns neutral results despite zero budget
+ok 64 - Decision host with the disabled browser factory returns neutral results despite zero budget
+  ---
+  duration_ms: 1.86957
+  type: 'test'
+  ...
+# Subtest: Decision reason list includes the fixed authorization failure
+ok 65 - Decision reason list includes the fixed authorization failure
+  ---
+  duration_ms: 0.164817
+  type: 'test'
+  ...
+# Subtest: No version pin is exported or consulted: acceptance is the capability check
+ok 66 - No version pin is exported or consulted: acceptance is the capability check
+  ---
+  duration_ms: 2.421998
+  type: 'test'
+  ...
+# Subtest: Live client environment never forwards inherited credentials, endpoints or loader hooks
+ok 67 - Live client environment never forwards inherited credentials, endpoints or loader hooks
+  ---
+  duration_ms: 0.869038
+  type: 'test'
+  ...
+# Subtest: Claude profile: Keychain path for the official client only, no shells, no personal directories
+ok 68 - Claude profile: Keychain path for the official client only, no shells, no personal directories
+  ---
+  duration_ms: 1.511173
+  type: 'test'
+  ...
+# Subtest: Codex profile: own CODEX_HOME minus every customization file, no fork, no Keychain helper
+ok 69 - Codex profile: own CODEX_HOME minus every customization file, no fork, no Keychain helper
+  ---
+  duration_ms: 0.702768
+  type: 'test'
+  ...
+# Subtest: Production argv disables ambient integrations without permission bypass flags
+ok 70 - Production argv disables ambient integrations without permission bypass flags
+  ---
+  duration_ms: 1.378726
+  type: 'test'
+  ...
+# Subtest: Reported versions are parsed from bounded --version output of any client
+ok 71 - Reported versions are parsed from bounded --version output of any client
+  ---
+  duration_ms: 0.395877
+  type: 'test'
+  ...
+# Subtest: Missing clients and Antigravity fail before launch
+ok 72 - Missing clients and Antigravity fail before launch
+  ---
+  duration_ms: 1.095318
+  type: 'test'
+  ...
+# Subtest: Any Codex version resolves to its native executable (npm layout or direct binary); unsafe installs are refused
+ok 73 - Any Codex version resolves to its native executable (npm layout or direct binary); unsafe installs are refused
+  ---
+  duration_ms: 22.512536
+  type: 'test'
+  ...
+# Subtest: codex: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 74 - codex: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 188.368097
+  type: 'test'
+  ...
+# Subtest: codex: instance/account isolation rejects before send
+ok 75 - codex: instance/account isolation rejects before send
+  ---
+  duration_ms: 56.386968
+  type: 'test'
+  ...
+# Subtest: codex: cancellation waits for native terminal event
+ok 76 - codex: cancellation waits for native terminal event
+  ---
+  duration_ms: 88.973106
+  type: 'test'
+  ...
+# Subtest: codex: process crash is uncertain and reconnect never replays
+ok 77 - codex: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 82.468123
+  type: 'test'
+  ...
+# Subtest: codex: no live launch without authentication or proven sandbox
+ok 78 - codex: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 5.120912
+  type: 'test'
+  ...
+# Subtest: claude-code: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 79 - claude-code: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 153.758701
+  type: 'test'
+  ...
+# Subtest: claude-code: instance/account isolation rejects before send
+ok 80 - claude-code: instance/account isolation rejects before send
+  ---
+  duration_ms: 56.250591
+  type: 'test'
+  ...
+# Subtest: claude-code: cancellation waits for native terminal event
+ok 81 - claude-code: cancellation waits for native terminal event
+  ---
+  duration_ms: 67.431286
+  type: 'test'
+  ...
+# Subtest: claude-code: process crash is uncertain and reconnect never replays
+ok 82 - claude-code: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 81.09692
+  type: 'test'
+  ...
+# Subtest: claude-code: no live launch without authentication or proven sandbox
+ok 83 - claude-code: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 1.525279
+  type: 'test'
+  ...
+# Subtest: antigravity: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+ok 84 - antigravity: real owned fixture subprocess, accepted is separate from completion, shutdown twice
+  ---
+  duration_ms: 108.831736
+  type: 'test'
+  ...
+# Subtest: antigravity: instance/account isolation rejects before send
+ok 85 - antigravity: instance/account isolation rejects before send
+  ---
+  duration_ms: 33.976974
+  type: 'test'
+  ...
+# Subtest: antigravity: cancellation waits for native terminal event
+ok 86 - antigravity: cancellation waits for native terminal event
+  ---
+  duration_ms: 44.408187
+  type: 'test'
+  ...
+# Subtest: antigravity: process crash is uncertain and reconnect never replays
+ok 87 - antigravity: process crash is uncertain and reconnect never replays
+  ---
+  duration_ms: 57.394563
+  type: 'test'
+  ...
+# Subtest: antigravity: no live launch without authentication or proven sandbox
+ok 88 - antigravity: no live launch without authentication or proven sandbox
+  ---
+  duration_ms: 1.29995
+  type: 'test'
+  ...
+# Subtest: Codex resume executes generated-schema native thread/resume
+ok 89 - Codex resume executes generated-schema native thread/resume
+  ---
+  duration_ms: 36.653213
+  type: 'test'
+  ...
+# Subtest: Claude and Antigravity do not claim unimplemented continuation
+ok 90 - Claude and Antigravity do not claim unimplemented continuation
+  ---
+  duration_ms: 63.279716
+  type: 'test'
+  ...
+# Subtest: Codex validates outgoing methods against installed version, not guessed methods
+ok 91 - Codex validates outgoing methods against installed version, not guessed methods
+  ---
+  duration_ms: 4.254016
+  type: 'test'
+  ...
+# Subtest: Deduplicates native UUID events but retains legitimate repeated text
+ok 92 - Deduplicates native UUID events but retains legitimate repeated text
+  ---
+  duration_ms: 113.071399
+  type: 'test'
+  ...
+# Subtest: Codex command approvals are explicitly denied
+ok 93 - Codex command approvals are explicitly denied
+  ---
+  duration_ms: 62.800762
+  type: 'test'
+  ...
+# Subtest: Host rejects malformed fixture messages and reaps child
+ok 94 - Host rejects malformed fixture messages and reaps child
+  ---
+  duration_ms: 35.633178
+  type: 'test'
+  ...
+# Subtest: Host rejects oversized fixture messages and reaps child
+ok 95 - Host rejects oversized fixture messages and reaps child
+  ---
+  duration_ms: 49.533717
+  type: 'test'
+  ...
+# Subtest: Discovery never executes malicious launch hooks, MCP, or provider PATH entries
+ok 96 - Discovery never executes malicious launch hooks, MCP, or provider PATH entries
+  ---
+  duration_ms: 2.392714
+  type: 'test'
+  ...
+# Subtest: T3 version extraction and bounded redaction regressions
+ok 97 - T3 version extraction and bounded redaction regressions
+  ---
+  duration_ms: 1.190867
+  type: 'test'
+  ...
+# Subtest: Settings admit exactly the three real metadata routes and reject live capability claims
+ok 98 - Settings admit exactly the three real metadata routes and reject live capability claims
+  ---
+  duration_ms: 4.330601
+  type: 'test'
+  ...
+# Subtest: Settings retain explicit version mismatch and reject a false metadata match
+ok 99 - Settings retain explicit version mismatch and reject a false metadata match
+  ---
+  duration_ms: 0.50003
+  type: 'test'
+  ...
+# Subtest: Settings persist only immutable generated instance identity, driver and nonsecret label
+ok 100 - Settings persist only immutable generated instance identity, driver and nonsecret label
+  ---
+  duration_ms: 1.503248
+  type: 'test'
+  ...
+# Subtest: Corrupt or credential-bearing saved configuration fails closed and is preserved
+ok 101 - Corrupt or credential-bearing saved configuration fails closed and is preserved
+  ---
+  duration_ms: 0.331257
+  type: 'test'
+  ...
+# Subtest: zero, one, two and three enabled instances select at most one verified route
+ok 102 - zero, one, two and three enabled instances select at most one verified route
+  ---
+  duration_ms: 2.314307
+  type: 'test'
+  ...
+# Subtest: Browser-owned discovery launches only fixed metadata command with no inherited environment
+ok 103 - Browser-owned discovery launches only fixed metadata command with no inherited environment
+  ---
+  duration_ms: 1.732535
+  type: 'test'
+  ...
+# Subtest: The capability check runs the fixed clients command with build root and HOME only, and validates its report
+ok 104 - The capability check runs the fixed clients command with build root and HOME only, and validates its report
+  ---
+  duration_ms: 2.774084
+  type: 'test'
+  ...
+# Subtest: Discovery output limits, nonzero exit and cancellation all remain failures
+ok 105 - Discovery output limits, nonzero exit and cancellation all remain failures
+  ---
+  duration_ms: 0.992848
+  type: 'test'
+  ...
+# Subtest: An active metadata subprocess is reaped after timeout
+ok 106 - An active metadata subprocess is reaped after timeout
+  ---
+  duration_ms: 1.219389
+  type: 'test'
+  ...
+# Subtest: An active metadata subprocess is reaped after abort
+ok 107 - An active metadata subprocess is reaped after abort
+  ---
+  duration_ms: 4.712822
+  type: 'test'
+  ...
+# Subtest: Settings exports no Keychain helper of its own; its metadata runner never writes stdin
+ok 108 - Settings exports no Keychain helper of its own; its metadata runner never writes stdin
+  ---
+  duration_ms: 0.681879
+  type: 'test'
+  ...
+# Subtest: Web callers and private windows cannot open persistent provider settings
+ok 109 - Web callers and private windows cannot open persistent provider settings
+  ---
+  duration_ms: 0.485233
+  type: 'test'
+  ...
+# Subtest: site_rule_v1 valid choices return the exact suggestion-only result shape
+ok 110 - site_rule_v1 valid choices return the exact suggestion-only result shape
+  ---
+  duration_ms: 43.997495
+  type: 'test'
+  ...
+# Subtest: site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions
+ok 111 - site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions
+  ---
+  duration_ms: 1.637999
+  type: 'test'
+  ...
+# Subtest: An effect the rule does not list becomes none with malformed_output
+ok 112 - An effect the rule does not list becomes none with malformed_output
+  ---
+  duration_ms: 1.599878
+  type: 'test'
+  ...
+# Subtest: Low confidence becomes none; the optional reason is fixed-code only
+ok 113 - Low confidence becomes none; the optional reason is fixed-code only
+  ---
+  duration_ms: 4.095043
+  type: 'test'
+  ...
+# Subtest: Malformed, oversized, wrong-model and bad-probability responses fail closed to none
+ok 114 - Malformed, oversized, wrong-model and bad-probability responses fail closed to none
+  ---
+  duration_ms: 4.322175
+  type: 'test'
+  ...
+# Subtest: 401, HTTP and network errors map to none and still disclose the transmission
+ok 115 - 401, HTTP and network errors map to none and still disclose the transmission
+  ---
+  duration_ms: 3.329455
+  type: 'test'
+  ...
+# Subtest: Deadline aborts the actual fetch once; caller abort cancels; no retry
+ok 116 - Deadline aborts the actual fetch once; caller abort cancels; no retry
+  ---
+  duration_ms: 52.425652
+  type: 'test'
+  ...
+# Subtest: No key means zero fetch calls and data_sent false; Keychain failure likewise
+ok 117 - No key means zero fetch calls and data_sent false; Keychain failure likewise
+  ---
+  duration_ms: 1.033724
+  type: 'test'
+  ...
+# Subtest: Strict request validation rejects unknown keys, caps and level violations without Keychain or fetch
+ok 118 - Strict request validation rejects unknown keys, caps and level violations without Keychain or fetch
+  ---
+  duration_ms: 10.110011
+  type: 'test'
+  ...
+# Subtest: The diagnostic choice set is unchanged and now discloses data_sent
+ok 119 - The diagnostic choice set is unchanged and now discloses data_sent
+  ---
+  duration_ms: 1.297606
+  type: 'test'
+  ...
+# Subtest: Host decision/site_rule replies with the decision result and never starts a provider client
+ok 120 - Host decision/site_rule replies with the decision result and never starts a provider client
+  ---
+  duration_ms: 3.061479
+  type: 'test'
+  ...
+# Subtest: Host enforces the default rolling-hour budget of 30 and never fetches when exhausted
+ok 121 - Host enforces the default rolling-hour budget of 30 and never fetches when exhausted
+  ---
+  duration_ms: 19.490168
+  type: 'test'
+  ...
+# Subtest: Budget counts only real transmissions: no key and invalid input never consume it
+ok 122 - Budget counts only real transmissions: no key and invalid input never consume it
+  ---
+  duration_ms: 4.526516
+  type: 'test'
+  ...
+# Subtest: Host decision/cancel aborts the in-flight fetch; closing the host aborts too
+ok 123 - Host decision/cancel aborts the in-flight fetch; closing the host aborts too
+  ---
+  duration_ms: 1.395508
+  type: 'test'
+  ...
+# Subtest: Actual stdio framing accepts a 64 KiB decision state and replies on one line
+ok 124 - Actual stdio framing accepts a 64 KiB decision state and replies on one line
+  ---
+  duration_ms: 51.374536
+  type: 'test'
+  ...
+# Subtest: Transport timeout is distinct from a possibly mutating uncertain outcome, without retries
+ok 125 - Transport timeout is distinct from a possibly mutating uncertain outcome, without retries
+  ---
+  duration_ms: 124.904664
+  type: 'test'
+  ...
+# Subtest: Transport rejects queue overload and releases all pending requests on shutdown
+ok 126 - Transport rejects queue overload and releases all pending requests on shutdown
+  ---
+  duration_ms: 49.683005
+  type: 'test'
+  ...
+# (node:7610) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ordinary success close never signals a numeric PGID or the retained child
+ok 127 - ordinary success close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 8.783089
+  type: 'test'
+  ...
+# Subtest: ordinary nonzero close never signals a numeric PGID or the retained child
+ok 128 - ordinary nonzero close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 1.084459
+  type: 'test'
+  ...
+# Subtest: ordinary signal exit close never signals a numeric PGID or the retained child
+ok 129 - ordinary signal exit close never signals a numeric PGID or the retained child
+  ---
+  duration_ms: 1.102162
+  type: 'test'
+  ...
+# Subtest: close alone never tries group cleanup even if fake retained exit fields are still null
+ok 130 - close alone never tries group cleanup even if fake retained exit fields are still null
+  ---
+  duration_ms: 1.025248
+  type: 'test'
+  ...
+# Subtest: cancel after leader exit settles without a close event or descendant signals
+ok 131 - cancel after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 1.737154
+  type: 'test'
+  ...
+# Subtest: cancel while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 132 - cancel while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 1.11716
+  type: 'test'
+  ...
+# Subtest: timeout after leader exit settles without a close event or descendant signals
+ok 133 - timeout after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 1.207407
+  type: 'test'
+  ...
+# Subtest: timeout while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 134 - timeout while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 0.900737
+  type: 'test'
+  ...
+# Subtest: close after leader exit settles without a close event or descendant signals
+ok 135 - close after leader exit settles without a close event or descendant signals
+  ---
+  duration_ms: 1.790773
+  type: 'test'
+  ...
+# Subtest: close while leader is live attempts the group then settles on exit without waiting for inherited pipes
+ok 136 - close while leader is live attempts the group then settles on exit without waiting for inherited pipes
+  ---
+  duration_ms: 5.773906
+  type: 'test'
+  ...
+# Subtest: host exit signals only a retained live leader; known exit is left alone
+ok 137 - host exit signals only a retained live leader; known exit is left alone
+  ---
+  duration_ms: 0.949447
+  type: 'test'
+  ...
+# Subtest: a leader exit observed during the group attempt suppresses the direct fallback and bounds cancel
+ok 138 - a leader exit observed during the group attempt suppresses the direct fallback and bounds cancel
+  ---
+  duration_ms: 0.712065
+  type: 'test'
+  ...
+# Subtest: a failed group attempt still uses the retained live child fallback
+ok 139 - a failed group attempt still uses the retained live child fallback
+  ---
+  duration_ms: 1.595089
+  type: 'test'
+  ...
+# Subtest: unknown retained exit facts refuse both signals; close still settles the selected timeout
+ok 140 - unknown retained exit facts refuse both signals; close still settles the selected timeout
+  ---
+  duration_ms: 0.804538
+  type: 'test'
+  ...
+# Subtest: a stopped exited child can advance the queue; its late close cannot remove the next child exit hook
+ok 141 - a stopped exited child can advance the queue; its late close cannot remove the next child exit hook
+  ---
+  duration_ms: 1.080362
+  type: 'test'
+  ...
+# Subtest: Read-only argument arrays are fixed arrays, never shell strings
+ok 142 - Read-only argument arrays are fixed arrays, never shell strings
+  ---
+  duration_ms: 2.611681
+  type: 'test'
+  ...
+# Subtest: Claude fake: brief over stdin, minimal env, project cwd, exact argv, normalized strict document
+ok 143 - Claude fake: brief over stdin, minimal env, project cwd, exact argv, normalized strict document
+  ---
+  duration_ms: 120.583497
+  type: 'test'
+  ...
+# Subtest: Codex fake: explain_errors embeds the console errors as untrusted data and returns the explanation
+ok 144 - Codex fake: explain_errors embeds the console errors as untrusted data and returns the explanation
+  ---
+  duration_ms: 45.577267
+  type: 'test'
+  ...
+# Subtest: Failures: non-zero exit, invalid JSON and unknown keys never return a document or stderr
+ok 145 - Failures: non-zero exit, invalid JSON and unknown keys never return a document or stderr
+  ---
+  duration_ms: 146.91325
+  type: 'test'
+  ...
+# Subtest: stdout over 256 KiB is invalid_output and the CLI is killed
+ok 146 - stdout over 256 KiB is invalid_output and the CLI is killed
+  ---
+  duration_ms: 30.54369
+  type: 'test'
+  ...
+# Subtest: Timeout kills the whole process group, including a grandchild
+ok 147 - Timeout kills the whole process group, including a grandchild
+  ---
+  duration_ms: 317.342608
+  type: 'test'
+  ...
+# Subtest: Queue: one running, at most four queued, then busy; cancel queued and running; close kills
+ok 148 - Queue: one running, at most four queued, then busy; cancel queued and running; close kills
+  ---
+  duration_ms: 85.524498
+  type: 'test'
+  ...
+# Subtest: Without the test-only launch, a real CLI is never started: NOT_AUTHORIZED, or not installed
+ok 149 - Without the test-only launch, a real CLI is never started: NOT_AUTHORIZED, or not installed
+  ---
+  duration_ms: 0.957702
+  type: 'test'
+  ...
+# Subtest: Request validation: project root, kind/cli, input shape, timeout bounds, unknown keys
+ok 150 - Request validation: project root, kind/cli, input shape, timeout bounds, unknown keys
+  ---
+  duration_ms: 1.876613
+  type: 'test'
+  ...
+# Subtest: Strict document validators reject unknown keys, over-cap strings, bad hosts and unsafe paths
+ok 151 - Strict document validators reject unknown keys, over-cap strings, bad hosts and unsafe paths
+  ---
+  duration_ms: 2.807385
+  type: 'test'
+  ...
+# Subtest: Host understand/* methods: available, run, cancel; host close kills; UNSUPPORTED without a runner
+ok 152 - Host understand/* methods: available, run, cancel; host close kills; UNSUPPORTED without a runner
+  ---
+  duration_ms: 126.977217
+  type: 'test'
+  ...
+# Subtest: setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged
+ok 153 - setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged
+  ---
+  duration_ms: 0.739256
+  type: 'test'
+  ...
+# Subtest: setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section
+ok 154 - setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section
+  ---
+  duration_ms: 0.244314
+  type: 'test'
+  ...
+# Subtest: setup: pickSetupCli prefers Codex, then Claude Code, else null
+ok 155 - setup: pickSetupCli prefers Codex, then Claude Code, else null
+  ---
+  duration_ms: 0.143226
+  type: 'test'
+  ...
+# Subtest: setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes
+ok 156 - setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes
+  ---
+  duration_ms: 4.595845
+  type: 'test'
+  ...
+# Subtest: setup: Codex and Claude fakes run with model args and return the validated document
+ok 157 - setup: Codex and Claude fakes run with model args and return the validated document
+  ---
+  duration_ms: 106.697782
+  type: 'test'
+  ...
+# Subtest: setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing
+ok 158 - setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing
+  ---
+  duration_ms: 0.598174
+  type: 'test'
+  ...
+# Subtest: Exact pinned metadata is not a claim of actual client protocol compatibility
+ok 159 - Exact pinned metadata is not a claim of actual client protocol compatibility
+  ---
+  duration_ms: 10.07313
+  type: 'test'
+  ...
+# Subtest: Overnight metadata updates explicitly mismatch pinned versions without executing a client
+ok 160 - Overnight metadata updates explicitly mismatch pinned versions without executing a client
+  ---
+  duration_ms: 4.99102
+  type: 'test'
+  ...
+# Subtest: Unknown, malformed and unpinned client versions stay untested and fail closed
+ok 161 - Unknown, malformed and unpinned client versions stay untested and fail closed
+  ---
+  duration_ms: 4.004253
+  type: 'test'
+  ...
+# Subtest: Metadata discovery rejects oversized and redirected package metadata without executing a client
+ok 162 - Metadata discovery rejects oversized and redirected package metadata without executing a client
+  ---
+  duration_ms: 8.235419
+  type: 'test'
+  ...
+# Subtest: Prerelease/build metadata is never silently truncated into an exact version match
+ok 163 - Prerelease/build metadata is never silently truncated into an exact version match
+  ---
+  duration_ms: 5.505632
+  type: 'test'
+  ...
+1..163
+# tests 163
+# suites 0
+# pass 162
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 2944.463734
+TAP version 13
+# Subtest: Linux: the sandbox proof refuses to run without a sandbox (BLOCKED_ENV)
+ok 1 - Linux: the sandbox proof refuses to run without a sandbox (BLOCKED_ENV)
+  ---
+  duration_ms: 3.247354
+  type: 'test'
+  ...
+# LINUX_PROVIDER_SANDBOX: UNSUPPORTED (fail closed); no broker artifact is admitted
+# Subtest: Linux: live provider launches are refused before any client lookup
+ok 2 - Linux: live provider launches are refused before any client lookup
+  ---
+  duration_ms: 0.963002
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 152.424998
+TAP version 13
+# Subtest: Helper rejects malformed input and selectors before any Secret Service call
+ok 1 - Helper rejects malformed input and selectors before any Secret Service call
+  ---
+  duration_ms: 32.407934
+  type: 'test'
+  ...
+# TEST_FIXTURE: invalid inputs and selectors refused without a bus
+# Subtest: No Secret Service: every operation fails closed (exit 1), nothing on stdout, no fallback
+ok 2 - No Secret Service: every operation fails closed (exit 1), nothing on stdout, no fallback
+  ---
+  duration_ms: 26.811245
+  type: 'test'
+  ...
+# TEST_FIXTURE: unreachable session bus refused for read/exists/store/remove (jev, openai)
+# Subtest: Negative fixture build never mutates and reports an unavailable service
+ok 3 - Negative fixture build never mutates and reports an unavailable service
+  ---
+  duration_ms: 9.323284
+  type: 'test'
+  ...
+# Subtest: JS adapter: an unavailable Secret Service is KEYCHAIN_ERROR, never null or a plaintext fallback
+ok 4 - JS adapter: an unavailable Secret Service is KEYCHAIN_ERROR, never null or a plaintext fallback
+  ---
+  duration_ms: 22.02232
+  type: 'test'
+  ...
+# Subtest: Private Secret Service round trip (own bus, own keyring, synthetic keys)
+ok 5 - Private Secret Service round trip (own bus, own keyring, synthetic keys)
+  ---
+  duration_ms: 329.227259
+  type: 'test'
+  ...
+# {"steps":{"exists_before":44,"read_before":44,"store":0,"exists_after":0,"read_after":0,"openai_exists":44,"openai_store":0,"openai_read_matches":true,"negative_read":44,"remove":0,"read_removed":44,"remove_again":44,"openai_remove":0},"read_matches":true,"negative_stderr":"TEST_FIXTURE secret_service=available result=44","daemon_stderr":""}
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 490.078014
+{
+  "status": "BLOCKED_ENV",
+  "reason": "BLOCKED_ENV",
+  "message": "macOS Keychain positive fixture; on Linux see keychain-negative-test (private Secret Service round trip)"
+}
+✔ host input is normalized to contract host patterns (2.978254ms)
+✔ the handoff example rule round-trips through the editor form and passes the contract validator (3.058052ms)
+✔ a new rule from the editor is valid, uses the generated id and defaults to observation none (1.260636ms)
+✔ raised observation hosts are kept only for outline and only for listed hosts (0.565192ms)
+✔ the editor reports field errors instead of producing invalid rules (0.394764ms)
+✔ agents settings are preserved but never widened by the editor (0.332418ms)
+✔ Jev settings form enforces 1–30 minute intervals and a 0–30 hourly budget (0.423158ms)
+✔ Jev wording states exactly when Jev is called and what is sent (M2) (0.463823ms)
+✔ service status text never promises remote checks (M1) (0.36497ms)
+✔ service and surface addresses with a query or fragment are refused in the editor (L5) (2.237034ms)
+✔ detection draft review keeps provenance and guess markers and yields a valid manifest (1.867837ms)
+✔ draft review rejects invalid edits instead of silently dropping them (0.562347ms)
+✔ editing a confirmed project round-trips its manifest (0.269882ms)
+✔ ledger views group per host/context and per day with readable durations (0.910424ms)
+✔ attention items map to page actions and never to non-web URLs (0.489912ms)
+✔ the page model shares enum values with the contexts core (0.436963ms)
+✔ add-project review, Domo-like: environments grouped per app, production URL on the web app, v2 manifest (39.908842ms)
+✔ add-project review, RemoteRAL-like: + Add environment gets a dev server; guesses stay marked; bad production URL refused (2.431486ms)
+✔ surfaces: Shown/More is written only where it differs from the kind's default; unticked ones are dropped (0.428507ms)
+✔ projects are grouped by space (any type) and the page says where a new project lives (0.41371ms)
+✔ deep links: four views, old hashes redirect, item links validated (0.536108ms)
+✔ AI & keys: provider cards keep the honest labels; Jev key form rules; Keychain texts match ProviderStatus (5.428715ms)
+✔ site rules show their own screen time; top sites are marked when a rule covers them (0.534394ms)
+✔ four sections only; the first run guide is the Projects empty state; every space is listed (121.290105ms)
+✔ Site rules carry their own screen time; the busiest sites follow, with Add rule (73.208357ms)
+✔ old hashes redirect; #ai loads provider status with honest labels (65.139941ms)
+✔ decision keys: explicit Store clears the field at once, crosses once, per provider; never echoed; fixed error texts (95.002834ms)
+✔ decision keys: with entry off a stored key can still be removed, after confirming; the other provider is independent (67.645059ms)
+✔ decision keys: a second press while a change runs is ignored; leaving AI & keys cancels it, clears typed keys and shows no late answer (83.804549ms)
+✔ decision keys: an uncertain outcome says it could not be confirmed, reads presence once more and never retries the change (40.682763ms)
+✔ admission: a startup sender refusal is asked again; only the actor's answer admits the page, then keys and providers load (317.233514ms)
+✔ admission: any other failed flags read admits nothing: no retry, no other read, no subscription, key forms off (921.712281ms)
+✔ admission: a page the actor keeps refusing asks a bounded number of times, then stays not connected and reads nothing (3581.33616ms)
+✔ admission: a pagehide during the retry stops asking; an answer from before the hide is not used; a restore asks afresh (425.227286ms)
+✔ decision keys: a private window or a refused check says why and offers nothing (25.17562ms)
+✔ rule editor: a legacy rule keeps no provider; a chosen provider is written and kept through unrelated edits (128.417009ms)
+✔ rule editor: a screenshot cannot be newly chosen; a saved screen rule keeps it; raising a host never allows it (60.022402ms)
+✔ add project: one sheet with name, type, services and space up front; addresses and links under More options; then where it lives (90.083136ms)
+✔ add project: the sheet opens at once, shows reading, applies the assistant's setup check, shows the icon and saves once (78.875976ms)
+✔ add project: closing the sheet while the assistant checks ends that check; a refused folder offers another (518.949316ms)
+✔ a project's icon shows in the list and on its home; its Start section copies each command, with its folder (64.842114ms)
+✔ P2: the home shows the own container in Firefox's colour, typed account labels and unconfirmed shared sites (33.639375ms)
+✔ P2: every project link on the home goes through the container router, never a plain openUrl (43.483448ms)
+✔ P2: account editor: labels the user types per service or site, sent one by one; bad sites are refused locally (49.202135ms)
+✔ P2: shared-sites editor offers the suggestions and shares only after the user turns sharing on (71.020243ms)
+✔ P2: the list card keeps editing secondary but reachable: its menu opens the same editors (38.126785ms)
+✔ #add-project=<space> from the space menu preselects that space; #edit-project opens the editor (79.639026ms)
+✔ edit project: a production address already listed hides the separate Production URL field (34.280768ms)
+✔ agent status: off in every new page; Turn on asks the browser and shows what it reports; hook settings only while listening (67.753663ms)
+✔ agent status: while the switch is on its way it keeps focus and ignores a second press (56.407131ms)
+✔ agent status: a failed start is one calm sentence with the code only in a detail; Try again asks again (47.703163ms)
+✔ agent status: without a verified notify script the hook rows say so and offer no copy; private windows see a calm line (65.093612ms)
+✔ agent status lifecycle: a hidden page publishes nothing; an agents event re-reads only while AI & keys shows; a restore reads afresh (360.041633ms)
+✔ browser tools: the browser's own list, with fixed reasons; plugin settings only while on, named by agent, shown as text and copied on request (217.541401ms)
+✔ plugin settings: no verified bridge says so and offers no copy; an answer prepared for an earlier socket is never shown (227.575267ms)
+✔ browser tools without the browser's capabilities say so; nothing is claimed as available (85.319419ms)
+✔ AI & keys: opening reads the status as it is; Check again asks the provider host to check the clients again (41.678459ms)
