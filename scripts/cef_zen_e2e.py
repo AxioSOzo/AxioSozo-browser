@@ -855,10 +855,9 @@ class CEFZenHarness(gui_test.Harness):
                                   'Ctrl+T opens a new tab / Zen\'s new-tab address bar', timeout=10)
         time.sleep(0.6)
         self.screenshot('20-ctrl-t', settle=False)
-        self.key('Escape')
-        time.sleep(0.4)
-        self.key('Escape')
-        time.sleep(0.6)
+        # Dismissed with a click into the page, not Escape (the Linux parent's address-bar crash).
+        self.click_at(*AT['blank'])
+        time.sleep(0.8)
         if self.web()['tabs'] != tabs:
             self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
         # Ctrl+W with the focus in a Chromium page closes that Chromium tab.
@@ -1044,7 +1043,8 @@ class CEFZenHarness(gui_test.Harness):
         time.sleep(0.5)
         out['primary_after_chromium_selection'] = primary()
         same = bool(out['chromium']['pasted']) == bool(out['gecko']['pasted'])
-        self.gate('middle_click_paste_autoscroll', 'PASS' if same and out['chromium']['pasted'] else 'EXPERIMENTAL', **out,
+        publishes = (out['primary_after_chromium_selection'] or '').strip() == 'alpha'
+        self.gate('middle_click_paste_autoscroll', 'PASS' if same and out['chromium']['pasted'] and publishes else 'EXPERIMENTAL', **out,
                   autoscroll='general.autoScroll is off by default on Linux in Firefox; Chromium-on-Linux scroll after middle click recorded as y')
         return out
 
@@ -1074,10 +1074,31 @@ class CEFZenHarness(gui_test.Harness):
 
     def scenario_beforeunload(self):
         self.require_chromium()
+        self.chrome_script("""
+            window.__feelDialogs = [];
+            if (!window.__feelDialogObserver) {
+              window.__feelDialogObserver = { observe: (subject, topic) => window.__feelDialogs.push(topic) };
+              for (const topic of ['common-dialog-loaded', 'tabmodal-dialog-loaded'])
+                Services.obs.addObserver(window.__feelDialogObserver, topic);
+            }
+            return true;""")
         self.click_at(*AT['d-unload'])
         self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed (with a user gesture)')
         self.click_at(*AT['link'])
-        opened = self.wait(lambda: self.alert_text(), 'Zen "leave page?" dialog', timeout=15)
+
+        def shown():
+            text = self.alert_text()
+            if text is not None:
+                return {'alert_text': text}
+            try:
+                log = self.chrome_script('return window.__feelDialogs;')
+            except gui_test.MarionetteError as error:
+                return {'script_refused': str(error)[:160]}
+            page = self.page()
+            if page and page['p'] == '2':
+                raise AssertionError(f'navigated to page 2 without a Zen dialog (dialog notifications: {log})')
+            return {'notifications': log} if log else None
+        opened = self.wait(shown, 'Zen "leave page?" dialog', timeout=15)
         time.sleep(0.6)
         self.screenshot('17-beforeunload')
         via = self.answer_prompt(['Return'], True)

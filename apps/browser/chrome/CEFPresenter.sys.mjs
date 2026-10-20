@@ -860,6 +860,7 @@ export class CEFPresenter {
     if (event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); }
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
+    if (event.event === "text_selection") this.#primarySelection(record, event.text);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -887,6 +888,24 @@ export class CEFPresenter {
       this.#action(record, target => record.adapter.focus(target, true));
     }
     if (record.committed) this.#syncChrome(record);
+  }
+  /**
+   * Linux: the desktop PRIMARY selection follows a Chromium tab's selection as it follows a
+   * Firefox page's, so middle-click paste works across tabs and applications. Like Gecko's
+   * auto-copy (mouse, keyboard or select-all reasons only), only a selection made by the
+   * user's own input in this view is published; script selections are not.
+   */
+  #primarySelection(record, text) {
+    if (this.keyPlatform !== "linux" || !record.committed || typeof text !== "string" || !text) return;
+    const input = record.userInputAt ?? -Infinity;
+    if (this.window.performance.now() - input > 1000) return;
+    try {
+      const { Cc, Ci } = this.window;
+      const clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+      if (!clipboard.isClipboardTypeSupported(Ci.nsIClipboard.kSelectionClipboard)) return;
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper)
+        .copyStringToClipboard(text, Ci.nsIClipboard.kSelectionClipboard);
+    } catch (error) { this.onFailure(error); }
   }
   #openInNewTab(record, url, background) {
     const gBrowser = this.window.gBrowser;
@@ -1122,6 +1141,7 @@ export class CEFPresenter {
       if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
+      if (type !== "pointermove" || event.buttons) record.userInputAt = this.window.performance.now();
       event.preventDefault();
       const position = point(event);
       let count = record.clicks.count;
@@ -1246,10 +1266,12 @@ export class CEFPresenter {
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
+        record.userInputAt = this.window.performance.now(); // Ctrl+A selects: Gecko auto-copies select-all too
         if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event)));
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
+      record.userInputAt = this.window.performance.now();
       const fields = cefKey(event, type, platform); send("key", fields);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });

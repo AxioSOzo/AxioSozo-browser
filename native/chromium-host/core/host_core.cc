@@ -290,6 +290,8 @@ struct Tab {
   std::string iconURL, iconData;
   bool hasIconURL = false, hasIconData = false;
   uint64_t iconRequest = 0;
+  // Linux PRIMARY selection: the last selected text reported to Zen (deduplicated).
+  std::string selectionText;
   bool live() const { return target.has("native_target_id"); }
 };
 static std::map<std::string, Tab*> tabsByKey;

@@ -418,6 +418,25 @@ test('a Chromium page title is a content title, so Zen puts it in the window tit
   await presenter.dispose();
 });
 
+test('Linux: a selection made by the user in a Chromium tab becomes the desktop PRIMARY selection; script selections do not', async () => {
+  const z = zenWindow();
+  const primary = [];
+  z.win.Services.appinfo = { OS: 'Linux' };
+  z.win.Ci = { nsIClipboard: { kSelectionClipboard: 1 }, nsIClipboardHelper: {} };
+  z.win.Cc = { '@mozilla.org/widget/clipboard;1': { getService: () => ({ isClipboardTypeSupported: type => type === 1 }) },
+    '@mozilla.org/widget/clipboardhelper;1': { getService: () => ({ copyStringToClipboard: (text, type) => primary.push([text, type]) }) } };
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  const canvas = z.first.linkedBrowser.parentNode.children.find(node => node !== z.first.linkedBrowser).children[0];
+  callbacks.onEvent({ event: 'text_selection', text: 'by script' });
+  assert.deepEqual(primary, [], 'no user input: the page selected text by itself');
+  canvas.handlers.get('pointerup')({ isTrusted: true, button: 0, buttons: 0, pointerId: 1, clientX: 1, clientY: 1, timeStamp: 1, preventDefault() {} });
+  callbacks.onEvent({ event: 'text_selection', text: 'by the user' });
+  assert.deepEqual(primary, [['by the user', 1]]);
+  await presenter.dispose();
+});
+
 test('links that open a new tab open a new Chromium tab; background tabs start when shown', async () => {
   const z = zenWindow();
   const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });

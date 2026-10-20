@@ -453,6 +453,16 @@ the resources and the root:root 4755 `chrome-sandbox`.
 - The host passes no D-Bus address, so Chromium uses its "basic" password store.
   (Open decision for the persistent web profile.)
 
+**PRIMARY selection (event `text_selection`, web sessions).** Windowless Chromium never
+publishes its selection to the X11 PRIMARY selection. A Linux web host sends
+`{"event":"text_selection","target":…,"text":"…"}` when the page's selected text changes
+(1–16384 UTF-16 units; never for a password field; repeated text is not resent). Zen
+writes it to the desktop PRIMARY selection only when the user's own pointer or key
+input reached that view within the last second (as Gecko's auto-copy does for mouse,
+keyboard and select-all selections). Fixture sessions and macOS hosts never send it;
+an adapter rejects it outside web mode. Reading PRIMARY (middle-click paste) is
+Chromium's own and needs nothing from Zen.
+
 **Sandbox.** The sandbox is never disabled.
 - Chromium uses the user-namespace sandbox when the kernel permits it.
 - Otherwise it uses the SUID `chrome-sandbox`. Ubuntu 24.04 restricts unprivileged
