@@ -8,8 +8,13 @@
 // a profile object, so a host only adds its profile (WebKitEngineAdapter.sys.mjs).
 //
 // The Chromium path (CEFEngineAdapter.sys.mjs) still carries its own copy of this
-// logic with CEF-only extensions (surface mode, web mode, UI delegation, a11y). It is
-// the same protocol; moving CEF onto this module is a later, separate step.
+// logic with CEF-only extensions (web mode, UI delegation, a11y). It is the same
+// protocol; moving CEF onto this module is a later, separate step.
+//
+// Surface mode (macOS, contracts/engine-surface-v1.md): with `surface: {endpoint, service,
+// frameRate}` the hello carries the endpoint's Mach service and one-time token, frames
+// travel over Mach straight into the bound canvas (never through JS) and a pipe frame or a
+// JSON frame_ack is a protocol error, exactly like CEFHostConnection's surface mode.
 
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
@@ -68,21 +73,24 @@ export function validateStreamTarget(value, { engine, identity, pending = false 
   return Object.freeze({ ...value });
 }
 
-/** §4 resize/create bounds: 1..4096 logical px, scale 1..4, physical ≤ 4096 px/side and ≤ 32 MiB. */
-export function validateStreamSurface({ width, height, device_scale } = {}) {
+/**
+ * §4 resize/create bounds: 1..4096 logical px, scale 1..4, physical ≤ 4096 px/side and
+ * ≤ 32 MiB (`maxBytes`; surface mode passes Infinity: IOSurfaces are bounded per side only).
+ */
+export function validateStreamSurface({ width, height, device_scale } = {}, { maxBytes = MAX_FRAME_BYTES } = {}) {
   if (![width, height].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
       || !Number.isFinite(device_scale) || device_scale < 1 || device_scale > 4) throw new Error("INVALID_SURFACE");
   const physicalWidth = Math.ceil(width * device_scale), physicalHeight = Math.ceil(height * device_scale);
   if (physicalWidth > MAX_SURFACE_DIMENSION || physicalHeight > MAX_SURFACE_DIMENSION
-      || physicalWidth * physicalHeight * 4 > MAX_FRAME_BYTES) throw new Error("UNSUPPORTED_SURFACE");
+      || physicalWidth * physicalHeight * 4 > maxBytes) throw new Error("UNSUPPORTED_SURFACE");
   return { width, height, device_scale };
 }
 
-/** Steps the render scale down in quarters until the 32 MiB pipe bound fits (logical size unchanged). */
-export function fitStreamSurface({ width, height, device_scale }) {
+/** Steps the render scale down in quarters until the bound fits (logical size unchanged). */
+export function fitStreamSurface({ width, height, device_scale }, { maxBytes = MAX_FRAME_BYTES } = {}) {
   for (let quarter = Math.ceil(device_scale * 4); quarter >= 4; quarter--) {
     const scale = quarter === Math.ceil(device_scale * 4) ? device_scale : quarter / 4;
-    try { return validateStreamSurface({ width, height, device_scale: Math.max(1, scale) }); }
+    try { return validateStreamSurface({ width, height, device_scale: Math.max(1, scale) }, { maxBytes }); }
     catch (error) { if (error.message !== "UNSUPPORTED_SURFACE") throw error; }
   }
   throw new Error("UNSUPPORTED_SURFACE");
@@ -197,27 +205,49 @@ export const STREAM_FAILURE_CODES = new Set([
   "UNKNOWN_ENGINE_RESPONSE", "INVALID_ENGINE_COMPLETION", "INVALID_ENGINE_TITLE", "INVALID_ENGINE_LOADING",
   "INVALID_ENGINE_URL", "INVALID_ENGINE_LOAD", "INVALID_ENGINE_HISTORY_RESTORE", "INVALID_ENGINE_CURSOR",
   "INVALID_ENGINE_HEARTBEAT", "ENGINE_HOST_UNRESPONSIVE", "ENGINE_FRAME_PRESENTATION_FAILED",
-  "ENGINE_EVENT_CALLBACK_FAILED", "ENGINE_INITIALIZATION_FAILED",
+  "ENGINE_EVENT_CALLBACK_FAILED", "ENGINE_INITIALIZATION_FAILED", "ENGINE_SURFACE_FAILED", "ENGINE_SURFACE_BIND_FAILED",
+  "ENGINE_SURFACE_SETUP_FAILED", "ENGINE_SURFACE_CLOSED",
 ]);
 class TargetError extends Error {}
 const targetError = code => new TargetError(code);
 const HOST_BRAND = Symbol.for("axiosozo.engine-stream.host-connection");
 
+/** engine-surface-v1 `native_target_id` as u64 (a safe JS integer here). */
+export function streamSurfaceTargetId(target) {
+  const value = target?.native_target_id;
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,15}$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw targetError("ENGINE_SURFACE_BIND_FAILED");
+  }
+  return Number(value);
+}
+
 /**
- * `profile`: { engine, readyFields: [...], validateReady(ready, {instance, frameDamage}) (throws),
- * restoreStatuses: [...], cursors: Set, imeLimit }.
+ * `profile`: { engine, readyFields: [...], validateReady(ready, {instance, frameDamage, surface,
+ * externalBeginFrames, frameRate}) (throws), restoreStatuses: [...], cursors: Set, imeLimit }.
+ * `surface`: { endpoint (nsIAxioEngineEndpoint), service, frameRate: 60|120 } or null (pipe).
  */
 export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatSeen = 0; #heartbeatCheckedAt = 0;
   #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null;
+  #endpoint = null; #frameRate = null; #surfaceTargets = new Map(); #surfaceClosed = false;
   constructor(process, { profile, token, instance, identity, timers, deadline = 15000, frameDamage = false,
-    damagePayload = false, frameTransport = "pipe", readSlot = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS, now = () => Date.now(), onFailure = () => {}, requestPrefix = "es" }) {
+    damagePayload = false, frameTransport = "pipe", readSlot = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
+    now = () => Date.now(), onFailure = () => {}, requestPrefix = "es", surface = null }) {
     if (!profile || typeof profile.engine !== "string" || typeof profile.validateReady !== "function") throw new Error("INVALID_ENGINE_PROFILE");
     if (!/^[0-9a-f]{64}$/u.test(token) || !id(instance) || !validFixtureOrigin(identity) || !/^[a-z]{1,8}$/u.test(requestPrefix)) {
       throw new Error("INVALID_ENGINE_BOOTSTRAP");
     }
+    // Pipe damage, rectangle payloads (§6.2) and memfd slots (§6.3) describe AXCF frames;
+    // surface frames carry their own dirty rectangles, so none of them combines with surface mode.
+    if (surface && (!surface.endpoint || !FRAME_RATES.includes(surface.frameRate) || frameDamage === true
+        || damagePayload === true || frameTransport !== "pipe")) {
+      throw new Error("INVALID_ENGINE_BOOTSTRAP");
+    }
+    this.#endpoint = surface?.endpoint ?? null; this.#frameRate = surface?.frameRate ?? null;
+    this.nativeInput = surface ? surface.service ?? null : null;
+    this.surfaceConnected = false; this.surfaceClosedReason = null;
     this.profile = profile; this.instance = instance; this.identity = identity; this.frameDamage = frameDamage === true;
     // §6.2: rectangle-only payloads (needs frame damage); frames are rebuilt per target here.
     this.damagePayload = this.frameDamage && damagePayload === true;
@@ -235,6 +265,9 @@ export class EngineStreamHost {
   get [HOST_BRAND]() { return true; }
   get ended() { return this.#ended; }
   get targetCount() { return this.#targets.size; }
+  /** Frames over engine-surface-v1 into a bound canvas; false = AXCF pipe frames. */
+  get surfaceMode() { return !!this.#endpoint; }
+  get frameRate() { return this.#frameRate; }
   waiter(label, onTimeout) {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -258,10 +291,76 @@ export class EngineStreamHost {
       fixture_origin: this.identity, ...(this.frameDamage ? { frame_damage: true } : {}),
       ...(this.damagePayload ? { damage_payload: true } : {}),
       ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}) };
+    if (this.#endpoint) {
+      const endpoint = this.#endpoint;
+      try {
+        endpoint.listener = this.#surfaceListener();
+        // CONNECT is accepted only from this direct child; register it before its token leaves.
+        endpoint.expectHostPid(this.#process.pid);
+        // The service name and single-use token travel only in this authenticated hello.
+        Object.assign(hello, { surface_service: endpoint.serviceName, surface_token: endpoint.takeToken(),
+          ...(endpoint.externalBeginFrames ? { surface_begin_frames: true } : {}), frame_rate: this.#frameRate });
+      } catch { this.fail("ENGINE_SURFACE_SETUP_FAILED"); throw new Error("ENGINE_SURFACE_SETUP_FAILED"); }
+    }
     await this.#write(hello);
     await this.#readyWait.promise;
     this.status = "connected";
     return this;
+  }
+  #surfaceListener() {
+    const listener = {
+      onConnected: pid => { this.surfaceConnected = pid === this.#process.pid; },
+      onTargetGeometry: (targetId, width, height, logicalWidth, logicalHeight, scale) => {
+        const adapter = this.#surfaceTargets.get(String(targetId));
+        if (!adapter) return;
+        // Never throw back into the native caller: a violation ends the target (and host) here.
+        try { adapter.surfaceGeometry({ width, height, logicalWidth, logicalHeight, scale }); }
+        catch (error) { try { this.#targetFailed(adapter, error); } catch (fatal) { this.fail(fatal.message); } }
+      },
+      onClosed: reason => {
+        this.surfaceClosedReason = String(reason);
+        this.#surfaceClosed = true; this.#surfaceTargets.clear();
+        // host-died, host-unresponsive or protocol:<detail>: every target of this host ends.
+        if (!this.#ended && !this.#closing) this.fail("ENGINE_SURFACE_CLOSED");
+      },
+    };
+    const qi = globalThis.ChromeUtils?.generateQI?.(["nsIAxioEngineEndpointListener"]);
+    if (qi) listener.QueryInterface = qi;
+    return listener;
+  }
+  /** Present `target` in `element` (a context-less chrome <canvas>); frames bypass JS. */
+  bindSurface(adapter, element, target) {
+    const surfaceId = streamSurfaceTargetId(target);
+    if (!this.#endpoint || this.#surfaceClosed || this.#ended || !element) throw targetError("ENGINE_SURFACE_BIND_FAILED");
+    try { this.#endpoint.bindElement(element, surfaceId, target.document_generation, target.navigation_generation); }
+    catch { throw targetError("ENGINE_SURFACE_BIND_FAILED"); }
+    this.#surfaceTargets.set(String(surfaceId), adapter);
+    return surfaceId;
+  }
+  /** Chrome processed this generation: the endpoint may now show its held frames. */
+  confirmSurface(surfaceId, target) {
+    if (!this.#endpoint || this.#surfaceClosed || this.#ended) return;
+    try { this.#endpoint.setTargetGenerations(surfaceId, target.document_generation, target.navigation_generation); }
+    catch { throw targetError("ENGINE_SURFACE_BIND_FAILED"); }
+  }
+  unbindSurface(surfaceId, adapter) {
+    if (this.#surfaceTargets.get(String(surfaceId)) !== adapter) return;
+    this.#surfaceTargets.delete(String(surfaceId));
+    if (!this.#surfaceClosed && !this.#ended) try { this.#endpoint.unbindTarget(surfaceId); } catch {}
+  }
+  /** Begin-frame gating: hidden targets receive no BEGIN_FRAME and unpin old surfaces. */
+  surfaceVisible(surfaceId, visible) {
+    if (this.#surfaceClosed || this.#ended) return;
+    try { this.#endpoint?.setTargetVisible(surfaceId, visible); } catch {}
+  }
+  surfaceStats(surfaceId) {
+    if (this.#surfaceClosed || this.#ended) return null;
+    try { return this.#endpoint?.getTargetStats(surfaceId) ?? null; } catch { return null; }
+  }
+  #closeSurface() {
+    if (!this.#endpoint || this.#surfaceClosed) return;
+    this.#surfaceClosed = true; this.#surfaceTargets.clear();
+    try { this.#endpoint.close(); } catch {}
   }
   register(adapter) {
     if (this.#ended || this.#closing) throw new Error("ENGINE_UNAVAILABLE");
@@ -288,6 +387,8 @@ export class EngineStreamHost {
   }
   request(method, fields, target, { acknowledge = false, owner = null } = {}) {
     if (this.#ended || (this.#closing && !["frame_ack", "shutdown"].includes(method))) return Promise.reject(new Error("ENGINE_UNAVAILABLE"));
+    // Surface frames are released over Mach; a JSON frame_ack is a host protocol error.
+    if (method === "frame_ack" && this.#endpoint) return Promise.reject(new Error("UNEXPECTED_ENGINE_FRAME"));
     if (this.#sequence >= MAX_REQUESTS) return Promise.reject(new Error("ENGINE_REQUEST_LIMIT"));
     if (!acknowledge && this.#requests.size >= MAX_INFLIGHT_REQUESTS * Math.max(1, this.#targets.size)) return Promise.reject(new Error("ENGINE_REQUEST_LIMIT"));
     const request_id = `${this.requestPrefix}-${++this.#sequence}`;
@@ -334,7 +435,8 @@ export class EngineStreamHost {
       if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
-        if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
+        // Surface mode: the pipe carries JSON events only; frames travel over Mach.
+        if (this.#endpoint || !this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
         this.lastFrame = value.frame_id;
         const adapter = this.#adapterFor(value.target);
         let presentationError = null;
@@ -353,6 +455,9 @@ export class EngineStreamHost {
       }
       this.readPhase = "event_validate";
       if (value.event === "ready") { this.#acceptReady(value); continue; }
+      // engine-surface-v1: `error {code:"surface_failed", reason}` precedes the host's exit 64.
+      if (this.#endpoint && value.event === "error" && value.code === "surface_failed" && !value.target && !value.request_id
+          && typeof value.reason === "string" && Object.keys(value).length === 4) throw new Error("ENGINE_SURFACE_FAILED");
       const fields = EVENT_FIELDS[value.event];
       if (!fields || Object.keys(value).some(key => !["version", "event", "target", ...fields].includes(key))) throw new Error("INVALID_ENGINE_EVENT");
       if (!this.#ready) throw new Error("INVALID_ENGINE_EVENT");
@@ -398,7 +503,10 @@ export class EngineStreamHost {
     if (this.#ready || this.status !== "starting") throw new Error("UNVERIFIED_ENGINE_RUNTIME");
     const fields = this.profile.readyFields;
     if (!hasKeys(value, ["version", "event", ...fields]) || value.engine_instance !== this.instance) throw new Error("UNVERIFIED_ENGINE_RUNTIME");
-    try { this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage, damagePayload: this.damagePayload }); }
+    try {
+      this.profile.validateReady(value, { instance: this.instance, frameDamage: this.frameDamage, damagePayload: this.damagePayload,
+        surface: !!this.#endpoint, externalBeginFrames: this.#endpoint?.externalBeginFrames === true, frameRate: this.#frameRate });
+    }
     catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
     const interval = value.capabilities?.heartbeat_interval_ms;
     if (interval !== undefined && !(Number.isInteger(interval) && interval >= 100 && interval <= 2000)) throw new Error("UNVERIFIED_ENGINE_RUNTIME");
@@ -453,6 +561,8 @@ export class EngineStreamHost {
     if (this.#ended) return;
     this.#ended = true; this.status = "failed"; this.failure = reason;
     this.#stopHeartbeatWatchdog();
+    // Crash, protocol error or exit: the Mach endpoint and every binding end too.
+    this.#closeSurface();
     console.error("AXIOSOZO_ENGINE_STREAM_DIAGNOSTIC", JSON.stringify({ engine: this.profile.engine, code: reason,
       phase: this.readPhase, lastFrameId: this.lastFrame, lastFrameBytes: this.lastFrameBytes,
       targets: this.#targets.size, pendingRequests: this.#requests.size, nativeExitCode: this.nativeExitCode }));
@@ -478,6 +588,7 @@ export class EngineStreamHost {
       this.nativeExitCode = result.exitCode;
       if (result.exitCode !== 0) throw new Error("ENGINE_SHUTDOWN_FAILED");
       this.#ended = true; this.status = "closed";
+      this.#closeSurface();
       const unavailable = new Error("ENGINE_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
       this.#requests.clear();
@@ -494,13 +605,18 @@ export class EngineStreamTarget {
   #host; #pending; #requests = new Set(); #inputQueue = []; #committedURLs = new Set(); #currentURL = null;
   #frameWait = null; #creating = null; #ended = false; #closing = false; #created = false; #loaded = false;
   #historyMethods = new Set(); #damageGap = true; #frameRate = null;
-  constructor(host, { pendingTarget, onEvent = () => {}, onFrame = () => {}, onFailure = () => {} }) {
+  // Surface mode: the bound canvas, its endpoint target id, the generations chrome
+  // confirmed to the endpoint, and whether the endpoint presented a first frame.
+  #surfaceElement = null; #surfaceId = null; #confirmed = null; #surfacePresented = false;
+  constructor(host, { pendingTarget, onEvent = () => {}, onFrame = () => {}, onFailure = () => {}, element = null,
+    onGeometry = () => {} }) {
     if (host?.[HOST_BRAND] !== true) throw new Error("INVALID_ENGINE_HOST");
     this.#host = host;
     this.#pending = validateStreamTarget(pendingTarget, { engine: host.profile.engine, identity: host.identity, pending: true });
     if (this.#pending.engine_instance !== host.instance) throw new Error("FOREIGN_ENGINE_TARGET");
-    this.onEvent = onEvent; this.onFrame = onFrame; this.onFailure = onFailure;
-    this.target = null; this.surface = null; this.nativeClosed = false; this.failure = null;
+    this.onEvent = onEvent; this.onFrame = onFrame; this.onFailure = onFailure; this.onGeometry = onGeometry;
+    this.#surfaceElement = element;
+    this.target = null; this.surface = null; this.nativeClosed = false; this.failure = null; this.geometry = null;
     this.status = "connected";
     host.register(this);
   }
@@ -516,6 +632,40 @@ export class EngineStreamTarget {
       imeCommit: capabilities.ime_commit === true, ime: capabilities.ime === true, edit: capabilities.edit === true });
   }
   get appliedFrameRate() { return this.#frameRate ?? this.#host.capabilities?.frame_rate ?? 60; }
+  /** GPU surface presentation (engine-surface-v1); false in the labelled BGRA pipe fallback. */
+  get surfaceMode() { return this.#host.surfaceMode === true; }
+  /** nsIAxioEngineSurfaceService (cursor, native event detail); null in the pipe fallback. */
+  get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }
+  get maxSurfaceBytes() { return this.surfaceMode ? Infinity : MAX_FRAME_BYTES; }
+  surfaceStats() { return this.#surfaceId === null ? null : this.#host.surfaceStats(this.#surfaceId); }
+  /** onTargetGeometry from the endpoint: the first frame arrived, or its size/scale changed. */
+  surfaceGeometry(geometry) {
+    if (this.#ended || this.#surfaceId === null) return;
+    const { width, height, logicalWidth, logicalHeight, scale } = geometry;
+    if (![width, height, logicalWidth, logicalHeight].every(value => Number.isInteger(value) && value > 0 && value <= MAX_SURFACE_DIMENSION)
+        || !Number.isFinite(scale) || scale <= 0 || scale > 4) throw targetError("ENGINE_SURFACE_BIND_FAILED");
+    this.geometry = Object.freeze({ width, height, logicalWidth, logicalHeight, scale });
+    this.#surfacePresented = true;
+    try { this.onGeometry(this.geometry); }
+    catch { throw targetError("ENGINE_FRAME_PRESENTATION_FAILED"); }
+    this.#surfaceFirstFrame();
+  }
+  #surfaceFirstFrame() {
+    // Parity with acceptFrame(): a presented frame of the loaded, current target.
+    if (this.#surfacePresented && this.#loaded && this.target && !this.#closing) this.#frameWait?.resolve(this.target);
+  }
+  /**
+   * Frames of a newer generation stay held in the endpoint until chrome processed that
+   * navigation (url and load events), so page pixels never precede the address Zen shows.
+   */
+  #confirmSurface() {
+    if (this.#surfaceId === null || !this.target || !this.#loaded || this.#closing || this.#ended) return;
+    const { document_generation, navigation_generation } = this.target;
+    if (this.#confirmed?.document_generation === document_generation
+        && this.#confirmed?.navigation_generation === navigation_generation) return;
+    this.#host.confirmSurface(this.#surfaceId, this.target);
+    this.#confirmed = { document_generation, navigation_generation };
+  }
   trackRequest(request_id) { this.#requests.add(request_id); }
   untrackRequest(request_id) { this.#requests.delete(request_id); }
   allowedURL(url) { return allowedFixtureURL(url, this.#pending.identity); }
@@ -582,6 +732,12 @@ export class EngineStreamTarget {
     if (value.target) {
       this.#adopt(value.target, value.event);
       if (value.event === "navigation") { this.#damageGap = true; this.pumpInput(); }
+      if (value.event === "created" && this.surfaceMode) {
+        // Bound before the host may paint (only after load), with the created generations;
+        // later generations wait for #confirmSurface.
+        this.#surfaceId = this.#host.bindSurface(this, this.#surfaceElement, this.target);
+        this.#confirmed = { document_generation: this.target.document_generation, navigation_generation: this.target.navigation_generation };
+      }
     }
     if (value.event === "title" && (typeof value.title !== "string" || value.title.length > 1024)) throw targetError("INVALID_ENGINE_TITLE");
     if (value.event === "loading" && ![value.loading, value.can_go_back, value.can_go_forward].every(item => typeof item === "boolean")) throw targetError("INVALID_ENGINE_LOADING");
@@ -609,6 +765,8 @@ export class EngineStreamTarget {
     if (value.event === "closed") this.nativeClosed = true;
     try { this.onEvent(value); }
     catch { throw targetError("ENGINE_EVENT_CALLBACK_FAILED"); }
+    // After chrome handled the event (address bar, title): release held surface frames.
+    if (value.event === "load") { this.#confirmSurface(); this.#surfaceFirstFrame(); }
   }
   get currentURL() { return this.#currentURL; }
   get loaded() { return this.#loaded; }
@@ -622,7 +780,8 @@ export class EngineStreamTarget {
   /** Resolves once the first frame of the loaded document was presented. */
   async create(url, surface) {
     if (this.#created || this.#creating || this.status !== "connected" || !this.allowedURL(url)) throw new Error("INVALID_ENGINE_CREATE");
-    this.surface = validateStreamSurface(surface);
+    if (this.surfaceMode && !this.#surfaceElement) throw new Error("INVALID_ENGINE_CREATE");
+    this.surface = validateStreamSurface(surface, { maxBytes: this.maxSurfaceBytes });
     this.#frameWait = this.#host.waiter("ENGINE_FIRST_FRAME", code => this.fail(code));
     this.#creating = this.#request("create", { url, ...this.surface }, this.#pending);
     const result = await this.#creating;
@@ -655,7 +814,7 @@ export class EngineStreamTarget {
   developerTools() { return Promise.resolve({ status: "unsupported", reason: "DEVTOOLS_NOT_INTEGRATED" }); }
   resize(target, surface) {
     this.resolve(target);
-    const next = validateStreamSurface(surface), previous = this.surface;
+    const next = validateStreamSurface(surface, { maxBytes: this.maxSurfaceBytes }), previous = this.surface;
     this.surface = next;
     return this.#request("resize", next).then(result => {
       if (result.status !== "success") this.surface = previous;
@@ -670,6 +829,8 @@ export class EngineStreamTarget {
   visibility(target, visible) {
     this.resolve(target);
     if (typeof visible !== "boolean") throw new Error("INVALID_VISIBILITY");
+    // Begin-frame gating first, so a shown target gets ticks as the host unhides it.
+    if (this.#surfaceId !== null) this.#host.surfaceVisible(this.#surfaceId, visible);
     if (this.#host.capabilities?.visibility !== true) return Promise.resolve({ status: "unsupported", reason: "VISIBILITY_UNSUPPORTED" });
     return this.#request("visibility", { visible });
   }
@@ -717,6 +878,7 @@ export class EngineStreamTarget {
   #end(reason, status) {
     this.#ended = true; this.status = status; this.failure = status === "failed" ? reason : null;
     const error = new Error(reason);
+    if (this.#surfaceId !== null) { this.#host.unbindSurface(this.#surfaceId, this); this.#surfaceId = null; }
     this.#frameWait?.reject(error);
     this.#host.rejectRequestsOf(this, error);
     for (const item of this.#inputQueue.splice(0)) item.reject(error);

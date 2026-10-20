@@ -16,7 +16,7 @@ A specification is not runtime evidence. Results are recorded under
 | Profile | Host | `target.engine` | Status |
 | --- | --- | --- | --- |
 | `cef-v1` | `native/chromium-host` (CEF 154, macOS arm64) | `chromium` | fixture + web mode; see cef-v1 |
-| `webkit-fixture-v1` | `native/webkit-host` (WPE WebKit 2.48.3, Linux) | `webkit` | fixture mode only |
+| `webkit-fixture-v1` | `native/webkit-host` (WPE WebKit 2.48.3, Linux; system WKWebView, macOS arm64 §8.2) | `webkit` | fixture mode only |
 
 Everything in sections 2–7 is common to all profiles and is normative. A profile may
 add methods, events, capabilities and hello keys only as announced capabilities;
@@ -147,7 +147,8 @@ it, presented or not, so §6.1's "previous frame delivered" stays the reference;
 payload without a whole frame of that target and size before it is a protocol error. A
 replaced pending frame's payload is cut from the replacing frame's pixels with the merged
 damage. `capabilities.damage_payload` is false (or absent from older hosts) without the key.
-Zen negotiates it on Linux whenever it negotiates frame damage (docs/perf/pixel-path.md).
+Zen negotiates it on Linux whenever it negotiates frame damage (docs/perf/pixel-path.md),
+never on macOS.
 Hosts enlarge their stdout pipe to 1 MiB on Linux (`F_SETPIPE_SZ`, best effort).
 
 ### 6.3 memfd frames (optional, additive, Linux, EXPERIMENTAL)
@@ -169,6 +170,14 @@ frame's `frame_ack`. One frame is in flight (§6), so the host rewrites a slot o
 frame that used it was acknowledged; slots alternate. Everything else (metadata validation,
 target binding, damage, coalescing) is unchanged. Zen negotiates it only with the pref
 `axiosozo.engines.linux.memfd_frames` (default false) and never on macOS or in surface mode.
+
+### 6.4 Surface mode excludes the pipe frame features
+
+§6.1–§6.3 describe AXCF frames. In surface mode ([engine-surface-v1](engine-surface-v1.md),
+macOS) frames never use the pipe and carry their own dirty rectangles, so a hello with
+`surface_service`/`surface_token` together with `frame_damage:true`, `damage_payload:true`
+or any `frame_transport` is malformed (exit 64), and a host without surface support refuses
+the surface keys themselves. Zen never builds such a hello (`INVALID_ENGINE_BOOTSTRAP`).
 
 ## 7. Fixture security policy (all profiles)
 
@@ -205,12 +214,14 @@ editable element is focused, else as key presses.
 
 ### 8.1 Deltas against cef-v1 the Zen adapter must handle
 
+(Rows describe the Linux WPE host; the macOS WKWebView host differs as listed in §8.2.)
+
 | # | Area | cef-v1 | webkit-fixture-v1 |
 | --- | --- | --- | --- |
 | 1 | `ready` identity keys | `cef, chromium, runtime_cef, runtime_chromium, platform:"macosarm64", render_path:"native-osr-bgra"` | `engine, webkit_port, webkit, runtime_webkit, libwpe, wpebackend_fdo, platform:"linux-x86_64", sandbox, process_model, render_path:"wpe-fdo-shm-bgra"`; validate against the `webkit` entry of `upstreams.lock.json` |
 | 2 | `target.engine` | `chromium` | `webkit`; `native_target_id` is WebKit's page id (decimal) |
 | 3 | Browsing modes | fixture and `browsing_mode:"web"` | fixture only; `browsing_mode` in hello → exit 64 |
-| 4 | Surface mode | `surface_service`/`surface_token` (Mach) | absent on Linux; those keys → exit 64 |
+| 4 | Surface mode | `surface_service`/`surface_token` (Mach) | absent on Linux; those keys → exit 64. macOS: as cef-v1 (§8.2, §6.4) |
 | 5 | Key verdicts | `down` completes with `key_consumed`/`key_not_consumed` | `key_verdict:false`: `down` completes `success` without `reason`; Zen must apply its own shortcuts without a verdict |
 | 6 | Key codes | `native_key_code` is a macOS virtual key code | on Linux it is passed to WebKit as the XKB hardware keycode (e.g. 9 Escape, 113 Left, 23 Tab); the keysym comes from `text`, else from `windows_key_code`. Verified on WPE 2.48.3: the page sees `Escape`, `ArrowLeft`, `Tab` |
 | 7 | Text | `char` sends CEF char events | `char` text goes through WebKit's input-method `committed` path; a `char` equal to the text its preceding `down` already inserted is dropped (no double insertion) |
@@ -230,6 +241,22 @@ editable element is focused, else as key presses.
 | 21 | Wheel | pixel deltas, cef sign | `delta_x/delta_y` CSS px as a smooth 2-D libwpe axis event; verified: `delta_y:-400` at 2x gives one DOM `wheel` with `deltaY:400` and scrolls 400 CSS px |
 | 22 | First frame of a document | CEF paints the new document | WebKit re-renders the previous document's frozen layer tree for a few frames after commit. The host holds buffers after every commit until the committed document (asked from an isolated script world) has rendered three animation frames; a 2 s fallback covers pages where that script cannot run. No wire change: Zen simply never receives old-document pixels under a new generation |
 | 23 | Back/forward | CEF back/forward cache | WebKit's back/forward cache (cache model `web-browser`, in the private profile): `back` restores without a fetch; `load.http_status` is then 200; WebKit clears `autocomplete=off` fields on restore |
+
+### 8.2 macOS WKWebView host (`native/webkit-host/mac`, EXPERIMENTAL)
+
+Same core (`stream_core.hpp`), same methods and fixture policy. `ready`: `{engine:"webkit",
+webkit_port:"wkwebview", webkit, runtime_webkit (system WebKit bundle version, shape-checked,
+not pinned), platform:"macos-<major>.<minor>-arm64", sandbox_configured:true,
+sandbox:"macos-webkit-xpc", process_model:"multi-process", capture:"wkwebview-snapshot",
+private_spi:[the two names in WEBKIT_MAC_PRIVATE_SPI], render_path:"wkwebview-snapshot-iosurface"
+(surface) | "wkwebview-snapshot-bgra" (pipe fallback), engine_instance, capabilities}`;
+capabilities as §8 except `surface`/`external_begin_frame` as negotiated, `cursor:false`,
+`wheel_phases:false`, and `damage_payload:false`, `frame_transport:"pipe"` always (§6.4).
+The host accepts the engine-surface-v1 hello keys (`surface_service`, `surface_token`,
+optional `surface_begin_frames`, `frame_rate`); `native_target_id` is the decimal view id.
+In surface mode a JSON `frame_ack` is a protocol error and the AXCF bound becomes 4096 px/side
+without the 32 MiB cap; a fatal Mach error is `error {code:"surface_failed"}` then exit 64.
+Without the engine-view component Zen uses the pipe fallback with `frame_damage` only.
 
 ## 9. Versioning
 

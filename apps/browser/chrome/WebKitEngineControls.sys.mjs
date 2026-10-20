@@ -5,8 +5,9 @@
 // CEFPresenter) and WebKit (WebKitPresenter). Returns an object with the same
 // surface as installEngineProbeControls(), so startup hands it to the tab glyph,
 // the engine preference, the coordinator authority check and every other reader in
-// place of the Chromium probe. Returns null where WebKit cannot run at all (macOS,
-// other platforms, no WebKit host configured): then nothing in the window changes.
+// place of the Chromium probe. Returns null where WebKit cannot run at all (no WebKit
+// host for this platform, i.e. not Linux x86_64 or macOS arm64, or no host configured):
+// then nothing in the window changes.
 import { WebKitPresenter } from "./WebKitPresenter.sys.mjs";
 import { webkitPlatform, webkitAvailabilityFor, webkitWebModeRequested, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { normalizeEngineId, isEngineAvailable, engineAvailability, engineLabel, CHROMIUM_FIXTURE_LINEUP } from "./EngineRegistry.sys.mjs";
@@ -61,7 +62,9 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
     const tab = win.gBrowser.selectedTab;
     const active = engineOf(tab) === "webkit";
     indicator.hidden = !active && !pending;
-    const label = pending ? "Switching engine…" : `WebKit ${WEBKIT_VERSION} · test page only · back to Firefox`;
+    let version = WEBKIT_VERSION;
+    try { version = presenter?.diagnostics?.()?.version ?? WEBKIT_VERSION; } catch {}
+    const label = pending ? "Switching engine…" : `WebKit ${version} · test page only · back to Firefox`;
     indicator.setAttribute("label", label);
     indicator.setAttribute("tooltiptext", (failure ? failure + ". " : "")
       + "Experimental WebKit engine (local test page only). Dialogs, permissions, downloads, IME and accessibility are unavailable.");

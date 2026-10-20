@@ -1,0 +1,140 @@
+# WebKit (WKWebView, system WebKit) engine host on a real macOS 15 arm64 runner with a
+# logged-in GUI session: capture-path bench, host build, transport/core unit tests,
+# engine-stream-v1 stream/input/security tests over the pipe, engine-surface-v1 tests
+# with the standalone Mach/IOSurface receiver, and process cleanup.
+# Component evidence only (never Zen E1/E2). Results go to the ci-results branch.
+#
+# publish: the shared publish-ci-results action uses GNU `cp --parents`, which macOS
+# does not have, so this workflow inlines the same publication with tar.
+name: macos-webkit-host
+on:
+  push:
+    branches: [claude/webkit-macos-host-ud7z1k, cloud/webkit-macos, cloud/merge-webkit-macos]  # cloud/merge-webkit-macos: merge verification
+    paths:
+      - native/webkit-host/**
+      - '!native/webkit-host/upstream/**'
+      - native/chromium-host/engine_surface_v1.h
+      - contracts/engine-stream-v1.md
+      - contracts/engine-surface-v1.md
+      - tests/fixtures/engine.html
+      - .github/workflows/macos-webkit-host.yml
+
+concurrency:
+  group: macos-webkit-host-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # upstreams.lock.json webkit.ci_image (same as linux-webkit-host.yml)
+  IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+
+jobs:
+  capture-bench:
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-bench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Runner info
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { sw_vers; uname -a; sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; xcrun --show-sdk-version; xcrun clang --version | head -1;
+            system_profiler SPDisplaysDataType 2>/dev/null | head -40; } > "$EVIDENCE_OUT/runner.txt" 2>&1
+      - name: Build the capture bench
+        run: |
+          set -euo pipefail
+          xcrun clang++ -std=c++20 -fobjc-arc -O2 -arch arm64 -mmacosx-version-min=14.5 -Wall -Wextra -Wno-unused-parameter \
+            native/webkit-host/mac/tests/capture_bench.mm -o "$RUNNER_TEMP/capture_bench" \
+            -framework Cocoa -framework WebKit -framework QuartzCore -framework Metal -framework IOSurface -framework ImageIO \
+            -framework UniformTypeIdentifiers -framework ScreenCaptureKit -framework CoreMedia -framework CoreVideo -lz 2>&1 | tee "$EVIDENCE_OUT/build.log"
+      - name: Run the capture bench
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/capture_bench" "$EVIDENCE_OUT" > "$EVIDENCE_OUT/bench.json" 2> "$EVIDENCE_OUT/bench-stderr.log"
+          code=$?
+          tail -c 4000 "$EVIDENCE_OUT/bench-stderr.log"; head -c 6000 "$EVIDENCE_OUT/bench.json"
+          exit $code
+      - name: Publish results (ci-results branch)
+        if: always()
+        env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: capture-bench, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
+               REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
+        run: bash native/webkit-host/mac/ci/publish.sh
+
+  host:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Build the WKWebView host
+        run: |
+          set -euo pipefail
+          # Gitignored build output outside the checkout (normalized path: profile guards compare it).
+          export AXIOSOZO_BUILD_ROOT="$RUNNER_TEMP/build"
+          echo "AXIOSOZO_BUILD_ROOT=$AXIOSOZO_BUILD_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_OUT" "$AXIOSOZO_BUILD_ROOT/webkit"
+          start=$(date +%s)
+          native/webkit-host/mac/build.sh 2>&1 | tee "$EVIDENCE_OUT/build.log"
+          echo "{\"build_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/build.json"
+          otool -L "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" > "$EVIDENCE_OUT/otool-L.txt"
+      - name: Engine-free unit tests (strict JSON, AXCF transport, stream core harness)
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/probe.py test-native 2>&1 | tail -n 40 | tee "$EVIDENCE_OUT/unit.log"
+      - name: Stream, input and security tests over the pipe (real WKWebView)
+        if: always()
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/mac/mac_test.py "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" 2>&1 | tee "$EVIDENCE_OUT/mac-test.log"
+      - name: engine-surface-v1 tests with the standalone receiver (real WKWebView)
+        if: always()
+        run: |
+          set -o pipefail
+          python3 native/webkit-host/mac/surface_test.py "$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitMacHost" "$EVIDENCE_OUT/surface" 2>&1 | tee "$EVIDENCE_OUT/surface-test.log"
+      - name: Collect evidence
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE_OUT/runs"
+          cp -R docs/evidence/darwin/webkit/runs/. "$EVIDENCE_OUT/runs/" 2>/dev/null || true
+          rm -f "$EVIDENCE_OUT/surface/surface-receiver"
+          ps -axo pid=,comm= | grep -i webkit > "$EVIDENCE_OUT/webkit-processes-after.txt" || true
+      - name: Publish results (ci-results branch)
+        if: always()
+        env: { SRC: "${{ env.EVIDENCE_OUT }}", NAME: host, TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}",
+               REF: "${{ github.ref_name }}", RUN: "${{ github.run_id }}-${{ github.run_attempt }}", SHA: "${{ github.sha }}" }
+        run: bash native/webkit-host/mac/ci/publish.sh
+
+  # The shared core (stream_core.hpp) also builds the Linux WPE host: rerun its full suite
+  # (same pinned container script and CI-environment settings as linux-webkit-host.yml).
+  wpe-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-wpe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build and test the WPE host in debian:13 (pinned)
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          docker pull -q "$IMAGE"
+          set +e
+          docker run --rm --shm-size=1g \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$EVIDENCE_OUT:/out" "$IMAGE" sh /src/native/webkit-host/ci/container_test.sh
+          code=$?
+          tail -n 60 "$EVIDENCE_OUT/test.log" 2>/dev/null
+          exit $code
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: wpe-regression

@@ -42,7 +42,11 @@ FRAME_KEYS = {'version', 'target', 'frame_id', 'width', 'height', 'stride', 'dev
 
 
 def read_packet(pipe, deadline, damage=False, payload=False, memfd=False):
-    header = read_exact(pipe, 16, deadline)
+    # The caller's deadline applies until a packet starts; a started packet is always read
+    # whole, so a timed-out wait can never leave the stream mid-packet.
+    first = read_exact(pipe, 1, deadline)
+    deadline = max(deadline, time.monotonic() + 20)
+    header = first + read_exact(pipe, 15, deadline)
     magic, version, kind, metadata_size, size = struct.unpack('>4sHHII', header)
     if magic != b'AXCF' or version != 1 or kind not in (1, 2):
         raise ValueError('invalid AXCF header')
@@ -124,6 +128,7 @@ class Session:
         self.process = subprocess.Popen([str(binary), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.error,
                                         start_new_session=True, bufsize=0, env=env)
+        probe.track_mac_host(self.process.pid)
         self.token = secrets.token_hex(32)
         self.instance = 'webkit-fixture-' + secrets.token_hex(8)
         self.counter = 0
@@ -330,9 +335,10 @@ def expect_ready(ready, engine, port='wpe'):
     assert caps['popups'] is False and caps['downloads'] is False and caps['permissions'] is False, caps
     assert caps['ime_commit'] is True and caps['key_verdict'] is False and caps['private_mode'] is False, caps
     if engine == 'webkit' and port == 'wkwebview':
-        # macOS scaffold: system WebKit, snapshot frames; never product evidence.
+        # macOS host: system WebKit, snapshot frames over the AXCF pipe fallback here.
         assert ready['webkit_port'] == 'wkwebview' and ready['render_path'] == 'wkwebview-snapshot-bgra', ready
-        assert ready['scaffold'] is True and ready['sandbox'] == 'macos-webkit-xpc', ready
+        assert ready['sandbox'] == 'macos-webkit-xpc' and ready['capture'] == 'wkwebview-snapshot', ready
+        assert isinstance(ready['private_spi'], list) and caps['surface'] is False, ready
     elif engine == 'webkit':
         pinned = probe.lock()
         assert ready['webkit_port'] == 'wpe' and ready['render_path'] == 'wpe-fdo-shm-bgra', ready
@@ -364,6 +370,9 @@ def scenario(session, origin, directory, engine, port='wpe'):
     if engine == 'webkit' and port == 'wpe':
         # The web process must actually run inside bubblewrap, not merely be configured to.
         assert sandbox['web_process'] and sandbox['bwrap_processes'] >= 1, sandbox
+    if engine == 'webkit' and port == 'wkwebview':
+        # System WebKit's WebContent runs as a Seatbelt-sandboxed XPC service.
+        assert sandbox['web_process'] and sandbox['web_process_sandboxed'], sandbox
     # Typed input reaches the page through the text commit path and is visible in title and pixels.
     focus = session.command('focus', focused=True)
     session.completed(focus)

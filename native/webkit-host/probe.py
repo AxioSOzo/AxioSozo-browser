@@ -33,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 # Bulky output stays under a gitignored project build root (override: AXIOSOZO_BUILD_ROOT).
 BUILD_ROOT = Path(os.environ.get('AXIOSOZO_BUILD_ROOT', str(ROOT / '.local/build')))
-BASE = BUILD_ROOT / 'webkit'
+BASE = Path(os.path.abspath(BUILD_ROOT / 'webkit'))  # mkdtemp() returns normalized paths
 BINARY = BASE / 'AxioWebKitHost'
 # Run output is gitignored (docs/evidence/*); small curated copies are committed explicitly.
 EVIDENCE = ROOT / 'docs/evidence' / ('linux' if platform.system() == 'Linux' else platform.system().lower()) / 'webkit/runs'
@@ -318,8 +318,78 @@ def descendants(pid, table=None):
     return found
 
 
+def mac_webkit_helpers():
+    """pid -> name of every live system WebKit XPC helper (com.apple.WebKit.*), macOS only."""
+    if platform.system() != 'Darwin':
+        return {}
+    done = subprocess.run(['/bin/ps', '-axo', 'pid=,comm='], capture_output=True, text=True, timeout=10)
+    helpers = {}
+    for line in done.stdout.splitlines():
+        pid, _, comm = line.strip().partition(' ')
+        name = comm.strip().rsplit('/', 1)[-1]
+        if pid.isdigit() and name.startswith('com.apple.WebKit.'):
+            helpers[int(pid)] = name
+    return helpers
+
+
+# WebKit helpers that existed before any host of this test process started (other apps).
+MAC_HELPER_BASELINE = set(mac_webkit_helpers())
+# Hosts this test process started (stream_test.Session) and their launchd responsible pids;
+# other runner processes (e.g. Quick Look) use WebKit too.
+MAC_HOST_PIDS = set()
+
+
+def mac_responsible_pid(pid):
+    """The pid launchd holds responsible for an XPC service (libquarantine), or None."""
+    try:
+        quarantine = ctypes.CDLL('/usr/lib/system/libquarantine.dylib')
+        function = quarantine.responsibility_get_pid_responsible_for_pid
+    except (OSError, AttributeError):
+        return None
+    function.argtypes = [ctypes.c_int]
+    function.restype = ctypes.c_int
+    value = function(pid)
+    return value if value > 0 else None
+
+
+def track_mac_host(pid):
+    """Remember a spawned host and the process launchd holds responsible for it (inherited)."""
+    if platform.system() == 'Darwin':
+        MAC_HOST_PIDS.update(p for p in (pid, mac_responsible_pid(pid)) if p)
+
+
+def mac_host_helpers(host_pids):
+    """WebKit helpers started after this test process began whose launchd responsible pid is a
+    tracked host or that host's own responsible process. Without the responsibility API: every
+    helper that appeared since this process started."""
+    helpers = {pid: name for pid, name in mac_webkit_helpers().items() if pid not in MAC_HELPER_BASELINE}
+    if mac_responsible_pid(os.getpid()) is None:
+        return helpers
+    return {pid: name for pid, name in helpers.items() if mac_responsible_pid(pid) in host_pids}
+
+
+def mac_sandboxed(pid):
+    """sandbox_check(pid, NULL, SANDBOX_FILTER_NONE) == 1: the process runs under a Seatbelt profile."""
+    libsystem = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    check = libsystem.sandbox_check
+    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    check.restype = ctypes.c_int
+    return check(pid, None, 0) == 1
+
+
 def sandbox_observation(host_pid):
-    """Which WebKit helpers run, and whether each one runs under bubblewrap."""
+    """Which WebKit helpers run, and whether each one runs under bubblewrap (Linux) or Seatbelt (macOS)."""
+    if platform.system() == 'Darwin':
+        # System WebKit's helpers are launchd XPC services, not our children: attribute them
+        # by launchd's responsible pid (other runner processes use WebKit too).
+        helpers = mac_host_helpers({host_pid, mac_responsible_pid(host_pid)} - {None})
+        processes = [dict(pid=pid, comm=name, sandboxed=mac_sandboxed(pid), responsible_pid=mac_responsible_pid(pid))
+                     for pid, name in sorted(helpers.items())]
+        web = [p for p in processes if p['comm'].startswith('com.apple.WebKit.WebContent')]
+        network = [p for p in processes if p['comm'].startswith('com.apple.WebKit.Networking')]
+        return dict(observed=True, processes=processes, bwrap_processes=0, web_process=bool(web), network_process=bool(network),
+                    web_process_sandboxed=bool(web) and all(p['sandboxed'] for p in web),
+                    all_helpers_sandboxed=bool(processes) and all(p['sandboxed'] for p in processes), sandbox='seatbelt')
     if platform.system() != 'Linux':
         return dict(observed=False, reason='not Linux')
     tree = descendants(host_pid)
@@ -333,7 +403,10 @@ def sandbox_observation(host_pid):
 
 
 def orphans(marker):
-    """Live processes that are our re-parented children or mention this run's private profile."""
+    """Live processes that are our re-parented children or mention this run's private profile.
+    macOS: WebKit XPC helpers that launchd attributes to a host this test process started."""
+    if platform.system() == 'Darwin':
+        return [dict(pid=pid, comm=name) for pid, name in mac_host_helpers(MAC_HOST_PIDS).items()]
     me = os.getpid()
     table = proc_table()
     return [dict(pid=pid, comm=comm, cmdline=cmd[:300]) for pid, (ppid, comm, cmd) in table.items()

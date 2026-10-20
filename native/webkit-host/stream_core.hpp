@@ -106,6 +106,9 @@ public:
 struct Tab;
 class Engine {
 public:
+  // engine-surface-v1 (macOS Mach/IOSurface frames). Only an engine that returns true
+  // accepts the hello's surface keys; for every other engine they stay protocol errors.
+  virtual bool surfaceSupported() { return false; }
   virtual ~Engine() = default;
   // Synchronous creation without loading; nullptr = native creation failed.
   virtual std::unique_ptr<EngineView> createView(Tab& tab, int width, int height, double scale, int frameRate) = 0;
@@ -133,6 +136,8 @@ struct Tab {
   std::vector<uint8_t> sent; int sentWidth = 0, sentHeight = 0; bool sentValid = false;
   int lastDamage[4] = {0, 0, 0, 0};
   std::vector<uint8_t> payload;  // damage_payload: the rectangle's rows of the frame being sent
+  // Surface mode: a paint found no free ring slot; flush again once one is released.
+  bool surfaceStalled = false;
 };
 
 struct Rect { int x = 0, y = 0, width = 0, height = 0; bool empty() const { return width <= 0 || height <= 0; } };
@@ -160,13 +165,37 @@ inline Rect diffBounds(const uint8_t* a, const uint8_t* b, int width, int height
   return {left, top, right - left + 1, bottom - top + 1};
 }
 
+// One frame handed to the engine-surface-v1 transport (surface mode only). `damage` is
+// relative to the previous frame sent for this target; empty means the whole frame.
+struct SurfaceFrame {
+  uint64_t nativeTargetId = 0, documentGeneration = 0, navigationGeneration = 0, frameId = 0;
+  const uint8_t* pixels = nullptr;  // tight BGRA8 premultiplied, width*4 stride
+  int width = 0, height = 0, logicalWidth = 0, logicalHeight = 0;
+  double scale = 1;
+  Rect damage;
+};
+enum class SurfaceResult { Sent, NoFreeSlot, Failed };
+class SurfaceSink {
+public:
+  virtual ~SurfaceSink() = default;
+  virtual SurfaceResult present(Tab& tab, const SurfaceFrame& frame) = 0;
+};
+
+// Bootstrap name of Zen's Mach service: [A-Za-z0-9._-], 8..127 bytes (engine-surface-v1).
+inline bool surfaceServiceValue(const Value* v) {
+  if (!v || !v->isString() || v->string.size() < 8 || v->string.size() > 127) return false;
+  for (char c : v->string)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')) return false;
+  return true;
+}
+
 class Host {
 public:
   Host(Transport& transport, Engine& engine) : transport_(transport), engine_(engine) {}
 
   // ---- Authentication ------------------------------------------------------------
-  // First stdin line. Fixture profile only: web browsing and Mach surfaces are not
-  // offered by this host and their keys are protocol errors.
+  // First stdin line. Fixture profile only: web browsing is not offered and its keys are
+  // protocol errors; so are the Mach surface keys unless the engine supports surfaces.
   bool handshake(std::chrono::milliseconds timeout) {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline && !transport_.failed() && !transport_.eof()) {
@@ -183,6 +212,10 @@ public:
     if (hello->has("frame_damage")) fields.push_back("frame_damage");
     if (hello->has("damage_payload")) fields.push_back("damage_payload");
     if (hello->has("frame_transport")) fields.push_back("frame_transport");
+    // engine-surface-v1: service and token come together; begin frames only with them.
+    bool surface = engine_.surfaceSupported() && (hello->has("surface_service") || hello->has("surface_token"));
+    if (surface) { fields.push_back("surface_service"); fields.push_back("surface_token"); }
+    if (surface && hello->has("surface_begin_frames")) fields.push_back("surface_begin_frames");
     if (!exactKeys(*hello, fields) || !integer(hello->get("version"), 1) || hello->get("version")->number != 1) return false;
     if (!hello->get("method")->isString() || hello->get("method")->string != "hello" || !tokenValue(hello->get("token"))) return false;
     if (!identifier(hello->get("engine_instance")) || !text(hello->get("fixture_origin"), 128)
@@ -196,6 +229,16 @@ public:
     if (auto payload = hello->get("damage_payload")) {
       if (!boolean(payload) || (payload->boolean && !frameDamage_)) return false;
       damagePayload_ = payload->boolean;
+    }
+    if (surface) {
+      // Pipe damage, rectangle payloads and memfd slots describe AXCF frames; surface frames
+      // carry their own dirty rects, so none of them combines with surface mode.
+      if (!surfaceServiceValue(hello->get("surface_service")) || !tokenValue(hello->get("surface_token")) || frameDamage_
+          || hello->has("frame_transport")) return false;
+      if (auto begin = hello->get("surface_begin_frames")) { if (!boolean(begin)) return false; beginFrames_ = begin->boolean; }
+      surfaceService_ = hello->get("surface_service")->string;
+      surfaceToken_ = hello->get("surface_token")->string;
+      surfaceRequested_ = true;
     }
     // §6.3 frame_transport "memfd": pixels in a sealed memfd slot (Linux only).
     if (auto mode = hello->get("frame_transport")) {
@@ -211,6 +254,22 @@ public:
   int frameRate() const { return frameRate_; }
   bool frameDamage() const { return frameDamage_; }
   bool damagePayload() const { return damagePayload_; }
+  bool surfaceRequested() const { return surfaceRequested_; }
+  bool externalBeginFrames() const { return beginFrames_; }
+  const std::string& surfaceService() const { return surfaceService_; }
+  // The single-use surface token (64 hex); cleared after the first call.
+  std::string takeSurfaceToken() { std::string token; token.swap(surfaceToken_); return token; }
+  // Surface mode: frames leave through `sink` (set before ready()), never the AXCF pipe.
+  void setSurfaceSink(SurfaceSink* sink) { surface_ = sink; }
+  // A ring slot of `tab` became free: deliver a paint that found none.
+  void surfaceSlotFreed(Tab* tab) { if (tab && tab->surfaceStalled) { tab->surfaceStalled = false; flush(tab); } }
+  // Fatal Mach channel error: `error {code:"surface_failed", reason}`, then exit 64 (engine-surface-v1).
+  void surfaceFailed(const std::string& reason) {
+    if (surfaceFailed_) return;
+    surfaceFailed_ = true;
+    event("error", Object{{"code", "surface_failed"}, {"reason", reason}});
+    closing_ = true;
+  }
 
   // Strict fixture policy: exactly the synthetic page and its GET navigation.
   bool allowedURL(const std::string& url, bool resource = false) const {
@@ -220,7 +279,7 @@ public:
 
   Object baseCapabilities() const {
     return Object{
-      {"surface", false}, {"external_begin_frame", false}, {"frame_rate", frameRate_}, {"observe", true},
+      {"surface", surface_ != nullptr}, {"external_begin_frame", surface_ != nullptr && beginFrames_}, {"frame_rate", frameRate_}, {"observe", true},
       {"navigate", true}, {"back", true}, {"forward", true}, {"reload", true}, {"stop", true}, {"close", true},
       {"input", true}, {"edit", true}, {"visibility", true}, {"cursor", true}, {"multi_target", true},
       {"max_targets", int(MaxTabs)}, {"persistent_profile", false}, {"open_in_tab", false}, {"devtools", false},
@@ -279,7 +338,7 @@ public:
   int finish() {
     if (!shutdownRequest_.empty() && !transport_.failed()) complete(shutdownRequest_, "success");
     transport_.finishEvents(std::chrono::milliseconds(1000));
-    return transport_.failed() ? 64 : 0;
+    return transport_.failed() || surfaceFailed_ ? 64 : 0;
   }
   void failProtocol() { transport_.reject(); closing_ = true; }
 
@@ -349,7 +408,7 @@ public:
   // Engine pixels: copied at once, so the engine may release its buffer on return.
   void frame(Tab* tab, const uint8_t* pixels, int width, int height, size_t stride, PixelFormat format) {
     if (!tab || !tab->created || tab->closing || closing_ || !pixels) return;
-    if (width <= 0 || height <= 0 || width > 4096 || height > 4096 || uint64_t(width) * uint64_t(height) * 4 > MaxFrame
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096 || (!surface_ && uint64_t(width) * uint64_t(height) * 4 > MaxFrame)
         || stride < size_t(width) * 4) {
       tabEvent(tab, "error", Object{{"code", "unsupported_surface"}}); return;
     }
@@ -386,6 +445,9 @@ private:
   Engine& engine_;
   std::string token_, instance_, fixtureOrigin_, shutdownRequest_;
   int frameRate_ = 60; bool frameDamage_ = false, damagePayload_ = false;
+  bool surfaceRequested_ = false, beginFrames_ = false, surfaceFailed_ = false;
+  std::string surfaceService_, surfaceToken_;
+  SurfaceSink* surface_ = nullptr;
   bool ready_ = false, closing_ = false, closed_ = false;
   uint64_t frameId_ = 0, heartbeat_ = 0;
   std::chrono::steady_clock::time_point nextHeartbeat_{};
@@ -425,9 +487,10 @@ private:
     if (!integer(w, 4096) || !integer(h, 4096) || !w->number || !h->number || !scale || !scale->isNumber()) return false;
     return std::isfinite(scale->number) && scale->number >= 1 && scale->number <= 4;
   }
-  static bool fits(const Value* w, const Value* h, const Value* scale) {
+  // The pipe's 32 MiB payload bound does not apply to surface frames (4096 px/side only).
+  bool fits(const Value* w, const Value* h, const Value* scale) const {
     double pw = std::ceil(w->number * scale->number), ph = std::ceil(h->number * scale->number);
-    return pw <= 4096 && ph <= 4096 && pw * ph * 4 <= double(MaxFrame);
+    return pw <= 4096 && ph <= 4096 && (surface_ || pw * ph * 4 <= double(MaxFrame));
   }
   void resetNavigation(Tab* tab) { tab->historyNavigation = false; tab->historyURL.clear(); tab->commandNavigationInvalidated = false; }
   void invalidateNavigation(Tab* tab) {
@@ -444,6 +507,7 @@ private:
   void flush(Tab* tab) {
     if (!tab->paintAllowed || !tab->visible || !tab->latestValid || tab->closing || closing_) return;
     int w = tab->latestWidth, h = tab->latestHeight;
+    if (surface_) { flushSurface(tab, w, h); return; }
     Object meta{{"version", 1}, {"target", tab->target}, {"width", w}, {"height", h}, {"stride", w * 4},
                 {"device_scale", tab->scale}, {"format", "BGRA8"}};
     Rect damageRect{0, 0, w, h};
@@ -473,6 +537,29 @@ private:
       return;
     }
     transport_.frame(tab->key, json::dump(Value(std::move(meta))), json::dump(tab->target), frameId_, tab->latest.data(), tab->latest.size());
+  }
+  void flushSurface(Tab* tab, int w, int h) {
+    Rect damage;
+    if (tab->sentValid && tab->sentWidth == w && tab->sentHeight == h) {
+      damage = diffBounds(tab->sent.data(), tab->latest.data(), w, h);
+      if (damage.empty()) return;  // identical pixels: nothing to present
+      if (damage.x == 0 && damage.y == 0 && damage.width == w && damage.height == h) damage = Rect{};
+    }
+    if (frameId_ == MaxGeneration) { failProtocol(); return; }
+    SurfaceFrame frame;
+    frame.nativeTargetId = std::stoull(tab->target.get("native_target_id")->string);
+    frame.documentGeneration = uint64_t(tab->target.get("document_generation")->number);
+    frame.navigationGeneration = uint64_t(tab->target.get("navigation_generation")->number);
+    frame.frameId = ++frameId_;  // gaps allowed (engine-surface-v1)
+    frame.pixels = tab->latest.data(); frame.width = w; frame.height = h;
+    frame.logicalWidth = tab->width; frame.logicalHeight = tab->height; frame.scale = tab->scale; frame.damage = damage;
+    switch (surface_->present(*tab, frame)) {
+      case SurfaceResult::Sent:
+        tab->sent = tab->latest; tab->sentWidth = w; tab->sentHeight = h; tab->sentValid = true; tab->surfaceStalled = false;
+        break;
+      case SurfaceResult::NoFreeSlot: tab->surfaceStalled = true; break;
+      case SurfaceResult::Failed: surfaceFailed("surface_send_failed"); break;
+    }
   }
   void closeTab(Tab* tab) {
     if (tab->closing) return;
@@ -515,6 +602,8 @@ private:
     const Value* supplied = c.get("target");
     if (!validTarget(supplied, creating)) { failProtocol(); return; }
     if (method == "frame_ack") {
+      // Surface frames are released over Mach; a JSON frame_ack is a protocol error.
+      if (surface_) { failProtocol(); return; }
       // The exact outstanding target, even if stale: discarded frames release credit too.
       if (!integer(c.get("frame_id")) || !transport_.acknowledge(uint64_t(c.get("frame_id")->number), json::dump(*supplied))) failProtocol();
       return;

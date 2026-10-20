@@ -17,7 +17,16 @@ probe = stream.probe
 
 CASES = ['wrong_token', 'duplicate_frame_ack', 'unknown_frame_ack', 'duplicate_target_id', 'replayed_request_id',
          'unknown_key', 'malformed_json', 'overlong_line', 'denied_navigation_url', 'web_mode_hello',
-         'surface_hello', 'clean_pipe_eof', 'shutdown']
+         'surface_hello', 'surface_memfd_hello', 'surface_damage_payload_hello', 'payload_without_damage_hello',
+         'clean_pipe_eof', 'shutdown']
+SURFACE_HELLO = {'surface_service': 'dev.axiosozo.surface.' + '0' * 32, 'surface_token': '1' * 64}
+# Hellos every host refuses with exit 64: surface mode excludes the Linux pipe features
+# (engine-stream-v1 §6.2/§6.3), and rectangle payloads need frame damage.
+REFUSED_HELLOS = {'web_mode_hello': {'browsing_mode': 'web'},
+                  'surface_hello': SURFACE_HELLO,
+                  'surface_memfd_hello': dict(SURFACE_HELLO, frame_transport='memfd'),
+                  'surface_damage_payload_hello': dict(SURFACE_HELLO, frame_damage=True, damage_payload=True),
+                  'payload_without_damage_hello': {'damage_payload': True}}
 
 
 def pending(session, origin, tab='fixture-tab'):
@@ -36,12 +45,11 @@ def expect_exit(session, code):
 
 
 def case(kind, binary, origin, directory, server):
-    hello_extra = {'web_mode_hello': {'browsing_mode': 'web'},
-                   'surface_hello': {'surface_service': 'dev.axiosozo.surface.' + '0' * 32, 'surface_token': '1' * 64}}.get(kind)
+    hello_extra = REFUSED_HELLOS.get(kind)
     session = stream.Session(binary, origin, directory, hello_extra=hello_extra)
     try:
-        if kind in ('web_mode_hello', 'surface_hello'):
-            # The fixture host offers neither profile: the hello itself is refused.
+        if kind in REFUSED_HELLOS:
+            # The fixture host offers neither profile, nor these combinations: the hello itself is refused.
             expect_exit(session, 64)
             return session
         session.until(lambda _, item: item.get('event') == 'ready')
