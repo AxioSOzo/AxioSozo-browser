@@ -46,7 +46,9 @@ platform-exclusive:
 | linux-webkit-host (debian:13 WPE 2.48.3) | 39380029025 | PASS — webkit-wpe stream incl. damage, damage_payload, memfd, **memfd_fallback** PASS; input, security, sandbox probe |
 | linux-webkit-zen (real Linux Zen app) | 39380028822 | PASS — launch/chrome/roundtrip (Gecko→WebKit→type/click/page2/Back/scroll→Gecko), host kill keeps Gecko tab, three engines Gecko→WebKit→Gecko→Chromium→Gecko; WebKit tab negotiated `frameTransport:"memfd"`, `frameUpload:"native"`, native receiver applied/presented 3/3, failed 0 |
 | Linux check and test | 39380054910 (078d89a = 33f91ee + handoff doc) | PASS |
-| macOS CI (regression lane vs base) | 39380054971 (078d89a) | in progress at time of writing; the final-head run supersedes it |
+| macOS CI (regression lane vs base) | 39380054971 (078d89a) | cancelled by a later push; its partial compare.md: 0 REGRESSION, `cef:test_probe.py` PASS, `webkit:mac-*` NEW_GATE_NOT_PASSING |
+| macOS CI | 39385874200 (a0415774) | FAIL: `webkit:mac-build` link error (undefined `axio::wksurface::*`): `scripts/macos_ci.py` compiled `host_mac.mm` alone, so mac-stream/input/security had no binary. Fixed in 8a3e21ca (lane now uses `native/webkit-host/mac/build.sh`). Also 1 REGRESSION row `cef:test_probe.py` (`test_sigterm_routes_through_owned_cleanup`: `os.killpg(pid, 0)` → EPERM in `probe.py cleanup_group`); this PR does not touch `native/chromium-host` (no diff vs cloud/integration), the same gate PASSed on 39380054971 for identical chromium-host code, and the same row flapped on cloud/webkit-feel 39376249625, so it is intermittent and belongs to the CEF owner |
+| macOS CI | (on the head after 8a3e21ca) | see below |
 
 PNGs inspected from ci-results (`cloud_merge-webkit-macos/39380028822-1-webkit-zen-e2e/roundtrip/03-typed.png`,
 `23-three-chromium.png`; `39380028752-1-host/runs/webkit-wkwebview-input-*/input-typed.png`): WebKit fixture
