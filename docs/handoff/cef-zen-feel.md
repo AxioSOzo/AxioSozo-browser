@@ -7,8 +7,8 @@ Branch: `claude/cef-zen-feel-dx16ke` — this session's designated branch, used 
 `cloud/cef-zen-feel`. The workflow triggers on both names.
 
 Nothing is READY. Here is where things stand:
-- E1/E2 for Chromium inside the Linux Zen app are **green**: `linux-cef-zen` run
-  **39359724324** succeeded, and I inspected its screenshots.
+- E1/E2 for Chromium inside the Linux Zen app are **green**: `linux-cef-zen` runs
+  **39359724324** and **39362536705** (on the final code) succeeded, and I inspected its screenshots.
 - Most of the native-feel matrix passes.
 - PARTIAL because these remain open:
   - dead keys and compose: BLOCKED_ENV under Xvfb;
@@ -91,6 +91,7 @@ Nothing is READY. Here is where things stand:
 | 39354267095 | **beforeunload PASS** (Escape stays, Return leaves); Gecko-baseline Ctrl+L crashed the parent → it is not a Chromium bug |
 | 39356851268 | F5/Ctrl+R dead over Chromium (`Browser:Reload` disabled) → fix 4 |
 | **39359724324** | **success**: harness PASS, fixture PASS, web PASS with BLOCKED {ime, urlbar_chromium (crash), the three after it}, 2× PASS; reload keys PASS |
+| **39362536705** | **success** on the final code commit 02d0870: the same result reproduced (same BLOCKED set) |
 
 The PR's "Linux check and test" runs passed: 39338055127 and later ones on this branch.
 
