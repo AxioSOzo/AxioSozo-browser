@@ -8,6 +8,7 @@ failures (FAIL on both). See docs/MACOS_CI.md.
 
   macos_ci.py node --dest DIR                      pinned Node (upstreams.lock.json ci_node)
   macos_ci.py run --checkout DIR --out DIR --side head|base [--only a,b]
+  macos_ci.py base-shim --checkout DIR             CI build root for a dev worktree (base only)
   macos_ci.py compare --head DIR --base DIR --out DIR
 
 `run` never needs the owner's macOS layout: gates that build native code use the
@@ -318,6 +319,74 @@ def compare(head_dir, base_dir, out):
     return 1 if summary.get('REGRESSION') or summary.get('REMOVED') else 0
 
 
+# The pre-program baseline `dev` has no macOS CI build root. `base-shim` gives a
+# throwaway dev worktree the same behaviour as this branch's mode (plain build
+# directory, no owner helpers) so that provider, CEF and ./dev gates compare like
+# for like. Every edit asserts its anchor, so a changed baseline fails loudly.
+BASE_SHIM = {
+    'scripts/storage.py': [
+        ("\n\nBUILD_ROOT = build_root()\n",
+         "\n\nif os.environ.get('AXIOSOZO_MACOS_CI') == '1':  # macos_ci.py base-shim\n"
+         "    def build_root(value=None):\n"
+         "        return Path(os.environ['AXIOSOZO_BUILD_ROOT'])\n\n\n"
+         "BUILD_ROOT = build_root()\n"),
+        ("\n\ndef main():\n",
+         "\n\nif os.environ.get('AXIOSOZO_MACOS_CI') == '1':  # macos_ci.py base-shim\n"
+         "    VOLUME = BUILD_ROOT\n\n"
+         "    def mounted():\n"
+         "        return BUILD_ROOT.is_dir() and not BUILD_ROOT.is_symlink()\n\n"
+         "    def report():\n"
+         "        return {'platform': 'macos-ci-base-shim', 'build_root': str(BUILD_ROOT), 'mounted': mounted()}\n\n"
+         "    def ensure():\n"
+         "        BUILD_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)\n"
+         "        return report()\n\n\n"
+         "def main():\n"),
+        ("    if not mounted():\n        raise RuntimeError('Project APFS volume is not mounted",
+         "    if os.environ.get('AXIOSOZO_MACOS_CI') == '1':  # macos_ci.py base-shim\n        ensure()\n"
+         "    if not mounted():\n        raise RuntimeError('Project APFS volume is not mounted"),
+    ],
+    'scripts/dev.py': [
+        ("    if build:\n        mounted = subprocess.run([MOUNT], cwd=ROOT)\n",
+         "    if build and os.environ.get('AXIOSOZO_MACOS_CI') == '1':  # macos_ci.py base-shim\n"
+         "        storage.ensure()\n"
+         "        CARGO_HOME_DIR.mkdir(parents=True, exist_ok=True)\n"
+         "        argv = [sys.executable, ROOT / 'scripts/storage.py', 'exec', '--', *argv]\n"
+         "    elif build:\n        mounted = subprocess.run([MOUNT], cwd=ROOT)\n"),
+    ],
+    'packages/provider-host/cli.mjs': [
+        ("const storageScript = ",
+         "const MAC_CI = process.env.AXIOSOZO_MACOS_CI === '1';  // macos_ci.py base-shim\n"
+         "const storageScript = "),
+        ("run('/Users/wout/.local/bin/dev-external', ",
+         "run(MAC_CI ? '/usr/bin/env' : '/Users/wout/.local/bin/dev-external', "),
+        ("run('/Users/wout/.local/bin/mount-dev-storage', []", "run(MAC_CI ? '/usr/bin/true' : '/Users/wout/.local/bin/mount-dev-storage', []"),
+    ],
+    'packages/provider-host/src/storage.mjs': [
+        ("export function providerBuildRoot() {\n",
+         "export function providerBuildRoot() {\n"
+         "  if (process.env.AXIOSOZO_MACOS_CI === '1') return path.join(process.env.AXIOSOZO_BUILD_ROOT, 'providers');"
+         "  // macos_ci.py base-shim\n"),
+    ],
+}
+
+
+def base_shim(checkout):
+    checkout = Path(checkout)
+    for name, edits in BASE_SHIM.items():
+        path = checkout / name
+        text = path.read_text()
+        for old, new in edits:
+            count = text.count(old)
+            if count < 1 or (count > 1 and 'mount-dev-storage' not in old):
+                raise SystemExit(f'BASE_SHIM_ANCHOR_MISSING: {name}: {old[:60]!r} (found {count})')
+            text = text.replace(old, new)
+        path.write_text(text)
+        print('base-shim:', name)
+    # probe.py: dev's macOS code is this branch's minus the CI mode (docs/MACOS_CI.md).
+    shutil.copy2(LANE / 'native/chromium-host/probe.py', checkout / 'native/chromium-host/probe.py')
+    print('base-shim: native/chromium-host/probe.py (copied from the branch under test)')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -328,6 +397,8 @@ def main():
     r.add_argument('--out', required=True)
     r.add_argument('--side', required=True, choices=['head', 'base'])
     r.add_argument('--only')
+    b = sub.add_parser('base-shim')
+    b.add_argument('--checkout', required=True)
     c = sub.add_parser('compare')
     c.add_argument('--head', required=True)
     c.add_argument('--base', required=True)
@@ -335,6 +406,9 @@ def main():
     args = parser.parse_args()
     if args.command == 'node':
         node(args.dest)
+        return 0
+    if args.command == 'base-shim':
+        base_shim(args.checkout)
         return 0
     if args.command == 'run':
         lane = Lane(args.checkout, args.out, args.side, args.only)

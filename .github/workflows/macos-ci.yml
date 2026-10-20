@@ -49,10 +49,9 @@ jobs:
         run: |
           if [ "${{ matrix.side }}" = base ]; then
             git worktree add --detach "$RUNNER_TEMP/base" origin/dev
-            # The baseline has no macOS CI build root. Its probe.py macOS code is
-            # identical to head's except for that mode (diff in docs/MACOS_CI.md), so
-            # head's probe.py builds dev's CEF host sources with the same commands.
-            cp native/chromium-host/probe.py "$RUNNER_TEMP/base/native/chromium-host/probe.py"
+            # dev has no macOS CI build root: give the throwaway worktree the same
+            # mode (docs/MACOS_CI.md "Baseline shim") so every gate compares like for like.
+            /usr/bin/python3 scripts/macos_ci.py base-shim --checkout "$RUNNER_TEMP/base"
             dir="$RUNNER_TEMP/base"
           else
             dir="$GITHUB_WORKSPACE"
