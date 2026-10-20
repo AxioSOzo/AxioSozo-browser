@@ -28,6 +28,8 @@ using json::Value;
 constexpr uint64_t MaxGeneration = 9007199254740991ULL;
 constexpr size_t MaxTabs = 32, MaxRequestIds = 100000, MaxDamageRects = 1;
 constexpr int HeartbeatIntervalMs = 1000;
+// §8.2 browser UI: open prompts per tab / per host (as cef-v1), text event chunks.
+constexpr size_t MaxPromptsPerTab = 8, MaxPromptsPerHost = 64, TextChunkUnits = 1800, MaxTextChunks = 36;
 
 // ---- Strict field checks (same rules as stream.inc) --------------------------------
 inline bool integer(const Value* v, uint64_t maximum = MaxGeneration) {
@@ -98,6 +100,14 @@ public:
   virtual void wheel(const WheelInput&) = 0;
   virtual void commitText(const std::string& text) = 0;
   virtual bool edit(const std::string& action) = 0;  // false: no focused editable frame
+  // §8.2 browser UI (only when negotiated; engines without it keep the defaults).
+  // A reply to prompt `id` (still open, kind-matched, target-checked by the core).
+  virtual void promptReply(const std::string& /*id*/, const std::string& /*method*/, const Value& /*command*/) {}
+  // The safe default for prompt `id` (timeout, navigation, close): cancel/deny/stay.
+  virtual void promptDefault(const std::string& /*id*/) {}
+  // find, stop_finding, zoom, paste_text, ime_set_composition, ime_cancel_composition,
+  // ime_finish_composing. false: not possible now (completed unsupported).
+  virtual bool uiCommand(const std::string& /*method*/, const Value& /*command*/) { return false; }
   // Starts closing. The engine must call Host::viewClosed() exactly once, possibly
   // synchronously from inside close(); the view object is destroyed later.
   virtual void close() = 0;
@@ -114,6 +124,8 @@ public:
   // Engine-specific capability overrides merged over Host::baseCapabilities().
   virtual Object capabilities() = 0;
   virtual std::string engineName() = 0;  // the `engine` value of every BrowserTarget
+  // §8.2: the engine can draw nothing itself but hands every UI request to Zen.
+  virtual bool browserUI() { return false; }
 };
 
 struct Tab {
@@ -133,6 +145,9 @@ struct Tab {
   std::vector<uint8_t> sent; int sentWidth = 0, sentHeight = 0; bool sentValid = false;
   int lastDamage[4] = {0, 0, 0, 0};
   std::vector<uint8_t> payload;  // damage_payload: the rectangle's rows of the frame being sent
+  // §8.2 open prompts: id -> kind, the target it was issued for, deadline.
+  struct Prompt { std::string kind; Value target; std::chrono::steady_clock::time_point deadline; };
+  std::map<std::string, Prompt> prompts;
 };
 
 struct Rect { int x = 0, y = 0, width = 0, height = 0; bool empty() const { return width <= 0 || height <= 0; } };
@@ -183,6 +198,7 @@ public:
     if (hello->has("frame_damage")) fields.push_back("frame_damage");
     if (hello->has("damage_payload")) fields.push_back("damage_payload");
     if (hello->has("frame_transport")) fields.push_back("frame_transport");
+    if (hello->has("browser_ui")) fields.push_back("browser_ui");
     if (!exactKeys(*hello, fields) || !integer(hello->get("version"), 1) || hello->get("version")->number != 1) return false;
     if (!hello->get("method")->isString() || hello->get("method")->string != "hello" || !tokenValue(hello->get("token"))) return false;
     if (!identifier(hello->get("engine_instance")) || !text(hello->get("fixture_origin"), 128)
@@ -192,6 +208,7 @@ public:
       frameRate_ = int(rate->number);
     }
     if (auto damage = hello->get("frame_damage")) { if (!boolean(damage)) return false; frameDamage_ = damage->boolean; }
+    if (auto ui = hello->get("browser_ui")) { if (!boolean(ui)) return false; browserUIRequested_ = ui->boolean; }
     // Rectangle-only payloads (engine-stream-v1 §6.2) need damage.
     if (auto payload = hello->get("damage_payload")) {
       if (!boolean(payload) || (payload->boolean && !frameDamage_)) return false;
@@ -211,6 +228,8 @@ public:
   int frameRate() const { return frameRate_; }
   bool frameDamage() const { return frameDamage_; }
   bool damagePayload() const { return damagePayload_; }
+  // §8.2: asked for in the hello and offered by the engine.
+  bool browserUI() const { return browserUIRequested_ && engine_.browserUI(); }
 
   // Strict fixture policy: exactly the synthetic page and its GET navigation.
   bool allowedURL(const std::string& url, bool resource = false) const {
@@ -235,6 +254,13 @@ public:
   void ready() {
     Object caps = baseCapabilities();
     for (auto& [key, value] : engine_.capabilities()) caps[key] = value;
+    caps["browser_ui"] = browserUI();
+    if (browserUI()) {
+      // Every UI request becomes a prompt Zen draws; downloads, pop-ups and HTTP auth stay refused.
+      for (const char* key : {"javascript_dialogs", "context_menu", "option_menu", "permissions", "file_dialogs",
+                              "find", "zoom", "favicon", "clipboard", "ime", "text_input"}) caps[key] = true;
+      caps["cursor_set"] = "css";
+    }
     if (transport_.memfd() >= 0)
       caps["memfd"] = Value(Object{{"fd", transport_.memfd()}, {"slot_bytes", double(transport_.memfdSlotBytes())},
                                    {"slots", int(transport_.memfdSlots())}});
@@ -267,6 +293,7 @@ public:
         nextHeartbeat_ = now + std::chrono::milliseconds(HeartbeatIntervalMs);
       }
     }
+    if (!closing_) expirePrompts();
     if (closing_) closeAll();
     if (closing_ && idle()) closed_ = true;
     return closed_;
@@ -376,6 +403,43 @@ public:
   }
   Tab* tabByKey(const std::string& key) { auto f = tabs_.find(key); return f == tabs_.end() ? nullptr : f->second.get(); }
 
+  // ---- §8.2 browser UI (UI thread) ---------------------------------------------------
+  // Issues prompt-<n> for the tab's current target, or "" when the limits are reached
+  // or the event would not fit (the engine then applies the safe default itself).
+  std::string openPrompt(Tab* tab, const std::string& kind, Object details, int timeoutMs) {
+    if (!browserUI() || !live(tab)) return "";
+    if (tab->prompts.size() >= MaxPromptsPerTab || openPrompts() >= MaxPromptsPerHost) {
+      tabEvent(tab, "error", Object{{"code", "prompt_limit"}}); return "";
+    }
+    std::string id = "prompt-" + std::to_string(++promptSequence_);
+    Object fields{{"prompt_id", id}, {"kind", kind}, {"timeout_ms", timeoutMs}, {"details", Value(std::move(details))},
+                  {"target", tab->target}, {"event", "prompt"}, {"version", 1}};
+    std::string line = json::dump(Value(fields));
+    if (line.size() > 8000) { tabEvent(tab, "error", Object{{"code", "prompt_too_large"}}); return ""; }
+    tab->prompts[id] = Tab::Prompt{kind, tab->target, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs)};
+    transport_.event(std::move(line));
+    return id;
+  }
+  // The engine withdrew a prompt itself (e.g. WebKit closed its option menu).
+  void withdrawPrompt(Tab* tab, const std::string& id) { closePrompt(tab, id, "withdrawn"); }
+  bool promptOpen(Tab* tab, const std::string& id) const { return tab && tab->prompts.count(id); }
+  // Text for Zen's clipboard or the X11 PRIMARY selection, in bounded chunks (§8.2).
+  void textEvent(Tab* tab, const std::string& kind, const std::string& text) {
+    if (!browserUI() || !live(tab) || text.empty()) return;
+    std::vector<std::string> parts;
+    std::string rest = text;
+    while (!rest.empty() && parts.size() < MaxTextChunks) {
+      std::string part = json::utf16Prefix(rest, TextChunkUnits);
+      if (part.empty()) break;
+      rest = rest.substr(part.size()); parts.push_back(std::move(part));
+    }
+    if (!rest.empty()) { tabEvent(tab, "error", Object{{"code", "text_too_large"}}); return; }
+    for (size_t i = 0; i < parts.size(); ++i)
+      tabEvent(tab, kind, Object{{"text", parts[i]}, {"part", int(i + 1)}, {"parts", int(parts.size())}});
+  }
+  // Any other target event of the profile (find_result, favicon, text_input, ...).
+  void uiEvent(Tab* tab, const std::string& kind, Object fields) { if (browserUI() && live(tab)) tabEvent(tab, kind, std::move(fields)); }
+
   void event(const std::string& kind, Object fields) {
     fields["event"] = kind; fields["version"] = 1;
     transport_.event(json::dump(Value(std::move(fields))));
@@ -385,7 +449,8 @@ private:
   Transport& transport_;
   Engine& engine_;
   std::string token_, instance_, fixtureOrigin_, shutdownRequest_;
-  int frameRate_ = 60; bool frameDamage_ = false, damagePayload_ = false;
+  int frameRate_ = 60; bool frameDamage_ = false, damagePayload_ = false, browserUIRequested_ = false;
+  uint64_t promptSequence_ = 0;
   bool ready_ = false, closing_ = false, closed_ = false;
   uint64_t frameId_ = 0, heartbeat_ = 0;
   std::chrono::steady_clock::time_point nextHeartbeat_{};
@@ -394,6 +459,30 @@ private:
   std::vector<std::unique_ptr<Tab>> graveyard_;
 
   bool live(Tab* tab) const { return tab && tab->created && !tab->closing && !closing_; }
+  size_t openPrompts() const { size_t n = 0; for (auto& item : tabs_) n += item.second->prompts.size(); return n; }
+  void closePrompt(Tab* tab, const std::string& id, const std::string& reason) {
+    if (!tab || !tab->prompts.erase(id)) return;
+    if (tab->created) tabEvent(tab, "prompt_closed", Object{{"prompt_id", id}, {"reason", reason}});
+  }
+  // Safe default, then prompt_closed: timeout, navigation (before generations advance), close.
+  void defaultPrompts(Tab* tab, const std::string& reason) {
+    std::vector<std::string> ids;
+    for (auto& item : tab->prompts) ids.push_back(item.first);
+    for (auto& id : ids) {
+      if (!tab->prompts.count(id)) continue;
+      if (tab->view) tab->view->promptDefault(id);
+      closePrompt(tab, id, reason);
+    }
+  }
+  void expirePrompts() {
+    auto now = std::chrono::steady_clock::now();
+    for (auto& item : tabs_) {
+      Tab* tab = item.second.get();
+      std::vector<std::string> expired;
+      for (auto& [id, prompt] : tab->prompts) if (now >= prompt.deadline) expired.push_back(id);
+      for (auto& id : expired) { if (tab->view) tab->view->promptDefault(id); closePrompt(tab, id, "timeout"); }
+    }
+  }
   static Value urlValue(const std::string& url) { return url.size() <= 4096 ? Value(url) : Value(""); }
   void tabEvent(Tab* tab, const std::string& kind, Object fields) {
     if (tab->created && !fields.count("target")) fields["target"] = tab->target;
@@ -431,6 +520,7 @@ private:
   }
   void resetNavigation(Tab* tab) { tab->historyNavigation = false; tab->historyURL.clear(); tab->commandNavigationInvalidated = false; }
   void invalidateNavigation(Tab* tab) {
+    defaultPrompts(tab, "navigation");
     auto document = uint64_t(tab->target.get("document_generation")->number);
     auto navigation = uint64_t(tab->target.get("navigation_generation")->number);
     if (document == MaxGeneration || navigation == MaxGeneration) { failProtocol(); return; }
@@ -476,6 +566,7 @@ private:
   }
   void closeTab(Tab* tab) {
     if (tab->closing) return;
+    defaultPrompts(tab, "closed");
     tab->closing = true; tab->paintAllowed = false; transport_.invalidatePendingFrame(tab->key);
     if (tab->view) tab->view->close(); else viewClosed(tab);
   }
@@ -502,13 +593,24 @@ private:
       {"mouse", {"type", "x", "y", "modifiers", "button", "click_count", "mouse_leave"}},
       {"wheel", {"x", "y", "modifiers", "delta_x", "delta_y"}}, {"frame_ack", {"frame_id"}}, {"frame_rate", {"frame_rate"}},
       {"ime_commit_text", {"text"}}, {"close", {}}, {"shutdown", {}}, {"devtools", {}}};
-    auto spec = extra.find(method);
-    if (spec == extra.end()) { failProtocol(); return; }
+    // §8.2 browser-UI methods exist only when negotiated; otherwise they are unknown (exit 64).
+    static const std::map<std::string, std::vector<std::string>> ui{
+      {"context_menu_command", {"prompt_id", "command", "index"}}, {"dialog_reply", {"prompt_id", "accept", "text"}},
+      {"permission_reply", {"prompt_id", "decision"}}, {"file_dialog_reply", {"prompt_id", "paths"}},
+      {"option_menu_reply", {"prompt_id", "index"}}, {"find", {"text", "forward", "match_case", "find_next"}},
+      {"stop_finding", {"clear_selection"}}, {"zoom", {"level"}}, {"paste_text", {"text"}},
+      {"ime_set_composition", {"text", "selection_start", "selection_end"}}, {"ime_cancel_composition", {}},
+      {"ime_finish_composing", {}}};
+    const std::vector<std::string>* spec = nullptr;
+    if (auto found = extra.find(method); found != extra.end()) spec = &found->second;
+    else if (auto found = ui.find(method); found != ui.end() && browserUI()) spec = &found->second;
+    if (!spec) { failProtocol(); return; }
     std::vector<std::string> expected{"version", "method", "request_id", "token"};
     if (method != "shutdown") expected.push_back("target");
-    expected.insert(expected.end(), spec->second.begin(), spec->second.end());
+    expected.insert(expected.end(), spec->begin(), spec->end());
     if (method == "wheel" && (c.has("phase") || c.has("momentum_phase") || c.has("precise")))
       expected.insert(expected.end(), {"phase", "momentum_phase", "precise"});
+    if (method == "paste_text" && (c.has("x") || c.has("y"))) expected.insert(expected.end(), {"x", "y"});
     if (!exactKeys(c, expected)) { failProtocol(); return; }
     if (method == "shutdown") { accepted(requestId); shutdownRequest_ = requestId; closing_ = true; return; }
     bool creating = method == "create";
@@ -536,6 +638,7 @@ private:
     if (method == "edit" && !(c.get("action")->isString() && edits.count(c.get("action")->string))) { failProtocol(); return; }
     if (method == "frame_rate" && (!integer(c.get("frame_rate"), 120) || (c.get("frame_rate")->number != 60 && c.get("frame_rate")->number != 120))) { failProtocol(); return; }
     if (method == "ime_commit_text" && !(text(c.get("text"), 1024) && !c.get("text")->string.empty())) { failProtocol(); return; }
+    if (ui.count(method)) { uiCommand(tab, method, c, requestId); return; }
     if (method == "key") { keyCommand(tab, c, requestId); return; }
     if (method == "mouse") { mouseCommand(tab, c, requestId); return; }
     if (method == "wheel") { wheelCommand(tab, c, requestId); return; }
@@ -594,6 +697,60 @@ private:
     tabEvent(tab, "created", Object{{"request_id", requestId}});
     complete(requestId, "success"); tab->createRequest.clear();
     tab->view->load(c.get("url")->string);
+  }
+  // §8.2: strict fields (a malformed field is a protocol error), then the prompt rules of cef-v1.
+  void uiCommand(Tab* tab, const std::string& method, const Value& c, const std::string& requestId) {
+    static const std::map<std::string, std::string> replies{{"context_menu_command", "context_menu"},
+      {"dialog_reply", "dialog"}, {"permission_reply", "permission"}, {"file_dialog_reply", "file_dialog"},
+      {"option_menu_reply", "option_menu"}};
+    auto number = [&](const char* key, double lo, double hi) { const Value* v = c.get(key); return signedInteger(v, lo, hi); };
+    bool ok = true;
+    if (replies.count(method)) {
+      const Value* id = c.get("prompt_id");
+      ok = text(id, 32) && id->string.rfind("prompt-", 0) == 0;
+      if (method == "context_menu_command") {
+        static const std::set<std::string> commands{"dismiss", "copy", "cut", "paste", "select_all", "undo", "redo",
+          "copy_image", "save_image", "save_link", "spelling", "add_to_dictionary"};
+        ok = ok && c.get("command")->isString() && commands.count(c.get("command")->string) && number("index", 0, 16);
+      } else if (method == "dialog_reply") ok = ok && boolean(c.get("accept")) && text(c.get("text"), 4096);
+      else if (method == "permission_reply") {
+        const Value* d = c.get("decision");
+        ok = ok && d->isString() && (d->string == "allow" || d->string == "deny" || d->string == "dismiss");
+      } else if (method == "file_dialog_reply") {
+        const Value* paths = c.get("paths");
+        ok = ok && paths->isArray() && paths->array->size() <= 64;
+        if (ok) for (auto& path : *paths->array) ok = ok && text(&path, 4096) && !path.string.empty() && path.string[0] == '/';
+      } else if (method == "option_menu_reply") ok = ok && number("index", -1, 1023);
+      if (!ok) { failProtocol(); return; }
+      auto found = tab->prompts.find(id->string);
+      // Timeouts race with the user: answering a closed prompt is not fatal (cef-v1).
+      if (found == tab->prompts.end() || found->second.kind != replies.at(method) || found->second.target != tab->target) {
+        error(requestId, "stale_prompt"); return;
+      }
+      accepted(requestId);
+      std::string promptId = id->string;
+      tab->view->promptReply(promptId, method, c);
+      closePrompt(tab, promptId, "answered");
+      complete(requestId, "success");
+      return;
+    }
+    if (method == "find") ok = text(c.get("text"), 1024) && !c.get("text")->string.empty() && boolean(c.get("forward"))
+                               && boolean(c.get("match_case")) && boolean(c.get("find_next"));
+    else if (method == "stop_finding") ok = boolean(c.get("clear_selection"));
+    else if (method == "zoom") ok = c.get("level")->isNumber() && std::isfinite(c.get("level")->number) && std::fabs(c.get("level")->number) <= 10;
+    else if (method == "paste_text") ok = text(c.get("text"), 4096) && !c.get("text")->string.empty()
+                               && (!c.has("x") || (integer(c.get("x"), uint64_t(tab->width)) && integer(c.get("y"), uint64_t(tab->height))));
+    else if (method == "ime_set_composition") {
+      const Value* t = c.get("text");
+      ok = text(t, 1024);
+      size_t length = ok ? json::utf16Length(t->string) : 0;
+      ok = ok && integer(c.get("selection_start"), length) && integer(c.get("selection_end"), length)
+           && c.get("selection_start")->number <= c.get("selection_end")->number;
+    }
+    if (!ok) { failProtocol(); return; }
+    accepted(requestId);
+    if (tab->view->uiCommand(method, c)) complete(requestId, "success");
+    else unsupported(requestId, "not_available");
   }
   void keyCommand(Tab* tab, const Value& c, const std::string& requestId) {
     static const std::set<std::string> types{"down", "up", "char"};
