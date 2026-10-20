@@ -182,11 +182,19 @@ export class WebKitPresenter {
   focus() { if (!this.active) return false; this.#focusContent(this.active); return true; }
   /** Page focus: the IME proxy editor while the page's editable is focused, else the engine view. */
   #focusContent(record) { (record.ime?.active ?? record.canvas)?.focus?.(); }
+  /** Diagnostics: the last browser-UI events and replies of a tab, with chrome-relative milliseconds. */
+  #uiLog(record, name, detail) {
+    (record.uiLog ??= []).push([name, detail, Math.round(this.window.performance?.now?.() ?? 0)]);
+    if (record.uiLog.length > 24) record.uiLog.shift();
+  }
   /** §8.2 browser UI, created with the first WebKit record whose host offers it. */
   #browserUI() {
     if (this.ui || this.disposed) return this.ui;
     this.ui = new this.BrowserUI(this.window, {
-      send: (record, method, fields, target) => record.adapter.reply(target, method, fields),
+      send: (record, method, fields, target) => {
+        this.#uiLog(record, method, fields?.accept ?? fields?.decision ?? fields?.index ?? null);
+        return record.adapter.reply(target, method, fields);
+      },
       target: record => record.adapter?.target ?? null,
       records: () => this.records.values(),
       hooks: {
@@ -398,8 +406,7 @@ export class WebKitPresenter {
   #event(record, event) {
     // Diagnostics: the last browser-UI events (names and kinds or codes only, never contents).
     if (!["heartbeat", "title", "url", "loading", "cursor"].includes(event.event)) {
-      (record.uiLog ??= []).push([event.event, event.kind ?? event.code ?? event.reason ?? event.mode ?? null]);
-      if (record.uiLog.length > 24) record.uiLog.shift();
+      this.#uiLog(record, event.event, event.kind ?? event.code ?? event.reason ?? event.mode ?? null);
     }
     if (record.browserUI && event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); return; }
     if (record.browserUI && event.event === "text_input") { this.#textInput(record, event); return; }

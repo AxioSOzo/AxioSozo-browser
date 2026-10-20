@@ -240,10 +240,14 @@ class FeelHarness(gui_test.Harness):
         # Zen's dialogs over the page must stay open for the user (and this test).
         self.marionette.call('WebDriver:DeleteSession')
         try:
-            self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True,
-                                                          'unhandledPromptBehavior': {'default': 'ignore', 'beforeUnload': 'ignore'}})
-        except gui_test.MarionetteError:
-            self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
+            session = self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True,
+                                                                    'unhandledPromptBehavior': {'default': 'ignore', 'beforeUnload': 'ignore'}})
+        except gui_test.MarionetteError as error:
+            self.result['prompt_behavior_map_refused'] = str(error)[:200]
+            session = self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
+        caps = (session or {}).get('capabilities') or (session or {}).get('value', {}).get('capabilities') or {}
+        self.result['marionette_prompt_behavior'] = caps.get('unhandledPromptBehavior')
+        self.result['browser_version'] = caps.get('browserVersion')
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
 
@@ -794,6 +798,8 @@ class FeelHarness(gui_test.Harness):
         self.click_at(*AT['d-unload'])
         self.wait_page(lambda page: 'armed' in page['d'], 'beforeunload armed')
         self.click_at(*AT['link'])
+        time.sleep(0.4)
+        self.screenshot('12-beforeunload-after-click', settle=False)
         try:
             shown = self.wait(lambda: self.alert_text() is not None or None, 'Zen beforeunload dialog', timeout=12)
         except AssertionError:
@@ -1044,7 +1050,13 @@ class FeelHarness(gui_test.Harness):
         self.screenshot('22-crash-notice')
         retry = next(b for b in notice['buttons'] if 'Try again' in str(b['label']))
         self.click_screen(retry['box'], notice['scale'])
-        self.wait(lambda: self.webkit_ready(), 'back in WebKit after "Try again in WebKit"', timeout=60)
+        try:
+            self.wait(lambda: self.webkit_ready(), 'back in WebKit after "Try again in WebKit"', timeout=60)
+        except AssertionError as error:
+            s = self.state()
+            after = {k: s.get(k) for k in ('engine', 'failure', 'pending', 'geckoHidden', 'notice', 'indicator', 'tabId')}
+            after['stopped_notice'] = self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped'])
+            raise AssertionError(f'{error}; after the click {after!r}') from None
         time.sleep(1)
         self.screenshot('22-retried')
         gone = self.chrome_script(NOTIFICATIONS, ['axiosozo-webkit-stopped'])
