@@ -195,6 +195,8 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
   Object.assign(ChromiumSaver.prototype, {
     execute(setProgressBytes) {
       this.progress = setProgressBytes;
+      // A small download can finish before Firefox starts the saver.
+      if (this.ended === "complete" && !this.removed) { setProgressBytes(this.bytes ?? 0, this.bytes ?? 0, false); return Promise.resolve(); }
       if (this.ended || this.removed) return Promise.reject(new DownloadError({ message: "Chromium download ended" }));
       // A restart after pause resumes the same native download; Firefox never re-fetches it.
       if (this.paused) { this.paused = false; this.control("resume"); }
@@ -214,7 +216,7 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
     },
     update(event) {
       if (event.state === "in_progress") { this.progress?.(event.received_bytes, event.total_bytes, true); return; }
-      this.ended = event.state;
+      this.ended = event.state; this.bytes = event.received_bytes;
       if (event.state === "complete") { this.progress?.(event.received_bytes, event.received_bytes, false); this.deferred?.resolve(); }
       else this.deferred?.reject(new DownloadError({ message: `Chromium download ${event.state}` }));
       this.deferred = null;
@@ -406,7 +408,7 @@ export class ChromiumBrowserUI {
   #state(record) {
     let state = this.#states.get(record);
     if (!state) {
-      state = { prompts: new Map(), dialog: { lastClosed: 0, disabled: false }, downloads: new Map(),
+      state = { prompts: new Map(), dialog: { lastClosed: 0, disabled: false }, downloads: new Map(), earlyDownloads: new Map(),
         blockedPopups: [], finder: null, restoreFinder: null, zoom: 1, cert: null };
       this.#states.set(record, state);
       this.#installFinder(record, state);
@@ -421,7 +423,14 @@ export class ChromiumBrowserUI {
     switch (event.event) {
       case "prompt": this.#prompt(record, state, event); return true;
       case "prompt_closed": this.#closeLocal(state, event.prompt_id); return true;
-      case "download_updated": state.downloads.get(event.download_id)?.update(event); return true;
+      case "download_updated": {
+        const saver = state.downloads.get(event.download_id);
+        if (saver) saver.update(event);
+        // The host starts a download as soon as Zen answers; Firefox's entry is registered
+        // just after. Keep the latest update per download until then (bounded).
+        else if (state.earlyDownloads.size < 16 || state.earlyDownloads.has(event.download_id)) state.earlyDownloads.set(event.download_id, event);
+        return true;
+      }
       case "find_result": state.finder?.onResult(event); return true;
       case "popup_blocked": this.#popupBlocked(record, state, event.url).catch(error => this.hooks.failure?.(error)); return true;
       case "navigation":
@@ -812,8 +821,12 @@ export class ChromiumBrowserUI {
     const saver = this.#services.registerDownload
       ? await this.#services.registerDownload({ url: details.url, path, contentType: details.mime_type, control })
       : await this.#registerDownload({ url: details.url || (this.hooks.currentURL?.(record) ?? ""), path, contentType: details.mime_type, control });
-    if (saver && this.#states.get(record) === state) state.downloads.set(details.download_id, saver);
-    else saver?.detach?.();
+    const early = state.earlyDownloads.get(details.download_id);
+    state.earlyDownloads.delete(details.download_id);
+    if (saver && this.#states.get(record) === state) {
+      state.downloads.set(details.download_id, saver);
+      if (early) saver.update(early);
+    } else saver?.detach?.();
   }
   /** Shows a Chromium download in Firefox's downloads panel (not persisted across restarts). */
   async #registerDownload({ url, path, contentType, control }) {

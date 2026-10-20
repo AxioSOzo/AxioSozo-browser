@@ -334,6 +334,35 @@ test('downloads: saved under Firefox download settings, shown in the downloads p
   h.ui.forget(h.record); assert.equal(saver.detached, true);
 });
 
+test('a small download that finishes before Firefox registers it still completes (run 39393555837)', async () => {
+  const h = harness();
+  const controls = [], added = [];
+  function DownloadSaver() {}
+  class DownloadError extends Error { constructor(properties) { super(properties?.message); } }
+  function Download() {}
+  Download.prototype.start = function() { this.attempt = this.saver.execute((current, total, partial) => { this.progress = [current, total, partial]; }); return this.attempt; };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const modules = {
+    'resource://gre/modules/Downloads.sys.mjs': { Downloads: { PUBLIC: 'public', getList: async () => { await gate; return { add: async download => added.push(download) }; } } },
+    'resource://gre/modules/DownloadCore.sys.mjs': { Download, DownloadSaver, DownloadError,
+      DownloadSource: { fromSerializable: value => ({ ...value }) }, DownloadTarget: { fromSerializable: value => ({ ...value }) } },
+  };
+  const ui = new ChromiumBrowserUI(h.win, { send: (_record, method, fields) => { controls.push([method, fields]); return Promise.resolve({ status: 'success' }); },
+    target: record => record.target, services: { Ci, importModule: url => modules[url], downloadTarget: async () => '/tmp-not-used/x.txt',
+      Services: { prefs: { getBoolPref: (_n, f) => f, getIntPref: (_n, f) => f } } } });
+  ui.handle(h.record, { event: 'prompt', target: TARGET, prompt_id: 'prompt-9', kind: 'download', timeout_ms: 600000,
+    details: { download_id: 7, suggested_name: 'x.txt', url: 'https://files.example/x.txt', mime_type: 'text/plain', total_bytes: 63 } });
+  await settle();
+  assert.deepEqual(controls[0], ['download_reply', { prompt_id: 'prompt-9', path: '/tmp-not-used/x.txt' }], 'answered: the host downloads now');
+  ui.handle(h.record, { event: 'download_updated', download_id: 7, state: 'in_progress', received_bytes: 0, total_bytes: 63, speed: 0, paused: false });
+  ui.handle(h.record, { event: 'download_updated', download_id: 7, state: 'complete', received_bytes: 63, total_bytes: 63, speed: 0, paused: false });
+  release(); await settle(); await settle();
+  await added[0].attempt;
+  assert.deepEqual(added[0].progress, [63, 63, false]);
+  ui.dispose();
+});
+
 test('Firefox Download integration: pause keeps the native download, resume continues it, cancel removes it', async () => {
   const h = harness();
   const controls = [], added = [];
