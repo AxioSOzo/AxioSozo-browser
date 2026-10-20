@@ -751,7 +751,10 @@ private:
       if (!ok) { failProtocol(); return; }
       auto found = tab->prompts.find(id->string);
       // Timeouts race with the user: answering a closed prompt is not fatal (cef-v1).
-      if (found == tab->prompts.end() || found->second.kind != replies.at(method) || found->second.target != tab->target) {
+      // beforeunload is answered with dialog_reply (accept = leave), as in cef-v1.
+      bool kindMatches = found != tab->prompts.end() && (found->second.kind == replies.at(method)
+                         || (method == "dialog_reply" && found->second.kind == "before_unload"));
+      if (!kindMatches || found->second.target != tab->target) {
         error(requestId, "stale_prompt"); return;
       }
       accepted(requestId);
