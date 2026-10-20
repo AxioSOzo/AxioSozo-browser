@@ -96,6 +96,8 @@ def memfd_fallback(origin, directory):
                 raise
             trace.append([kind, item.get('event') or item.get('frame_id'), len(payload)] + ([item.get('damage')] if kind == 2 else []))
             del trace[:-12]
+            if item.get('target'):
+                session.target = item['target']
             if kind != 2:
                 continue
             x, y, w, h = item['damage'][0]
@@ -120,7 +122,14 @@ def memfd_fallback(origin, directory):
         assert after[0][:2] == [0, 0] and after[0][2:4] == after[0][4:6], after[0]
         assert out['partial_after'] >= 5, out
         close = session.command('close')
-        session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close)
+        # Damage payloads are not whole frames: read raw items (and keep acknowledging) until closed.
+        while True:
+            kind, item, _ = raw_packet(session, deadline)
+            if kind == 2:
+                session.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
+            elif item.get('event') == 'completed' and item.get('request_id') == close:
+                break
+        out.pop('trace', None)
         out['status'] = 'PASS'
     except (Exception, KeyboardInterrupt) as exc:
         out['error'] = type(exc).__name__ + ': ' + str(exc)[:500]
