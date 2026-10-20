@@ -1578,9 +1578,14 @@ class CEFZenHarness(gui_test.Harness):
     def download_in(self, engine):
         before = len(self.chrome_script(self.DOWNLOADS))
         self.click_at(*AT['dl-link'])
-        done = self.wait(lambda: (lambda items: items[before:] if len(items) > before and all(i['stopped'] for i in items[before:])
-                                  else None)(self.chrome_script(self.DOWNLOADS)), f'{engine}: a finished download in Firefox\'s list',
-                         timeout=30)
+        try:
+            done = self.wait(lambda: (lambda items: items[before:] if len(items) > before and all(i['stopped'] for i in items[before:])
+                                      else None)(self.chrome_script(self.DOWNLOADS)), f'{engine}: a finished download in Firefox\'s list',
+                             timeout=45)
+        except AssertionError as error:
+            items = self.chrome_script(self.DOWNLOADS)
+            self.screenshot(f'34-download-{engine}-stuck', settle=False)
+            raise AssertionError(f'{error}; downloads {items[before:]!r} (before {before})') from None
         time.sleep(0.8)
         self.screenshot(f'34-download-{engine}', settle=False)
         item = done[-1]

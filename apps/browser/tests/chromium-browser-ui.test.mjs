@@ -452,6 +452,43 @@ test('findbar without Highlight All keeps only the active Chromium match and sti
   assert.deepEqual(sent(), [['find', false], ['stop_finding', false]]);
 });
 
+test('Linux CEF reports no active match for a new session: one find-next step gives Firefox\'s 1 of 3, 2 of 3 (run 39387935674)', async () => {
+  const h = harness();
+  const findbar = { counts: [], results: [], onFindResult(data) { this.results.push(data.result); }, onMatchesCountResult(data) { this.counts.push(data.current); } };
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  const finder = h.record.browser.finder;
+  finder.addResultListener(findbar);
+  const sent = () => h.sent.filter(item => item.method === 'find' || item.method === 'stop_finding')
+    .map(item => [item.method, item.fields.find_next ?? item.fields.clear_selection]);
+  // Typing: one request in flight, the newest search queued in place of older ones.
+  finder.fastFind('n'); finder.fastFind('ne'); finder.fastFind('needle'); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 9, active: 0, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true]], "'n': no active match, one step");
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 9, active: 1, final: true }); await settle();
+  assert.equal(h.sent.at(-1).fields.text, 'needle', 'then the queued newest search');
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 3, active: 0, final: true }); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 6, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 1]);
+  assert.deepEqual(sent().slice(-1), [['stop_finding', false]], 'only the active match stays selected');
+  // Find again: a session restarts from the kept selection (no ordinal), then one step on.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false]], 'a stale identifier is ignored');
+  h.ui.handle(h.record, { event: 'find_result', identifier: 7, count: 3, active: 0, final: true }); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 8, count: 3, active: 2, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true], ['stop_finding', false]]);
+  assert.deepEqual(findbar.counts, [1, 1, 2]);
+  assert.equal(findbar.results.at(-1), 0);
+  // No result at all (a lost reply): the finder does not stay blocked.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.timers.filter(item => item.ms === 2500).at(-1).fn();
+  finder.findAgain('needle', false); await settle();
+  assert.equal(sent().filter(item => item[0] === 'find').length, 2);
+});
+
 test("Zen's findbar drives Chromium find through the tab's browser.finder and restores Firefox's finder", async () => {
   const h = harness();
   const findbar = { results: [], counts: [], onFindResult(data) { this.results.push(data); }, onMatchesCountResult(data) { this.counts.push(data); } };
@@ -474,7 +511,7 @@ test("Zen's findbar drives Chromium find through the tab's browser.finder and re
   assert.deepEqual(findbar.counts.at(-1), { total: 3, current: 1, limit: 1000 });
   assert.equal(findbar.results.at(-1).result, 0);
   finder.fastFind('missing'); await settle();
-  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 0, active: 0, final: true });
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 0, active: 0, final: true });
   assert.equal(findbar.results.at(-1).result, 1);
   finder.onFindbarClose(); await settle();
   assert.deepEqual(h.sent.at(-1).fields, { clear_selection: false });

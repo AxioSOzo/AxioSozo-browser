@@ -135,16 +135,15 @@ test('Linux mirror: assistive clicks become press actions and never reach the pa
   assert.ok(h.calls.some(call => call[0] === 'focus'), 'Zen focus on the canvas first');
 });
 
-test('Linux mirror: hidden tab clears the mirror, showing it asks again; detach removes it', () => {
+test('Linux mirror: a hidden tab keeps its tree (Chromium does not resend it after off/on); detach removes it', () => {
   const h = setup();
   h.controller.handleEvent(7, update(page(), { reset: true }));
   const root = h.overlay.children[1];
+  const before = h.calls.filter(call => call[0] === 'accessibility').length;
   h.controller.setVisible(7, false);
-  assert.equal(root.find(el => el.getAttribute('role') === 'button'), null);
-  assert.deepEqual(h.calls.filter(call => call[0] === 'accessibility').at(-1), ['accessibility', false]);
+  assert.ok(root.find(el => el.getAttribute('role') === 'button'), 'the mirror stays while the tab is hidden');
   h.controller.setVisible(7, true);
-  assert.deepEqual(h.calls.filter(call => call[0] === 'accessibility').at(-1), ['accessibility', true]);
-  h.controller.handleEvent(7, update(page(), { reset: true }));
+  assert.equal(h.calls.filter(call => call[0] === 'accessibility').length, before, 'Chromium accessibility is never toggled');
   assert.ok(root.find(el => el.getAttribute('role') === 'button'));
   h.controller.detach(7);
   assert.equal(h.overlay.children.length, 1);

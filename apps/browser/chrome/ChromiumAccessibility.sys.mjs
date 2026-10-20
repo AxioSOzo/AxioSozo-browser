@@ -567,6 +567,10 @@ export class ChromiumAccessibility {
     const view = this.#views.get(targetId);
     if (!view) return;
     view.visible = visible;
+    // The Linux mirror keeps a hidden tab's tree: Chromium does not send it again after
+    // accessibility goes off and on (run 39387935674: after a tab switch AT-SPI saw only
+    // the page's root). Its mirror sits in the hidden tab, so AT-SPI reports it not showing.
+    if (!visible && this.#service?.keepWhileHidden) return;
     if (!visible) this.#disable(view);
     // Services without a per-canvas assistive query (the Linux mirror) ask again on show.
     else if (this.#service?.requestOnShow) this.#requested(targetId);
@@ -729,7 +733,7 @@ const FIELD_ROLES = new Set(["textField", "searchBox", "textFieldWithComboBox"])
 export class LinuxAccessibilityMirror {
   listener = null;
   // ChromiumAccessibility: send Chromium roles and resolved bounds; ask for the tree on attach/show.
-  chromiumRoles = true; requestOnShow = true;
+  chromiumRoles = true; requestOnShow = true; keepWhileHidden = true;
   #views = new Map(); #active;
 
   /** @param active () → bool: a platform assistive client uses Gecko's accessibility (AT-SPI). */

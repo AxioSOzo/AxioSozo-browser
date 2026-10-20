@@ -231,83 +231,106 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
 /**
  * A Firefox findbar backend (the browser.finder interface) for a Chromium tab.
  *
- * Highlight All: Chromium always highlights every match while a find session is
- * open. Without Firefox's "Highlight All", each result therefore ends Chromium's
- * session keeping only the active match as the selection (stop_finding without
- * clearing it), as Firefox shows it. The next "find again" starts a new Chromium
- * session from that selection; when Chromium lands on the same match again, one
- * follow-up step moves it on, so the findbar's ordinal advances as in Firefox.
+ * Requests go to Chromium one at a time: a newer search replaces the queued ones, and a
+ * result counts only for the request in flight (its identifier is above every one seen
+ * before it was sent). Chromium reports no active match (ordinal 0) for a new session,
+ * so a new search, and a "find again" that had to restart, takes one find-next step:
+ * that selects the match Firefox would show and gives the ordinal ("1 of 3", "2 of 3").
+ *
+ * Highlight All: Chromium always highlights every match while a find session is open.
+ * Without Firefox's "Highlight All", each result therefore ends Chromium's session
+ * keeping only the active match as the selection (stop_finding without clearing it),
+ * as Firefox shows it. The next "find again" restarts a session from that selection
+ * and steps on from it.
  */
+const FIND_STEP_TIMEOUT_MS = 2500;
 class ChromiumFinder {
-  constructor(ui, record, highlightAll = () => false) {
-    this.ui = ui; this.record = record; this.listeners = new Set();
+  constructor(ui, record, highlightAll = () => false, win = null) {
+    this.ui = ui; this.record = record; this.win = win; this.listeners = new Set();
     this.searchString = ""; this.caseSensitive = false; this.entireWord = false; this.matchDiacritics = false;
-    this.pending = null; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
+    this.pending = null; this.queue = []; this.maxIdentifier = 0; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
     this.highlightAll = !!highlightAll(); this.stopped = false; this.events = [];
   }
   addResultListener(listener) { this.listeners.add(listener); }
   removeResultListener(listener) { this.listeners.delete(listener); }
   #notify(method, ...args) { for (const listener of [...this.listeners]) { try { listener[method]?.(...args); } catch {} } }
-  #send(text, forward, findNext) {
-    this.events.push(["sent", forward, findNext]);
-    if (this.events.length > 24) this.events.shift();
-    this.ui.command(this.record, "find", { text: text.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
+  #log(entry) { this.events.push(entry); if (this.events.length > 24) this.events.shift(); }
+  #send(request, findNext) {
+    request.phase = findNext ? "next" : "session"; request.active = 0;
+    // Results of this send carry a larger identifier than any reported so far.
+    request.floor = this.maxIdentifier + 1;
+    this.#log(["sent", request.forward, findNext]);
+    this.win?.clearTimeout?.(this.timer);
+    this.timer = this.win?.setTimeout?.(() => { if (this.pending === request) { this.pending = null; this.#next(); } }, FIND_STEP_TIMEOUT_MS);
+    this.ui.command(this.record, "find", { text: request.searchString.slice(0, 1024), forward: request.forward,
+      match_case: !!this.caseSensitive, find_next: findNext });
   }
-  #find(searchString, forward, findNext) {
-    const same = searchString === this.searchString;
+  #find(searchString, forward, findNext, { keep = false } = {}) {
     this.searchString = searchString;
     if (!searchString) {
-      this.stopped = false;
+      this.queue = []; this.pending = null; this.stopped = false;
       this.ui.command(this.record, "stop_finding", { clear_selection: true });
       this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 });
       return;
     }
-    // After a stopped session Chromium has nothing to continue: restart from the kept selection.
-    const chain = findNext && this.stopped && same && this.lastCount > 0;
-    const want = !chain ? 0 : forward ? this.lastActive % this.lastCount + 1 : (this.lastActive + this.lastCount - 2) % this.lastCount + 1;
-    this.pending = { searchString, forward, findNext, active: 0, want, previous: this.lastActive };
+    const request = { searchString, forward, findNext, keep };
+    // A new search supersedes everything queued; "find again" requests queue up (bounded).
+    if (!findNext) this.queue = [request];
+    else if (this.queue.length < 8) this.queue.push(request);
+    if (!this.pending) this.#next();
+  }
+  #next() {
+    const request = this.queue.shift();
+    if (!request) return;
+    this.pending = request;
+    request.previous = this.lastActive;
+    // Find again on a live session steps on; on a stopped one (or a new search) a session
+    // restarts from the kept selection first.
+    request.restart = request.findNext && this.stopped;
     this.stopped = false;
-    this.#send(searchString, forward, chain ? false : findNext);
+    this.#send(request, request.findNext && !request.restart);
   }
   fastFind(searchString) { this.#find(searchString, true, false); }
   findAgain(searchString, findBackwards) { this.#find(searchString || this.searchString, !findBackwards, true); }
   onResult(event) {
     // The last raw results (diagnostics for the findbar gate; counts and ordinals only).
-    this.events.push([event.identifier, event.count, event.active, event.final]);
-    if (this.events.length > 24) this.events.shift();
-    if (!this.pending) return;
-    // Chromium reports the active match ordinal in an intermediate update and may
-    // leave it unset (0 here) in the final count update: keep the last one seen.
-    if (event.active) this.pending.active = event.active;
+    this.#log([event.identifier, event.count, event.active, event.final]);
+    this.maxIdentifier = Math.max(this.maxIdentifier, event.identifier);
+    const request = this.pending;
+    if (!request || event.identifier < request.floor) return;
+    // Chromium may report the active ordinal only in an interim update: keep the last one seen.
+    if (event.active) request.active = event.active;
     if (!event.final) return;
-    const pending = this.pending;
-    const { searchString, forward, findNext } = pending;
-    if (!event.active && event.count) {
-      // No ordinal at all: a new search is on its first match; find-next moved one on.
-      const previous = pending.want ? 0 : this.lastActive;
-      const guess = pending.active || (findNext && previous && this.lastCount === event.count
-        ? (forward ? previous % event.count + 1 : (previous + event.count - 2) % event.count + 1) : 1);
-      event = { ...event, active: Math.min(guess, event.count) };
-    }
-    if (pending.want && event.count && event.active !== pending.want) {
-      // The restarted session found the kept match again: one step on.
-      pending.want = 0; pending.active = 0;
-      this.#send(searchString, forward, true);
+    let active = request.active;
+    const { searchString, forward, findNext } = request;
+    if (request.phase === "session" && event.count && !request.keep
+        && (!active || (request.restart && active === request.previous))) {
+      // No active match yet, or the restart found the kept one again: one step on.
+      this.#send(request, true);
       return;
     }
-    const previous = pending.want ? pending.previous : this.lastActive;
+    if (!active && event.count) {
+      // Still no ordinal: keep the shown match (Highlight All refresh), else one on from it.
+      const previous = request.previous;
+      active = request.keep && previous ? previous
+        : findNext && previous && this.lastCount === event.count
+          ? (forward ? previous % event.count + 1 : (previous + event.count - 2) % event.count + 1) : 1;
+      active = Math.min(active, event.count);
+    }
     let result = event.count ? FIND_FOUND : FIND_NOTFOUND;
-    if (event.count && findNext && ((forward && event.active < previous) || (!forward && event.active > previous))) result = FIND_WRAPPED;
-    this.lastActive = event.active; this.lastCount = event.count;
+    const previous = request.previous;
+    if (event.count && findNext && previous && ((forward && active < previous) || (!forward && active > previous))) result = FIND_WRAPPED;
+    this.lastActive = event.count ? active : 0; this.lastCount = event.count;
     this.pending = null;
+    this.win?.clearTimeout?.(this.timer);
     this.#notify("onFindResult", { result, findBackwards: !forward, searchString, storeResult: findNext, linkURL: null, findAgain: findNext, drawOutline: false });
-    this.#notify("onMatchesCountResult", { total: event.count, current: event.active, limit: 1000 });
-    if (event.count && !this.highlightAll) this.#keepActiveOnly();
+    this.#notify("onMatchesCountResult", { total: event.count, current: this.lastActive, limit: 1000 });
+    if (event.count && !this.highlightAll && !this.queue.length) this.#keepActiveOnly();
+    this.#next();
   }
   #keepActiveOnly() {
     this.stopped = true;
-    this.events.push(["stop"]);
-    if (this.events.length > 24) this.events.shift();
+    this.#log(["stop"]);
     this.ui.command(this.record, "stop_finding", { clear_selection: false });
   }
   requestMatchesCount() { this.#notify("onMatchesCountResult", { total: this.lastCount, current: this.lastActive, limit: 1000 }); }
@@ -318,16 +341,16 @@ class ChromiumFinder {
     if (on === this.highlightAll) return;
     this.highlightAll = on;
     if (!this.searchString || !this.lastCount) return;
-    if (on && this.stopped) {
-      // A new session from the kept selection highlights every match again.
-      this.pending = { searchString: this.searchString, forward: true, findNext: false, active: 0, want: 0, previous: this.lastActive };
-      this.stopped = false;
-      this.#send(this.searchString, true, false);
-    } else if (!on && !this.stopped && !this.pending) this.#keepActiveOnly();
+    // A new session from the kept selection highlights every match again; the shown match stays.
+    if (on && this.stopped && !this.pending) this.#find(this.searchString, true, false, { keep: true });
+    else if (!on && !this.stopped && !this.pending) this.#keepActiveOnly();
   }
   onModalHighlightChange() {} enableSelection() {} keyPress() {} onFindbarOpen() {}
   removeSelection() { this.stopped = false; this.ui.command(this.record, "stop_finding", { clear_selection: true }); }
-  onFindbarClose() { this.pending = null; this.stopped = false; this.ui.command(this.record, "stop_finding", { clear_selection: false }); }
+  onFindbarClose() {
+    this.pending = null; this.queue = []; this.stopped = false; this.win?.clearTimeout?.(this.timer);
+    this.ui.command(this.record, "stop_finding", { clear_selection: false });
+  }
   focusContent() { this.ui.hooks.focusContent?.(this.record); }
   getInitialSelection() { this.#notify("onCurrentSelection", "", true); }
   setSearchStringToSelection() { return Promise.resolve({ searchString: "" }); }
@@ -905,7 +928,7 @@ export class ChromiumBrowserUI {
   #installFinder(record, state) {
     const browser = record.browser;
     if (!browser || typeof browser !== "object") return;
-    const finder = new ChromiumFinder(this, record, () => this.#prefBool("findbar.highlightAll", false));
+    const finder = new ChromiumFinder(this, record, () => this.#prefBool("findbar.highlightAll", false), this.#win);
     const gBrowser = this.#win.gBrowser, tab = record.tab;
     let findbar = null;
     try { if (gBrowser?.isFindBarInitialized?.(tab)) findbar = gBrowser.getCachedFindBar(tab); } catch {}
