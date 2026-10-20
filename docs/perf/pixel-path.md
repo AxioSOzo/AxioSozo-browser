@@ -424,3 +424,25 @@ and is the first variant that also improves WebKit's 2× key → frame (−18…
 spends ~20 µs per frame on presentation. `NATIVE_RECEIVER_DEFAULT = true`: apps that contain the
 component (built from this branch on) use it; older app builds have no component and use the frame
 worker; the pref `axiosozo.engines.linux.native_receiver=false` returns to the worker.
+
+Functional checks with the native receiver as the default on that app: linux-webkit-zen **39366816642**
+E2E PASS (launch, chrome, Gecko → WebKit → Gecko round trip with typing/click/page 2/Back/scroll,
+host failure, three engines; diagnostics `frameUpload: "native"`, captures through `copyFrame()`);
+soak **39366862243** (`native`): 30 cycles / 10 min, WebKit + Chromium + Gecko tabs, PASS, no
+problems, host descriptors flat, medians WebKit 56.1 fps / key → frame 15.7 ms / scroll 52.4 fps,
+Chromium 60.0 fps / 11.0 ms / 59.8 fps, presenter main-thread time 0.01 ms per frame.
+
+## Phase 2 runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39349238042 | linux-perf: soak memfd/pipe; A/B base vs memfd | soak PASS; A/B 24+36 PASS |
+| 39352857399 | linux-perf: presenter bench (VideoFrame); A/B base/cand/worker/imagedata | all PASS |
+| 39355570329 | linux-perf: A/B base/cand(defaults)/jsmain 3×2; soak with defaults | 48/48 PASS, soak PASS |
+| 39362552105 | linux-perf-build: Zen app with the native receiver (after 39350827997 cold fail, 39360822222 error capture) | build + GUI smoke PASS |
+| 39364874251 | linux-perf: A/B base/cand/native on that app | 48/48 PASS |
+| 39366816642 | linux-webkit-zen with native default | E2E PASS |
+| 39366862243 | linux-perf: soak with native default | PASS |
+| 39351791880, 39355570129 | linux-cef-host (x86_64, arm64, macOS compile) incl. real-CEF memfd fallback | PASS (zen-gui-chromium: known setup failure) |
+| 39349713944, 39351146838 | linux-webkit-host incl. real-WPE memfd fallback | PASS |
+| 39349714010, 39355570147 | linux-webkit-zen (VideoFrame; worker default) | E2E PASS |

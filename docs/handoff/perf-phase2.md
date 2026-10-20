@@ -1,51 +1,76 @@
-Status: PARTIAL
+Status: DONE
 
-# perf-phase2 handoff (cloud session, 20 Oct 2026) — in progress, updated as runs land
+# perf-phase2 handoff (cloud session, 20 Oct 2026)
 
 PR: https://github.com/AxioSOzo/AxioSozo-browser/pull/14 (draft, `cloud/perf-phase2` → `cloud/integration`).
 Branch `cloud/perf-phase2`; mirror `claude/perf-phase2-l5jipx` (the session's designated branch, same commits).
+Based on cloud/integration `d5cc1a8` (no later merge needed at the time of writing).
 
-## Done (pushed)
-1. memfd pipe fallback (pre-hello `/proc/<pid>/fd` probe; in-band `frame_ack {frame_transport:"pipe"}`;
-   session latch) in both hosts + both Zen readers; contracts engine-stream-v1 §6.3 "Fallback"; tests.
-2. Soak/multi-tab harness `tools/pixel-path/soak.py` (+ `ci/soak_container.sh`, linux-perf `soak` job):
-   run 39349238042 PASS (memfd 30 cycles/10 min, pipe 13 cycles/4 min), numbers in docs/perf/pixel-path.md.
-3. memfd frames default ON for Linux (`MEMFD_FRAMES_DEFAULT = true`).
-4. zen_bench XTest-paced wheel (scroll fps claimable), parent-process CPU per window.
-5. BGRX VideoFrame upload (no JS swizzle), probed once, imagedata fallback.
-6. Frame worker (ChromeWorker + OffscreenCanvas + sync IOUtils reads), pref `axiosozo.engines.linux.frame_worker`.
-7. Native Linux receiver `apps/browser/native/engine-view/linux` (pref `axiosozo.engines.linux.native_receiver`),
-   build workflow `.github/workflows/linux-perf-build.yml` (first build: run 39350827997, cold).
+## Machine resources
+- Cloud session: Ubuntu 24.04, 4 vCPU, no Zen app; Firefox 156 headers read from a sparse clone for API checks;
+  evidence read from `ci-results` (`cloud_perf-phase2/`).
+- GitHub runners: ubuntu-24.04 4 vCPU (AMD EPYC 7763 / 9V74), no GPU (software WebRender); WebKit + soak jobs in
+  the pinned debian:13 image.
 
-## Defaults now (Linux, pipe mode)
-memfd frames ON; frame worker ON (memfd only, probe-gated); main-thread upload BGRX VideoFrame
-(probe-gated, imagedata fallback); native receiver OFF (pref, needs this branch's app build).
+## What changed (all on Linux pipe mode; macOS surface path untouched)
+1. **memfd fallback** (contracts engine-stream-v1 §6.3 "Fallback"): pre-hello `/proc/<pid>/fd` probe; an unreadable
+   slot (one retry) → frame dropped, `frame_ack {frame_transport:"pipe"}`; both hosts switch to the pipe before the
+   credit returns (CEF: pending frames whole + every view repainted; WebKit: targets re-sent whole); session latch.
+   Tests: node, CEF native transport test, real-CEF `damage_test.py`, real-WPE `stream_test.py memfd_fallback`.
+   CEF host: protocol failures now log `AXIO_CEF_PROTOCOL_FAILURE line=N` on stderr.
+2. **memfd frames default ON** (`MEMFD_FRAMES_DEFAULT`) after the soak.
+3. **Frame worker** (ChromeWorker `EngineFrameWorker.js` + `transferControlToOffscreen` + `IOUtils.openFileForSyncReading`),
+   default ON with memfd when its probe passes; capture via placeholder `toDataURL`.
+4. **Native Linux receiver** `apps/browser/native/engine-view/linux` (`nsIAxioFrameReceiverService`, GTK-only
+   `DIRS` in engine-view/moz.build): ring mapped read-only (direct child, exact size, seals), background task queue,
+   B8G8R8X8 `SharedRGBImage` on the canvas's async `ImageContainer` via the existing `SetAxioExternalImageContainer`
+   patch. Default ON where the component exists (`NATIVE_RECEIVER_DEFAULT`); older apps fall back to the worker.
+5. **BGRX VideoFrame upload** for the remaining main-thread path (probe-gated; whole damaged rows because Gecko 156
+   ignores `VideoFrameBufferInit.layout`); `frame_upload=imagedata` keeps the JS swizzle.
+6. **Bench/CI**: zen_bench XTest-paced wheel + `fps_input` (both scroll artefacts fixed: `xdotool click --repeat`
+   pacing and `mousemove --sync` blocking ~15 s), parent CPU per window; `tools/pixel-path/soak.py` (+ container),
+   generic A/B variants, `linux-perf.yml` driven by `tools/pixel-path/ci/plan.json` (incl. `zen_run_id`),
+   `.github/workflows/linux-perf-build.yml`; one additive evidence line in `linux-zen-reusable.yml`
+   (C/C++/IDL compile errors with context → `zen-setup.compile-errors.txt`).
+7. Presenters: only `#draw`, capture and diagnostics touched (`frameUpload`, `memfdFallback`, `nativeReceiver`),
+   plus a guarded teardown resize (placeholder canvases refuse width/height).
 
-## Runs so far
-- **linux-perf 39355570329 (defaults vs cloud/integration, 3 reps × 2 rounds, 48/48 PASS)**: 2× Zen parent CPU
-  −35…−38 % (both engines), 2× p99 −20…−26 %, key → frame −33…−43 % except WebKit 2× (+2…4 %, WPE-bound);
-  soak with defaults PASS (30 cycles/10 min, no RSS trend). Tables in docs/perf/pixel-path.md.
-- linux-webkit-zen 39355570147 (9bf9fea, worker default): E2E PASS (launch, chrome, round trip, host failure,
-  three engines) with transport memfd + upload worker.
-- linux-cef-host 39355570129 (9bf9fea): x86_64 + arm64 PASS, macOS compile PASS (zen-gui-chromium known setup failure).
-- linux-perf-build 39350827997 (cold, daf88cf): Zen build FAILED in mach build (error not captured: the
-  evidence error list filled with Rust lint lines); 39360822222 captured it (most vexing parse of an
-  IntSize, 4 errors in AxioFrameReceiver.cpp); **39362552105 (35782ef): build + Gecko GUI smoke PASS** (warm, ~16 min
-  setup). Its artifact `axiosozo-zen-linux-x86_64` is the newest in the repo: other workstreams' "newest artifact"
-  jobs may pick it up (native receiver compiled in, pref off by default = cloud/integration behaviour).
-- linux-perf 39364874251: A/B base / cand / native on that app (running).
-- linux-perf 39352857399: presenter bench (VideoFrame identical output, Firefox 158 damage band 0.60 → 0.12 ms);
-  A/B base/cand/worker/imagedata both engines — worker: 2× parent CPU −40 %, Chromium key → frame −44 %
-  (tables in docs/perf/pixel-path.md).
-- linux-cef-host 39351791880 (39ba2dc): every gate PASS on x86_64 and arm64 incl. real-CEF memfd fallback
-  (`zen-gui-chromium` setup step fails: known pre-existing probe.py check issue, as on cloud/integration).
-- linux-perf 39349238042: soak PASS; A/B base vs memfd (XTest wheel) still running at the time of writing.
-- linux-webkit-host 39349713944 (32c4110): PASS incl. real-WPE `memfd_fallback`.
-- linux-webkit-zen 39349714010 (32c4110): PASS.
-- linux-cef-host 39351072238 (ff669a4): every gate PASS except `damage` (test bug in the new memfd
-  fallback scenario: `close` sent without a target; the fallback itself passed: frame 9 dropped, next
-  frame whole 1800×1300 through the pipe, then 80×80 payloads). Fixed in the next commit.
+## Results (Actions, same-job A/B, prebuilt/branch app + TEST-ONLY chrome overlay; tables in docs/perf/pixel-path.md)
+Defaults vs cloud/integration (run 39355570329, worker; and 39364874251, native, Zen parent CPU / p99 / key → frame):
+- Chromium 2×: parent 126 → 82 % (worker) → 59–63 % (native); p99 33 → 24 ms; key → frame 21 → 12 ms; scroll 25 → 60 fps.
+- WebKit 2×: parent 115 → 68 % → 52–54 %; p99 28–37 → 23–25 ms (native); key → frame 27–29 → 22–23 ms (native only;
+  the worker alone was flat, WPE-bound); scroll 21–27 → 56 fps.
+- 1×: parent −26…−29 % (Chromium, worker) / −38…−43 % (native); key → frame −30…−43 %; Chromium 1× rAF p99 is at
+  the 60 fps floor (~20 ms) before and after (not improved, nothing to improve).
+- Soaks PASS (39349238042 memfd/pipe, 39355570329 worker, 39366862243 native): 30 cycles / 10 min, WebKit + Chromium +
+  Gecko tabs in one window, no fallback, host descriptors flat; these medians are the multi-tab numbers.
 
-## Next
-- Read the A/B (base / cand / imagedata / worker) and the native build; pin `zen_run_id` in
-  tools/pixel-path/ci/plan.json to the linux-perf-build run and A/B `native`.
+## Regressions
+linux-cef-host 39351791880 / 39355570129 PASS (x86_64, arm64, macOS compile; `zen-gui-chromium` fails in its setup
+step — known pre-existing probe.py check issue, same on cloud/integration); linux-webkit-host 39349713944 /
+39351146838 PASS; linux-webkit-zen E2E PASS 39349714010 (VideoFrame), 39355570147 (worker), 39366816642 (native);
+node suite 2908 pass / 5 fail (the same 5 pre-existing project-reader/arrival failures as cloud/integration).
+
+## Verified vs NOT_VERIFIED
+- PASS: everything above, all from cited runs.
+- NOT_VERIFIED: GPU machines; macOS (untouched, never negotiates memfd/worker/native); the in-Zen pre-hello
+  `/proc` fallback path (unit-tested only: Yama does not gate PTRACE_MODE_READ, so CI cannot make /proc unreadable);
+  E1/E2 (never claimed); READY (never).
+
+## Notes for other workstreams
+- **Artifact**: linux-perf-build 39362552105 (`cloud/perf-phase2`) is the newest `axiosozo-zen-linux-x86_64`;
+  jobs that pick "the newest" get the native receiver compiled in (it is used by default when their chrome JS is this
+  branch's; with older chrome JS nothing calls it).
+- Hosts and Zen must come from the same tree (`frame_ack.frame_transport` is new; older hosts reject it).
+- cef-zen-feel / webkit-feel: presenter canvases may be bound natively (external ImageContainer) or transferred to a
+  worker: never call `getContext`/resize on them outside `#draw`; captures go through `captureFixtureFrame()`.
+- linux-platform: please keep the one-line `zen-setup.compile-errors.txt` capture in linux-zen-reusable.yml.
+- Integration lead: when cloud/integration builds include engine-view/linux, run linux-perf with `zen_run_id` empty.
+
+## Next steps
+1. Merge PR #14; rebuild the integration app so every job gets the native receiver.
+2. Native receiver: partial texture updates (copy only damage into recycled SharedRGBImages) to cut the 2× whole-frame
+   copy; hidden-tab re-present on show.
+3. WebKit 2× is now bound by WPE software rendering (~150–200 % CPU): GPU path on real hardware (webkit-feel/host).
+4. Re-profile the parent with the engine-profile tooling on the new defaults (remaining: AXCF metadata/events via
+   Subprocess, chrome work, software compositing).
