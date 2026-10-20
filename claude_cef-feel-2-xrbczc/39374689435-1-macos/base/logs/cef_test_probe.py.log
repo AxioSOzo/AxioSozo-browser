@@ -1,0 +1,39 @@
+....E/Applications/Xcode_16.4.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/case.py:621: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='UTF-8'>
+  outcome.errors.clear()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.F........
+======================================================================
+ERROR: test_cleanup_includes_descendant_after_parent_exit (__main__.LifecycleTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/native/chromium-host/test_probe.py", line 39, in test_cleanup_includes_descendant_after_parent_exit
+    self.assertTrue(probe.cleanup_group(process))
+  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 830, in cleanup_group
+    while exists() and time.monotonic() < deadline:
+  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 821, in exists
+    os.killpg(process.pid, 0)
+PermissionError: [Errno 1] Operation not permitted
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/native/chromium-host/test_probe.py", line 50, in test_cleanup_includes_descendant_after_parent_exit
+    probe.cleanup_group(process)
+  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 825, in cleanup_group
+    remained = exists()
+  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 821, in exists
+    os.killpg(process.pid, 0)
+PermissionError: [Errno 1] Operation not permitted
+
+======================================================================
+FAIL: test_sigterm_routes_through_owned_cleanup (__main__.LifecycleTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/_temp/base/native/chromium-host/test_probe.py", line 87, in test_sigterm_routes_through_owned_cleanup
+    self.assertEqual(process.returncode, 130, (out, err))
+AssertionError: 1 != 130 : ('{"component": "cef", "status": "RUNNING", "native_pid": 15711, "profile": "/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/axio-cef-lifecycle-d1yegobj/cef-profile-0lurqxvj"}\n', 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 973, in run\n    group_cleanup_required = cleanup_group(process)\n  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 830, in cleanup_group\n    while exists() and time.monotonic() < deadline:\n  File "/Users/runner/work/_temp/base/native/chromium-host/probe.py", line 821, in exists\n    os.killpg(process.pid, 0)\nPermissionError: [Errno 1] Operation not permitted\n')
+
+----------------------------------------------------------------------
+Ran 15 tests in 1.088s
+
+FAILED (failures=1, errors=1)

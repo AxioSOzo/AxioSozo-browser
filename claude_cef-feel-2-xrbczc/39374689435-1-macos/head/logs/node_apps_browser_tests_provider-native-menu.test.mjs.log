@@ -1,0 +1,44 @@
+﹣ the native target is the pinned Firefox Tools menu: main-menubar > tools-menu > menu_ToolsPopup, before devToolsSeparator (1.667958ms) # generated Zen source not present (/Volumes/AxioSozoBuild/zen/source/engine/browser/base/content/browser-menubar.inc.xhtml)
+✔ ordinary window: one Ask AI… item before the native devToolsSeparator; a trusted command opens the panel, built on first use (2.600542ms)
+✔ untrusted, retargeted and native sibling command events are ignored (0.440375ms)
+✔ private or unknown-privacy windows: Ask AI is shown disabled, with no listener, sheet or panel (3.030166ms)
+✔ a missing or different native menu, an untrusted document or an existing entry or panel: null and nothing changes (2.159958ms)
+✔ idempotent per window; dispose removes exactly its own item, listener, sheet and panel; a later install starts fresh (1.949ms)
+✔ a sheet the document already loads (the fixture probe's) is reused, never duplicated and never removed (0.638666ms)
+✔ a failed installation leaves the document unchanged (1.712833ms)
+✔ installing, opening a failing panel and disposing a failing panel never throw into the window (1.567916ms)
+✔ the installer source takes no shortcut, intercepts no command and authors no style (1.513041ms)
+✖ every selector of the loaded sheet is scoped to an AxioSozo id; Zen tokens are only read (13.036125ms)
+✔ with the real provider panel: Ask AI opens a focused dialog and Settings opens its window; nothing is spawned, discovered or stored (4.138583ms)
+✔ startup source: Ask AI is installed once, right after Zen's startup, and disposed at unload; BrowserExperience is never loaded (0.594125ms)
+✔ startup: Ask AI appears only after Zen's startup, enabled in a normal window and disabled in a private one; unload removes exactly it (17.198291ms)
+✔ startup: a window closed during Zen's startup installs and publishes nothing (1.751333ms)
+✔ startup in the fixture probe: its browser-experience sheet is reused; one sheet, removed once at unload (0.615208ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 131.273041
+
+✖ failing tests:
+
+test at apps/browser/tests/provider-native-menu.test.mjs:262:1
+✖ every selector of the loaded sheet is scoped to an AxioSozo id; Zen tokens are only read (13.036125ms)
+  AssertionError [ERR_ASSERTION]: #nav-bar-customization-target:has(> #axiosozo-engine-probe)
+      at TestContext.<anonymous> (file:///Users/runner/work/AxioSozo-browser/AxioSozo-browser/apps/browser/tests/provider-native-menu.test.mjs:275:53)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '#nav-bar-customization-target:has(> #axiosozo-engine-probe)',
+    expected: /^(:is\()?#axiosozo-/u,
+    operator: 'match',
+    diff: 'simple'
+  }
