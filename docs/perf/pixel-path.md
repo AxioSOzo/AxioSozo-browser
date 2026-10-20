@@ -446,3 +446,127 @@ Chromium 60.0 fps / 11.0 ms / 59.8 fps, presenter main-thread time 0.01 ms per f
 | 39351791880, 39355570129 | linux-cef-host (x86_64, arm64, macOS compile) incl. real-CEF memfd fallback | PASS (zen-gui-chromium: known setup failure) |
 | 39349713944, 39351146838 | linux-webkit-host incl. real-WPE memfd fallback | PASS |
 | 39349714010, 39355570147 | linux-webkit-zen (VideoFrame; worker default) | E2E PASS |
+
+# Phase 3 (perf-phase3, branch claude/perf-phase3-uvmfis)
+
+Driven by docs/perf/profile-findings.md (engine-profile run 39379600003). All numbers: GitHub
+`ubuntu-24.04` runners (4 vCPU, no GPU, software WebRender), real Linux Zen app + TEST-ONLY chrome
+overlay of this branch, sandboxes on. CPU claims use zen_bench's `raf-nosampler` window (the 2 ms
+chrome sampler off) and, for attribution, the Gecko profiler pass. Same-job A/B: every engine job of
+`linux-engine-profile.yml` runs `zen_profile.py` twice on one runner — phase 3 defaults, then the
+control `--pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false`.
+
+## Direct compositing of the engine canvas
+
+**Why it was expensive.** TEST-ONLY `zen_profile.py --wr-promotion-log`
+(`gfx.webrender.debug.surface-promotion-logging` + `RUST_LOG=webrender::tile_cache=warn`, summarized
+from stderr; run 39382362542): WebRender never promoted the engine image to a compositor surface —
+`Surface promotion of prim at Box2D((382, 68), (2056, 1280)) failed with: overlay not allowed for prim
+with mask`, every frame. The canvas itself was already right (1674×1212 device px at an integral
+device origin at 2×: no scaling; B8G8R8X8, opaque). The mask is Zen's: every tab panel
+(`.browserSidebarContainer`) has `overflow: clip` with a 5 px `border-radius`. Unpromoted, each
+engine frame was re-rasterized into picture-cache tiles through that rounded clip
+(`blendTextureNearestFast`, `draw_quad_spans`) and the tiles then copied (`scale_blit<true>`).
+
+**Change** (`EngineFrameSurface.sys.mjs` `directComposite`, pref
+`axiosozo.engines.linux.direct_composite`, default on; Linux native receiver only — macOS surface
+mode is untouched). While an engine view covers its whole panel, the panel's clip is lifted
+(`overflow: visible`; its rounded shadow stays) and the four 5 px corners are drawn on top by caps:
+Zen's window background (`-moz-element(#zen-browser-background)` over the ancestors' composited
+colour), the panel's own `box-shadow` (from a transparent copy of the panel box) and a radial mask
+for the arc. Only that tab's panel changes, only while the view fills it (ResizeObserver; a view that
+no longer covers the panel gives the clip back); `restore()` on teardown. Result: 0 promotion
+failures in every engine job; real-screen captures (xwd of the X root, 0.3 s apart) change while the
+rAF fixture runs, so frames reach the display.
+
+**Profiler, same job (run 39385314455, 2×, rAF fixture, sampler off, ms of CPU per ~3 s window):**
+
+| function / thread | Chromium control → phase 3 | WebKit control → phase 3 |
+| --- | --- | --- |
+| `blendTextureNearestFast` | 153 → **0** | 143 → **0** |
+| `draw_quad_spans` | 84 → **0** | 49 → **0** |
+| `scale_blit<true>` (Renderer + SwComposite) | 269 → **20** | 301 → **4** |
+| Renderer thread | 569 → 164 | 583 → 185 |
+| SwComposite thread | 520 → 125 | 497 → 114 |
+| Zen parent, all threads | 2 062 → 1 228 | — |
+
+## Warm spare hosts (engine switch)
+
+`EngineHostSpare.sys.mjs` + the adapters' launch paths: one warm spare host per engine and Firefox
+process, started at browser idle through the engine's own launcher (same binary, sandbox, private
+per-host profile, fixture origin and hello). Fixture mode only (never the shared web-mode Chromium
+host), never on macOS; one use (a spare serves exactly one tab); refilled ~1 s after a tab's host
+closes; dropped on `memory-pressure` and at `quit-application-granted`; pref
+`axiosozo.engines.prewarm` (default on). The GUI harness (`scripts/gui_test.py`) turns it off so
+the E2Es' "exactly one host per tab" assertions stay deterministic; `zen_profile.py` turns it on.
+The WPE host additionally starts its sandboxed web process right after `ready` (a hidden
+`about:blank` view; the first target's view is created with `related-view` to it and the warm view is
+dropped; `AXIO_WEBKIT_NO_PREWARM=1` disables it).
+
+A spare is launched through the shared (system-global) module instance while `CEFPresenter` lives in
+the window's module graph: native frames are therefore recognised by a `Symbol.for` brand
+(`isNativeFrame`), not `instanceof` (run 39384485852 showed the failure: Chromium fell back to the
+2D path with one frame).
+
+Gecko → engine switch, same job (run 39385314455, zen_bench switch ms):
+
+| tab | control | phase 3 |
+| --- | ---: | ---: |
+| Chromium 1× / 2× | 471 / 495 ms | **136 / 156 ms** |
+| WebKit 1× / 2× | 507 / 529 ms | **193 / 207 ms** |
+
+## Result: phase 3 vs control, same job (run 39396635363)
+
+App: linux-perf-build **39383407870** (this branch: damage-only native receiver compiled in), chrome
+overlay of this branch. Per engine job, `zen_profile.py` runs phase 3 (defaults) and then the control
+(`direct_composite=false`, `prewarm=false`) on the same runner; two plain passes each (median), plus
+a profiler pass. Gecko rows are the same job's Gecko control tab (no engine involved).
+
+| tab | Zen parent CPU, rAF (sampler off) | Renderer + SwComposite | parent CPU, wheel scroll | Gecko → engine switch | key → frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chromium 1× | 24.5 → **16.6 %** | 11.0 → 3.5 | 42.6 → 35.2 % | 425 → **122 ms** | 12.1 → 12.2 ms |
+| Chromium 2× | 36.0 → **18.7 %** | 23.3 → 6.0 | 58.9 → 36.5 % | 316 → **166 ms** | 8.6 → 9.0 ms |
+| WebKit 1× | 27.2 → **18.6 %** | 11.7 → 3.2 | 44.0 → 36.7 % | 500 → **227 ms** | 16.4 → 17.2 ms |
+| WebKit 2× | 55.8 → **33.1 %** | 38.0 → 9.9 | 82.4 → 47.8 % | 525 → **237 ms** | 27.0 → 27.9 ms |
+| Gecko 1× / 2× (control tab) | 17.4 / 17.8 % | 9.4 / 11.2 | 42.6 / 76.7 % | — | — |
+
+- Engine tabs now cost the parent about what a Gecko tab running the same rAF fixture costs (16.6–18.7 %
+  vs 17.4–17.8 %), except WebKit 2× (33 %; the native receiver's task queue ~6–8 % and the main thread ~7 % of it).
+- Scroll: the parent no longer re-rasterizes the canvas, so wheel scrolling is cheaper too (−7…−35
+  points); scroll fps unchanged (60 Chromium, 55–57 WebKit). The main thread while scrolling stays
+  13–18 % (Gecko's own wheel dispatch + the per-frame host message), in phase 3 and control alike.
+- Key → frame is unchanged within noise (it is host-bound, profile-findings §b).
+- The rest of the switch (122–237 ms) is the target's creation + first navigation/paint in the warm
+  host; the parent's share stays ~35–50 ms.
+- Damage-only native presents (both variants run the new receiver): present 0.24 ms/frame at 2×
+  Chromium, 0.37–0.42 ms WebKit 2× (perf-phase2: 0.78 ms whole-frame); 98 % of presents are partial
+  (`partialCopies` 178/181), the rest are new/stale textures.
+
+## Smaller changes
+
+- Native receiver (`engine-view/linux`): presents write only what changed into the recycled
+  SharedRGBImage (TextureClient serial → last frame generation it holds; union of the damage since,
+  from a 16-frame history; whole frame for a new or stale texture); counters `partialCopies`,
+  `wholeCopies`, `copiedPixels` in `statsJSON`. Hidden-tab re-present: a frame applied while the tab
+  was hidden is posted when it is shown (`representNativeFrame`).
+- Request writes: no `TextEncoder` per message (frame acks, input) — a line is measured only when it
+  could exceed 16 KiB; CEF wheel coalescing keys are plain strings. Wheel events were already
+  coalesced to one `wheel` message per frame in both presenters; zen_bench's XTest wheel sends one
+  notch per 16 ms, so per-frame coalescing has nothing more to merge.
+
+## Phase 3 runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39382362542 | linux-engine-profile, TEST-ONLY `--wr-promotion-log` + canvas ancestor chain | diagnosis: "overlay not allowed for prim with mask" (Zen panel radius) |
+| 39383407784 | first direct-compositing run (no spare host) | 0 promotion failures; Chromium 2× rAF parent 17.4 % |
+| 39384485852 | same-job A/B with spare hosts | WebKit PASS; Chromium FAIL (cross-module `instanceof`, fixed in c22eb86) |
+| 39385314455 | same-job A/B + profiler | all PASS; blend/scale paths gone (tables above) |
+| 39383407870 | linux-perf-build: phase-3 app (damage-only receiver) | build + GUI smoke PASS |
+| 39396635363 | final same-job A/B on that app (plain×2 + profile) | all PASS (result table) |
+| 39384485896 | linux-webkit-host (WPE warm web process) | PASS |
+| 39387902084, 39385246366 | linux-webkit-zen E2E | PASS |
+| 39387902076 | linux-cef-zen (Chromium-in-Zen E2E/feel) | PASS |
+| 39387902105 | linux-cef-host: x86_64, arm64, macOS compile | PASS; `zen-gui-chromium` FAIL (see handoff) |
+| 39385246466, 39387902382 | linux-perf soak (old app) | PASS |
+| 39396635366 | linux-perf soak (phase-3 app) | attempt 1: one transient CEF helper sample (fds 335→368→335), see handoff |

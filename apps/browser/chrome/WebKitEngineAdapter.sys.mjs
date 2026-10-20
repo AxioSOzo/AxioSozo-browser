@@ -10,6 +10,7 @@
 // loopback GET fixture, and general web mode is not offered (docs/CAPABILITY_MATRIX.md).
 import { EngineStreamHost, EngineStreamTarget, validFixtureOrigin } from "./EngineStreamClient.sys.mjs";
 import { memfdFramesWanted, memfdProcReadable, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 
 // upstreams.lock.json `webkit` (Debian 13 packages); a test keeps these equal to the lockfile.
@@ -337,11 +338,72 @@ export class WebKitEngineAdapter extends EngineStreamTarget {
 }
 
 /**
+ * Warm spare host (EngineHostSpare.sys.mjs): one per Firefox process, held by the shared module
+ * instance, started with launchWebKit's defaults (SPARE_OPTIONS). Returns whether a spare is (being) scheduled.
+ */
+let spare = null;
+// launchWebKit's defaults (frame damage + damage payloads, transport by pref, §8.2 browser UI).
+const SPARE_OPTIONS = Object.freeze({ frameDamage: true, damagePayload: true, frameTransport: null, browserUI: true });
+const SHARED_MODULE = "chrome://browser/content/axiosozo/WebKitEngineAdapter.sys.mjs";
+function sharedInstance() {
+  try { return ChromeUtils.importESModule(SHARED_MODULE); } catch { return null; }
+}
+export function prewarmWebKitHost(win, delayMs = PREWARM_STARTUP_DELAY_MS) {
+  const shared = sharedInstance();
+  if (shared && shared.prewarmWebKitHost !== prewarmWebKitHost) return shared.prewarmWebKitHost(win, delayMs);
+  const origin = Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN");
+  // Never on macOS: a surface endpoint belongs to one tab's canvas (EngineHostSpare).
+  if (isMac(webkitPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI))) return false;
+  if (!validFixtureOrigin(origin) || !webkitAvailabilityFor(win).available) return false;
+  if (!prewarmWanted(Services.prefs)) { spare?.drop(); return false; }
+  spare ??= new SpareHost(() => startWebKitHost(win, origin, SPARE_OPTIONS));
+  spare.schedule(win, delayMs);
+  return true;
+}
+/** The spare for a tab of `origin` started with these options, or null (then the caller starts a host). */
+export async function takeWarmWebKitHost(origin, options) {
+  const shared = sharedInstance();
+  if (shared && shared.takeWarmWebKitHost !== takeWarmWebKitHost) return shared.takeWarmWebKitHost(origin, options);
+  // Only a request with the spare's own options can use it.
+  if (!spare || !prewarmWanted(Services.prefs) || Object.keys(SPARE_OPTIONS).some(key => options?.[key] !== SPARE_OPTIONS[key])) return null;
+  return spare.take(host => !host.ended && host.status === "connected" && host.targetCount === 0 && host.identity === origin
+    && host.frameDamage === true && host.damagePayload === true);
+}
+export function webkitSpareStats() {
+  const shared = sharedInstance();
+  if (shared && shared.webkitSpareStats !== webkitSpareStats) return shared.webkitSpareStats();
+  return spare?.stats ?? null;
+}
+
+/**
  * Start a private WebKit host for one Zen tab and attach it. Fixture mode only;
- * every path and the fixture origin are re-validated here, at the spawn.
+ * every path and the fixture origin are re-validated here, at the spawn. A warm
+ * spare (prewarmWebKitHost) is used when one is ready.
  */
 export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFailure, frameDamage = true,
   damagePayload = frameDamage, frameTransport = null, browserUI = true, element = null, onGeometry = () => {} }) {
+  if (typeof tabId !== "string" || !/^[a-zA-Z0-9_:/.-]{1,128}$/u.test(tabId) || !webkitAvailabilityFor(win).available) {
+    throw new Error("WEBKIT_RUNTIME_UNAVAILABLE");
+  }
+  // macOS: never a warm spare (EngineHostSpare: surface endpoints are created per tab, before the
+  // spawn, for this tab's canvas); the host starts here with the endpoint.
+  const mac = isMac(webkitPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI));
+  const options = { frameDamage, damagePayload, frameTransport, browserUI };
+  const warm = mac ? null : await takeWarmWebKitHost(origin, options);
+  const host = warm ?? await startWebKitHost(win, origin, { ...options, element: mac ? element : null });
+  const adapter = new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
+    document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
+    element: host.surfaceMode ? element : null, onGeometry });
+  const close = adapter.close.bind(adapter);
+  adapter.close = async () => {
+    try { await close(); } finally { if (!mac) try { prewarmWebKitHost(win, PREWARM_AFTER_CLOSE_MS); } catch {} }
+  };
+  adapter.warmHost = !!warm;
+  return adapter;
+}
+
+/** One connected private WebKit host (no target yet). `element`: macOS surface canvas, or null. */
+async function startWebKitHost(win, origin, { frameDamage, damagePayload, frameTransport, browserUI, element = null }) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
   const platform = webkitPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI);
@@ -349,8 +411,7 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   const root = env("AXIOSOZO_BUILD_ROOT"), session = env("AXIOSOZO_SESSION_RUNTIME"), command = env("AXIOSOZO_WEBKIT_BINARY");
   if (!platform || !webkitAvailabilityFor(win).available || command !== webkitBinaryPath(root, platform)
       || !validWebKitSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path, platform)
-      || origin !== env("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") || !validFixtureOrigin(origin)
-      || typeof tabId !== "string" || !/^[a-zA-Z0-9_:/.-]{1,128}$/u.test(tabId)) {
+      || origin !== env("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") || !validFixtureOrigin(origin)) {
     throw new Error("WEBKIT_RUNTIME_UNAVAILABLE");
   }
   const instance = "webkit-" + Services.uuid.generateUUID().toString().replace(/[{}]/gu, "");
@@ -400,7 +461,5 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
     surface: endpoint ? { endpoint, service, frameRate: webkitSurfaceFrameRate(service) } : null });
   try { await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
-  return new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: instance, identity: origin,
-    document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
-    element: endpoint ? element : null, onGeometry });
+  return host;
 }

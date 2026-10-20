@@ -128,6 +128,19 @@ dominant cost.
 | current full draw (convert + put) | 6.9 | 6.3 | — |
 | candidate: convert + put only a 10 % damage band | 0.8 | 0.7 | — |
 
+## Update: perf-phase3 defaults (run 39396635363)
+
+Same-job A/B (phase 3 vs its control on one runner; `raf-nosampler` = zen_bench's 2 ms sampler off),
+details and method in docs/perf/pixel-path.md "Phase 3". Engine canvases are now composited by
+WebRender as their own surface (no per-frame re-rasterization), and the Gecko → engine switch uses a
+warm spare host in fixture mode.
+
+| Metric (inside Zen) | Gecko tab | Chromium tab 1× / 2× | WebKit tab 1× / 2× |
+| --- | --- | --- | --- |
+| Zen parent CPU, rAF page (sampler off) | 17.4 % / 17.8 % | 24.5 → **16.6 %** / 36.0 → **18.7 %** | 27.2 → **18.6 %** / 55.8 → **33.1 %** |
+| Gecko → engine switch | — | 425 → **122 ms** / 316 → **166 ms** | 500 → **227 ms** / 525 → **237 ms** |
+| rAF fps / scroll fps | 59 / 59 | 60 / 60 | 58 / 55–57 |
+
 ## Bottlenecks, ranked
 
 1. **The Zen parent process caps engine tabs at ~48–49 fps and adds ~20 ms input latency.**

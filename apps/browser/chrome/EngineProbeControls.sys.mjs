@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
-import { allowedFixtureURL, validFixtureOrigin } from "./CEFEngineAdapter.sys.mjs";
+import { allowedFixtureURL, validFixtureOrigin, prewarmCEFFixtureHost } from "./CEFEngineAdapter.sys.mjs";
 import { transferableGeckoURL } from "./CEFPresenter.sys.mjs";
 import { normalizeEngineId, isEngineAvailable } from "./EngineRegistry.sys.mjs";
 
@@ -168,6 +168,8 @@ export function installEngineProbeControls(win, gecko, { Presenter, onEngineChan
     button.addEventListener("command", command);
     toolbar.appendChild(button);
     updateButton();
+    // perf-phase3: a warm spare fixture host at idle (Linux; pref axiosozo.engines.prewarm).
+    try { prewarmCEFFixtureHost(win); } catch {}
   } else getPresenter(); // restores Chromium tabs and installs the tab menu and badge
   return Object.freeze({
     switchToChromium: () => switchEngine("chromium"),

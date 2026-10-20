@@ -5,9 +5,10 @@
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
-  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, isNativeFrame, NativeFrameSinks, nativeFrameRing,
   workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
 export const CHROMIUM_VERSION = "154.0.8037.17";
@@ -413,6 +414,10 @@ export function surfaceFrameRate(service) {
 /** cef-v1 `frame_rate` command values. */
 export const FRAME_RATES = Object.freeze([60, 120]);
 
+// Request lines are bounded (16 KiB of UTF-8).
+const utf8Encoder = new TextEncoder();
+const utf8Length = text => utf8Encoder.encode(text).length;
+
 /**
  * One authenticated native process. A web host serves every Chromium tab of a
  * Zen profile; each tab is a CEFEngineAdapter registered by its tab_id.
@@ -603,7 +608,8 @@ export class CEFHostConnection {
   }
   async #write(value) {
     const text = JSON.stringify(value) + "\n";
-    if (new TextEncoder().encode(text).length > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
+    // A UTF-16 unit is at most 3 UTF-8 bytes: only a long line is measured (frame acks, input: never).
+    if (text.length > 5461 && utf8Length(text) > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
     try { await this.#process.stdin.write(text); }
     catch (error) { this.fail("CEF_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }
@@ -689,8 +695,8 @@ export class CEFHostConnection {
       }
       // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
       // After a memfd fallback, a frame worker's targets take the pipe payloads too.
-      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
-      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
+      if (kind === 2 && this.#native?.acceptsBuffers && !isNativeFrame(pixels)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !isNativeFrame(pixels)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -1400,8 +1406,43 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
 }
 
 /**
+ * Warm spare fixture host (EngineHostSpare.sys.mjs): one per Firefox process, held by the
+ * shared module instance (every window imports this module through its own module graph).
+ * Linux only; never the web-mode host. Returns whether a spare is (being) scheduled.
+ */
+let fixtureSpare = null;
+const SHARED_MODULE = "chrome://browser/content/axiosozo/CEFEngineAdapter.sys.mjs";
+function sharedInstance() {
+  try { return ChromeUtils.importESModule(SHARED_MODULE); } catch { return null; }
+}
+export function prewarmCEFFixtureHost(win, delayMs = PREWARM_STARTUP_DELAY_MS) {
+  const shared = sharedInstance();
+  if (shared && shared.prewarmCEFFixtureHost !== prewarmCEFFixtureHost) return shared.prewarmCEFFixtureHost(win, delayMs);
+  const origin = Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN");
+  if (expectedCEFPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI) === "macosarm64" || !validFixtureOrigin(origin)) return false;
+  if (!prewarmWanted(Services.prefs)) { fixtureSpare?.drop(); return false; }
+  fixtureSpare ??= new SpareHost(() => launchHost("fixture", origin));
+  fixtureSpare.schedule(win, delayMs);
+  return true;
+}
+/** The spare for a fixture tab of `origin`, or null (then the caller starts a host itself). */
+export async function takeCEFFixtureHost(origin) {
+  const shared = sharedInstance();
+  if (shared && shared.takeCEFFixtureHost !== takeCEFFixtureHost) return shared.takeCEFFixtureHost(origin);
+  if (!fixtureSpare || !prewarmWanted(Services.prefs)) return null;
+  return fixtureSpare.take(host => !host.ended && host.status === "connected" && host.targetCount === 0
+    && host.browsingMode === "fixture" && host.identity === origin);
+}
+export function cefFixtureSpareStats() {
+  const shared = sharedInstance();
+  if (shared && shared.cefFixtureSpareStats !== cefFixtureSpareStats) return shared.cefFixtureSpareStats();
+  return fixtureSpare?.stats ?? null;
+}
+
+/**
  * Attach one Zen tab as a Chromium target. Web tabs share the profile's host;
- * the fixture probe keeps its own strict single-origin host per tab.
+ * the fixture probe keeps its own strict single-origin host per tab (a warm spare
+ * when one is ready, see prewarmCEFFixtureHost).
  */
 export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure,
   element = null, onGeometry }) {
@@ -1414,12 +1455,21 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
     return new shared.CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
       document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure, element, onGeometry });
   }
-  const host = await launchHost("fixture", origin);
-  const adapter = new CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
+  const spare = await takeCEFFixtureHost(origin);
+  const host = spare ?? await launchHost("fixture", origin);
+  // A spare comes from the shared module instance: its adapter class too (as in web mode).
+  const Adapter = (spare && sharedInstance()?.CEFEngineAdapter) || CEFEngineAdapter;
+  const adapter = new Adapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
     identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
     element, onGeometry });
   // A fixture host exists for exactly this one tab.
   const close = adapter.close.bind(adapter);
-  adapter.close = async () => { try { await close(); } finally { await host.shutdown().catch(() => {}); } };
+  adapter.close = async () => {
+    try { await close(); } finally {
+      await host.shutdown().catch(() => {});
+      try { prewarmCEFFixtureHost(win, PREWARM_AFTER_CLOSE_MS); } catch {}
+    }
+  };
+  adapter.warmHost = !!spare;
   return adapter;
 }

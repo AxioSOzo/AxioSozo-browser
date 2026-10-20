@@ -525,6 +525,12 @@ public:
   // One content manager per view, all sharing the origin filter.
   WebKitUserContentManager* newContentManager() const;
   Host& host() { return *host_; }
+  // Start-up (perf-phase3): a hidden about:blank view started right after `ready`, so the
+  // sandboxed web and network processes launch before the first `create`. The first target's
+  // view is created related to it (same web process) and the warm view is then dropped. It
+  // never gets a target, input or frames; AXIO_WEBKIT_NO_PREWARM turns it off (A/B).
+  void prewarm();
+  WebKitWebView* takeWarmView();
 
 private:
   Host* host_ = nullptr;
@@ -534,6 +540,8 @@ private:
   WebKitUserContentFilter* filter_ = nullptr;
   WebKitUserContentFilterStore* filters_ = nullptr;
   std::map<WebKitWebView*, WpeView*> views_;
+  WebKitWebView* warm_ = nullptr;
+  WebKitUserContentManager* warmContent_ = nullptr;
 };
 
 // ---- View -------------------------------------------------------------------------
@@ -569,9 +577,15 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
     webkit_user_content_manager_add_script(content_, watch);
     webkit_user_script_unref(watch);
   }
-  view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
-                                       "network-session", engine_.session(), "settings", engine_.settings(),
-                                       "user-content-manager", content_, nullptr));
+  // Related to the warm view (if any): its already started web process serves this view; the
+  // context and network session come with it (they are the engine's own).
+  WebKitWebView* warm = engine_.takeWarmView();
+  view_ = warm ? WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "related-view", warm,
+                                              "settings", engine_.settings(), "user-content-manager", content_, nullptr))
+               : WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
+                                              "network-session", engine_.session(), "settings", engine_.settings(),
+                                              "user-content-manager", content_, nullptr));
+  if (warm) g_object_unref(warm);
   if (!view_) return false;
   // libwpe drops dispatches made before WebKit registered its backend client
   // (CI run 39294885122: the page saw devicePixelRatio 1), so apply scale and size now.
@@ -1391,6 +1405,30 @@ bool WpeEngine::initialize(Host& host, const std::string& profile) {
   return true;
 }
 
+void WpeEngine::prewarm() {
+  if (warm_ || getenv("AXIO_WEBKIT_NO_PREWARM")) return;
+  auto* box = new BackendBox();  // no owner: any buffer is released at once
+  box->exportable = wpe_view_backend_exportable_fdo_create(&exportClient, box, 16, 16);
+  if (!box->exportable) { delete box; return; }
+  auto* backend = webkit_web_view_backend_new(wpe_view_backend_exportable_fdo_get_view_backend(box->exportable), [](gpointer data) {
+    auto* owned = static_cast<BackendBox*>(data);
+    wpe_view_backend_exportable_fdo_destroy(owned->exportable);
+    delete owned;
+  }, box);
+  warmContent_ = newContentManager();
+  warm_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", context_,
+                                       "network-session", session_, "settings", settings_,
+                                       "user-content-manager", warmContent_, nullptr));
+  if (warm_) webkit_web_view_load_uri(warm_, "about:blank");
+}
+
+WebKitWebView* WpeEngine::takeWarmView() {
+  WebKitWebView* warm = warm_;
+  warm_ = nullptr;
+  if (warmContent_) { g_object_unref(warmContent_); warmContent_ = nullptr; }
+  return warm;  // the caller unrefs it once its own view exists
+}
+
 WebKitUserContentManager* WpeEngine::newContentManager() const {
   WebKitUserContentManager* content = webkit_user_content_manager_new();
   webkit_user_content_manager_add_filter(content, filter_);
@@ -1398,6 +1436,7 @@ WebKitUserContentManager* WpeEngine::newContentManager() const {
 }
 
 void WpeEngine::shutdown() {
+  if (WebKitWebView* warm = takeWarmView()) g_object_unref(warm);
   if (filter_) { webkit_user_content_filter_unref(filter_); filter_ = nullptr; }
   if (filters_) { g_object_unref(filters_); filters_ = nullptr; }
   if (settings_) { g_object_unref(settings_); settings_ = nullptr; }
@@ -1504,6 +1543,7 @@ int main(int argc, char** argv) {
   }
   currentHost = &host;
   host.ready();
+  engine.prewarm();
   loop = g_main_loop_new(nullptr, FALSE);
   g_unix_signal_add(SIGTERM, [](gpointer) -> gboolean { if (currentHost) currentHost->beginClosing(); return G_SOURCE_CONTINUE; }, nullptr);
   g_unix_signal_add(SIGINT, [](gpointer) -> gboolean { if (currentHost) currentHost->beginClosing(); return G_SOURCE_CONTINUE; }, nullptr);

@@ -6,7 +6,7 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame, isNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -591,6 +591,7 @@ export class CEFPresenter {
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
     if (record.visible !== visible) {
       record.visible = visible;
+      if (visible) representNativeFrame(record); // a frame applied while hidden
       if (!visible) this.#closeDatalist(record);
       record.a11y?.setVisible(record.a11yTarget, visible);
       // Surface mode also gates the endpoint's begin frames, fixture sessions included.
@@ -815,7 +816,7 @@ export class CEFPresenter {
       record.firstFrameAt ??= this.window.performance.now();
       record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
     };
-    if (pixels instanceof NativeFrame) {
+    if (isNativeFrame(pixels)) {
       // Native receiver: the component presents the frame; nothing to convert here.
       const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
       if (paint) { if (paint !== true) onPaint(paint); return; }
@@ -1222,7 +1223,8 @@ export class CEFPresenter {
   }
   /** Sum wheel (or pinch) deltas per frame; a phase or modifier change flushes first. */
   #coalesce(record, method, fields, sums) {
-    const key = JSON.stringify([method, fields.modifiers, fields.phase ?? null, fields.momentum_phase ?? null, fields.precise ?? null]);
+    // Per wheel event: a plain string key (no JSON array per event).
+    const key = `${method}|${fields.modifiers}|${fields.phase ?? ""}|${fields.momentum_phase ?? ""}|${fields.precise ?? ""}`;
     if (record.pendingWheel && record.pendingWheel.key !== key) this.#flushWheel(record);
     if (record.pendingWheel) {
       record.pendingWheel.fields = fields; // the latest position
@@ -1692,6 +1694,7 @@ export class CEFPresenter {
         ?? (this.window.gBrowser.selectedTab === record.tab && record.priorDocShellIsActive);
     }
     record.stack.style.position = record.priorPosition;
+    record.directComposite?.restore(); // perf: the panel's rounded clip comes back with Gecko
     record.overlay.remove();
     // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
     try { record.canvas.width = 1; record.canvas.height = 1; } catch {}

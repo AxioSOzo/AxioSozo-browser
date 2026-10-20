@@ -17,7 +17,7 @@
 // JSON frame_ack is a protocol error, exactly like CEFHostConnection's surface mode.
 
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, disableMemfdFrames,
-  MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  MEMFD_FALLBACK_ACK, NativeFrame, isNativeFrame, NativeFrameSinks, nativeFrameRing,
   workerFrameRing } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
@@ -223,6 +223,10 @@ export function streamSurfaceTargetId(target) {
   return Number(value);
 }
 
+// Request lines are bounded (16 KiB of UTF-8).
+const utf8Encoder = new TextEncoder();
+const utf8Length = text => utf8Encoder.encode(text).length;
+
 /**
  * `profile`: { engine, readyFields: [...], validateReady(ready, {instance, frameDamage, surface,
  * externalBeginFrames, frameRate}) (throws), restoreStatuses: [...], cursors: Set, imeLimit }, and
@@ -386,7 +390,8 @@ export class EngineStreamHost {
   }
   async #write(value) {
     const text = JSON.stringify(value) + "\n";
-    if (new TextEncoder().encode(text).length > 16384) throw new Error("ENGINE_REQUEST_TOO_LARGE");
+    // A UTF-16 unit is at most 3 UTF-8 bytes: only a long line is measured (frame acks, input: never).
+    if (text.length > 5461 && utf8Length(text) > 16384) throw new Error("ENGINE_REQUEST_TOO_LARGE");
     try { await this.#process.stdin.write(text); }
     catch (error) { this.fail("ENGINE_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }
@@ -462,8 +467,8 @@ export class EngineStreamHost {
       }
       // Every delivered frame is applied, presented or not (§6.2).
       // After a memfd fallback, a frame worker's targets take the pipe payloads too.
-      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
-      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
+      if (kind === 2 && this.#native?.acceptsBuffers && !isNativeFrame(pixels)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !isNativeFrame(pixels)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
