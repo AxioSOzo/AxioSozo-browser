@@ -35,11 +35,14 @@ curl -fsSL "$URL" -o wpe.tar.xz
 echo "$SHA  wpe.tar.xz" | sha256sum -c - | tee -a "$OUT/build-steps.log"
 tar -xJf wpe.tar.xz
 SRC=/work/wpewebkit-$VERSION
+PREFIX=/usr/local/wpe-upstream
 export CCACHE_DIR=/ccache CCACHE_MAXSIZE=6G CCACHE_COMPRESS=1 CCACHE_BASEDIR=/work CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+{ echo "restored cache: $(du -sh /ccache 2>/dev/null | cut -f1)"; ccache -s; } >"$OUT/ccache-before.txt" 2>&1 || true
 ccache -z >/dev/null
 log "configure $VERSION"
 start=$(date +%s)
-cmake -S "$SRC" -B /work/build -G Ninja -DPORT=WPE -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/wpe-upstream \
+cmake -S "$SRC" -B /work/build -G Ninja -DPORT=WPE -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PREFIX \
+  -DCMAKE_INSTALL_RPATH=$PREFIX/lib \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_LD_LLD=ON \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DENABLE_DOCUMENTATION=OFF -DENABLE_INTROSPECTION=OFF -DENABLE_MINIBROWSER=OFF -DENABLE_API_TESTS=OFF \
@@ -55,6 +58,8 @@ printf '{"version":"%s","configure_s":%s,"build_s":%s,"nproc":%s,"ok":%s}\n' "$V
 cat "$OUT/build-time.json"
 [ "${status:-0}" = 0 ] || exit 1
 ninja -C /work/build install >"$OUT/install.log" 2>&1
+# WebKit's helpers must find the prefix's libWPEWebKit (run 39319667952: they could not).
+for exe in "$PREFIX"/libexec/wpe-webkit-2.0/*; do printf '%s: ' "$exe"; readelf -d "$exe" | grep -E 'RUNPATH|RPATH' || echo none; done >"$OUT/runpath.txt"
 log "installed $VERSION to /usr/local/wpe-upstream; running host suites against it"
-export AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=/usr/local/wpe-upstream
+export AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=$PREFIX AXIOSOZO_WEBKIT_UPSTREAM_KEY=$KEY
 sh /src/native/webkit-host/ci/container_test.sh

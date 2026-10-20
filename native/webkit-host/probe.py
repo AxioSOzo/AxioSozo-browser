@@ -57,7 +57,12 @@ UPSTREAM_REPLACES = {'libwpewebkit-2.0-1', 'libwpewebkit-2.0-dev'}
 
 
 def expected_webkit():
-    return lock()['upstream']['version'] if UPSTREAM_PREFIX else lock()['version']
+    if not UPSTREAM_PREFIX:
+        return lock()['version']
+    entry = lock()
+    for key in os.environ.get('AXIOSOZO_WEBKIT_UPSTREAM_KEY', 'upstream').split('.'):
+        entry = entry[key]
+    return entry['version']
 
 
 def pkg_config_env():

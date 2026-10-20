@@ -67,7 +67,7 @@ python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1]))["webkit"]["debian
   echo "}"
 } >"$OUT/machine.json"
 
-as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio ${AXIOSOZO_WEBKIT_UPSTREAM_PREFIX:+AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=$AXIOSOZO_WEBKIT_UPSTREAM_PREFIX} "$@"; }
+as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio ${AXIOSOZO_WEBKIT_UPSTREAM_PREFIX:+AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=$AXIOSOZO_WEBKIT_UPSTREAM_PREFIX} ${AXIOSOZO_WEBKIT_UPSTREAM_KEY:+AXIOSOZO_WEBKIT_UPSTREAM_KEY=$AXIOSOZO_WEBKIT_UPSTREAM_KEY} "$@"; }
 
 status=0
 log "check (pins, build fingerprint, bubblewrap user namespaces)"
