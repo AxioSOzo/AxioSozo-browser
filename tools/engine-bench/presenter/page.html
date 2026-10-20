@@ -102,8 +102,9 @@ async function run() {
     }
     if (typeof VideoFrame === 'function') {
       // BGRX VideoFrame of the (damage) rectangle + drawImage: no JS swizzle (EngineFrameSurface "videoframe").
-      const draw = (b, x, y, rw, rh) => { const vf = new VideoFrame(b, { format: 'BGRX', codedWidth: rw, codedHeight: rh,
-        timestamp: 0, layout: [{ offset: (y * w + x) * 4, stride: w * 4 }] }); ctx.drawImage(vf, x, y); vf.close(); };
+      // Whole rows only (Gecko 156 ignores VideoFrameBufferInit.layout; see drawBGRXRows).
+      const draw = (b, x, y, rw, rh) => { const vf = new VideoFrame(new Uint8Array(b, y * w * 4, rh * w * 4), { format: 'BGRX',
+        codedWidth: w, codedHeight: rh, timestamp: 0 }); ctx.drawImage(vf, 0, y); vf.close(); };
       try {
         r.candidate_videoframe_full_ms = await time(b => { draw(b, 0, 0, w, h); flush(); }, make);
         r.candidate_videoframe_damage10_ms = await time(b => { draw(b, 0, 37 % (h - band), w, band); flush(); }, make);
@@ -112,10 +113,10 @@ async function run() {
         const whole = ctx.getImageData(0, 0, w, h).data;
         r.videoframe_identical_output = whole.every((v, i) => Math.abs(v - want[i]) <= 0);
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
-        draw(make(), 13, 7, 50, 20);
-        const rect = ctx.getImageData(13, 7, 50, 20).data;
-        r.videoframe_rect_identical_output = rect.every((v, i) => { const px = (i >> 2), x = 13 + px % 50, y = 7 + ((px / 50) | 0);
-          return Math.abs(v - want[(y * w + x) * 4 + (i & 3)]) <= 0; });
+        draw(make(), 0, 7, w, 20);
+        const rows = ctx.getImageData(0, 7, w, 20).data, above = ctx.getImageData(0, 6, w, 1).data;
+        r.videoframe_rows_identical_output = rows.every((v, i) => Math.abs(v - want[7 * w * 4 + i]) <= 0)
+          && above.every((v, i) => (i & 3) === 3 || v === 0);
       } catch (error) { r.videoframe_error = String(error && error.message || error); }
       if (typeof EngineFrameSurface === 'function') {
         const vw = { requestAnimationFrame() {}, performance, ImageData, VideoFrame, OffscreenCanvas: self.OffscreenCanvas };

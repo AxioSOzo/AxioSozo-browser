@@ -25,6 +25,7 @@ prefs_for() {
     worker) echo "--pref axiosozo.engines.linux.frame_worker=true" ;;
     nativeworker) echo "--pref axiosozo.engines.linux.frame_worker=true --pref axiosozo.engines.linux.native_receiver=true" ;;
     native) echo "--pref axiosozo.engines.linux.native_receiver=true" ;;
+    imagedata) echo "--pref axiosozo.engines.linux.frame_upload=imagedata" ;;
     *) ;;
   esac
 }

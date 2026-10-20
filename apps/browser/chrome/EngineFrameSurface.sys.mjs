@@ -13,9 +13,9 @@
 //   that a newer one supersedes before the tick costs no pixel work, and the host's
 //   frame credit is returned as soon as a frame is accepted, not after its paint.
 // - Upload (pref `axiosozo.engines.linux.frame_upload`): "videoframe" (default where the window
-//   has WebCodecs) wraps the damaged rectangle of the BGRA frame in a VideoFrame of format BGRX
-//   (Gecko's native B8G8R8X8, no JS swizzle, no unpremultiply: the canvas is opaque) and draws it
-//   with drawImage; "imagedata" is the JS swizzle into a persistent ImageData + putImageData. A
+//   draws BGRX VideoFrames exactly) wraps the damaged rows of the BGRA frame in a VideoFrame of
+//   format BGRX (Gecko's native B8G8R8X8, no JS swizzle, no unpremultiply: the canvas is opaque)
+//   and draws it with drawImage; "imagedata" is the JS swizzle into a persistent ImageData + putImageData. A
 //   VideoFrame failure switches that surface to "imagedata" for good.
 // - With `hello.damage_payload` (engine-stream-v1 §6.2, cef-v1 "Frame damage") the
 //   payload is only the damaged rectangle; DamagePayloadAssembler rebuilds the whole
@@ -116,22 +116,23 @@ export function convertBGRAInPlace(buffer, width) {
 }
 
 /**
- * Draws a `w`×`h` rectangle at (x, y) of a premultiplied BGRA frame (`source`, `frameWidth` px
- * rows, tight stride) onto `context` at the same position, through a VideoFrame of format BGRX
- * that views only that rectangle (layout offset + the frame's stride): Gecko copies those rows
- * once into a B8G8R8X8 surface and blits it. Alpha is ignored (opaque engine canvas).
+ * Draws the rows `y`..`y+h` of a premultiplied BGRA frame (`source`, `frameWidth` px rows, tight
+ * stride) onto `context` at the same position, through a VideoFrame of format BGRX over a view of
+ * exactly those rows: Gecko copies them once into a B8G8R8X8 surface and blits it. Whole rows
+ * because Gecko (156) ignores `VideoFrameBufferInit.layout` and assumes a tight stride, so a
+ * narrower rectangle cannot be described without a JS copy. Alpha is ignored (opaque canvas).
  */
-export function drawBGRXRect(VideoFrameClass, context, source, frameWidth, x, y, w, h, timestamp = 0) {
-  const frame = new VideoFrameClass(source, { format: "BGRX", codedWidth: w, codedHeight: h, timestamp,
-    layout: [{ offset: (y * frameWidth + x) * 4, stride: frameWidth * 4 }] });
-  try { context.drawImage(frame, x, y); }
+export function drawBGRXRows(VideoFrameClass, context, source, frameWidth, y, h, timestamp = 0) {
+  const rows = new Uint8Array(source, y * frameWidth * 4, h * frameWidth * 4);
+  const frame = new VideoFrameClass(rows, { format: "BGRX", codedWidth: frameWidth, codedHeight: h, timestamp });
+  try { context.drawImage(frame, 0, y); }
   finally { frame.close(); }
 }
 
 export const FRAME_UPLOAD_PREF = "axiosozo.engines.linux.frame_upload";
 
-// Once per process: does this engine draw a BGRX VideoFrame rectangle (layout offset + stride)
-// exactly? A 3x2 frame's 2x1 rectangle at (1, 1) is drawn on a scratch canvas and read back.
+// Once per process: does this engine draw BGRX VideoFrame rows exactly? Row 1 of a 3x2 frame is
+// drawn on a scratch canvas at y = 1 and read back.
 let videoFrameProbe = null;
 export function videoFrameUploadWorks(win) {
   if (videoFrameProbe !== null) return videoFrameProbe.ok;
@@ -139,8 +140,8 @@ export function videoFrameUploadWorks(win) {
   try {
     const bgra = new Uint8Array(pixels.flatMap(([r, g, b]) => [b, g, r, 255]));
     const canvas = new win.OffscreenCanvas(3, 2), context = canvas.getContext("2d", { alpha: false });
-    drawBGRXRect(win.VideoFrame, context, bgra.buffer, 3, 1, 1, 2, 1, 0);
-    const out = context.getImageData(1, 1, 2, 1).data, want = [...pixels[4], 255, ...pixels[5], 255];
+    drawBGRXRows(win.VideoFrame, context, bgra.buffer, 3, 1, 1, 0);
+    const out = context.getImageData(0, 1, 3, 1).data, want = [...pixels[3], 255, ...pixels[4], 255, ...pixels[5], 255];
     const ok = want.every((value, i) => Math.abs(out[i] - value) <= 2);
     videoFrameProbe = { ok, ...(ok ? {} : { got: [...out] }) };
   } catch (error) { videoFrameProbe = { ok: false, error: String(error?.message ?? error) }; }
@@ -220,7 +221,9 @@ export class EngineFrameSurface {
     const frameId = this.#metadata.frame_id;
     let [x, y, w, h] = this.#current ? this.#dirty : [0, 0, width, height];
     if (this.#upload === "videoframe") {
-      try { drawBGRXRect(this.#win.VideoFrame, context, this.#source, width, x, y, w, h, frameId); }
+      // Whole rows of the damage (see drawBGRXRows).
+      [x, w] = [0, width];
+      try { drawBGRXRows(this.#win.VideoFrame, context, this.#source, width, y, h, frameId); }
       catch (error) {
         // This window cannot draw BGRX VideoFrames: the JS path from now on, starting whole.
         this.#upload = "imagedata"; this.#uploadError = String(error?.message ?? error);

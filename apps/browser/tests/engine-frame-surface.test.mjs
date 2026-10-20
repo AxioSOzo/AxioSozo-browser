@@ -98,8 +98,8 @@ test("damage payloads rebuild the whole frame per target and reject a partial fr
   assembler.forget("t1"); assert.equal(assembler.size, 0);
 });
 
-test("videoframe upload: the damaged rectangle is wrapped as BGRX (offset + frame stride) and drawn in place", async () => {
-  const { frameUploadMode, drawBGRXRect } = await import("../chrome/EngineFrameSurface.sys.mjs");
+test("videoframe upload: the damaged rows are wrapped as BGRX (a view, no copy) and drawn in place", async () => {
+  const { frameUploadMode, drawBGRXRows } = await import("../chrome/EngineFrameSurface.sys.mjs");
   const frames = [], draws = [];
   class VideoFrame {
     constructor(data, init) { this.init = init; this.data = data; this.closed = false; frames.push(this); }
@@ -115,18 +115,20 @@ test("videoframe upload: the damaged rectangle is wrapped as BGRX (offset + fram
   const surface = new EngineFrameSurface(win, canvas, { onPaint: paint => paints.push(paint), upload: "videoframe" });
   const buffer = new ArrayBuffer(10 * 4 * 4);
   surface.accept({ frame_id: 1, width: 10, height: 4 }, buffer); win.tick();
-  assert.deepEqual(frames[0].init, { format: "BGRX", codedWidth: 10, codedHeight: 4, timestamp: 1, layout: [{ offset: 0, stride: 40 }] });
+  assert.deepEqual(frames[0].init, { format: "BGRX", codedWidth: 10, codedHeight: 4, timestamp: 1 });
+  assert.deepEqual([frames[0].data.byteOffset, frames[0].data.byteLength], [0, 160]);
   assert.deepEqual([draws[0].x, draws[0].y], [0, 0]);
   surface.accept({ frame_id: 2, width: 10, height: 4, damage: [[3, 2, 4, 1]] }, buffer); win.tick();
-  assert.deepEqual(frames[1].init, { format: "BGRX", codedWidth: 4, codedHeight: 1, timestamp: 2, layout: [{ offset: (2 * 10 + 3) * 4, stride: 40 }] });
-  assert.equal(frames[1].data, buffer, "the frame buffer itself, no copy in JS");
-  assert.deepEqual([draws[1].x, draws[1].y], [3, 2]);
+  assert.deepEqual(frames[1].init, { format: "BGRX", codedWidth: 10, codedHeight: 1, timestamp: 2 });
+  assert.equal(frames[1].data.buffer, buffer, "a view of the frame buffer, no copy in JS");
+  assert.deepEqual([frames[1].data.byteOffset, frames[1].data.byteLength], [80, 40]);
+  assert.deepEqual([draws[1].x, draws[1].y], [0, 2]);
   assert.ok(frames.every(frame => frame.closed), "every VideoFrame is closed after the draw");
   assert.equal(canvas.puts.length, 0); assert.equal(paints.at(-1).upload, "videoframe");
-  assert.equal(paints.at(-1).uploadedPixels, 4);
-  // drawBGRXRect closes the frame even when drawing throws.
+  assert.equal(paints.at(-1).uploadedPixels, 10, "whole rows of the damage");
+  // drawBGRXRows closes the frame even when drawing throws.
   const failing = { drawImage: () => { throw new Error("NOT_SUPPORTED"); } };
-  assert.throws(() => drawBGRXRect(VideoFrame, failing, buffer, 10, 0, 0, 1, 1), /NOT_SUPPORTED/);
+  assert.throws(() => drawBGRXRows(VideoFrame, failing, buffer, 10, 0, 1), /NOT_SUPPORTED/);
   assert.equal(frames.at(-1).closed, true);
 });
 
@@ -142,12 +144,13 @@ test("videoframe upload failure switches the surface to imagedata, whole", () =>
   assert.deepEqual(canvas.puts.at(-1).rect, [1, 1, 1, 1]); assert.equal(paints.at(-1).upload, "imagedata");
 });
 
-test("the VideoFrame probe accepts an engine that honours layout offset and stride, refuses one that does not", async () => {
+test("the VideoFrame probe accepts an engine that honours the view offset, refuses one that does not", async () => {
   const { videoFrameUploadWorks, videoFrameUploadProbe, resetVideoFrameProbe } = await import("../chrome/EngineFrameSurface.sys.mjs");
-  // A model of drawImage(VideoFrame BGRX): reads codedWidth x codedHeight from `offset` with `stride`.
-  const engine = honourLayout => {
+  // A model of drawImage(VideoFrame BGRX) over a Uint8Array view; `honourOffset` false models an
+  // engine that reads from the start of the underlying buffer.
+  const engine = honourOffset => {
     class VideoFrame {
-      constructor(data, init) { this.data = new Uint8Array(data); this.init = init; }
+      constructor(data, init) { this.data = honourOffset ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data.buffer); this.init = init; }
       close() {}
     }
     class OffscreenCanvas {
@@ -156,9 +159,9 @@ test("the VideoFrame probe accepts an engine that honours layout offset and stri
         const canvas = this;
         return {
           drawImage(frame, x, y) {
-            const { codedWidth: w, codedHeight: h, layout: [{ offset, stride }] } = frame.init;
+            const { codedWidth: w, codedHeight: h } = frame.init;
             for (let row = 0; row < h; row++) for (let col = 0; col < w; col++) {
-              const from = honourLayout ? offset + row * stride + col * 4 : (row * w + col) * 4, to = ((y + row) * canvas.width + x + col) * 4;
+              const from = (row * w + col) * 4, to = ((y + row) * canvas.width + x + col) * 4;
               const [b, g, r] = frame.data.subarray(from, from + 3);
               canvas.pixels.set([r, g, b, 255], to);
             }
