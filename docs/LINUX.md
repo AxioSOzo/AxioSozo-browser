@@ -221,6 +221,17 @@ decorations (Zen's own titlebar buttons) when it is set
 the baseline artifact (before) and this branch's build (after, `--strict`).
 It never types into the address bar (WebRender crash, cloud/linux-platform).
 
+### Evidence
+
+Actions run 39346931130 (`linux-gecko-feel.yml`): 7 `before` cells against
+artifact 39319467610 and 7 `after` cells against this branch's build, all
+`after` cells PASS with `--strict` (GNOME, KDE, dark, 1× and 2× first run, no
+desktop session, bare Xvfb). Screenshots and numbers:
+`docs/evidence/linux/gecko-feel/README.md`. Under a GNOME/KDE session the
+baseline had no window buttons at all and a 1200×757 window after onboarding;
+smooth scroll (60 fps, p95 17.1 ms), wheel distance (114 px/notch), tab
+switch and startup show no regression.
+
 ### What remains
 
 - A real GNOME/KDE session (mutter/KWin, Wayland) is NOT_VERIFIED: CI uses
