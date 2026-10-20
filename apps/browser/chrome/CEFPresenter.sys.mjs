@@ -1521,6 +1521,7 @@ export class CEFPresenter {
     const stats = record.surfaceMode ? record.adapter.surfaceStats?.() ?? null : null;
     return { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
+      frameTransport:record.surfaceMode ? null : record.adapter.frameTransport ?? "pipe",
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).

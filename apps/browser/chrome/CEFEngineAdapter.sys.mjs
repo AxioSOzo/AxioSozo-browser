@@ -883,6 +883,8 @@ export class CEFEngineAdapter {
   get nativeExitCode() { return this.#host.nativeExitCode; }
   /** GPU surface presentation (engine-surface-v1). False only in the labelled BGRA pipe fallback. */
   get surfaceMode() { return this.#host.surfaceMode === true; }
+  /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
+  get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
   /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
   get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }

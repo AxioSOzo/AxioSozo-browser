@@ -53,7 +53,76 @@ never negotiates damage or payloads; no TLS, sandbox or isolation setting change
 
 ## Measurements
 
-(filled in from linux-perf runs; see "Runs")
+All in-Zen numbers: linux-perf run **39342063334**, same-job A/B on one runner per engine. Base =
+cloud/integration `5f8b1d0` chrome JS + host; cand = this branch `9833f88`; memfd = cand with the
+EXPERIMENTAL pref. The app is the prebuilt Linux Zen artifact (linux-zen-build run 39337785340,
+`b14bad7`); chrome JS is overlaid per variant (TEST-ONLY `chrome-overlay`, labelled in every
+result). 2× = TEST-ONLY `layout.css.devPixelsPerPx=2` on a 2304×1440 Xvfb screen, so the engine
+surface is 837×632 CSS px at scale 2 (1674×1264 physical), close to the component bench's 2×.
+Rounds alternate base/cand/memfd (2 rounds × 3 repetitions each); both rounds agree. Full tables:
+`docs/perf/evidence/zen-ab-{chromium,webkit}-39342063334.md`. All 24 bench runs PASS.
+
+### Inside Zen, Chromium tabs (AMD EPYC 7763)
+
+| Metric (median, round 1 / round 2) | base | cand | memfd |
+| --- | --- | --- | --- |
+| 1× rAF presented fps | 42.6 / 42.9 | **59.0 / 59.0** | 59.0 / 58.7 |
+| 1× rAF frame interval p99 | 38.5 / 39.5 ms | **19.0 / 20.8 ms** | 29.1 / 29.2 ms |
+| 1× rAF CPU, whole browser | 159 / 159 % | **75 / 75 %** | 69 / 71 % |
+| 1× key → presented frame | 29.1 / 28.8 ms | **19.9 / 18.6 ms** | 20.3 / 20.1 ms |
+| 1× static page navigate → visible | 80 / 87 ms | 48 / 61 ms | 42 / 48 ms |
+| 2× rAF presented fps | 10.5 / 10.3 | **58.0 / 57.6** | **59.0 / 59.0** |
+| 2× rAF frame interval p99 | 125 / 125 ms | 31.1 / 30.6 ms | **22.0 / 21.8 ms** |
+| 2× rAF CPU, whole browser | 165 / 165 % | 162 / 164 % (at 5.5× the fps) | 133 / 131 % |
+| 2× presenter draw per frame | 6.35 / 6.21 ms | **3.54 / 3.68 ms** | 3.58 / 3.59 ms |
+| 2× key → presented frame | 90.7 / 89.6 ms | **21.1 / 20.9 ms** | 18.7 / 21.0 ms |
+| 2× static page navigate → visible | 254 / 282 ms | 77 / 87 ms | 67 / 48 ms |
+| 2× Gecko → Chromium switch | 567 / 601 ms | 469 / 526 ms | 471 / 502 ms |
+
+### Inside Zen, WebKit tabs (debian:13, AMD EPYC 9V74)
+
+| Metric (median, round 1 / round 2) | base | cand | memfd |
+| --- | --- | --- | --- |
+| 1× rAF presented fps | 39.1 / 38.9 | **57.9 / 57.6** | 57.7 / 57.7 |
+| 1× rAF frame interval p99 | 42.3 / 45.1 ms | **22.6 / 22.8 ms** | 24.2 / 22.8 ms |
+| 1× rAF CPU, whole browser | 201 / 202 % | 123 / 125 % | **115 / 114 %** |
+| 1× presenter draw per frame | 1.50 / 1.53 ms | 0.79 / 0.81 ms | 0.82 / 0.82 ms |
+| 1× key → presented frame | 32.4 / 32.0 ms | **24.1 / 23.7 ms** | 24.4 / 24.6 ms |
+| 2× rAF presented fps | 6.0 / 6.0 | 48.7 / 48.8 | **56.6 / 56.6** |
+| 2× rAF frame interval p99 | 220 / 209 ms | 47.3 / 37.8 ms | **33.0 / 30.9 ms** |
+| 2× rAF CPU, whole browser | 302 / 303 % | 330 / 331 % (at 8× the fps) | 306 / 306 % |
+| 2× presenter draw per frame | 8.91 / 8.55 ms | **3.73 / 3.76 ms** | 4.07 / 4.02 ms |
+| 2× key → presented frame | 98.2 / 98.4 ms | **29.5 / 29.8 ms** | 29.8 / 30.2 ms |
+| 2× static page navigate → visible | 215 / 256 ms | 87 / 105 ms | **67 / 70 ms** |
+
+Reading the tables:
+
+- At 1× the pipe path alone (u32 swizzle, rAF pacing, early ack, 1 MiB pipe, damage payload)
+  takes both engines to the display rate with p99 ≈ 20 ms and halves the browser's CPU; memfd
+  adds little there (frames are 2.3 MB and mostly 24 % damage).
+- At 2× the base path was transport-bound (10 fps Chromium / 6 fps WebKit with p99 > 120 ms,
+  key → frame 90–98 ms). The candidate presents 58 / 49 fps; **memfd** brings WebKit to 56.6 fps
+  and Chromium's p99 to 22 ms, with less CPU per frame (both stay CPU-saturated on 4 vCPUs in
+  software rendering, so total CPU % is flat while fps rises 5–9×).
+- Presenter draw at 2×: 6.3 → 3.6 ms (Chromium) and 8.7 → 3.7 ms (WebKit) per frame; at 1×
+  1.6 → 1.15 ms / 1.5 → 0.8 ms.
+- Wheel scroll windows are rows of the bench too (up to +600 %) but are dominated by the known
+  xdotool pacing artefact (docs/PERFORMANCE.md bottleneck 3); not claimed.
+- Memory: unchanged within noise (RSS −0…−9 %).
+- Not measured: GPU machines, macOS (surface path untouched), multi-tab.
+
+### Component and presenter benches
+
+- Presenter same-process A/B (`presenter` job, run 39342063334, Firefox 157, 1800×1300, identical
+  output): full draw 12.42 → 7.04 ms; `bgraToRGBA` 10.74 → 5.60 ms; EngineFrameSurface paint of a
+  10 % damage band 0.90 ms. Chrome 155 and V8 the same direction (run 39340129366: Chrome full draw
+  15.07 → 7.62 ms, V8 11.57 → 4.77 ms).
+- CEF host alone at 2× (`docs/perf/evidence/component-chromium-39340129366-vs-39330954155.md`):
+  client read 15.6 → 4.4 ms (1 MiB pipe) → 0.43 ms (+damage_payload), bytes/frame 9.36 → 2.21 MB,
+  client CPU 81 → 26 → 4.9 %, key → frame 17.0 → 7.1 → 2.0 ms.
+- WPE host alone at 2×, same CPU model (`docs/perf/evidence/component-webkit-39342063334-vs-39330954155.md`):
+  rAF 46.2 → 58.0 fps, p99 36.3 → 20.0 ms, client read 17.3 → 6.6 → 1.2 ms, client CPU 73.7 → 31.8 →
+  9.5 %, key → frame 35.5 → 21.8 ms.
 
 ## memfd frames (implemented, EXPERIMENTAL, pref-gated)
 
@@ -124,3 +193,9 @@ At 900×650: 64 KiB pipe 2.7 ms / 36 wakeups → 1 MiB 1.2 ms / 3 → memfd 0.17
 
 | Run | What | Result |
 | --- | --- | --- |
+| 39342063334 | linux-perf at 9833f88: presenter A/B, component benches (both engines, 3 passes), in-Zen A/B base/cand/memfd at 1×/2× | all green; tables above |
+| 39340129366 | linux-perf at 6e08ff3: presenter A/B, CEF component bench; A/B harness bugs (fixed in d8c923c); cancelled after the component job | partial, used for the CEF component table |
+| 39341140946, 39342063401 | linux-cef-host at 3137181 / 9833f88: x86_64 + arm64 every gate PASS (E0, stream, security, input, web, damage, native tests incl. damage-payload and memfd); `zen-gui-chromium` setup step fails on the known `probe.py check` exit code (also on cloud/integration) | PASS |
+| 39341141004, 39342063286 | linux-webkit-host at 3137181 / 9833f88: real WPE unit + stream + input + security + cleanup; damage_payload and memfd scenarios byte-identical to a forced whole frame | PASS |
+| 39341141669, 39342063487 | linux-webkit-zen at 3137181 / 9833f88: unit, adapter, E2E (launch, chrome, Gecko→WebKit→Gecko round trip, host failure, three engines) | E2E PASS |
+| 39340175745 | Linux check and test (PR #10) | green |

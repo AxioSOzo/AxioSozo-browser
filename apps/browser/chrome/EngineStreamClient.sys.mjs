@@ -508,6 +508,7 @@ export class EngineStreamTarget {
   get tabId() { return this.#pending.tab_id; }
   get identity() { return this.#pending.identity; }
   get host() { return this.#host; }
+  get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
   get ended() { return this.#ended; }
   get inputFeatures() {
     const capabilities = this.#host.capabilities ?? {};
