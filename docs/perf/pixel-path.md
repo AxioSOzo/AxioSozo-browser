@@ -251,6 +251,18 @@ rows from a `Uint8Array` view of the frame (no JS copy): Gecko 156's
 `dom/media/webcodecs/VideoFrame.cpp` ignores `VideoFrameBufferInit.layout` and assumes a tight
 stride, so a narrower rectangle cannot be described without a copy.
 
+Presenter bench (same process, run **39352857399** `presenter`, Firefox 158 headless and Chrome 155,
+identical output checked against the per-byte reference, probe `{ok: true}` in both):
+
+| 1800×1300 | Firefox imagedata → videoframe | Chrome imagedata → videoframe |
+| --- | --- | --- |
+| EngineFrameSurface paint, 10 % damage band | 0.60 → **0.12 ms** | 0.71 → 0.85 ms |
+| EngineFrameSurface paint, whole frame | 5.92 → 5.48 ms | 6.53 → 5.72 ms |
+| 900×650, 10 % band | 0.24 → **0.08 ms** | 0.18 → 0.28 ms |
+
+In Gecko (the engine Zen runs) a damage band costs a fifth; a whole frame is bounded by the copy
+either way (allocation + copy of 9.4 MB alone: 4.3 ms).
+
 ## Off the main thread: frame worker and native receiver
 
 Both implement one "sink" per native target (applyFrame / bindCanvas / present), chosen by the
