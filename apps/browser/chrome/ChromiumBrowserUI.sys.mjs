@@ -226,21 +226,44 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
   return ChromiumSaver;
 }
 
-/** A Firefox findbar backend (the browser.finder interface) for a Chromium tab. */
+/**
+ * A Firefox findbar backend (the browser.finder interface) for a Chromium tab.
+ *
+ * Highlight All: Chromium always highlights every match while a find session is
+ * open. Without Firefox's "Highlight All", each result therefore ends Chromium's
+ * session keeping only the active match as the selection (stop_finding without
+ * clearing it), as Firefox shows it. The next "find again" starts a new Chromium
+ * session from that selection; when Chromium lands on the same match again, one
+ * follow-up step moves it on, so the findbar's ordinal advances as in Firefox.
+ */
 class ChromiumFinder {
-  constructor(ui, record) {
+  constructor(ui, record, highlightAll = () => false) {
     this.ui = ui; this.record = record; this.listeners = new Set();
     this.searchString = ""; this.caseSensitive = false; this.entireWord = false; this.matchDiacritics = false;
     this.pending = null; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
+    this.highlightAll = !!highlightAll(); this.stopped = false;
   }
   addResultListener(listener) { this.listeners.add(listener); }
   removeResultListener(listener) { this.listeners.delete(listener); }
   #notify(method, ...args) { for (const listener of [...this.listeners]) { try { listener[method]?.(...args); } catch {} } }
+  #send(text, forward, findNext) {
+    this.ui.command(this.record, "find", { text: text.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
+  }
   #find(searchString, forward, findNext) {
+    const same = searchString === this.searchString;
     this.searchString = searchString;
-    if (!searchString) { this.ui.command(this.record, "stop_finding", { clear_selection: true }); this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 }); return; }
-    this.pending = { searchString, forward, findNext, active: 0 };
-    this.ui.command(this.record, "find", { text: searchString.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
+    if (!searchString) {
+      this.stopped = false;
+      this.ui.command(this.record, "stop_finding", { clear_selection: true });
+      this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 });
+      return;
+    }
+    // After a stopped session Chromium has nothing to continue: restart from the kept selection.
+    const chain = findNext && this.stopped && same && this.lastCount > 0;
+    const want = !chain ? 0 : forward ? this.lastActive % this.lastCount + 1 : (this.lastActive + this.lastCount - 2) % this.lastCount + 1;
+    this.pending = { searchString, forward, findNext, active: 0, want, previous: this.lastActive };
+    this.stopped = false;
+    this.#send(searchString, forward, chain ? false : findNext);
   }
   fastFind(searchString) { this.#find(searchString, true, false); }
   findAgain(searchString, findBackwards) { this.#find(searchString || this.searchString, !findBackwards, true); }
@@ -250,18 +273,46 @@ class ChromiumFinder {
     // leave it unset (0 here) in the final count update: keep the last one seen.
     if (event.active) this.pending.active = event.active;
     if (!event.final) return;
-    const { searchString, forward, findNext } = this.pending;
-    if (!event.active && event.count) event = { ...event, active: Math.min(this.pending.active || 1, event.count) };
+    const pending = this.pending;
+    const { searchString, forward, findNext } = pending;
+    if (!event.active && event.count) event = { ...event, active: Math.min(pending.active || 1, event.count) };
+    if (pending.want && event.count && event.active !== pending.want) {
+      // The restarted session found the kept match again: one step on.
+      pending.want = 0; pending.active = 0;
+      this.#send(searchString, forward, true);
+      return;
+    }
+    const previous = pending.want ? pending.previous : this.lastActive;
     let result = event.count ? FIND_FOUND : FIND_NOTFOUND;
-    if (event.count && findNext && ((forward && event.active < this.lastActive) || (!forward && event.active > this.lastActive))) result = FIND_WRAPPED;
+    if (event.count && findNext && ((forward && event.active < previous) || (!forward && event.active > previous))) result = FIND_WRAPPED;
     this.lastActive = event.active; this.lastCount = event.count;
+    this.pending = null;
     this.#notify("onFindResult", { result, findBackwards: !forward, searchString, storeResult: findNext, linkURL: null, findAgain: findNext, drawOutline: false });
     this.#notify("onMatchesCountResult", { total: event.count, current: event.active, limit: 1000 });
+    if (event.count && !this.highlightAll) this.#keepActiveOnly();
+  }
+  #keepActiveOnly() {
+    this.stopped = true;
+    this.ui.command(this.record, "stop_finding", { clear_selection: false });
   }
   requestMatchesCount() { this.#notify("onMatchesCountResult", { total: this.lastCount, current: this.lastActive, limit: 1000 }); }
-  highlight() {} onHighlightAllChange() {} onModalHighlightChange() {} enableSelection() {} keyPress() {} onFindbarOpen() {}
-  removeSelection() { this.ui.command(this.record, "stop_finding", { clear_selection: true }); }
-  onFindbarClose() { this.pending = null; this.ui.command(this.record, "stop_finding", { clear_selection: false }); }
+  /** Firefox's "Highlight All" checkbox (and the findbar's own highlight refreshes). */
+  highlight(on) { this.onHighlightAllChange(on); }
+  onHighlightAllChange(on) {
+    on = !!on;
+    if (on === this.highlightAll) return;
+    this.highlightAll = on;
+    if (!this.searchString || !this.lastCount) return;
+    if (on && this.stopped) {
+      // A new session from the kept selection highlights every match again.
+      this.pending = { searchString: this.searchString, forward: true, findNext: false, active: 0, want: 0, previous: this.lastActive };
+      this.stopped = false;
+      this.#send(this.searchString, true, false);
+    } else if (!on && !this.stopped && !this.pending) this.#keepActiveOnly();
+  }
+  onModalHighlightChange() {} enableSelection() {} keyPress() {} onFindbarOpen() {}
+  removeSelection() { this.stopped = false; this.ui.command(this.record, "stop_finding", { clear_selection: true }); }
+  onFindbarClose() { this.pending = null; this.stopped = false; this.ui.command(this.record, "stop_finding", { clear_selection: false }); }
   focusContent() { this.ui.hooks.focusContent?.(this.record); }
   getInitialSelection() { this.#notify("onCurrentSelection", "", true); }
   setSearchStringToSelection() { return Promise.resolve({ searchString: "" }); }
@@ -839,7 +890,7 @@ export class ChromiumBrowserUI {
   #installFinder(record, state) {
     const browser = record.browser;
     if (!browser || typeof browser !== "object") return;
-    const finder = new ChromiumFinder(this, record);
+    const finder = new ChromiumFinder(this, record, () => this.#prefBool("findbar.highlightAll", false));
     const gBrowser = this.#win.gBrowser, tab = record.tab;
     let findbar = null;
     try { if (gBrowser?.isFindBarInitialized?.(tab)) findbar = gBrowser.getCachedFindBar(tab); } catch {}

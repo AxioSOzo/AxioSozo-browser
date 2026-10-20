@@ -415,6 +415,43 @@ test("blocked pop-ups use Firefox's notification bar; allowing the site opens th
   assert.equal(h.notifications.length, 0);
 });
 
+test('findbar without Highlight All keeps only the active Chromium match and still advances 1, 2, 3, 1', async () => {
+  const h = harness();
+  const findbar = { counts: [], results: [], onFindResult(data) { this.results.push(data.result); }, onMatchesCountResult(data) { this.counts.push(data.current); } };
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  const finder = h.record.browser.finder;
+  finder.addResultListener(findbar);
+  const sent = () => h.sent.map(item => [item.method, item.fields.find_next ?? item.fields.clear_selection]);
+  finder.fastFind('needle'); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 1, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]], 'other matches cleared, the active one kept selected');
+  // Find again: Chromium restarts from the kept selection; if it finds the same match, one more step.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 2, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 3, active: 2, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 2]);
+  // Chromium moving on by itself needs no extra step.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 3, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]]);
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 2, 3, 1]);
+  assert.equal(findbar.results.at(-1), 2, 'wrapped');
+  // Highlight All on: a new session highlights every match and is not stopped.
+  h.sent.length = 0;
+  finder.onHighlightAllChange(true); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 6, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false]], 'no stop while Highlight All is on');
+  finder.highlight(false); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]]);
+});
+
 test("Zen's findbar drives Chromium find through the tab's browser.finder and restores Firefox's finder", async () => {
   const h = harness();
   const findbar = { results: [], counts: [], onFindResult(data) { this.results.push(data); }, onMatchesCountResult(data) { this.counts.push(data); } };
