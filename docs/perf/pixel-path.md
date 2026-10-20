@@ -515,6 +515,33 @@ Gecko → engine switch, same job (run 39385314455, zen_bench switch ms):
 | Chromium 1× / 2× | 471 / 495 ms | **136 / 156 ms** |
 | WebKit 1× / 2× | 507 / 529 ms | **193 / 207 ms** |
 
+## Result: phase 3 vs control, same job (run 39396635363)
+
+App: linux-perf-build **39383407870** (this branch: damage-only native receiver compiled in), chrome
+overlay of this branch. Per engine job, `zen_profile.py` runs phase 3 (defaults) and then the control
+(`direct_composite=false`, `prewarm=false`) on the same runner; two plain passes each (median), plus
+a profiler pass. Gecko rows are the same job's Gecko control tab (no engine involved).
+
+| tab | Zen parent CPU, rAF (sampler off) | Renderer + SwComposite | parent CPU, wheel scroll | Gecko → engine switch | key → frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chromium 1× | 24.5 → **16.6 %** | 11.0 → 3.5 | 42.6 → 35.2 % | 425 → **122 ms** | 12.1 → 12.2 ms |
+| Chromium 2× | 36.0 → **18.7 %** | 23.3 → 6.0 | 58.9 → 36.5 % | 316 → **166 ms** | 8.6 → 9.0 ms |
+| WebKit 1× | 27.2 → **18.6 %** | 11.7 → 3.2 | 44.0 → 36.7 % | 500 → **227 ms** | 16.4 → 17.2 ms |
+| WebKit 2× | 55.8 → **33.1 %** | 38.0 → 9.9 | 82.4 → 47.8 % | 525 → **237 ms** | 27.0 → 27.9 ms |
+| Gecko 1× / 2× (control tab) | 17.4 / 17.8 % | 9.4 / 11.2 | 42.6 / 76.7 % | — | — |
+
+- Engine tabs now cost the parent about what a Gecko tab running the same rAF fixture costs (16.6–18.7 %
+  vs 17.4–17.8 %), except WebKit 2× (33 %; the native receiver's task queue ~6–8 % and the main thread ~7 % of it).
+- Scroll: the parent no longer re-rasterizes the canvas, so wheel scrolling is cheaper too (−7…−35
+  points); scroll fps unchanged (60 Chromium, 55–57 WebKit). The main thread while scrolling stays
+  13–18 % (Gecko's own wheel dispatch + the per-frame host message), in phase 3 and control alike.
+- Key → frame is unchanged within noise (it is host-bound, profile-findings §b).
+- The rest of the switch (122–237 ms) is the target's creation + first navigation/paint in the warm
+  host; the parent's share stays ~35–50 ms.
+- Damage-only native presents (both variants run the new receiver): present 0.24 ms/frame at 2×
+  Chromium, 0.37–0.42 ms WebKit 2× (perf-phase2: 0.78 ms whole-frame); 98 % of presents are partial
+  (`partialCopies` 178/181), the rest are new/stale textures.
+
 ## Smaller changes
 
 - Native receiver (`engine-view/linux`): presents write only what changed into the recycled
@@ -526,3 +553,20 @@ Gecko → engine switch, same job (run 39385314455, zen_bench switch ms):
   could exceed 16 KiB; CEF wheel coalescing keys are plain strings. Wheel events were already
   coalesced to one `wheel` message per frame in both presenters; zen_bench's XTest wheel sends one
   notch per 16 ms, so per-frame coalescing has nothing more to merge.
+
+## Phase 3 runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39382362542 | linux-engine-profile, TEST-ONLY `--wr-promotion-log` + canvas ancestor chain | diagnosis: "overlay not allowed for prim with mask" (Zen panel radius) |
+| 39383407784 | first direct-compositing run (no spare host) | 0 promotion failures; Chromium 2× rAF parent 17.4 % |
+| 39384485852 | same-job A/B with spare hosts | WebKit PASS; Chromium FAIL (cross-module `instanceof`, fixed in c22eb86) |
+| 39385314455 | same-job A/B + profiler | all PASS; blend/scale paths gone (tables above) |
+| 39383407870 | linux-perf-build: phase-3 app (damage-only receiver) | build + GUI smoke PASS |
+| 39396635363 | final same-job A/B on that app (plain×2 + profile) | all PASS (result table) |
+| 39384485896 | linux-webkit-host (WPE warm web process) | PASS |
+| 39387902084, 39385246366 | linux-webkit-zen E2E | PASS |
+| 39387902076 | linux-cef-zen (Chromium-in-Zen E2E/feel) | PASS |
+| 39387902105 | linux-cef-host: x86_64, arm64, macOS compile | PASS; `zen-gui-chromium` FAIL (see handoff) |
+| 39385246466, 39387902382 | linux-perf soak (old app) | PASS |
+| 39396635366 | linux-perf soak (phase-3 app) | attempt 1: one transient CEF helper sample (fds 335→368→335), see handoff |
