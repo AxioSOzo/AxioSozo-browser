@@ -453,6 +453,7 @@ private:
   std::chrono::steady_clock::time_point nextHeartbeat_{};
   std::set<std::string> requestIds_;
   std::map<std::string, std::unique_ptr<Tab>> tabs_;
+  int memfdFallbacks_ = 0;  // §6.3 frame_ack fallbacks (at most one: the transport switches once)
   std::vector<std::unique_ptr<Tab>> graveyard_;
 
   bool live(Tab* tab) const { return tab && tab->created && !tab->closing && !closing_; }
@@ -596,6 +597,8 @@ private:
     expected.insert(expected.end(), spec->second.begin(), spec->second.end());
     if (method == "wheel" && (c.has("phase") || c.has("momentum_phase") || c.has("precise")))
       expected.insert(expected.end(), {"phase", "momentum_phase", "precise"});
+    // §6.3 fallback: a frame_ack may ask for the pipe once memfd frames are active.
+    if (method == "frame_ack" && c.has("frame_transport")) expected.push_back("frame_transport");
     if (!exactKeys(c, expected)) { failProtocol(); return; }
     if (method == "shutdown") { accepted(requestId); shutdownRequest_ = requestId; closing_ = true; return; }
     bool creating = method == "create";
@@ -604,8 +607,16 @@ private:
     if (method == "frame_ack") {
       // Surface frames are released over Mach; a JSON frame_ack is a protocol error.
       if (surface_) { failProtocol(); return; }
+      // §6.3 fallback: Zen could not read this frame's slot and dropped it. The pipe carries every
+      // later frame (switched before the credit returns) and each target is re-sent whole.
+      const Value* fallback = c.get("frame_transport");
+      if (fallback && !(fallback->isString() && fallback->string == "pipe" && transport_.disableMemfd())) { failProtocol(); return; }
       // The exact outstanding target, even if stale: discarded frames release credit too.
-      if (!integer(c.get("frame_id")) || !transport_.acknowledge(uint64_t(c.get("frame_id")->number), json::dump(*supplied))) failProtocol();
+      if (!integer(c.get("frame_id")) || !transport_.acknowledge(uint64_t(c.get("frame_id")->number), json::dump(*supplied))) { failProtocol(); return; }
+      if (fallback) {
+        memfdFallbacks_++;
+        for (auto& item : tabs_) { item.second->sentValid = false; flush(item.second.get()); }
+      }
       return;
     }
     Tab* tab = tabByKey(supplied->get("tab_id")->string);

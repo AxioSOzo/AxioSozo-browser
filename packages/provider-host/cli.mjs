@@ -8,7 +8,7 @@ import { discover, DRIVERS } from './src/discovery.mjs';
 import { livePreflight } from './src/adapters.mjs';
 import { DecisionProvider, DIAGNOSTIC_STATE } from './src/decision.mjs';
 import { platformKeychain } from './src/keychain.mjs';
-import { providerBuildRoot } from './src/storage.mjs';
+import { macosCiBuildRoot, providerBuildRoot } from './src/storage.mjs';
 import { SANDBOX_POLICY } from './src/sandbox.mjs';
 import { createLiveAdapter, LIVE_POLICY } from './src/live.mjs';
 import { checkClients, clearClientChecks, describeCheck } from './src/checks.mjs';
@@ -19,6 +19,12 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const [command = 'discover', driver, ...flags] = process.argv.slice(2);
 const print = data => process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 const storageScript = path.resolve(root, '../../scripts/storage.py');
+// The owner's macOS helpers. In the macOS CI mode (GitHub-hosted runners without
+// that layout, docs/MACOS_CI.md) the same commands run without them: `env` runs the
+// wrapped command and there is no volume to mount.
+const MAC_CI = macosCiBuildRoot() !== null;
+const DEV_EXTERNAL = MAC_CI ? '/usr/bin/env' : '/Users/wout/.local/bin/dev-external';
+const MOUNT_DEV_STORAGE = MAC_CI ? '/usr/bin/true' : '/Users/wout/.local/bin/mount-dev-storage';
 const helperPath = () => path.join(providerBuildRoot(), 'keychain');
 function run(executable, args) {
   const result = spawnSync(executable, args, { cwd: root, shell: false, stdio: 'inherit' });
@@ -29,7 +35,7 @@ function run(executable, args) {
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).filter(item => !item.name.startsWith('._')).flatMap(item => item.isDirectory() ? sourceFiles(path.join(directory, item.name)) : /\.(mjs|ts)$/.test(item.name) ? [path.join(directory, item.name)] : []);
 }
-function nativeRun(args) { return run('/Users/wout/.local/bin/dev-external', ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
+function nativeRun(args) { return run(DEV_EXTERNAL, ['python3', storageScript, 'exec', '/usr/bin/clang', ...args]); }
 // Linux: no wrapper exists; storage.py exec routes temporary files into the build root.
 function linuxRun(args) { return run('/usr/bin/python3', [storageScript, 'exec', '--', '/usr/bin/cc', ...args]); }
 // libsecret compile/link flags; null when the development package is missing.
@@ -60,7 +66,7 @@ try {
   }
   else if (command === 'check') {
     for (const source of sourceFiles(root)) if (!run(process.execPath, ['--check', source])) break;
-    if (!process.exitCode && process.platform === 'darwin' && run('/Users/wout/.local/bin/mount-dev-storage', [])) {
+    if (!process.exitCode && process.platform === 'darwin' && run(MOUNT_DEV_STORAGE, [])) {
       nativeRun(['-Wall', '-Wextra', '-Werror', '-fsyntax-only', '-fobjc-arc', path.join(root, 'native/keychain.m')]);
       if (!process.exitCode) nativeRun(['-Wall', '-Wextra', '-Werror', '-fsyntax-only', path.join(root, 'native/sandbox-launcher.c'), path.join(root, 'native/sandbox-probe.c')]);
     }
@@ -86,7 +92,7 @@ try {
     // Linux: the isolated positive fixture is part of tests/secret-service.os.mjs (private bus + keyring).
     if (process.platform === 'linux') linuxBlocked('Linux has no separate positive Keychain fixture build; keychain-negative-test covers a private Secret Service');
     if (process.platform !== 'darwin') throw Object.assign(new Error('Isolated Keychain fixture requires macOS'), { code: 'BLOCKED_ENV' });
-    if (run('/Users/wout/.local/bin/mount-dev-storage', [])) {
+    if (run(MOUNT_DEV_STORAGE, [])) {
       const source = path.join(root, 'native/keychain-positive.m'); const binary = path.join(providerBuildRoot(), 'keychain-positive');
       mkdirSync(path.dirname(binary), { recursive: true, mode: 0o700 });
       if (nativeRun(['-Wall', '-Wextra', '-Werror', '-fobjc-arc', '-O2', source, '-framework', 'Security', '-framework', 'CoreFoundation', '-framework', 'Foundation', '-framework', 'LocalAuthentication', '-o', binary])) {
@@ -119,7 +125,7 @@ try {
     }
   } else if (command === 'setup') {
     if (process.platform !== 'darwin') throw Object.assign(new Error('Keychain helper requires macOS'), { code: 'BLOCKED_ENV' });
-    if (!run('/Users/wout/.local/bin/mount-dev-storage', [])) process.exitCode = 78;
+    if (!run(MOUNT_DEV_STORAGE, [])) process.exitCode = 78;
     else {
       const helper = helperPath(); mkdirSync(path.dirname(helper), { recursive: true, mode: 0o700 });
       nativeRun(['-Wall', '-Wextra', '-Werror', '-fobjc-arc', '-O2', path.join(root, 'native/keychain.m'), '-framework', 'Security', '-framework', 'CoreFoundation', '-framework', 'Foundation', '-framework', 'LocalAuthentication', '-o', helper]);

@@ -95,7 +95,7 @@ function harness({ sendFails = false, permissions = new Map() } = {}) {
   const prompt = (kind, details, id = 'prompt-1', target = record.target) =>
     ui.handle(record, validateDelegationEvent({ event: 'prompt', version: 1, target, prompt_id: id, kind, details, timeout_ms: 120000 }));
   return { ui, win, record, other, sent, timers, dialogs, shown, opened, notices, firefox, navigations, pickers, store, downloads,
-    zoomCalls, notifications, popupSet, zoomButton, prompt, originalFullZoom };
+    zoomCalls, notifications, popupSet, zoomButton, prompt, originalFullZoom, doc };
 }
 harness.now = 1_000_000;
 
@@ -437,6 +437,24 @@ test("Zen's findbar drives Chromium find through the tab's browser.finder and re
   assert.deepEqual(h.sent.at(-1).fields, { clear_selection: false });
   h.ui.forget(h.record);
   assert.equal(Object.hasOwn(h.record.browser, 'finder'), false, "Firefox's own finder is back");
+});
+
+test('the zoom commands follow the Chromium page, so Ctrl+0 is enabled while it is zoomed', async () => {
+  const h = harness();
+  const reset = new Element('command'), reduce = new Element('command'), enlarge = new Element('command');
+  // Firefox disabled reset for the hidden blank Gecko browser at 100% (run 39348385457).
+  reset.setAttribute('disabled', 'true');
+  h.doc.elements.set('cmd_fullZoomReset', reset); h.doc.elements.set('cmd_fullZoomReduce', reduce); h.doc.elements.set('cmd_fullZoomEnlarge', enlarge);
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  h.win.FullZoom.enlarge(h.record.browser); await settle();
+  assert.equal(reset.getAttribute('disabled'), null, 'reset enabled at 110%');
+  h.win.FullZoom.reset(h.record.browser); await settle();
+  assert.equal(reset.getAttribute('disabled'), 'true', 'reset disabled again at 100%');
+  for (let i = 0; i < 8; i++) h.win.FullZoom.enlarge(h.record.browser);
+  await settle();
+  assert.equal(enlarge.getAttribute('disabled'), 'true', 'enlarge disabled at the largest zoom');
+  assert.equal(reduce.getAttribute('disabled'), null);
+  h.ui.dispose();
 });
 
 test("Firefox zoom commands zoom a Chromium tab and its URL-bar indicator; Gecko tabs keep Firefox's zoom", async () => {

@@ -48,7 +48,7 @@ apt-get install -y --no-install-recommends bash $(python3 /home/axio/cand/script
 chown -R axio:axio "$AXIOSOZO_BUILD_ROOT"
 dpkg-query -W -f='${Package}\t${Version}\n' | grep -E 'wpe|webkit|mesa|bubblewrap|xvfb' | sort >"$OUT/dpkg-engine.tsv"
 as_axio() { setpriv --reuid=axio --regid=axio --init-groups --reset-env -- env HOME=/home/axio \
-  PATH=/usr/bin:/bin AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" LANG=C.UTF-8 REPS="${REPS:-3}" ROUNDS="${ROUNDS:-2}" \
+  PATH=/usr/bin:/bin AXIOSOZO_BUILD_ROOT="$AXIOSOZO_BUILD_ROOT" LANG=C.UTF-8 REPS="${REPS:-3}" ROUNDS="${ROUNDS:-2}" VARIANTS="${VARIANTS:-base cand memfd}" \
   SCALES="${SCALES:-1 2}" SUDO= "$@"; }
 as_axio git config --global --add safe.directory '*'
 log "unpack the Linux Zen app"

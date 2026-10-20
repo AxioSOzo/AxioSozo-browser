@@ -16,7 +16,9 @@
 // travel over Mach straight into the bound canvas (never through JS) and a pipe frame or a
 // JSON frame_ack is a protocol error, exactly like CEFHostConnection's surface mode.
 
-import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, disableMemfdFrames,
+  MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  workerFrameRing } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -230,7 +232,7 @@ export class EngineStreamHost {
   #process; #token; #timers; #deadline; #requests = new Map(); #sequence = 0;
   #targets = new Map(); #readyWait; #ended = false; #closing = false; #ready = false;
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatSeen = 0; #heartbeatCheckedAt = 0;
-  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null;
+  #heartbeatTimer = null; #heartbeatOn = false; #now; #assembler = null; #readSlot = null; #slotReader = null; #native = null;
   #endpoint = null; #frameRate = null; #surfaceTargets = new Map(); #surfaceClosed = false;
   constructor(process, { profile, token, instance, identity, timers, deadline = 15000, frameDamage = false,
     damagePayload = false, frameTransport = "pipe", readSlot = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
@@ -414,6 +416,24 @@ export class EngineStreamHost {
     if (!adapter || (created ? adapter.target : adapter.target?.native_target_id !== target.native_target_id)) return null;
     return adapter;
   }
+  /**
+   * §6.3 fallback: a slot could not be read. The frame is dropped (never presented), its
+   * target's assembled frame is forgotten, and its frame_ack asks the host to send every later
+   * frame through the pipe, each target's next one whole.
+   */
+  async #memfdFallback(value) {
+    this.readPhase = "frame_validate";
+    if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
+    this.lastFrame = value.frame_id;
+    this.memfd = null; this.frameTransport = "pipe";
+    this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
+    this.#assembler?.forget(value.target?.native_target_id);
+    // The native receiver takes memfd frames only: the JS path draws the pipe frames from now on.
+    if (this.#native && !this.#native.acceptsBuffers) { this.#native.close(); this.#native = null; this.nativeReceiver = false; }
+    console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: this.profile.engine, frameId: value.frame_id }));
+    this.readPhase = "frame_ack";
+    if (!this.#ended) await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
+  }
   #targetFailed(adapter, error) {
     const code = STREAM_FAILURE_CODES.has(error?.message) ? error.message : "ENGINE_PROTOCOL_OR_EOF";
     if (!(error instanceof TargetError) || !adapter) throw new Error(code);
@@ -429,10 +449,18 @@ export class EngineStreamHost {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd) {
         this.readPhase = "frame_memfd";
-        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+        // Native receiver or frame worker: the slot is read off the main thread; no pixels reach JS.
+        try { pixels = this.#native ? await this.#native.apply(value) : await this.#slotReader(value.slot, value.payload_bytes); }
+        catch (error) {
+          if (error?.message !== "MEMFD_READ_FAILED") throw error;
+          await this.#memfdFallback(value);
+          continue;
+        }
       }
       // Every delivered frame is applied, presented or not (§6.2).
-      if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
+      // After a memfd fallback, a frame worker's targets take the pipe payloads too.
+      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -467,7 +495,7 @@ export class EngineStreamHost {
         const creation = value.event === "created" && this.#requests.get(value.request_id);
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_ENGINE_CREATION");
         adapter = this.#adapterFor(value.target, value.event === "created");
-        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
+        if (value.event === "closed") { this.#assembler?.forget(value.target.native_target_id); this.#native?.forget(value.target.native_target_id); }
       } else if (TARGET_EVENTS.has(value.event)) {
         throw new Error("MISSING_ENGINE_TARGET");
       } else if (value.event === "error" && !value.request_id) {
@@ -521,6 +549,10 @@ export class EngineStreamHost {
       try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
       catch { throw new Error("UNVERIFIED_ENGINE_RUNTIME"); }
       this.memfd = memfd;
+      // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
+      this.#native = ring ? new NativeFrameSinks(ring) : null;
+      this.nativeReceiver = !!this.#native;
     }
     this.#ready = true;
     this.capabilities = Object.freeze({ ...value.capabilities });
@@ -559,7 +591,7 @@ export class EngineStreamHost {
   }
   fail(reason) {
     if (this.#ended) return;
-    this.#ended = true; this.status = "failed"; this.failure = reason;
+    this.#ended = true; this.status = "failed"; this.#native?.close(); this.#native = null; this.failure = reason;
     this.#stopHeartbeatWatchdog();
     // Crash, protocol error or exit: the Mach endpoint and every binding end too.
     this.#closeSurface();
@@ -587,7 +619,7 @@ export class EngineStreamHost {
       const result = await this.#process.wait();
       this.nativeExitCode = result.exitCode;
       if (result.exitCode !== 0) throw new Error("ENGINE_SHUTDOWN_FAILED");
-      this.#ended = true; this.status = "closed";
+      this.#ended = true; this.status = "closed"; this.#native?.close(); this.#native = null;
       this.#closeSurface();
       const unavailable = new Error("ENGINE_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
@@ -625,6 +657,8 @@ export class EngineStreamTarget {
   get identity() { return this.#pending.identity; }
   get host() { return this.#host; }
   get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
+  get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get ended() { return this.#ended; }
   get inputFeatures() {
     const capabilities = this.#host.capabilities ?? {};

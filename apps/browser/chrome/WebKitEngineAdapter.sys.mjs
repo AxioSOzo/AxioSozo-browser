@@ -9,7 +9,7 @@
 // fallback (ADR 004 "macOS"). Fixture mode only: the host loads nothing but the
 // loopback GET fixture, and general web mode is not offered (docs/CAPABILITY_MATRIX.md).
 import { EngineStreamHost, EngineStreamTarget, validFixtureOrigin } from "./EngineStreamClient.sys.mjs";
-import { MEMFD_FRAMES_PREF } from "./EngineFrameSurface.sys.mjs";
+import { memfdFramesWanted, memfdProcReadable, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 
 // upstreams.lock.json `webkit` (Debian 13 packages); a test keeps these equal to the lockfile.
 export const WEBKIT_VERSION = "2.48.3";
@@ -265,13 +265,17 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   }
   const cleanup = () => IOUtils.remove(profile, { recursive: true });
   process.wait().then(cleanup, cleanup).catch(() => {});
+  // engine-stream-v1 §6.3 memfd frames are a Linux pipe feature: pref/default, and only when this
+  // child's /proc/<pid>/fd is readable; otherwise the pipe. macOS never negotiates them (nor asks
+  // /proc, which would latch the process-wide memfd fallback) and never starts a frame worker.
+  const transport = isMac(platform) ? "pipe"
+    : frameTransport ?? (memfdFramesWanted() && await memfdProcReadable(process.pid) ? "memfd" : "pipe");
+  if (transport === "memfd" && frameWorkerWanted()) await frameWorkersUsable();
   const host = new EngineStreamHost(process, { profile: webkitProfile({ platform }), token, instance, identity: origin,
     // Surface frames carry Mach dirty rects, so pipe damage exists only without the endpoint.
-    // Rectangle-only payloads (engine-stream-v1 §6.2) and memfd frames (§6.3, EXPERIMENTAL, off
-    // unless the pref is set) are Linux pipe features; macOS never negotiates them.
+    // Rectangle-only payloads (engine-stream-v1 §6.2) are a Linux pipe feature; macOS never asks.
     timers, frameDamage: endpoint ? false : frameDamage, damagePayload: !isMac(platform) && damagePayload, requestPrefix: "wk",
-    frameTransport: isMac(platform) ? "pipe"
-      : frameTransport ?? (Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe"),
+    frameTransport: transport,
     surface: endpoint ? { endpoint, service, frameRate: webkitSurfaceFrameRate(service) } : null });
   try { await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }

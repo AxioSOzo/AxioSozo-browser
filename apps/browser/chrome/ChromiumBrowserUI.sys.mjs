@@ -906,5 +906,16 @@ export class ChromiumBrowserUI {
     }
     doc.getElementById("appMenu-zoomReset-button2")?.setAttribute("label", label);
     doc.getElementById("zoom-reset-button")?.setAttribute("label", label);
+    // Firefox enables the zoom commands from the selected browser's own zoom, which for a
+    // Chromium tab is the hidden blank Gecko browser at 100%: Ctrl+0 (cmd_fullZoomReset)
+    // would stay disabled. They follow the Chromium page's zoom instead.
+    const values = this.#zoomValues(), zoom = this.#state(record).zoom;
+    for (const [id, disabled] of [["cmd_fullZoomReset", percent === 100], ["cmd_fullZoomReduce", zoom <= values[0] + 1e-6],
+      ["cmd_fullZoomEnlarge", zoom >= values.at(-1) - 1e-6]]) {
+      const command = doc.getElementById(id);
+      if (!command) continue;
+      if (disabled) command.setAttribute("disabled", "true");
+      else command.removeAttribute("disabled");
+    }
   }
 }

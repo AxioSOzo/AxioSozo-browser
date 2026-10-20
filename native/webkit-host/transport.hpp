@@ -66,6 +66,9 @@ class Transport {
   std::atomic<size_t> slotBytes_{0};
   std::atomic<uint32_t> slots_{0};
   uint32_t nextSlot_ = 0;
+  // §6.3 fallback (frame_ack frame_transport "pipe"): Zen could not read a slot; later frames
+  // travel in the pipe. The ring stays mapped until stop().
+  std::atomic<bool> memfdActive_{false};
 
   void fail() { failed_ = true; changed_.notify_all(); }
   bool transfer(const uint8_t* data, size_t size) {
@@ -125,7 +128,7 @@ class Transport {
         } else continue;
         writing_ = true;
       }
-      if (packet.kind == 2 && ring_) {
+      if (packet.kind == 2 && ring_ && memfdActive_) {
         if (packet.pixels.size() > slotBytes_) { fail(); break; }
         memcpy(ring_.load() + size_t(nextSlot_) * slotBytes_, packet.pixels.data(), packet.pixels.size());
         char member[64];
@@ -196,13 +199,25 @@ public:
     if (ring == MAP_FAILED) { close(fd); return -1; }
     slotBytes_ = slotBytes; slots_ = slots; memfd_ = fd;
     ring_ = static_cast<uint8_t*>(ring);  // last: the writer only uses a complete ring
+    memfdActive_ = true;
     return fd;
 #else
     (void)slots; (void)slotBytes;
     return -1;
 #endif
   }
+  // §6.3 fallback, before the frame_ack that asked for it releases the credit: later frames go
+  // through the pipe. Pending frames may be damage payloads against the dropped frame, so they
+  // are discarded; the caller re-sends each target whole. False when memfd frames are not active.
+  bool disableMemfd() {
+    std::lock_guard lock(mutex_);
+    if (!ring_ || !memfdActive_) return false;
+    memfdActive_ = false;
+    pending_.clear();
+    return true;
+  }
   int memfd() const { return memfd_; }
+  bool memfdActive() const { return ring_ && memfdActive_; }
   size_t memfdSlotBytes() const { return slotBytes_; }
   uint32_t memfdSlots() const { return slots_; }
   bool failed() const { return failed_; }
