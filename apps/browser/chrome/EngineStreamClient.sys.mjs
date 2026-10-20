@@ -11,7 +11,8 @@
 // logic with CEF-only extensions (surface mode, web mode, UI delegation, a11y). It is
 // the same protocol; moving CEF onto this module is a later, separate step.
 
-import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, disableMemfdFrames,
+  MEMFD_FALLBACK_ACK } from "./EngineFrameSurface.sys.mjs";
 export const MAX_FRAME_BYTES = 33554432;
 export const MAX_SURFACE_DIMENSION = 4096;
 export const HEARTBEAT_TIMEOUT_MS = 5000;
@@ -313,6 +314,22 @@ export class EngineStreamHost {
     if (!adapter || (created ? adapter.target : adapter.target?.native_target_id !== target.native_target_id)) return null;
     return adapter;
   }
+  /**
+   * §6.3 fallback: a slot could not be read. The frame is dropped (never presented), its
+   * target's assembled frame is forgotten, and its frame_ack asks the host to send every later
+   * frame through the pipe, each target's next one whole.
+   */
+  async #memfdFallback(value) {
+    this.readPhase = "frame_validate";
+    if (!this.#ready || value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_ENGINE_FRAME");
+    this.lastFrame = value.frame_id;
+    this.memfd = null; this.frameTransport = "pipe";
+    this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
+    this.#assembler?.forget(value.target?.native_target_id);
+    console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: this.profile.engine, frameId: value.frame_id }));
+    this.readPhase = "frame_ack";
+    if (!this.#ended) await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
+  }
   #targetFailed(adapter, error) {
     const code = STREAM_FAILURE_CODES.has(error?.message) ? error.message : "ENGINE_PROTOCOL_OR_EOF";
     if (!(error instanceof TargetError) || !adapter) throw new Error(code);
@@ -328,7 +345,12 @@ export class EngineStreamHost {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd) {
         this.readPhase = "frame_memfd";
-        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+        try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
+        catch (error) {
+          if (error?.message !== "MEMFD_READ_FAILED") throw error;
+          await this.#memfdFallback(value);
+          continue;
+        }
       }
       // Every delivered frame is applied, presented or not (§6.2).
       if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);

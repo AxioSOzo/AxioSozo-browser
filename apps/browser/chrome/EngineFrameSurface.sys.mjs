@@ -230,6 +230,45 @@ export class DamagePayloadAssembler {
  * in flight), so the read completes before the credit returns.
  */
 export const MEMFD_FRAMES_PREF = "axiosozo.engines.linux.memfd_frames";
+/** Default of MEMFD_FRAMES_PREF on Linux (the pipe stays the fallback; docs/perf/pixel-path.md). */
+export const MEMFD_FRAMES_DEFAULT = false;
+
+// Process-wide: once a slot read failed (or /proc/<pid>/fd was unreadable) every later host of
+// this session uses the pipe, so a broken environment costs one fallback, not one per tab.
+let memfdDisabled = null;
+/** Records why memfd frames stopped being negotiated in this session (first reason wins). */
+export function disableMemfdFrames(reason) {
+  memfdDisabled ??= { reason: String(reason), at: Date.now() };
+  return memfdDisabled;
+}
+export function memfdFramesDisabled() { return memfdDisabled; }
+/** Test seam: forget the session latch. */
+export function resetMemfdFrames() { memfdDisabled = null; }
+
+/** Whether a Linux pipe-mode host should be asked for memfd frames (pref, default, latch). */
+export function memfdFramesWanted(prefs = globalThis.Services?.prefs) {
+  if (memfdDisabled) return false;
+  try { return prefs ? prefs.getBoolPref(MEMFD_FRAMES_PREF, MEMFD_FRAMES_DEFAULT) : MEMFD_FRAMES_DEFAULT; }
+  catch { return MEMFD_FRAMES_DEFAULT; }
+}
+
+/**
+ * Before the hello: can Zen open the spawned host's descriptors at all? Listing /proc/<pid>/fd
+ * needs the same ptrace-read access as opening a slot (Yama scope ≥ 2, a non-dumpable host or a
+ * restricted /proc refuse it). False means "ask for the pipe" and latches the session.
+ */
+export async function memfdProcReadable(pid, getChildren = globalThis.IOUtils?.getChildren?.bind(globalThis.IOUtils)) {
+  if (!Number.isInteger(pid) || pid <= 1 || typeof getChildren !== "function") return false;
+  try { await getChildren(`/proc/${pid}/fd`); return true; }
+  catch { disableMemfdFrames("proc_fd_unreadable"); return false; }
+}
+
+/**
+ * The frame_ack of a frame whose slot could not be read (§6.3 fallback): the frame is dropped,
+ * `frame_transport:"pipe"` moves every later frame of this host into the pipe and makes the
+ * host send each target's next frame whole (Zen's copy of the dropped frame's target is stale).
+ */
+export const MEMFD_FALLBACK_ACK = Object.freeze({ frame_transport: "pipe" });
 
 /** `ready.capabilities.memfd`: `{fd, slot_bytes, slots}` within the pipe frame bound. */
 export function validMemfdCapability(value, maxFrameBytes) {
@@ -252,11 +291,16 @@ export function validMemfdFrame(metadata, capability, expectedBytes) {
 export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read?.bind(globalThis.IOUtils)) {
   if (!Number.isInteger(pid) || pid <= 1 || typeof read !== "function") throw new Error("MEMFD_UNAVAILABLE");
   const path = `/proc/${pid}/fd/${capability.fd}`;
+  const once = async (slot, bytes) => {
+    try {
+      const data = await read(path, { offset: slot * capability.slot_bytes, maxBytes: bytes });
+      return data && data.byteLength === bytes ? data : null;
+    } catch { return null; }
+  };
   return async (slot, bytes) => {
-    let data;
-    try { data = await read(path, { offset: slot * capability.slot_bytes, maxBytes: bytes }); }
-    catch { throw new Error("MEMFD_READ_FAILED"); }
-    if (!data || data.byteLength !== bytes) throw new Error("MEMFD_READ_FAILED");
+    // One retry: a transient failure (EINTR/ENOMEM) should not cost the transport.
+    const data = await once(slot, bytes) ?? await once(slot, bytes);
+    if (!data) throw new Error("MEMFD_READ_FAILED");
     // The presenter keeps a reference until its next paint: a tight, exclusive buffer.
     return data.byteOffset === 0 && data.buffer.byteLength === bytes ? data.buffer : data.slice().buffer;
   };

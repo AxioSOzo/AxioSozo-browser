@@ -4,7 +4,8 @@
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
-import { DamagePayloadAssembler, MEMFD_FRAMES_PREF, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
+  disableMemfdFrames, MEMFD_FALLBACK_ACK } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -633,6 +634,22 @@ export class CEFHostConnection {
     if (!adapter || (created ? adapter.target : adapter.target?.native_target_id !== target.native_target_id)) return null;
     return adapter;
   }
+  /**
+   * engine-stream-v1 §6.3 fallback: a slot could not be read. The frame is dropped (never
+   * presented), its target's assembled frame is forgotten, and its frame_ack asks the host to
+   * send every later frame through the pipe, each target's next one whole.
+   */
+  async #memfdFallback(value) {
+    this.readPhase = "frame_validate";
+    if (value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_CEF_FRAME");
+    this.lastFrame = value.frame_id;
+    this.memfd = null; this.frameTransport = "pipe";
+    this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
+    this.#assembler?.forget(value.target?.native_target_id);
+    console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: "chromium", frameId: value.frame_id }));
+    this.readPhase = "frame_ack";
+    await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
+  }
   #targetFailed(adapter, error) {
     const code = READ_FAILURE_CODES.has(error?.message) ? error.message : "CEF_PROTOCOL_OR_EOF";
     if (!(error instanceof TargetError) || !this.shared || !adapter) throw new Error(code);
@@ -646,7 +663,12 @@ export class CEFHostConnection {
       let pixels = packet.pixels;
       if (kind === 2 && this.memfd && !this.#endpoint) {
         this.readPhase = "frame_memfd";
-        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+        try { pixels = await this.#slotReader(value.slot, value.payload_bytes); }
+        catch (error) {
+          if (error?.message !== "MEMFD_READ_FAILED") throw error;
+          await this.#memfdFallback(value);
+          continue;
+        }
       }
       // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
       if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
@@ -1330,8 +1352,10 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     const cleanup = () => IOUtils.remove(profile, { recursive: true });
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
-  // engine-stream-v1 §6.3 memfd frames: EXPERIMENTAL, Linux pipe mode only, off unless the pref is set.
-  const frameTransport = !endpoint && platform !== "macosarm64" && Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe";
+  // engine-stream-v1 §6.3 memfd frames: Linux pipe mode only (pref, MEMFD_FRAMES_DEFAULT), and only
+  // when this child's /proc/<pid>/fd is readable; otherwise the pipe.
+  const frameTransport = !endpoint && platform !== "macosarm64" && memfdFramesWanted()
+    && await memfdProcReadable(process.pid) ? "memfd" : "pipe";
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
     shared: browsingMode === "web", platform, frameTransport,
     surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });

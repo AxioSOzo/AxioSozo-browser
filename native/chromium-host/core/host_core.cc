@@ -693,6 +693,7 @@ static void streamCommand(const std::string& line) {
   if (method == "ime_set_composition") optional = {"underlines", "replacement_range"};
   else if (method == "ime_commit_text") optional = {"replacement_range", "relative_cursor_pos"};
   else if (method == "ime_finish_composing") optional = {"keep_selection"};
+  else if (method == "frame_ack") optional = {"frame_transport"};  // engine-stream-v1 §6.3 fallback
   for (const auto& name : axOptionalFields(method)) optional.push_back(name);
   for (const auto& name : optional) if (command.has(name)) expected.push_back(name);
   if (!keys(&command, expected)) { failProtocol(); return; }
@@ -706,11 +707,28 @@ static void streamCommand(const std::string& line) {
   const Value* supplied = command.get("target");
   if (!validTarget(supplied, creating_)) { failProtocol(); return; }
   if (method == "frame_ack") {
+    // engine-stream-v1 §6.3 fallback: Zen could not read this frame's memfd slot and dropped it.
+    // Later frames travel in the pipe (switched before the credit returns); every view repaints
+    // whole, since Zen's copy of the dropped frame's target is stale.
+    const Value* fallback = command.get("frame_transport");
+    if (fallback && !(fallback->isString() && command.str("frame_transport") == "pipe" && transport.disableMemfd())) {
+      failProtocol();
+      return;
+    }
     // Exact outstanding target is intentionally used instead of current target:
     // discarded stale frames also need to release their one transport credit.
     if (!integer(command.get("frame_id")) ||
         !transport.acknowledge(uint64_t(command.num("frame_id")), json::write(*supplied))) {
       failProtocol();
+      return;
+    }
+    if (fallback) {
+      fprintf(stderr, "AXIO_CEF_MEMFD_FALLBACK frame_id=%llu\n", static_cast<unsigned long long>(command.num("frame_id")));
+      for (auto& item : tabsByKey) {
+        Tab* each = item.second;
+        each->fullDamage = true;
+        if (each->browser && each->live() && !each->closing) invalidateView(each->browser);
+      }
     }
     return;
   }
