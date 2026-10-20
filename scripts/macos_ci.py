@@ -24,6 +24,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -102,7 +103,7 @@ class Lane:
         return self.only is None or name in self.only or any(name.startswith(p.rstrip('*'))
                                                              for p in self.only if p.endswith('*'))
 
-    def gate(self, name, argv, requires=(), ci_root=False, timeout=900, expect=(0,), extra=None,
+    def gate(self, name, argv, requires=(), ci_root=False, timeout=600, expect=(0,), extra=None,
              classify=None):
         if not self.wanted(name):
             return None
@@ -116,13 +117,33 @@ class Lane:
         print(f'[{self.side}] {name}: {" ".join(map(str, argv))}', flush=True)
         try:
             with log.open('wb') as handle:
-                completed = subprocess.run([str(item) for item in argv], cwd=self.checkout,
+                # Own process group: a timeout stops every descendant, not only the leader.
+                process = subprocess.Popen([str(item) for item in argv], cwd=self.checkout,
                                            env=self.env(ci_root, extra), stdout=handle,
                                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                           timeout=timeout)
-            code = completed.returncode
-        except subprocess.TimeoutExpired:
-            code = 'timeout'
+                                           start_new_session=True)
+                try:
+                    code = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    code = 'timeout'
+                    for sig in (signal.SIGTERM, signal.SIGKILL):
+                        try:
+                            os.killpg(process.pid, sig)
+                        except ProcessLookupError:
+                            break
+                        try:
+                            process.wait(timeout=10)
+                            break
+                        except subprocess.TimeoutExpired:
+                            pass
+                    with log.open('a') as note:
+                        note.write(f'\nLANE: timeout after {timeout} s; process group stopped\n')
+                finally:
+                    # Leftover members of the group (daemonized helpers) never outlive a gate.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
         except OSError as error:
             log.write_text(f'cannot start: {error}\n')
             code = 'oserror'
@@ -137,6 +158,8 @@ class Lane:
         self.results[name] = dict(status=status, exit=code, seconds=round(time.monotonic() - started, 1),
                                   log=str(log.relative_to(self.out)), tail=text[-1500:])
         print(f'[{self.side}] {name}: {status} (exit {code}, {self.results[name]["seconds"]} s)', flush=True)
+        # Incremental: a job killed by its time limit still leaves every finished gate.
+        write_results(self.out, self.side, self.checkout, self.results, quiet=True)
         return status
 
     def tests(self, pattern):
@@ -158,7 +181,7 @@ class Lane:
         self.gate('python-compile', [py, '-c', COMPILE_ALL], requires=['scripts'])
         for path in self.tests('tests/test_*.py'):
             self.gate('python:' + path.name, [py, '-m', 'unittest', 'discover', '-s', 'tests', '-p', path.name, '-v'],
-                      requires=[str(path)], timeout=900)
+                      requires=[str(path)], timeout=600)
         for path in ['apps/browser/tests/test_bootstrap.py', 'tools/axiosozo-project-reader/project_reader_test.py',
                      'tools/axiosozo-arrival/arrival_lsof_test.py', 'tools/axiosozo-manifest/manifest_accept_test.py']:
             self.gate('python:' + path, [py, '-I', '-S', '-B', path] if path.startswith('tools/') else [py, path],
@@ -168,12 +191,12 @@ class Lane:
                         'packages/provider-host/tests/*.test.mjs']:
             for path in self.tests(pattern):
                 self.gate('node:' + str(path), [node, '--test', '--test-timeout=120000', path],
-                          requires=[str(path)], timeout=600)
+                          requires=[str(path)], timeout=300)
         # 5. Provider host on macOS: native Keychain/broker build, then negative-only
         #    Keychain tests (empty search list, invalid input) and the Seatbelt broker test.
         cli = 'packages/provider-host/cli.mjs'
         for command in ['check', 'setup', 'keychain-negative-test', 'sandbox-test']:
-            self.gate('provider:' + command, [node, cli, command], requires=[cli], ci_root=True, timeout=900)
+            self.gate('provider:' + command, [node, cli, command], requires=[cli], ci_root=True, timeout=600)
         # 6. CEF macOS host: pinned macosarm64 CEF, compile + ad hoc sign, native tests.
         probe = 'native/chromium-host/probe.py'
         self.gate('cef:setup', [py, probe, 'setup'], requires=[probe], ci_root=True, timeout=2400)
@@ -191,9 +214,9 @@ class Lane:
                       f' && "{cef_tests}/{unit}"'], requires=[source], timeout=300)
         # Real Chromium OSR on the runner (headless session): component evidence only.
         self.gate('cef:stream_test.py', [py, 'native/chromium-host/stream_test.py'],
-                  requires=['native/chromium-host/stream_test.py'], ci_root=True, timeout=1200)
+                  requires=['native/chromium-host/stream_test.py'], ci_root=True, timeout=900)
         self.gate('cef:surface_test.py', [py, 'native/chromium-host/surface_test.py', '--seconds', '3'],
-                  requires=['native/chromium-host/surface_test.py'], ci_root=True, timeout=1500)
+                  requires=['native/chromium-host/surface_test.py'], ci_root=True, timeout=900)
         # 7. WebKit: engine-neutral core (fake host) and the macOS WKWebView scaffold.
         webkit = self.build / 'webkit'
         webkit.mkdir(exist_ok=True)
@@ -206,19 +229,19 @@ class Lane:
         self.gate('webkit:core_test', ['/bin/sh', '-c',
                   f'xcrun clang++ -std=c++20 -Wall -Wextra -I native/webkit-host native/webkit-host/tests/fake_host.cc'
                   f' -o "{webkit}/fake_host" && {py} native/webkit-host/tests/core_test.py "{webkit}/fake_host"'],
-                  requires=['native/webkit-host/tests/core_test.py'], timeout=900)
+                  requires=['native/webkit-host/tests/core_test.py'], timeout=600)
         self.gate('webkit:mac-build', ['xcrun', 'clang++', '-std=c++20', '-fobjc-arc', '-Wall', '-Wextra',
                   '-framework', 'Cocoa', '-framework', 'WebKit', 'native/webkit-host/mac/host_mac.mm',
                   '-o', webkit / 'AxioWebKitMacHost'], requires=['native/webkit-host/mac/host_mac.mm'])
         for part in ['stream', 'input', 'security']:
             self.gate('webkit:mac-' + part, [py, 'native/webkit-host/mac/mac_test.py', webkit / 'AxioWebKitMacHost', part],
-                      requires=['native/webkit-host/mac/mac_test.py'], timeout=900)
+                      requires=['native/webkit-host/mac/mac_test.py'], timeout=300)
         # 8. The whole ./dev check / ./dev test through the macOS CI build root.
         #    Informational: both need a built Zen and owner-only fixtures for a full PASS.
         self.gate('dev-setup-cargo-provider', ['./dev', 'setup', '--only', 'cargo,provider'], requires=['dev'],
-                  ci_root=True, timeout=1800)
-        self.gate('dev-check', ['./dev', 'check'], requires=['dev'], ci_root=True, timeout=3600)
-        self.gate('dev-test', ['./dev', 'test'], requires=['dev'], ci_root=True, timeout=3600)
+                  ci_root=True, timeout=1200)
+        self.gate('dev-check', ['./dev', 'check'], requires=['dev'], ci_root=True, timeout=1500)
+        self.gate('dev-test', ['./dev', 'test'], requires=['dev'], ci_root=True, timeout=2400)
         return self.results
 
 
@@ -239,7 +262,7 @@ sys.exit(1 if bad else 0)
 '''
 
 
-def write_results(out, side, checkout, results):
+def write_results(out, side, checkout, results, quiet=False):
     head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout, capture_output=True, text=True).stdout.strip()
     counts = {}
     for item in results.values():
@@ -250,12 +273,16 @@ def write_results(out, side, checkout, results):
     lines = [f'{side} {head[:12]} {platform.platform()}: ' + ', '.join(f'{k} {v}' for k, v in sorted(counts.items()))]
     lines += [f'  {item["status"]:<16} {name}' for name, item in results.items()]
     (Path(out) / 'summary.txt').write_text('\n'.join(lines) + '\n')
-    print('\n'.join(lines), flush=True)
+    if not quiet:
+        print('\n'.join(lines), flush=True)
 
 
 def compare(head_dir, base_dir, out):
-    head = json.loads((Path(head_dir) / 'results.json').read_text())
-    base = json.loads((Path(base_dir) / 'results.json').read_text())
+    def load(directory):
+        path = Path(directory) / 'results.json'
+        # A lane that died before its first gate left nothing: every gate is NOT_RUN.
+        return json.loads(path.read_text()) if path.is_file() else dict(commit='missing-results', gates={})
+    head, base = load(head_dir), load(base_dir)
     rows = []
     for name in list(dict.fromkeys([*head['gates'], *base['gates']])):
         h = head['gates'].get(name, {}).get('status', 'NOT_RUN')

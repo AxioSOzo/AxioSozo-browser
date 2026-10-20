@@ -31,8 +31,6 @@ jobs:
       fail-fast: false
       matrix:
         side: [head, base]
-    permissions:
-      contents: write  # publish-ci-results
     defaults:
       run:
         shell: bash
@@ -40,7 +38,6 @@ jobs:
       # Outside every checkout (storage.py refuses build roots inside tracked source).
       AXIOSOZO_BUILD_ROOT: /Users/runner/axiosozo-build
       CARGO_TERM_COLOR: never
-      EVIDENCE_OUT: ${{ github.workspace }}/../macos-ci-${{ matrix.side }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,6 +62,9 @@ jobs:
 
       - name: Runner resources
         run: |
+          # $RUNNER_TEMP: upload-artifact refuses paths with `..`. The compare job
+          # publishes the results (publish-ci-results uses GNU cp; macOS has BSD cp).
+          echo "EVIDENCE_OUT=$RUNNER_TEMP/macos-ci-${{ matrix.side }}" >> "$GITHUB_ENV"
           sw_vers
           uname -a
           sysctl -n hw.ncpu hw.memsize
@@ -92,6 +92,7 @@ jobs:
           key: cef-macosarm64-5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777
 
       - name: Lane
+        timeout-minutes: 150  # leaves time to upload the incremental results.json
         run: |
           /usr/bin/python3 scripts/macos_ci.py run --side "${{ matrix.side }}" \
             --checkout "${{ steps.target.outputs.dir }}" --out "$EVIDENCE_OUT"
@@ -112,12 +113,6 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      - if: always()
-        uses: ./.github/actions/publish-ci-results
-        with:
-          path: ${{ env.EVIDENCE_OUT }}
-          name: macos-${{ matrix.side }}
-
   compare:
     needs: lane
     if: always()
@@ -125,23 +120,24 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write  # publish-ci-results
-    env:
-      EVIDENCE_OUT: ${{ github.workspace }}/../macos-ci-compare
     steps:
+      - run: echo "EVIDENCE_OUT=$RUNNER_TEMP/macos-ci" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true  # compare reports a missing side as NOT_RUN
         with:
           name: macos-lane-head
-          path: ${{ runner.temp }}/head
+          path: ${{ env.EVIDENCE_OUT }}/head
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true  # compare reports a missing side as NOT_RUN
         with:
           name: macos-lane-base
-          path: ${{ runner.temp }}/base
+          path: ${{ env.EVIDENCE_OUT }}/base
       - name: Compare head with dev
         run: |
-          python3 scripts/macos_ci.py compare --head "$RUNNER_TEMP/head" --base "$RUNNER_TEMP/base" --out "$EVIDENCE_OUT"
+          python3 scripts/macos_ci.py compare --head "$EVIDENCE_OUT/head" --base "$EVIDENCE_OUT/base" --out "$EVIDENCE_OUT"
       - name: Summary
         if: always()
         run: cat "$EVIDENCE_OUT/compare.md" >> "$GITHUB_STEP_SUMMARY" || true
@@ -149,4 +145,4 @@ jobs:
         uses: ./.github/actions/publish-ci-results
         with:
           path: ${{ env.EVIDENCE_OUT }}
-          name: macos-compare
+          name: macos
