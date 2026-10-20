@@ -8,7 +8,7 @@
 // place of the Chromium probe. Returns null where WebKit cannot run at all (macOS,
 // other platforms, no WebKit host configured): then nothing in the window changes.
 import { WebKitPresenter } from "./WebKitPresenter.sys.mjs";
-import { webkitPlatform, webkitAvailabilityFor, webkitWebModeRequested, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
+import { webkitPlatform, webkitAvailabilityFor, webkitWebModeRequested, WEBKIT_VERSION, prewarmWebKitHost } from "./WebKitEngineAdapter.sys.mjs";
 import { normalizeEngineId, isEngineAvailable, engineAvailability, engineLabel, CHROMIUM_FIXTURE_LINEUP } from "./EngineRegistry.sys.mjs";
 import { installEngineTabMenu } from "./EngineTabMenu.sys.mjs";
 
@@ -115,6 +115,8 @@ export function installWebKitEngine(win, gecko, { chromium = null, Presenter = W
   if (menu) cleanups.push(() => menu.dispose());
   updateIndicator();
 
+  // perf-phase3: a warm spare WebKit host at idle (pref axiosozo.engines.prewarm).
+  try { prewarmWebKitHost(win); } catch {}
   return Object.freeze({
     switchTo,
     switchToWebKit: () => switchTo("webkit"),

@@ -8,6 +8,7 @@ import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlo
   disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
   workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_REFILL_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
 export const CHROMIUM_VERSION = "154.0.8037.17";
@@ -1382,8 +1383,43 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
 }
 
 /**
+ * Warm spare fixture host (EngineHostSpare.sys.mjs): one per Firefox process, held by the
+ * shared module instance (every window imports this module through its own module graph).
+ * Linux only; never the web-mode host. Returns whether a spare is (being) scheduled.
+ */
+let fixtureSpare = null;
+const SHARED_MODULE = "chrome://browser/content/axiosozo/CEFEngineAdapter.sys.mjs";
+function sharedInstance() {
+  try { return ChromeUtils.importESModule(SHARED_MODULE); } catch { return null; }
+}
+export function prewarmCEFFixtureHost(win, delayMs = PREWARM_STARTUP_DELAY_MS) {
+  const shared = sharedInstance();
+  if (shared && shared.prewarmCEFFixtureHost !== prewarmCEFFixtureHost) return shared.prewarmCEFFixtureHost(win, delayMs);
+  const origin = Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN");
+  if (expectedCEFPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI) === "macosarm64" || !validFixtureOrigin(origin)) return false;
+  if (!prewarmWanted(Services.prefs)) { fixtureSpare?.drop(); return false; }
+  fixtureSpare ??= new SpareHost(() => launchHost("fixture", origin));
+  fixtureSpare.schedule(win, delayMs);
+  return true;
+}
+/** The spare for a fixture tab of `origin`, or null (then the caller starts a host itself). */
+export async function takeCEFFixtureHost(origin) {
+  const shared = sharedInstance();
+  if (shared && shared.takeCEFFixtureHost !== takeCEFFixtureHost) return shared.takeCEFFixtureHost(origin);
+  if (!fixtureSpare || !prewarmWanted(Services.prefs)) return null;
+  return fixtureSpare.take(host => !host.ended && host.status === "connected" && host.targetCount === 0
+    && host.browsingMode === "fixture" && host.identity === origin);
+}
+export function cefFixtureSpareStats() {
+  const shared = sharedInstance();
+  if (shared && shared.cefFixtureSpareStats !== cefFixtureSpareStats) return shared.cefFixtureSpareStats();
+  return fixtureSpare?.stats ?? null;
+}
+
+/**
  * Attach one Zen tab as a Chromium target. Web tabs share the profile's host;
- * the fixture probe keeps its own strict single-origin host per tab.
+ * the fixture probe keeps its own strict single-origin host per tab (a warm spare
+ * when one is ready, see prewarmCEFFixtureHost).
  */
 export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure,
   element = null, onGeometry }) {
@@ -1396,12 +1432,21 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
     return new shared.CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
       document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure, element, onGeometry });
   }
-  const host = await launchHost("fixture", origin);
+  const spare = await takeCEFFixtureHost(origin);
+  const host = spare ?? await launchHost("fixture", origin);
+  // The next spare: soon after this tab's host closes, at the latest PREWARM_REFILL_MS from now.
+  prewarmCEFFixtureHost(win, PREWARM_REFILL_MS);
   const adapter = new CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
     identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
     element, onGeometry });
   // A fixture host exists for exactly this one tab.
   const close = adapter.close.bind(adapter);
-  adapter.close = async () => { try { await close(); } finally { await host.shutdown().catch(() => {}); } };
+  adapter.close = async () => {
+    try { await close(); } finally {
+      await host.shutdown().catch(() => {});
+      try { prewarmCEFFixtureHost(win, PREWARM_AFTER_CLOSE_MS); } catch {}
+    }
+  };
+  adapter.warmHost = !!spare;
   return adapter;
 }

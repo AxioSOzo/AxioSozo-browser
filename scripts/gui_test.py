@@ -63,6 +63,9 @@ TEST_PREFS = {
     'browser.tabs.warnOnClose': False,
     'browser.sessionstore.resume_from_crash': False,
     'network.captive-portal-service.enabled': False,
+    # No warm spare engine host (perf-phase3, EngineHostSpare.sys.mjs): E2Es count one host per tab.
+    # Benches that measure the spare set it back with --pref axiosozo.engines.prewarm=true.
+    'axiosozo.engines.prewarm': False,
 }
 CHROME_STATE = """
 const owner = window.AxioSozo;

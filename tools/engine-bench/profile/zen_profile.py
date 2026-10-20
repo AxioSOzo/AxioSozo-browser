@@ -115,6 +115,15 @@ return {dpr, canvas_pixels: [canvas.width, canvas.height], css_rect: [r.x, r.y, 
         integral_device_origin: Math.abs(r.x * dpr - Math.round(r.x * dpr)) < 0.01 && Math.abs(r.y * dpr - Math.round(r.y * dpr)) < 0.01,
         object_fit: cs.objectFit, moz_opaque: canvas.hasAttribute('moz-opaque'), chain};
 '''
+# perf-phase3 warm spare hosts (EngineHostSpare.sys.mjs): launched / taken / refused / dropped per engine.
+SPARE_STATS = '''
+const out = {};
+for (const [name, file, fn] of [["chromium", "CEFEngineAdapter", "cefFixtureSpareStats"], ["webkit", "WebKitEngineAdapter", "webkitSpareStats"]]) {
+  try { out[name] = ChromeUtils.importESModule(`chrome://browser/content/axiosozo/${file}.sys.mjs`)[fn]?.() ?? null; }
+  catch (error) { out[name] = String(error).slice(0, 120); }
+}
+return out;
+'''
 PROMOTION_LINE = re.compile(r'Surface promotion of prim at (.*?) (failed|failure ignored) with: (.*?)\.?$')
 
 
@@ -491,7 +500,12 @@ class ZenProfile(zen_bench.ZenBench):
             ms = self.switch_engine(self.engine.name)
             state = self.wait(lambda: (lambda p: p if p['engine'] == self.engine.name and str(p['title'] or '').startswith('bench:static')
                                        and (p['frames'] or 0) > 0 else None)(self.presented()), self.engine.name + ' frames')
-            return dict(gecko_to_engine_switch_ms=ms, presenter=state)
+            spare = None
+            try:
+                spare = self.chrome_script(SPARE_STATS)
+            except Exception as error:  # diagnostics only
+                spare = f'{type(error).__name__}: {error}'[:200]
+            return dict(gecko_to_engine_switch_ms=ms, presenter=state, spare_hosts=spare)
         record = self.measured('switch-to-engine', switch)
         try:
             time.sleep(0.5)
@@ -499,6 +513,17 @@ class ZenProfile(zen_bench.ZenBench):
         except Exception as error:  # diagnostics only
             self.result.setdefault('canvas_chain', []).append(dict(pass_=self.pass_name, error=f'{type(error).__name__}: {error}'[:200]))
         return record
+
+    def visual_check(self):
+        """Real screen pixels (xwd of the X root) twice, 0.3 s apart, while the rAF fixture animates in the
+        engine tab: the screen must change (frames reach the display, whatever the compositing path)."""
+        try:
+            first = self.screenshot(f'visual-{self.pass_name}-a', settle=False)
+            time.sleep(0.3)
+            second = self.screenshot(f'visual-{self.pass_name}-b', settle=False)
+            return dict(screen_changed=first.read_bytes() != second.read_bytes(), screenshots=[first.name, second.name])
+        except Exception as error:  # diagnostics only
+            return dict(error=f'{type(error).__name__}: {error}'[:200])
 
     def one_pass(self, server):
         out = dict(pass_=self.pass_name)
@@ -509,6 +534,8 @@ class ZenProfile(zen_bench.ZenBench):
                 out['static'] = self.load(server, 'static')
             self.measured('idle', lambda: self.raf_window(2.0))
             out['raf_load'] = self.load(server, 'raf')
+            if self.native_engine:
+                out['visual'] = self.visual_check()
             self.measured('raf', lambda: self.raf_window(3.0))
             # Control for the harness itself: the same rAF fixture with zen_bench's 2 ms chrome sampler
             # (which calls the presenter's diagnostics() 500x/s) off; only /proc CPU and hooks/profile.
@@ -652,6 +679,9 @@ def main():
         if not (name.startswith('axiosozo.engines.') or name.startswith('gfx.webrender.debug.')):
             parser.error(f'--pref {name}: not an engine or WebRender debug test pref')
         extra_prefs[name] = {'true': True, 'false': False}.get(value, int(value) if value.isdigit() else value)
+    # Warm spare hosts are on in product fixture mode; the GUI harness turns them off (deterministic process
+    # counts in the E2Es), the profile measures them on unless asked otherwise.
+    extra_prefs.setdefault('axiosozo.engines.prewarm', True)
     args.browser_env = {}
     if args.wr_promotion_log:
         extra_prefs['gfx.webrender.debug.surface-promotion-logging'] = True

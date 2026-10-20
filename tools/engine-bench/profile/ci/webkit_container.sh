@@ -17,6 +17,8 @@ OUT=/out
 PASSES=${PROFILE_PASSES:-plain,trace,profile}
 # Extra zen_profile.py options (e.g. --wr-promotion-log), word-split on purpose.
 EXTRA=${PROFILE_EXTRA:-}
+# Same-job control options (label <label>-control), e.g. the perf-phase3 features off.
+CONTROL=${PROFILE_CONTROL:-}
 mkdir -p "$OUT"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/steps.log"; }
 export DEBIAN_FRONTEND=noninteractive
@@ -105,8 +107,18 @@ log "zen_profile --engine webkit at 2x (TEST-ONLY layout.css.devPixelsPerPx=2, 2
 as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --label webkit-2x --device-scale 2 --size 2304x1440 \
   --app fetched --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-2x" --passes "$PASSES" $EXTRA >"$OUT/zen-profile-webkit-2x.log" 2>&1 || w2status=$?
 log "webkit 2x profile exit $w2status"
+if [ -n "$CONTROL" ]; then
+  install -d -o axio -g axio "$OUT/webkit-control" "$OUT/webkit-2x-control"
+  log "zen_profile --engine webkit control ($CONTROL)"
+  as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --label webkit-control --app fetched \
+    --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-control" --passes "$PASSES" $EXTRA $CONTROL >"$OUT/zen-profile-webkit-control.log" 2>&1 || true
+  log "zen_profile --engine webkit 2x control ($CONTROL)"
+  as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --label webkit-2x-control --device-scale 2 --size 2304x1440 \
+    --app fetched --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-2x-control" --passes "$PASSES" $EXTRA $CONTROL >"$OUT/zen-profile-webkit-2x-control.log" 2>&1 || true
+fi
 log "summarize profiles (report.py process)"
-for d in webkit gecko-debian webkit-2x; do
+for d in webkit gecko-debian webkit-2x webkit-control webkit-2x-control; do
+  [ -d "$OUT/$d" ] || continue
   as_axio env AXIOSOZO_PROFILE_SYMBOLS="$SYMBOLS" python3 "$REPO/tools/engine-bench/profile/report.py" process "$OUT/$d" >>"$OUT/steps.log" 2>&1 || log "report $d FAILED"
 done
 ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"
