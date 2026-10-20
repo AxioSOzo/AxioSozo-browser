@@ -1,0 +1,30 @@
+## uname -a
+Linux runnervm05w4h 7.0.0-1017-azure #17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 19:06:39 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux
+## nproc
+4
+## free -h
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       1.1Gi        13Gi        42Mi       1.3Gi        14Gi
+Swap:          3.0Gi          0B       3.0Gi
+## df -h
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       145G   38G  108G  26% /
+/dev/root       145G   38G  108G  26% /
+## os-release
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.5 LTS (Noble Numbat)"
+## kernel sandbox knobs
+/proc/sys/kernel/apparmor_restrict_unprivileged_userns=1
+/proc/sys/kernel/unprivileged_userns_clone=1
+/proc/sys/user/max_user_namespaces=58304
+## DRM devices
+total 0
+drwxr-xr-x  2 root root      60 Oct 20 13:19 .
+drwxr-xr-x 19 root root    4020 Oct 20 13:19 ..
+crw-rw----  1 root video 226, 1 Oct 20 13:19 card1
+card1
+card1-Virtual-1
+version
+/sys/class/drm/card1/device/driver -> /sys/bus/vmbus/drivers/hyperv_drm
