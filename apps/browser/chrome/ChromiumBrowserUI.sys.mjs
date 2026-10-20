@@ -239,14 +239,19 @@ class ChromiumFinder {
   #find(searchString, forward, findNext) {
     this.searchString = searchString;
     if (!searchString) { this.ui.command(this.record, "stop_finding", { clear_selection: true }); this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 }); return; }
-    this.pending = { searchString, forward, findNext };
+    this.pending = { searchString, forward, findNext, active: 0 };
     this.ui.command(this.record, "find", { text: searchString.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
   }
   fastFind(searchString) { this.#find(searchString, true, false); }
   findAgain(searchString, findBackwards) { this.#find(searchString || this.searchString, !findBackwards, true); }
   onResult(event) {
-    if (!event.final || !this.pending) return;
+    if (!this.pending) return;
+    // Chromium reports the active match ordinal in an intermediate update and may
+    // leave it unset (0 here) in the final count update: keep the last one seen.
+    if (event.active) this.pending.active = event.active;
+    if (!event.final) return;
     const { searchString, forward, findNext } = this.pending;
+    if (!event.active && event.count) event = { ...event, active: Math.min(this.pending.active || 1, event.count) };
     let result = event.count ? FIND_FOUND : FIND_NOTFOUND;
     if (event.count && findNext && ((forward && event.active < this.lastActive) || (!forward && event.active > this.lastActive))) result = FIND_WRAPPED;
     this.lastActive = event.active; this.lastCount = event.count;

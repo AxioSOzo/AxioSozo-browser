@@ -430,6 +430,12 @@ test("Zen's findbar drives Chromium find through the tab's browser.finder and re
   h.ui.handle(h.record, { event: 'find_result', identifier: 2, count: 3, active: 1, final: true });
   assert.deepEqual(findbar.results.map(item => item.result), [0, 2], 'found, then wrapped');
   assert.deepEqual(findbar.counts.at(-1), { total: 3, current: 1, limit: 1000 });
+  // The final count update may carry no active ordinal: the findbar still says "1 of 3".
+  finder.fastFind('needle'); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 1, final: false });
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 0, final: true });
+  assert.deepEqual(findbar.counts.at(-1), { total: 3, current: 1, limit: 1000 });
+  assert.equal(findbar.results.at(-1).result, 0);
   finder.fastFind('missing'); await settle();
   h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 0, active: 0, final: true });
   assert.equal(findbar.results.at(-1).result, 1);

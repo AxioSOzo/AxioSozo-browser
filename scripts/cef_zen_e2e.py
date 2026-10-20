@@ -51,7 +51,7 @@ FEEL = ROOT / 'tests/fixtures/cef-zen-feel.html'
 ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
 # Address-bar focus checks run last: the Linux parent process has a known WebRender crash around
 # address-bar input (owned by cloud/linux-platform), and a crash ends the session.
-WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
+WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'fonts', 'scrollbars', 'badge', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
                  'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
                  'urlbar_gecko', 'ctrl_t_gecko')
@@ -111,7 +111,8 @@ const matches = bar._foundMatches ?? bar.querySelector('.found-matches');
 return {open: !bar.hidden, value: bar._findField?.value ?? null, fieldFocused: document.activeElement === bar._findField?.inputField
           || bar._findField?.matches?.(':focus-within') || false,
         matches: matches?.textContent || matches?.value || null, matchesArgs: matches?.getAttribute('data-l10n-args') ?? null,
-        status: bar._findStatusDesc?.textContent ?? null};
+        status: bar._findStatusDesc?.textContent ?? null,
+        highlightAll: bar.getElement?.('highlight')?.checked ?? null};
 """
 CONTEXT_MENU = """
 const popup = document.getElementById('axiosozo-chromium-context-menu');
@@ -122,12 +123,31 @@ return {open: popup.state === 'open', state: popup.state,
 """
 
 
-class FeelServer:
-    """Owned loopback HTTP fixture: /feel.html and /engine.html, each with ?page=2. GET only."""
+DOWNLOAD_BODY = b'AxioSozo feel download: synthetic test file, no personal data.\n'
 
-    def __init__(self):
+
+def lan_address():
+    """The machine's own non-loopback IPv4 address (a UDP connect sends no packet), or None."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(('192.0.2.1', 9))
+            address = probe.getsockname()[0]
+        return None if address.startswith('127.') else address
+    except OSError:
+        return None
+
+
+class FeelServer:
+    """Owned HTTP fixture servers: /feel.html and /engine.html (each with ?page=2) and /download.txt
+    (an attachment). GET only. Loopback always; a copy on the machine's own LAN address (for the
+    "Not secure" badge of a plain-HTTP non-loopback page); a loopback HTTPS copy with a throwaway
+    self-signed certificate (certificate-error gates). Nothing listens beyond this machine's addresses."""
+
+    def __init__(self, workdir=None):
         pages = {'/feel.html': FEEL.read_bytes(), '/engine.html': ENGINE_FIXTURE.read_bytes()}
         self.hashes = {name: hashlib.sha256(data).hexdigest() for name, data in pages.items()}
+        self.servers = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.0'
@@ -135,12 +155,14 @@ class FeelServer:
             def log_message(self, *_):
                 pass
 
-            def reply(self, code, payload=b'', content_type='text/plain; charset=utf-8'):
+            def reply(self, code, payload=b'', content_type='text/plain; charset=utf-8', extra=()):
                 self.send_response(code)
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(payload)))
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('X-Content-Type-Options', 'nosniff')
+                for name, value in extra:
+                    self.send_header(name, value)
                 self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; "
                                  "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'")
                 self.end_headers()
@@ -148,11 +170,15 @@ class FeelServer:
                 self.close_connection = True
 
             def do_GET(self):
-                if self.headers.get_all('Host', []) != [f'127.0.0.1:{self.server.server_port}']:
+                host, port = self.server.server_address[:2]
+                if self.headers.get_all('Host', []) != [f'{host}:{port}']:
                     return self.reply(400)
                 url = urllib.parse.urlsplit(self.path)
                 if url.path in pages and url.query in ('', 'page=2') and not url.fragment:
                     return self.reply(200, pages[url.path], 'text/html; charset=utf-8')
+                if url.path == '/download.txt' and not url.query:
+                    return self.reply(200, DOWNLOAD_BODY, 'text/plain; charset=utf-8',
+                                      [('Content-Disposition', 'attachment; filename="axiosozo-feel-download.txt"')])
                 if url.path == '/favicon.ico':
                     return self.reply(204)
                 return self.reply(404)
@@ -160,19 +186,48 @@ class FeelServer:
             def do_POST(self):
                 self.reply(405)
 
-        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.server.daemon_threads = True
-        self.origin = f'http://127.0.0.1:{self.server.server_port}'
+        def serve(address, context=None):
+            server = http.server.ThreadingHTTPServer((address, 0), Handler)
+            server.daemon_threads = True
+            if context:
+                server.socket = context.wrap_socket(server.socket, server_side=True)
+            self.servers.append(server)
+            return f"{'https' if context else 'http'}://{address}:{server.server_port}"
+
+        self.origin = serve('127.0.0.1')
         self.url = self.origin + '/feel.html'
-        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
+        lan = lan_address()
+        self.lan_origin = serve(lan) if lan else None
+        self.lan_url = self.lan_origin + '/feel.html' if lan else None
+        self.tls_origin = self.tls_url = None
+        self.tls_note = None
+        if workdir and shutil.which('openssl'):
+            import ssl
+            key, cert = Path(workdir) / 'feel-tls.key', Path(workdir) / 'feel-tls.crt'
+            made = subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(key), '-out', str(cert),
+                                   '-days', '1', '-subj', '/CN=axiosozo-feel-untrusted', '-addext', 'subjectAltName=IP:127.0.0.1'],
+                                  capture_output=True, text=True, timeout=60)
+            if made.returncode == 0:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(str(cert), str(key))
+                self.tls_origin = serve('127.0.0.1', context)
+                self.tls_url = self.tls_origin + '/feel.html'
+            else:
+                self.tls_note = 'openssl: ' + made.stderr.strip()[-300:]
+        else:
+            self.tls_note = 'openssl missing'
+        self.threads = [threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
+                        for server in self.servers]
 
     def __enter__(self):
-        self.thread.start()
+        for thread in self.threads:
+            thread.start()
         return self
 
     def __exit__(self, *_):
-        self.server.shutdown()
-        self.server.server_close()
+        for server in self.servers:
+            server.shutdown()
+            server.server_close()
 
 
 class ChromiumWeb(ChromiumEngine):
@@ -432,6 +487,105 @@ class CEFZenHarness(gui_test.Harness):
                 ('engine', 'mode', 'view', 'geckoHidden', 'geckoURL', 'overlay', 'label', 'tabs', 'focus')},
                 'native': {k: native.get(k) for k in ('renderPath', 'frames', 'surface', 'firstFrameMilliseconds',
                                                       'meanDrawMilliseconds', 'uploadedPixelShare', 'inputFeatures')}}
+
+    def scenario_fonts(self):
+        """The same text in each CSS generic family has the same width in Chromium as in the Gecko tab
+        (same fonts resolved through fontconfig), including the fallback for unknown and ui-* families."""
+        self.require_chromium()
+        chromium = self.page()['fw']
+        self.screenshot('30-fonts-chromium')
+        self.select_tab(self.gecko_tab)
+        gecko = self.page()['fw']
+        self.screenshot('30-fonts-gecko')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        ratios = {name: round(chromium[name] / gecko[name], 3) if gecko[name] else None for name in gecko}
+        off = {name: ratio for name, ratio in ratios.items() if ratio is None or abs(ratio - 1) > 0.03}
+        self.gate('fonts_match_gecko', 'FAIL' if off else 'PASS', screenshots=['30-fonts-chromium.png', '30-fonts-gecko.png'],
+                  chromium=chromium, gecko=gecko, ratios=ratios,
+                  note='CSS px width of the same text per family (default=unknown family, serif, sans-serif, monospace, '
+                       'system-ui, ui-monospace); within 3% = the same face')
+        if off:
+            raise AssertionError(f'font widths differ from Gecko: {off}')
+        return {'chromium': chromium, 'gecko': gecko, 'ratios': ratios}
+
+    def scenario_scrollbars(self):
+        """Chromium uses overlay scrollbars like Gecko on GTK: no layout width taken, a thin bar while scrolling."""
+        self.require_chromium()
+        out = {}
+        for engine, tab in (('chromium', self.cef_tab), ('gecko', self.gecko_tab)):
+            self.select_tab(tab)
+            if engine == 'chromium':
+                self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+            self.move(*AT['blank'])
+            for _ in range(3):
+                self.xdotool('click', '5')
+                time.sleep(0.05)
+            page = self.wait_page(lambda page: page['y'] > 0, f'{engine} scrolled')
+            time.sleep(0.3)
+            self.screenshot(f'31-scrollbar-{engine}', settle=False)
+            out[engine] = {'layout_width': page['sw'], 'inner_width': page['z'][1]}
+            self.scroll_top()
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        same = out['chromium']['layout_width'] == out['gecko']['layout_width']
+        self.gate('overlay_scrollbars', 'PASS' if same else 'FAIL', screenshots=['31-scrollbar-chromium.png', '31-scrollbar-gecko.png'],
+                  **out, note='layout_width = innerWidth - clientWidth: 0 for overlay scrollbars')
+        if not same:
+            raise AssertionError(f'scrollbar layout width differs: {out}')
+        return out
+
+    BADGE_GEOMETRY = """
+        const rect = node => { if (!node) return null; const r = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          const chain = []; for (let n = node.parentElement, i = 0; n && i < 4; n = n.parentElement, i++) {
+            const pr = n.getBoundingClientRect(); chain.push({id: n.id || n.localName, x: pr.left, w: pr.width,
+              display: getComputedStyle(n).display, overflow: getComputedStyle(n).overflowX}); }
+          return {id: node.id, x: r.left, y: r.top, w: r.width, h: r.height, flex: style.flex, parents: chain,
+                  shown: r.width > 0 && r.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'}; };
+        const browser = gBrowser.selectedBrowser, stack = browser.parentNode;
+        const overlay = stack?.querySelector?.('[data-axiosozo-cef]');
+        const content = rect(overlay && overlay.style.display === 'block' ? overlay : browser);
+        return {content, urlbar: rect(document.getElementById('urlbar')),
+                chips: ['axiosozo-engine-badge', 'axiosozo-engine-probe', 'axiosozo-engine-indicator', 'axiosozo-actions']
+                  .map(id => rect(document.getElementById(id))).filter(Boolean)};"""
+
+    @staticmethod
+    def overlaps(chips, content):
+        def inter(a, b):
+            return min(a['x'] + a['w'], b['x'] + b['w']) - max(a['x'], b['x']) > 0.5 and \
+                min(a['y'] + a['h'], b['y'] + b['h']) - max(a['y'], b['y']) > 0.5
+        return [chip['id'] for chip in chips if chip['shown'] and inter(chip, content)]
+
+    def scenario_badge(self):
+        """Engine chips and the "Not secure" badge live in Zen's toolbar/address bar, never over the page."""
+        self.require_chromium()
+        loopback = self.chrome_script(self.BADGE_GEOMETRY)
+        out = {'loopback': loopback}
+        covering = self.overlaps(loopback['chips'], loopback['content'])
+        if self.feel.lan_url:
+            # A plain-HTTP page on the runner's own non-loopback address: Chromium tabs show "Not secure".
+            self.chrome_script('gBrowser.selectedTab = gBrowser.tabs.find(t => t.linkedPanel === arguments[0]); return true;',
+                               [self.cef_tab])
+            self.chrome_script('window.AxioSozo.engineProbe.navigate(arguments[0]); return true;', [self.feel.lan_url])
+            self.wait_page(lambda page: page['p'] == '1' and self.web()['page']['url'].startswith(self.feel.lan_origin),
+                           'the LAN copy of the feel page in Chromium', timeout=20)
+            time.sleep(0.8)
+            self.screenshot('32-not-secure-badge')
+            lan = self.chrome_script(self.BADGE_GEOMETRY)
+            out['lan'] = lan
+            out['lan_badge_shown'] = any(chip['id'] == 'axiosozo-engine-badge' and chip['shown'] for chip in lan['chips'])
+            covering += self.overlaps(lan['chips'], lan['content'])
+            self.chrome_script('window.AxioSozo.engineProbe.navigate(arguments[0]); return true;', [self.feel.url])
+            self.wait_page(lambda page: self.web()['page']['url'].startswith(self.feel.origin), 'back on the loopback page', timeout=20)
+        else:
+            out['lan'] = 'no non-loopback IPv4 address on this machine'
+        status = 'FAIL' if covering else ('PASS' if out.get('lan_badge_shown') else 'EXPERIMENTAL')
+        self.gate('badge_never_covers_content', status, screenshot='32-not-secure-badge.png', covering=covering,
+                  lan_badge_shown=out.get('lan_badge_shown'))
+        if covering:
+            raise AssertionError(f'chips over the page content: {covering}: {out}')
+        return out
 
     def scenario_typing(self):
         self.require_chromium()
@@ -788,11 +942,41 @@ class CEFZenHarness(gui_test.Harness):
         self.type_text('needle')
         found = self.wait(lambda: (lambda b: b if b['value'] == 'needle' and ('3' in str(b['matches']) + str(b['matchesArgs'])) else None)(
             self.chrome_script(FINDBAR_STATE)), 'findbar reports 3 matches from Chromium', timeout=15)
+        time.sleep(0.5)
+        found = self.chrome_script(FINDBAR_STATE)
         self.screenshot('12-find')
+        self.key('Return')
+        time.sleep(0.8)
+        again = self.chrome_script(FINDBAR_STATE)
+        self.screenshot('12-find-next')
         self.key('Escape')
         closed = self.wait(lambda: not self.chrome_script(FINDBAR_STATE)['open'], 'findbar closed', timeout=10)
-        self.gate('find_in_page', 'PASS', screenshot='12-find.png', findbar=found)
-        return {'opened': bar, 'found': found, 'closed': closed}
+        # Gecko baseline: the same search in Firefox's own findbar.
+        self.select_tab(self.gecko_tab)
+        self.click_at(*AT['blank'])
+        self.key('ctrl+f')
+        self.wait(lambda: self.chrome_script(FINDBAR_STATE)['open'], 'Gecko findbar open', timeout=10)
+        self.key('ctrl+a')
+        self.type_text('needle')
+        gecko = self.wait(lambda: (lambda b: b if b['value'] == 'needle' and '3' in str(b['matches']) + str(b['matchesArgs']) else None)(
+            self.chrome_script(FINDBAR_STATE)), 'Gecko findbar reports 3 matches', timeout=15)
+        time.sleep(0.5)
+        gecko = self.chrome_script(FINDBAR_STATE)
+        self.screenshot('12-find-gecko')
+        self.key('Return')
+        time.sleep(0.8)
+        gecko_again = self.chrome_script(FINDBAR_STATE)
+        self.key('Escape')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        same = (found['matches'], again['matches']) == (gecko['matches'], gecko_again['matches'])
+        self.gate('find_in_page', 'PASS' if same else 'FAIL', screenshots=['12-find.png', '12-find-next.png', '12-find-gecko.png'],
+                  chromium=[found['matches'], again['matches']], gecko=[gecko['matches'], gecko_again['matches']],
+                  highlight_all={'chromium': found.get('highlightAll'), 'gecko': gecko.get('highlightAll')})
+        if not same:
+            raise AssertionError(f"findbar counts differ: chromium {[found['matches'], again['matches']]} "
+                                 f"gecko {[gecko['matches'], gecko_again['matches']]}")
+        return {'opened': bar, 'found': found, 'again': again, 'closed': closed, 'gecko': gecko, 'gecko_again': gecko_again}
 
     ZOOM_KEYS = """
         return [...document.querySelectorAll('key')].filter(k => ['0', '=', '+', '-'].includes(k.getAttribute('key'))
@@ -1280,6 +1464,13 @@ class CEFZenHarness(gui_test.Harness):
         page1 = self.wait(lambda: (lambda t: t if 'page=1' in t else None)(self.fixture_state()['tabLabel']), 'back to page 1')
         self.gate('fixture_e1', 'PASS', screenshots=['f02-chromium.png', 'f03-typed.png', 'f04-page2.png'],
                   native={k: state['native'].get(k) for k in ('renderPath', 'surface', 'frames', 'firstFrameMilliseconds')})
+        # The fixture probe's "Return to Gecko" chip stays in Zen's toolbar, never over the page.
+        geometry = self.chrome_script(self.BADGE_GEOMETRY)
+        covering = self.overlaps(geometry['chips'], geometry['content'])
+        self.gate('probe_chip_never_covers_content', 'FAIL' if covering else 'PASS', screenshot='f02-chromium.png',
+                  covering=covering, geometry=geometry)
+        if covering:
+            raise AssertionError(f'chips over the page content: {covering}: {geometry}')
         return {'probe_button': probe, 'typed': typed, 'clicked': clicked, 'page2': page2, 'back': back, 'page1': page1}
 
     def scenario_fixture_host_kill(self):
@@ -1331,10 +1522,16 @@ def main():
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     evidence = Path(args.evidence_dir).resolve() if args.evidence_dir else storage.BUILD_ROOT / 'gui-evidence' / f'cef-zen-{args.mode}-{stamp}'
     code = 0
-    with FeelServer() as feel:
+    workdir = storage.BUILD_ROOT / 'gui-evidence' / ('feel-tls-' + stamp)
+    try:
+        workdir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        workdir = None
+    with FeelServer(workdir) as feel:
         harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale), evidence, feel)
         harness.result.update(harness='axiosozo-linux-gui+cef-zen', mode=args.mode, scale=args.scale,
-                              feel_fixture={'origin': feel.origin, 'sha256': feel.hashes})
+                              feel_fixture={'origin': feel.origin, 'lan_origin': feel.lan_origin, 'tls_origin': feel.tls_origin,
+                                            'tls_note': feel.tls_note, 'sha256': feel.hashes})
         harness.result['test_only_switches'] += (['AXIOSOZO_ENGINE_SWITCHING=1 (existing developer gate)'] if args.mode == 'web'
                                                  else ['AXIOSOZO_ENGINE_PROBE=1 fixture probe'])
         if args.scale != 1:
@@ -1359,6 +1556,8 @@ def main():
         except (RuntimeError, OSError, subprocess.SubprocessError, AssertionError) as error:
             status, code = 'FAIL', 1
             harness.result['reason'] = f'{type(error).__name__}: {error}'
+    if workdir:
+        shutil.rmtree(workdir, ignore_errors=True)   # the throwaway TLS key
     for name, outcome in harness.result['scenarios'].items():
         if outcome['status'] == 'FAIL':
             harness.matrix.setdefault(name, {'status': 'FAIL', 'reason': outcome.get('reason')})

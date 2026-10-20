@@ -778,6 +778,13 @@ static void streamCommand(const std::string& line) {
     // makes a windowless view paint transparently: an unstyled page's background then
     // has alpha 0 and showed as black in the presenter's opaque canvas.
     settings.background_color = 0xFFFFFFFF;
+    // Platform font policy (LaunchConfig::fonts); the strings outlive create_browser.
+    auto standardFont = json::toUtf16(config.fonts.standard), serifFont = json::toUtf16(config.fonts.serif);
+    auto sansFont = json::toUtf16(config.fonts.sansSerif), fixedFont = json::toUtf16(config.fonts.fixed);
+    if (!standardFont.empty()) settings.standard_font_family = view(standardFont);
+    if (!serifFont.empty()) settings.serif_font_family = view(serifFont);
+    if (!sansFont.empty()) settings.sans_serif_font_family = view(sansFont);
+    if (!fixedFont.empty()) settings.fixed_font_family = view(fixedFont);
     auto value = json::toUtf16(command.str("url"));
     auto address = view(value);
     event("accepted", json::object({{"request_id", requestId}}));

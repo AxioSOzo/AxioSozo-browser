@@ -16,7 +16,7 @@
 name: linux-cef-zen
 on:
   push:
-    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel]
+    branches: [claude/cef-zen-feel-dx16ke, cloud/cef-zen-feel, claude/cef-feel-2-xrbczc, cloud/cef-feel-2]
     paths:
       - apps/browser/chrome/CEF*.sys.mjs
       - apps/browser/chrome/Chromium*.sys.mjs
@@ -30,6 +30,7 @@ on:
       - scripts/cef_zen_e2e.py
       - tests/fixtures/cef-zen-feel.html
       - tests/fixtures/engine.html
+      - apps/browser/chrome/browser-experience.css
       - .github/workflows/linux-cef-zen.yml
       - .github/actions/publish-ci-results/**
 
@@ -42,6 +43,9 @@ permissions:
 
 env:
   ARTIFACT: axiosozo-zen-linux-x86_64
+  # The prebuilt app to test (linux-perf-build: SWGL address-bar crash fix + native frame
+  # receiver + memfd frames). The newest unexpired artifact is used if this one expired.
+  ZEN_RUN: "39362552105"
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -101,8 +105,9 @@ jobs:
       - name: Newest Linux Zen build artifact
         id: zen
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=20" \
-            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=50" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse
+                  | ((map(select(.workflow_run.id == ($ENV.ZEN_RUN | tonumber))) + .) | .[0] // empty
                   | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
             > "$EVIDENCE_OUT/zen-artifact.json" || true
           cat "$EVIDENCE_OUT/zen-artifact.json"
