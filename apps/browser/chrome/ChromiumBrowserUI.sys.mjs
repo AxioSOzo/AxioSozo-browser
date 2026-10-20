@@ -21,6 +21,8 @@ const MEDIA_TYPES = new Set(["none", "image", "video", "audio", "canvas", "file"
 const FILE_MODES = { open: "modeOpen", open_multiple: "modeOpenMultiple", open_folder: "modeGetFolder", save: "modeSave" };
 const CLOSE_REASONS = new Set(["timeout", "navigation", "closed", "reset", "withdrawn", "answered"]);
 const DOWNLOAD_STATES = new Set(["in_progress", "complete", "canceled", "interrupted"]);
+// The device named in prompts: macOS keeps "your Mac"; Linux says "your computer".
+const DEVICE = globalThis.Services?.appinfo?.OS === "Linux" ? "computer" : "Mac";
 // [browser.properties key or null, English fallback, PopupNotifications anchor]
 const PERMISSIONS = {
   geolocation: ["geolocation.shareWithSite4", "Allow %S to access your location?", "geo-notification-icon"],
@@ -31,13 +33,13 @@ const PERMISSIONS = {
   clipboard: [null, "Allow %S to see text and images copied to the clipboard?", "default-notification-icon"],
   storage_access: [null, "Allow %S to use its cookies on this site?", "default-notification-icon"],
   top_level_storage_access: [null, "Allow %S to use its cookies on this site?", "default-notification-icon"],
-  local_fonts: [null, "Allow %S to use the fonts installed on your Mac?", "default-notification-icon"],
+  local_fonts: [null, `Allow %S to use the fonts installed on your ${DEVICE}?`, "default-notification-icon"],
   idle_detection: [null, "Allow %S to know when you are actively using this device?", "default-notification-icon"],
   multiple_downloads: [null, "Allow %S to download multiple files?", "default-notification-icon"],
   keyboard_lock: [null, "Allow %S to capture your keyboard?", "default-notification-icon"],
   pointer_lock: [null, "Allow %S to hide and lock your pointer?", "default-notification-icon"],
   window_management: [null, "Allow %S to manage windows on all your displays?", "default-notification-icon"],
-  file_system_access: [null, "Allow %S to edit files on your Mac?", "default-notification-icon"],
+  file_system_access: [null, `Allow %S to edit files on your ${DEVICE}?`, "default-notification-icon"],
   sensors: [null, "Allow %S to use motion and light sensors?", "default-notification-icon"],
 };
 const CERT_ERRORS = { [-200]: "ERR_CERT_COMMON_NAME_INVALID", [-201]: "ERR_CERT_DATE_INVALID", [-202]: "ERR_CERT_AUTHORITY_INVALID",
