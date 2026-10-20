@@ -314,8 +314,12 @@ the `ci-results` branch (`cloud_linux-cef/<run>-<attempt>-linux-ubuntu-24.04/`).
 compile-checks the unchanged macOS host and the portable core against the pinned
 macOS headers.
 
+**Inside Zen (E1/E2):** `.github/workflows/linux-cef-zen.yml` drives Chromium tabs in the
+real Linux Zen app (`scripts/cef_zen_e2e.py`); results and the native-feel gates are in
+`docs/CAPABILITY_MATRIX.md` and `docs/evidence/linux/cef-zen/`. Linux web hosts also send
+`text_selection` (cef-v1 "Linux hosts") so Zen can publish the X11 PRIMARY selection.
+
 **Not covered on Linux:**
-- Zen embedding (E1/E2).
 - AT-SPI exposure of the mirrored accessibility tree.
 - Wayland-native clipboard.
 - The `linuxarm64` build: the pin is recorded, but nothing has been built yet.
