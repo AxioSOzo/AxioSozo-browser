@@ -1,0 +1,2684 @@
+{
+ "harness": "axiosozo-zen-bench",
+ "version": 1,
+ "engine": "chromium",
+ "started_utc": "2026-10-20T00:22:21+00:00",
+ "host": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "cpus": 4
+ },
+ "test_only_switches": [
+  "-marionette",
+  "--remote-allow-system-access",
+  "loopback Marionette port",
+  "throwaway owned profile"
+ ],
+ "scenarios": {},
+ "screenshots": [
+  "/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/evidence-ab-chromium/ab/base-r1-2x/zen-bench-chromium.png"
+ ],
+ "bench": {
+  "launch_to_marionette_ms": 2814,
+  "window": {
+   "window_id": "2097155",
+   "xwininfo": {
+    "Width": "2072",
+    "Height": "1296",
+    "Map State": "IsViewable",
+    "Absolute upper-left X": "0",
+    "Absolute upper-left Y": "0"
+   },
+   "title": "AxioSozo \u2014 AxioSozo Dev"
+  },
+  "launch_to_window_ms": 2822,
+  "memory_at_start": {
+   "cpu_percent": 0.0,
+   "cpu_percent_by_kind": {
+    "Privileged Cont": 0.0,
+    "RDD Process": 0.0,
+    "Socket Process": 0.0,
+    "Utility Process": 0.0,
+    "Web Content": 0.0,
+    "WebExtensions": 0.0,
+    "axiosozo-dev": 0.0,
+    "forkserver": 0.0
+   },
+   "client_cpu_percent": 0.0,
+   "processes": 12,
+   "rss_mb": 1375.4,
+   "pss_mb": 634.6,
+   "rss_mb_by_kind": {
+    "Privileged Cont": 149.0,
+    "RDD Process": 31.1,
+    "Socket Process": 31.2,
+    "Utility Process": 29.0,
+    "Web Content": 431.4,
+    "WebExtensions": 131.3,
+    "axiosozo-dev": 539.3,
+    "forkserver": 33.1
+   }
+  },
+  "engine_prepare": {
+   "status": "BLOCKED_ENV",
+   "reason": "probe.py check: {\"component\": \"cef\", \"status\": \"BLOCKED_ENV\", \"message\": \"BLOCKED_ENV: native CEF rebuild required; run probe.py setup\"}"
+  },
+  "repetitions": [
+   {
+    "index": 0,
+    "switch": {
+     "gecko_to_engine_switch_ms": 789.2,
+     "switch_to_title_wall_ms": 799.4,
+     "presenter": {
+      "engine": "chromium",
+      "frames": 1,
+      "title": "bench:static|page=2",
+      "tabEngine": "chromium",
+      "renderPath": "native-osr-bgra",
+      "meanDrawMilliseconds": 9.355583000000024,
+      "uploadedPixelShare": 1,
+      "firstFrameMilliseconds": 782.3655029999995,
+      "supersededFrames": null,
+      "surface": {
+       "width": 837,
+       "height": 632,
+       "device_scale": 2
+      },
+      "frameTransport": null
+     },
+     "engine_to_gecko_switch_ms": 15082.3
+    },
+    "static": {
+     "navigate_to_title_wall_ms": 6.6,
+     "title": "bench:static|page=1",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 165.5,
+      "navigate_to_visible_ms": 283.8,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 3,
+       "title": "bench:static|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 12.325548000000103,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 9.7,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 9.1,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2617.8,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 205.2,
+        "Isolated Web Co": 108.6,
+        "Privileged Cont": 149.0,
+        "RDD Process": 31.1,
+        "Socket Process": 31.2,
+        "Utility Process": 29.0,
+        "Web Content": 431.8,
+        "WebExtensions": 131.5,
+        "axiosozo-dev": 770.9,
+        "cef:gpu-process": 173.4,
+        "cef:renderer": 215.4,
+        "cef:utility": 148.1,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image": {
+     "navigate_to_title_wall_ms": 264.2,
+     "title": "bench:image|page=2",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 24.4,
+      "navigate_to_visible_ms": 210.5,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 5,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 10.952985000000263,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 7.1,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 1.9,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 4.5,
+        "cef:gpu-process": 0.6,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2744.6,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 229.7,
+        "Isolated Web Co": 108.6,
+        "Privileged Cont": 149.0,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 432.6,
+        "WebExtensions": 131.7,
+        "axiosozo-dev": 812.2,
+        "cef:gpu-process": 177.8,
+        "cef:renderer": 266.3,
+        "cef:utility": 148.2,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "dom": {
+     "navigate_to_title_wall_ms": 263.9,
+     "title": "bench:dom|page=1|rows=2000",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 18.2,
+      "navigate_to_visible_ms": 315.3,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 7,
+       "title": "bench:dom|page=1|rows=2000",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 10.480695000000326,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 10.4,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 1.3,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 1.3,
+        "axiosozo-dev": 7.1,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.6,
+       "processes": 23,
+       "rss_mb": 2734.5,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 238.2,
+        "Isolated Web Co": 108.6,
+        "Privileged Cont": 150.6,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.1,
+        "WebExtensions": 132.2,
+        "axiosozo-dev": 696.9,
+        "cef:gpu-process": 190.5,
+        "cef:renderer": 346.6,
+        "cef:utility": 148.2,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "raf": {
+     "load": {
+      "navigate_to_title_wall_ms": 260.0,
+      "title": "bench:raf|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 18.2,
+       "navigate_to_visible_ms": 105.9,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 8
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 38,
+      "input_wall_s": 3.0,
+      "canvas_updates": 38,
+      "fps": 12.69,
+      "fps_whole_window": 12.39,
+      "interval_ms": {
+       "n": 37,
+       "median": 76.875,
+       "p95": 100.012,
+       "min": 67.602,
+       "max": 112.584,
+       "mean": 78.777,
+       "stdev": 7.89
+      },
+      "interval_p99_ms": 112.58430299999964,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 53,
+       "title": "bench:raf|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 4.822325679245433,
+       "uploadedPixelShare": 0.38860882192392165,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 165.2,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 12.1,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.7,
+        "WebExtensions": 0.3,
+        "axiosozo-dev": 122.7,
+        "cef:gpu-process": 17.0,
+        "cef:renderer": 12.4,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 1.9,
+       "processes": 23,
+       "rss_mb": 2931.6,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 255.5,
+        "Isolated Web Co": 110.1,
+        "Privileged Cont": 150.2,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.8,
+        "WebExtensions": 131.2,
+        "axiosozo-dev": 871.3,
+        "cef:gpu-process": 196.7,
+        "cef:renderer": 344.7,
+        "cef:utility": 148.5,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 270.7,
+      "title": "bench:scroll|page=1",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 19.1,
+       "navigate_to_visible_ms": 132.1,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 20,
+      "input_wall_s": 1.957,
+      "canvas_updates": 20,
+      "fps": 10.06,
+      "fps_whole_window": 9.87,
+      "interval_ms": {
+       "n": 19,
+       "median": 96.126,
+       "p95": 139.863,
+       "min": 90.499,
+       "max": 139.863,
+       "mean": 99.44,
+       "stdev": 11.164
+      },
+      "interval_p99_ms": 139.86315900000045,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 76,
+       "title": "bench:scroll|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 6.573365026315813,
+       "uploadedPixelShare": 0.5620790838763803,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 211.5,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 12.9,
+        "Isolated Web Co": 0.5,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 117.9,
+        "cef:gpu-process": 66.9,
+        "cef:renderer": 13.4,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 3.1,
+       "processes": 23,
+       "rss_mb": 3201.7,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 264.1,
+        "Isolated Web Co": 109.9,
+        "Privileged Cont": 150.0,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.8,
+        "WebExtensions": 131.4,
+        "axiosozo-dev": 1053.5,
+        "cef:gpu-process": 239.7,
+        "cef:renderer": 381.3,
+        "cef:utility": 148.5,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image_scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 263.8,
+      "title": "bench:image|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 93.2,
+       "navigate_to_visible_ms": 257.6,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 11,
+      "input_wall_s": 17.05,
+      "canvas_updates": 11,
+      "fps": 0.77,
+      "fps_whole_window": 0.64,
+      "interval_ms": {
+       "n": 10,
+       "median": 130.323,
+       "p95": 11834.611,
+       "min": 83.998,
+       "max": 11834.611,
+       "mean": 1295.649,
+       "stdev": 3513.075
+      },
+      "interval_p99_ms": 11834.610550999998,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 90,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 7.337579022222144,
+       "uploadedPixelShare": 0.6302001152733878,
+       "firstFrameMilliseconds": 782.3655029999995,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 34.2,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 1.9,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.1,
+        "RDD Process": 0.1,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.1,
+        "WebExtensions": 0.1,
+        "axiosozo-dev": 24.7,
+        "cef:gpu-process": 4.7,
+        "cef:renderer": 2.5,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 0.3,
+       "processes": 23,
+       "rss_mb": 3163.5,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 257.1,
+        "Isolated Web Co": 110.0,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 435.1,
+        "WebExtensions": 129.7,
+        "axiosozo-dev": 914.6,
+        "cef:gpu-process": 283.5,
+        "cef:renderer": 447.1,
+        "cef:utility": 148.6,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "key": {
+     "load": {
+      "navigate_to_title_wall_ms": 264.2,
+      "title": "bench:text|page=1|len=0",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 28.5,
+       "navigate_to_visible_ms": 118.8,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 2
+      },
+      "error": null
+     },
+     "samples": 20,
+     "measured_in": "zen-chrome",
+     "title": "bench:text|page=1|len=20",
+     "keydown_to_presented_frame_ms": {
+      "n": 20,
+      "median": 75.332,
+      "p95": 100.83,
+      "min": 54.805,
+      "max": 110.896,
+      "mean": 76.999,
+      "stdev": 10.915
+     },
+     "keys_without_frame": 0
+    },
+    "memory_all_processes": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "AxioCEFProbe": 0.0,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "cef:gpu-process": 0.0,
+      "cef:renderer": 0.0,
+      "cef:utility": 0.0,
+      "cef:zygote": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 23,
+     "rss_mb": 3044.5,
+     "pss_mb": null,
+     "rss_mb_by_kind": {
+      "AxioCEFProbe": 273.9,
+      "Isolated Web Co": 110.0,
+      "Privileged Cont": 149.3,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 435.1,
+      "WebExtensions": 128.7,
+      "axiosozo-dev": 901.0,
+      "cef:gpu-process": 230.6,
+      "cef:renderer": 378.3,
+      "cef:utility": 149.0,
+      "cef:zygote": 159.6,
+      "forkserver": 33.1
+     }
+    },
+    "tab_switch": {
+     "measured_in": "zen-chrome: TabSwitchDone, else the first chrome MozAfterPaint (engine presenter tabs)",
+     "to_gecko_blank_tab_ms": {
+      "n": 3,
+      "median": 70.044,
+      "p95": 201.71,
+      "min": 68.617,
+      "max": 201.71,
+      "mean": 113.457,
+      "stdev": 62.407
+     },
+     "back_to_bench_tab_ms": {
+      "n": 3,
+      "median": 47.719,
+      "p95": 50.554,
+      "min": 46.26,
+      "max": 50.554,
+      "mean": 48.178,
+      "stdev": 1.783
+     },
+     "back_chrome_paint_ms": {
+      "n": 3,
+      "median": 47.719,
+      "p95": 50.554,
+      "min": 46.26,
+      "max": 50.554,
+      "mean": 48.178,
+      "stdev": 1.783
+     },
+     "signals": [
+      "MozAfterPaint",
+      "timeout-1s"
+     ],
+     "engine_after": "chromium",
+     "raw": [
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 201.7102509999895,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 70.04372000000149,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 68.6173689999996,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 47.71916000000056,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 46.25980900000286,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 50.55422499999986,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      }
+     ]
+    },
+    "memory_after_switch_back": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 13,
+     "rss_mb": 1590.8,
+     "pss_mb": 742.8,
+     "rss_mb_by_kind": {
+      "Isolated Web Co": 110.2,
+      "Privileged Cont": 149.3,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 436.4,
+      "WebExtensions": 127.9,
+      "axiosozo-dev": 637.8,
+      "forkserver": 33.1
+     }
+    },
+    "status": "PASS"
+   },
+   {
+    "index": 1,
+    "switch": {
+     "gecko_to_engine_switch_ms": 475.0,
+     "switch_to_title_wall_ms": 482.9,
+     "presenter": {
+      "engine": "chromium",
+      "frames": 1,
+      "title": "bench:static|page=2",
+      "tabEngine": "chromium",
+      "renderPath": "native-osr-bgra",
+      "meanDrawMilliseconds": 8.385526999998547,
+      "uploadedPixelShare": 1,
+      "firstFrameMilliseconds": 470.00556000000506,
+      "supersededFrames": null,
+      "surface": {
+       "width": 837,
+       "height": 632,
+       "device_scale": 2
+      },
+      "frameTransport": null
+     },
+     "engine_to_gecko_switch_ms": 134.2
+    },
+    "static": {
+     "navigate_to_title_wall_ms": 5.1,
+     "title": "bench:static|page=1",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 95.9,
+      "navigate_to_visible_ms": 235.0,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 3,
+       "title": "bench:static|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.559052000001733,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 11.0,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.6,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 4.5,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 5.2,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2615.5,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 204.8,
+        "Isolated Web Co": 102.7,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.1,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 735.1,
+        "cef:gpu-process": 199.6,
+        "cef:renderer": 215.9,
+        "cef:utility": 148.0,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image": {
+     "navigate_to_title_wall_ms": 261.0,
+     "title": "bench:image|page=2",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 23.3,
+      "navigate_to_visible_ms": 194.1,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 5,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.417516400001478,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 6.5,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 1.3,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 4.5,
+        "cef:gpu-process": 0.6,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2736.0,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 229.5,
+        "Isolated Web Co": 102.7,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.6,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 768.2,
+        "cef:gpu-process": 187.0,
+        "cef:renderer": 290.7,
+        "cef:utility": 148.0,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "dom": {
+     "navigate_to_title_wall_ms": 265.7,
+     "title": "bench:dom|page=1|rows=2000",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 17.7,
+      "navigate_to_visible_ms": 340.4,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 7,
+       "title": "bench:dom|page=1|rows=2000",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.331020857143033,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 7.8,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 1.3,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 6.5,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2713.5,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 238.4,
+        "Isolated Web Co": 102.7,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.6,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 665.3,
+        "cef:gpu-process": 200.0,
+        "cef:renderer": 349.2,
+        "cef:utility": 148.0,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "raf": {
+     "load": {
+      "navigate_to_title_wall_ms": 263.2,
+      "title": "bench:raf|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 25.5,
+       "navigate_to_visible_ms": 106.9,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 8
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 39,
+      "input_wall_s": 3.0,
+      "canvas_updates": 39,
+      "fps": 12.71,
+      "fps_whole_window": 12.71,
+      "interval_ms": {
+       "n": 38,
+       "median": 76.091,
+       "p95": 101.721,
+       "min": 68.675,
+       "max": 103.465,
+       "mean": 78.652,
+       "stdev": 8.711
+      },
+      "interval_p99_ms": 103.46514699999534,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 54,
+       "title": "bench:raf|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 4.677018296295029,
+       "uploadedPixelShare": 0.38254941268264925,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 164.7,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 13.4,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 122.6,
+        "cef:gpu-process": 16.7,
+        "cef:renderer": 12.1,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 1.9,
+       "processes": 23,
+       "rss_mb": 3043.4,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 255.9,
+        "Isolated Web Co": 104.5,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.6,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 970.8,
+        "cef:gpu-process": 206.0,
+        "cef:renderer": 348.0,
+        "cef:utility": 148.3,
+        "cef:zygote": 160.1,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 257.1,
+      "title": "bench:scroll|page=1",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 91.3,
+       "navigate_to_visible_ms": 168.0,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 21,
+      "input_wall_s": 17.05,
+      "canvas_updates": 21,
+      "fps": 1.47,
+      "fps_whole_window": 1.23,
+      "interval_ms": {
+       "n": 20,
+       "median": 93.671,
+       "p95": 139.495,
+       "min": 84.259,
+       "max": 11784.802,
+       "mean": 681.424,
+       "stdev": 2547.327
+      },
+      "interval_p99_ms": 11784.801933999988,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 78,
+       "title": "bench:scroll|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 6.223200743588491,
+       "uploadedPixelShare": 0.5610709179512773,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 29.9,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 2.2,
+        "Isolated Web Co": 0.1,
+        "Privileged Cont": 0.1,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.1,
+        "WebExtensions": 0.1,
+        "axiosozo-dev": 18.2,
+        "cef:gpu-process": 7.7,
+        "cef:renderer": 1.6,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 0.4,
+       "processes": 23,
+       "rss_mb": 2865.3,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 264.3,
+        "Isolated Web Co": 104.5,
+        "Privileged Cont": 149.3,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.6,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 699.0,
+        "cef:gpu-process": 248.8,
+        "cef:renderer": 390.4,
+        "cef:utility": 148.3,
+        "cef:zygote": 160.1,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image_scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 256.1,
+      "title": "bench:image|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 71.3,
+       "navigate_to_visible_ms": 214.0,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 13,
+      "input_wall_s": 17.049,
+      "canvas_updates": 13,
+      "fps": 0.92,
+      "fps_whole_window": 0.76,
+      "interval_ms": {
+       "n": 12,
+       "median": 105.942,
+       "p95": 11791.343,
+       "min": 90.88,
+       "max": 11791.343,
+       "mean": 1083.265,
+       "stdev": 3228.641
+      },
+      "interval_p99_ms": 11791.343354000011,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 94,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 7.016884095743738,
+       "uploadedPixelShare": 0.6357822510659535,
+       "firstFrameMilliseconds": 470.00556000000506,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 25.7,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 2.0,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.1,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.1,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 15.3,
+        "cef:gpu-process": 4.5,
+        "cef:renderer": 3.7,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 0.3,
+       "processes": 23,
+       "rss_mb": 2983.8,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 257.1,
+        "Isolated Web Co": 104.5,
+        "Privileged Cont": 149.6,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 443.6,
+        "WebExtensions": 127.9,
+        "axiosozo-dev": 743.1,
+        "cef:gpu-process": 292.6,
+        "cef:renderer": 427.9,
+        "cef:utility": 148.4,
+        "cef:zygote": 160.1,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "key": {
+     "load": {
+      "navigate_to_title_wall_ms": 262.4,
+      "title": "bench:text|page=1|len=0",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 24.7,
+       "navigate_to_visible_ms": 109.7,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 2
+      },
+      "error": null
+     },
+     "samples": 20,
+     "measured_in": "zen-chrome",
+     "title": "bench:text|page=1|len=20",
+     "keydown_to_presented_frame_ms": {
+      "n": 20,
+      "median": 73.694,
+      "p95": 79.32,
+      "min": 53.44,
+      "max": 92.644,
+      "mean": 73.253,
+      "stdev": 6.565
+     },
+     "keys_without_frame": 0
+    },
+    "memory_all_processes": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "AxioCEFProbe": 0.0,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "cef:gpu-process": 0.0,
+      "cef:renderer": 0.0,
+      "cef:utility": 0.0,
+      "cef:zygote": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 23,
+     "rss_mb": 3117.1,
+     "pss_mb": null,
+     "rss_mb_by_kind": {
+      "AxioCEFProbe": 274.0,
+      "Isolated Web Co": 104.5,
+      "Privileged Cont": 149.6,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 443.6,
+      "WebExtensions": 127.9,
+      "axiosozo-dev": 968.6,
+      "cef:gpu-process": 231.6,
+      "cef:renderer": 379.6,
+      "cef:utility": 148.5,
+      "cef:zygote": 160.1,
+      "forkserver": 33.1
+     }
+    },
+    "tab_switch": {
+     "measured_in": "zen-chrome: TabSwitchDone, else the first chrome MozAfterPaint (engine presenter tabs)",
+     "to_gecko_blank_tab_ms": {
+      "n": 3,
+      "median": 68.0,
+      "p95": 69.001,
+      "min": 50.146,
+      "max": 69.001,
+      "mean": 62.382,
+      "stdev": 8.662
+     },
+     "back_to_bench_tab_ms": {
+      "n": 3,
+      "median": 46.167,
+      "p95": 48.777,
+      "min": 43.532,
+      "max": 48.777,
+      "mean": 46.159,
+      "stdev": 2.141
+     },
+     "back_chrome_paint_ms": {
+      "n": 3,
+      "median": 46.167,
+      "p95": 48.777,
+      "min": 43.532,
+      "max": 48.777,
+      "mean": 46.159,
+      "stdev": 2.141
+     },
+     "signals": [
+      "MozAfterPaint",
+      "timeout-1s"
+     ],
+     "engine_after": "chromium",
+     "raw": [
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 69.00063399999635,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 67.99957100000756,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 50.14639300000272,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 48.7766249999986,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 46.16673900000751,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 43.53241499999422,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      }
+     ]
+    },
+    "memory_after_switch_back": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 13,
+     "rss_mb": 1602.5,
+     "pss_mb": 752.4,
+     "rss_mb_by_kind": {
+      "Isolated Web Co": 104.9,
+      "Privileged Cont": 149.6,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 443.9,
+      "WebExtensions": 127.9,
+      "axiosozo-dev": 647.1,
+      "forkserver": 33.1
+     }
+    },
+    "status": "PASS"
+   },
+   {
+    "index": 2,
+    "switch": {
+     "gecko_to_engine_switch_ms": 482.5,
+     "switch_to_title_wall_ms": 490.8,
+     "presenter": {
+      "engine": "chromium",
+      "frames": 1,
+      "title": "bench:static|page=2",
+      "tabEngine": "chromium",
+      "renderPath": "native-osr-bgra",
+      "meanDrawMilliseconds": 7.593408000015188,
+      "uploadedPixelShare": 1,
+      "firstFrameMilliseconds": 478.102773000006,
+      "supersededFrames": null,
+      "surface": {
+       "width": 837,
+       "height": 632,
+       "device_scale": 2
+      },
+      "frameTransport": null
+     },
+     "engine_to_gecko_switch_ms": 15369.0
+    },
+    "static": {
+     "navigate_to_title_wall_ms": 3.6,
+     "title": "bench:static|page=1",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 106.2,
+      "navigate_to_visible_ms": 184.5,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 3,
+       "title": "bench:static|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.12148833334019,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 17.5,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 1.3,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 3.9,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 11.7,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.7,
+       "processes": 23,
+       "rss_mb": 2546.0,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 205.0,
+        "Isolated Web Co": 111.0,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.0,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 664.6,
+        "cef:gpu-process": 199.9,
+        "cef:renderer": 216.7,
+        "cef:utility": 148.1,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image": {
+     "navigate_to_title_wall_ms": 260.5,
+     "title": "bench:image|page=2",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 20.8,
+      "navigate_to_visible_ms": 219.0,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 5,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.01520020000171,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 5.8,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 4.5,
+        "cef:gpu-process": 0.6,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.8,
+       "processes": 23,
+       "rss_mb": 2680.2,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 229.6,
+        "Isolated Web Co": 111.0,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.0,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 713.2,
+        "cef:gpu-process": 187.0,
+        "cef:renderer": 290.5,
+        "cef:utility": 148.1,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "dom": {
+     "navigate_to_title_wall_ms": 265.3,
+     "title": "bench:dom|page=1|rows=2000",
+     "measured_in": "zen-chrome",
+     "timing": {
+      "navigate_to_title_ms": 20.9,
+      "navigate_to_visible_ms": 344.9,
+      "visible_basis": "first frame after the title event",
+      "frames_after_navigate": 2
+     },
+     "error": null,
+     "idle_raf": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 0,
+      "input_wall_s": 1.5,
+      "canvas_updates": 0,
+      "fps": null,
+      "fps_whole_window": 0.0,
+      "interval_ms": {
+       "n": 0
+      },
+      "interval_p99_ms": null,
+      "long_intervals_share": null,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 7,
+       "title": "bench:dom|page=1|rows=2000",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 9.23053971428973,
+       "uploadedPixelShare": 1,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 7.8,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 0.6,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 7.1,
+        "cef:gpu-process": 0.0,
+        "cef:renderer": 0.0,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.8,
+       "processes": 23,
+       "rss_mb": 2735.7,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 238.5,
+        "Isolated Web Co": 111.0,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.0,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 688.1,
+        "cef:gpu-process": 200.0,
+        "cef:renderer": 349.3,
+        "cef:utility": 148.1,
+        "cef:zygote": 159.6,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "raf": {
+     "load": {
+      "navigate_to_title_wall_ms": 265.7,
+      "title": "bench:raf|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 29.2,
+       "navigate_to_visible_ms": 114.3,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 7
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 40,
+      "input_wall_s": 3.0,
+      "canvas_updates": 40,
+      "fps": 12.89,
+      "fps_whole_window": 13.01,
+      "interval_ms": {
+       "n": 39,
+       "median": 74.603,
+       "p95": 102.905,
+       "min": 62.851,
+       "max": 109.614,
+       "mean": 77.606,
+       "stdev": 9.496
+      },
+      "interval_p99_ms": 109.6144529999874,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 54,
+       "title": "bench:raf|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 4.496033518519619,
+       "uploadedPixelShare": 0.38390211060083873,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 164.2,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 12.7,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.0,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 122.7,
+        "cef:gpu-process": 16.6,
+        "cef:renderer": 12.1,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 2.0,
+       "processes": 23,
+       "rss_mb": 3065.3,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 256.2,
+        "Isolated Web Co": 112.4,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.0,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 992.9,
+        "cef:gpu-process": 206.1,
+        "cef:renderer": 348.4,
+        "cef:utility": 148.3,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 257.7,
+      "title": "bench:scroll|page=1",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 73.9,
+       "navigate_to_visible_ms": 151.8,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 21,
+      "input_wall_s": 17.043,
+      "canvas_updates": 21,
+      "fps": 1.47,
+      "fps_whole_window": 1.23,
+      "interval_ms": {
+       "n": 20,
+       "median": 95.264,
+       "p95": 147.416,
+       "min": 83.836,
+       "max": 11782.892,
+       "mean": 682.509,
+       "stdev": 2546.64
+      },
+      "interval_p99_ms": 11782.89161999998,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 78,
+       "title": "bench:scroll|page=1",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 6.016331153847904,
+       "uploadedPixelShare": 0.5620888344448981,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 30.3,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 2.3,
+        "Isolated Web Co": 0.1,
+        "Privileged Cont": 0.0,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.1,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 18.6,
+        "cef:gpu-process": 7.7,
+        "cef:renderer": 1.6,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 0.3,
+       "processes": 23,
+       "rss_mb": 2869.4,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 272.5,
+        "Isolated Web Co": 112.4,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.6,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 688.2,
+        "cef:gpu-process": 255.3,
+        "cef:renderer": 391.1,
+        "cef:utility": 148.3,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "image_scroll": {
+     "load": {
+      "navigate_to_title_wall_ms": 258.1,
+      "title": "bench:image|page=2",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 98.8,
+       "navigate_to_visible_ms": 226.6,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 3
+      },
+      "error": null
+     },
+     "window": {
+      "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+      "frames": 13,
+      "input_wall_s": 17.06,
+      "canvas_updates": 13,
+      "fps": 0.92,
+      "fps_whole_window": 0.76,
+      "interval_ms": {
+       "n": 12,
+       "median": 108.541,
+       "p95": 11801.345,
+       "min": 95.462,
+       "max": 11801.345,
+       "mean": 1083.029,
+       "stdev": 3231.712
+      },
+      "interval_p99_ms": 11801.345411999995,
+      "long_intervals_share": 1.0,
+      "multi_frame_updates": 0,
+      "presenter": {
+       "engine": "chromium",
+       "frames": 94,
+       "title": "bench:image|page=2",
+       "tabEngine": "chromium",
+       "renderPath": "native-osr-bgra",
+       "meanDrawMilliseconds": 6.954250744682058,
+       "uploadedPixelShare": 0.6366269051776814,
+       "firstFrameMilliseconds": 478.102773000006,
+       "supersededFrames": null,
+       "surface": {
+        "width": 837,
+        "height": 632,
+        "device_scale": 2
+       },
+       "frameTransport": null
+      },
+      "usage": {
+       "cpu_percent": 26.0,
+       "cpu_percent_by_kind": {
+        "AxioCEFProbe": 1.9,
+        "Isolated Web Co": 0.0,
+        "Privileged Cont": 0.1,
+        "RDD Process": 0.0,
+        "Socket Process": 0.0,
+        "Utility Process": 0.0,
+        "Web Content": 0.1,
+        "WebExtensions": 0.0,
+        "axiosozo-dev": 15.5,
+        "cef:gpu-process": 4.7,
+        "cef:renderer": 3.6,
+        "cef:utility": 0.0,
+        "cef:zygote": 0.0,
+        "forkserver": 0.0
+       },
+       "client_cpu_percent": 0.3,
+       "processes": 23,
+       "rss_mb": 3001.8,
+       "pss_mb": null,
+       "rss_mb_by_kind": {
+        "AxioCEFProbe": 257.0,
+        "Isolated Web Co": 112.4,
+        "Privileged Cont": 149.9,
+        "RDD Process": 32.8,
+        "Socket Process": 32.6,
+        "Utility Process": 30.5,
+        "Web Content": 434.6,
+        "WebExtensions": 128.2,
+        "axiosozo-dev": 742.7,
+        "cef:gpu-process": 310.5,
+        "cef:renderer": 429.0,
+        "cef:utility": 148.6,
+        "cef:zygote": 159.9,
+        "forkserver": 33.1
+       }
+      }
+     }
+    },
+    "key": {
+     "load": {
+      "navigate_to_title_wall_ms": 265.9,
+      "title": "bench:text|page=1|len=0",
+      "measured_in": "zen-chrome",
+      "timing": {
+       "navigate_to_title_ms": 31.8,
+       "navigate_to_visible_ms": 127.4,
+       "visible_basis": "first frame after the title event",
+       "frames_after_navigate": 2
+      },
+      "error": null
+     },
+     "samples": 20,
+     "measured_in": "zen-chrome",
+     "title": "bench:text|page=1|len=20",
+     "keydown_to_presented_frame_ms": {
+      "n": 20,
+      "median": 73.872,
+      "p95": 78.27,
+      "min": 52.299,
+      "max": 97.618,
+      "mean": 73.665,
+      "stdev": 7.484
+     },
+     "keys_without_frame": 0
+    },
+    "memory_all_processes": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "AxioCEFProbe": 0.0,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "cef:gpu-process": 0.0,
+      "cef:renderer": 0.0,
+      "cef:utility": 0.0,
+      "cef:zygote": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 23,
+     "rss_mb": 3156.4,
+     "pss_mb": null,
+     "rss_mb_by_kind": {
+      "AxioCEFProbe": 273.7,
+      "Isolated Web Co": 112.4,
+      "Privileged Cont": 149.9,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 434.6,
+      "WebExtensions": 128.2,
+      "axiosozo-dev": 990.1,
+      "cef:gpu-process": 249.3,
+      "cef:renderer": 380.5,
+      "cef:utility": 148.7,
+      "cef:zygote": 159.9,
+      "forkserver": 33.1
+     }
+    },
+    "tab_switch": {
+     "measured_in": "zen-chrome: TabSwitchDone, else the first chrome MozAfterPaint (engine presenter tabs)",
+     "to_gecko_blank_tab_ms": {
+      "n": 3,
+      "median": 67.487,
+      "p95": 68.103,
+      "min": 52.212,
+      "max": 68.103,
+      "mean": 62.601,
+      "stdev": 7.351
+     },
+     "back_to_bench_tab_ms": {
+      "n": 3,
+      "median": 43.563,
+      "p95": 44.86,
+      "min": 43.203,
+      "max": 44.86,
+      "mean": 43.875,
+      "stdev": 0.712
+     },
+     "back_chrome_paint_ms": {
+      "n": 3,
+      "median": 43.563,
+      "p95": 44.86,
+      "min": 43.203,
+      "max": 44.86,
+      "mean": 43.875,
+      "stdev": 0.712
+     },
+     "signals": [
+      "MozAfterPaint",
+      "timeout-1s"
+     ],
+     "engine_after": "chromium",
+     "raw": [
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 68.10338300003787,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 67.48722999999882,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 52.21162600000389,
+       "engine": "gecko",
+       "signal": "timeout-1s"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 43.20301800002926,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 44.860442999983206,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      },
+      {
+       "tabSwitchDone": null,
+       "chromePaint": 43.562644999998156,
+       "engine": "chromium",
+       "signal": "MozAfterPaint"
+      }
+     ]
+    },
+    "memory_after_switch_back": {
+     "cpu_percent": 0.0,
+     "cpu_percent_by_kind": {
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.0,
+     "processes": 13,
+     "rss_mb": 1548.7,
+     "pss_mb": 699.5,
+     "rss_mb_by_kind": {
+      "Isolated Web Co": 112.4,
+      "Privileged Cont": 149.9,
+      "RDD Process": 32.8,
+      "Socket Process": 32.6,
+      "Utility Process": 30.5,
+      "Web Content": 434.9,
+      "WebExtensions": 128.2,
+      "axiosozo-dev": 594.2,
+      "forkserver": 33.1
+     }
+    },
+    "status": "PASS"
+   }
+  ],
+  "memory_at_end": {
+   "cpu_percent": 0.0,
+   "cpu_percent_by_kind": {
+    "Privileged Cont": 0.0,
+    "RDD Process": 0.0,
+    "Socket Process": 0.0,
+    "Utility Process": 0.0,
+    "Web Content": 0.0,
+    "WebExtensions": 0.0,
+    "axiosozo-dev": 0.0,
+    "forkserver": 0.0
+   },
+   "client_cpu_percent": 0.0,
+   "processes": 12,
+   "rss_mb": 1436.7,
+   "pss_mb": 688.8,
+   "rss_mb_by_kind": {
+    "Privileged Cont": 149.9,
+    "RDD Process": 32.8,
+    "Socket Process": 32.6,
+    "Utility Process": 30.5,
+    "Web Content": 434.9,
+    "WebExtensions": 128.3,
+    "axiosozo-dev": 594.5,
+    "forkserver": 33.1
+   }
+  }
+ },
+ "app": {
+  "executable": "/home/runner/axiosozo-build/linux-app/39328797871/axiosozo-dev/axiosozo-dev",
+  "source": "fetched-artifact",
+  "run_id": "39328797871",
+  "repository_commit": "50cc17fa68835b9292eacda90eeaaa4c821aa672",
+  "fingerprint": "939e224dbf5d881cffca8b05ab7724557d63a0661293f947ef4a7176c223ff59",
+  "fingerprint_matches_checkout": false
+ },
+ "session": "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/bench-eb4abeff0655f3e6",
+ "display": {
+  "server": "Xvfb",
+  "display": ":90",
+  "size": "2304x1440",
+  "xauth": true,
+  "geometry": "2304 1440"
+ },
+ "dbus": "private session bus",
+ "command": [
+  "/home/runner/axiosozo-build/linux-app/39328797871/axiosozo-dev/axiosozo-dev",
+  "-no-remote",
+  "-profile",
+  "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/bench-eb4abeff0655f3e6/gecko",
+  "-marionette",
+  "--remote-allow-system-access",
+  "about:blank"
+ ],
+ "browser": {
+  "pid": 4158,
+  "marionette_port": 36589,
+  "capabilities": {
+   "browserName": "axiosozo",
+   "browserVersion": "0.1a1",
+   "platformName": "linux"
+  },
+  "seconds_to_marionette": 2.81,
+  "exit_code": 0
+ },
+ "cef_check": "{\"component\": \"cef\", \"status\": \"BLOCKED_ENV\", \"message\": \"BLOCKED_ENV: native CEF rebuild required; run probe.py setup\"}",
+ "cleanup": {
+  "state": "DIRECT_CHILDREN_REAPED",
+  "direct_children_reaped": true,
+  "groups": "NOT_VERIFIED"
+ },
+ "summary": {
+  "static.navigate_to_title_wall_ms": {
+   "n": 3,
+   "median": 5.1,
+   "p95": 6.6,
+   "min": 3.6,
+   "max": 6.6,
+   "mean": 5.1,
+   "stdev": 1.225
+  },
+  "image.navigate_to_title_wall_ms": {
+   "n": 3,
+   "median": 261.0,
+   "p95": 264.2,
+   "min": 260.5,
+   "max": 264.2,
+   "mean": 261.9,
+   "stdev": 1.639
+  },
+  "dom.navigate_to_title_wall_ms": {
+   "n": 3,
+   "median": 265.3,
+   "p95": 265.7,
+   "min": 263.9,
+   "max": 265.7,
+   "mean": 264.967,
+   "stdev": 0.772
+  },
+  "raf.window.fps": {
+   "n": 3,
+   "median": 12.71,
+   "p95": 12.89,
+   "min": 12.69,
+   "max": 12.89,
+   "mean": 12.763,
+   "stdev": 0.09
+  },
+  "raf.window.interval_ms.median": {
+   "n": 3,
+   "median": 76.091,
+   "p95": 76.875,
+   "min": 74.603,
+   "max": 76.875,
+   "mean": 75.856,
+   "stdev": 0.942
+  },
+  "raf.window.interval_p99_ms": {
+   "n": 3,
+   "median": 109.614,
+   "p95": 112.584,
+   "min": 103.465,
+   "max": 112.584,
+   "mean": 108.555,
+   "stdev": 3.798
+  },
+  "raf.window.long_intervals_share": {
+   "n": 3,
+   "median": 1.0,
+   "p95": 1.0,
+   "min": 1.0,
+   "max": 1.0,
+   "mean": 1.0,
+   "stdev": 0.0
+  },
+  "raf.window.usage.cpu_percent": {
+   "n": 3,
+   "median": 164.7,
+   "p95": 165.2,
+   "min": 164.2,
+   "max": 165.2,
+   "mean": 164.7,
+   "stdev": 0.408
+  },
+  "scroll.window.fps": {
+   "n": 3,
+   "median": 1.47,
+   "p95": 10.06,
+   "min": 1.47,
+   "max": 10.06,
+   "mean": 4.333,
+   "stdev": 4.049
+  },
+  "scroll.window.interval_p99_ms": {
+   "n": 3,
+   "median": 11782.892,
+   "p95": 11784.802,
+   "min": 139.863,
+   "max": 11784.802,
+   "mean": 7902.519,
+   "stdev": 5489.027
+  },
+  "scroll.window.long_intervals_share": {
+   "n": 3,
+   "median": 1.0,
+   "p95": 1.0,
+   "min": 1.0,
+   "max": 1.0,
+   "mean": 1.0,
+   "stdev": 0.0
+  },
+  "scroll.window.usage.cpu_percent": {
+   "n": 3,
+   "median": 30.3,
+   "p95": 211.5,
+   "min": 29.9,
+   "max": 211.5,
+   "mean": 90.567,
+   "stdev": 85.513
+  },
+  "scroll.window.input_wall_s": {
+   "n": 3,
+   "median": 17.043,
+   "p95": 17.05,
+   "min": 1.957,
+   "max": 17.05,
+   "mean": 12.017,
+   "stdev": 7.113
+  },
+  "image_scroll.window.input_wall_s": {
+   "n": 3,
+   "median": 17.05,
+   "p95": 17.06,
+   "min": 17.049,
+   "max": 17.06,
+   "mean": 17.053,
+   "stdev": 0.005
+  },
+  "image_scroll.window.fps": {
+   "n": 3,
+   "median": 0.92,
+   "p95": 0.92,
+   "min": 0.77,
+   "max": 0.92,
+   "mean": 0.87,
+   "stdev": 0.071
+  },
+  "image_scroll.window.interval_p99_ms": {
+   "n": 3,
+   "median": 11801.345,
+   "p95": 11834.611,
+   "min": 11791.343,
+   "max": 11834.611,
+   "mean": 11809.1,
+   "stdev": 18.495
+  },
+  "image_scroll.window.usage.cpu_percent": {
+   "n": 3,
+   "median": 26.0,
+   "p95": 34.2,
+   "min": 25.7,
+   "max": 34.2,
+   "mean": 28.633,
+   "stdev": 3.938
+  },
+  "memory_all_processes.rss_mb": {
+   "n": 3,
+   "median": 3117.1,
+   "p95": 3156.4,
+   "min": 3044.5,
+   "max": 3156.4,
+   "mean": 3106.0,
+   "stdev": 46.352
+  },
+  "memory_all_processes.processes": {
+   "n": 3,
+   "median": 23,
+   "p95": 23,
+   "min": 23,
+   "max": 23,
+   "mean": 23.0,
+   "stdev": 0.0
+  },
+  "tab_switch.to_gecko_blank_tab_ms.median": {
+   "n": 3,
+   "median": 68.0,
+   "p95": 70.044,
+   "min": 67.487,
+   "max": 70.044,
+   "mean": 68.51,
+   "stdev": 1.105
+  },
+  "tab_switch.back_to_bench_tab_ms.median": {
+   "n": 3,
+   "median": 46.167,
+   "p95": 47.719,
+   "min": 43.563,
+   "max": 47.719,
+   "mean": 45.816,
+   "stdev": 1.715
+  },
+  "switch.gecko_to_engine_switch_ms": {
+   "n": 3,
+   "median": 482.5,
+   "p95": 789.2,
+   "min": 475.0,
+   "max": 789.2,
+   "mean": 582.233,
+   "stdev": 146.38
+  },
+  "switch.engine_to_gecko_switch_ms": {
+   "n": 3,
+   "median": 15082.3,
+   "p95": 15369.0,
+   "min": 134.2,
+   "max": 15369.0,
+   "mean": 10195.167,
+   "stdev": 7115.141
+  },
+  "static.timing.navigate_to_title_ms": {
+   "n": 3,
+   "median": 106.2,
+   "p95": 165.5,
+   "min": 95.9,
+   "max": 165.5,
+   "mean": 122.533,
+   "stdev": 30.672
+  },
+  "static.timing.navigate_to_visible_ms": {
+   "n": 3,
+   "median": 235.0,
+   "p95": 283.8,
+   "min": 184.5,
+   "max": 283.8,
+   "mean": 234.433,
+   "stdev": 40.541
+  },
+  "image.timing.navigate_to_title_ms": {
+   "n": 3,
+   "median": 23.3,
+   "p95": 24.4,
+   "min": 20.8,
+   "max": 24.4,
+   "mean": 22.833,
+   "stdev": 1.506
+  },
+  "image.timing.navigate_to_visible_ms": {
+   "n": 3,
+   "median": 210.5,
+   "p95": 219.0,
+   "min": 194.1,
+   "max": 219.0,
+   "mean": 207.867,
+   "stdev": 10.335
+  },
+  "dom.timing.navigate_to_title_ms": {
+   "n": 3,
+   "median": 18.2,
+   "p95": 20.9,
+   "min": 17.7,
+   "max": 20.9,
+   "mean": 18.933,
+   "stdev": 1.406
+  },
+  "dom.timing.navigate_to_visible_ms": {
+   "n": 3,
+   "median": 340.4,
+   "p95": 344.9,
+   "min": 315.3,
+   "max": 344.9,
+   "mean": 333.533,
+   "stdev": 13.023
+  },
+  "raf.window.fps_whole_window": {
+   "n": 3,
+   "median": 12.71,
+   "p95": 13.01,
+   "min": 12.39,
+   "max": 13.01,
+   "mean": 12.703,
+   "stdev": 0.253
+  },
+  "scroll.window.fps_whole_window": {
+   "n": 3,
+   "median": 1.23,
+   "p95": 9.87,
+   "min": 1.23,
+   "max": 9.87,
+   "mean": 4.11,
+   "stdev": 4.073
+  },
+  "image_scroll.window.fps_whole_window": {
+   "n": 3,
+   "median": 0.76,
+   "p95": 0.76,
+   "min": 0.64,
+   "max": 0.76,
+   "mean": 0.72,
+   "stdev": 0.057
+  },
+  "raf.window.presenter.meanDrawMilliseconds": {
+   "n": 3,
+   "median": 4.677,
+   "p95": 4.822,
+   "min": 4.496,
+   "max": 4.822,
+   "mean": 4.665,
+   "stdev": 0.133
+  },
+  "scroll.window.presenter.meanDrawMilliseconds": {
+   "n": 3,
+   "median": 6.223,
+   "p95": 6.573,
+   "min": 6.016,
+   "max": 6.573,
+   "mean": 6.271,
+   "stdev": 0.23
+  },
+  "raf.window.presenter.uploadedPixelShare": {
+   "n": 3,
+   "median": 0.384,
+   "p95": 0.389,
+   "min": 0.383,
+   "max": 0.389,
+   "mean": 0.385,
+   "stdev": 0.003
+  },
+  "scroll.window.presenter.uploadedPixelShare": {
+   "n": 3,
+   "median": 0.562,
+   "p95": 0.562,
+   "min": 0.561,
+   "max": 0.562,
+   "mean": 0.562,
+   "stdev": 0.0
+  },
+  "raf.window.multi_frame_updates": {
+   "n": 3,
+   "median": 0,
+   "p95": 0,
+   "min": 0,
+   "max": 0,
+   "mean": 0.0,
+   "stdev": 0.0
+  },
+  "scroll.window.multi_frame_updates": {
+   "n": 3,
+   "median": 0,
+   "p95": 0,
+   "min": 0,
+   "max": 0,
+   "mean": 0.0,
+   "stdev": 0.0
+  },
+  "key.keydown_to_presented_frame_ms.median": {
+   "n": 3,
+   "median": 73.872,
+   "p95": 75.332,
+   "min": 73.694,
+   "max": 75.332,
+   "mean": 74.299,
+   "stdev": 0.734
+  },
+  "key.keydown_to_presented_frame_ms.p95": {
+   "n": 3,
+   "median": 79.32,
+   "p95": 100.83,
+   "min": 78.27,
+   "max": 100.83,
+   "mean": 86.14,
+   "stdev": 10.396
+  },
+  "memory_after_switch_back.rss_mb": {
+   "n": 3,
+   "median": 1590.8,
+   "p95": 1602.5,
+   "min": 1548.7,
+   "max": 1602.5,
+   "mean": 1580.667,
+   "stdev": 23.103
+  },
+  "memory_after_switch_back.processes": {
+   "n": 3,
+   "median": 13,
+   "p95": 13,
+   "min": 13,
+   "max": 13,
+   "mean": 13.0,
+   "stdev": 0.0
+  }
+ },
+ "chrome_overlay": {
+  "label": "chrome-overlay (TEST-ONLY: prebuilt Zen app, chrome JS from this checkout)",
+  "overlay_commit": "5f8b1d015c241d4839272a11a08ccaa533ffa1be",
+  "app_build_commit": "50cc17fa68835b9292eacda90eeaaa4c821aa672",
+  "replaced": 21,
+  "added": 0
+ },
+ "device_scale_pref": {
+  "layout.css.devPixelsPerPx": "2.0",
+  "size": "2304x1440",
+  "label": "TEST-ONLY rendering scale pref"
+ },
+ "status": "PASS",
+ "schema": "axiosozo-zen-bench-v1",
+ "label": "chromium",
+ "E1": "NOT_TESTED",
+ "E2": "NOT_TESTED",
+ "machine": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "nproc": 4,
+  "python": "3.12.3",
+  "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+  "mem_total_mb": 15989,
+  "os": "Ubuntu 24.04.5 LTS",
+  "gpu_dri": [
+   "card1"
+  ],
+  "pipe_max_size": 1048576,
+  "loadavg_start": [
+   "0.49",
+   "0.66",
+   "0.37"
+  ]
+ }
+}
