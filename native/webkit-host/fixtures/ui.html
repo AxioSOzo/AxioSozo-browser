@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ui</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 fill=%22%23257d65%22/%3E%3C/svg%3E">
+<!-- SYNTHETIC LOCAL WEBKIT BROWSER-UI FIXTURE - NO ACCOUNTS. Served as /engine.html by ui_test.py only.
+     Fixed CSS-pixel geometry (device_scale 1); the page reports what it saw in its title. -->
+<style>html,body{margin:0}body{font:20px/24px monospace;background:#fff;color:#123}.a{position:absolute;box-sizing:border-box;margin:0}
+button,input,select{font:16px monospace}
+#alert{left:20px;top:20px;width:100px;height:30px}#confirm{left:140px;top:20px;width:100px;height:30px}
+#prompt{left:260px;top:20px;width:100px;height:30px}#perm{left:380px;top:20px;width:120px;height:30px}
+#t{left:20px;top:80px;width:300px;height:30px}#sel{left:360px;top:80px;width:120px;height:30px}
+#p{left:20px;top:140px;white-space:pre}#needle{left:20px;top:200px;white-space:pre}
+#mv{left:20px;top:240px;width:100px;height:40px;cursor:move;background:#eef}
+#ed{left:20px;top:300px;width:300px;height:40px;border:1px solid #889}#link{left:500px;top:140px}</style>
+<button class="a" id="alert">alert</button><button class="a" id="confirm">confirm</button><button class="a" id="prompt">prompt</button>
+<button class="a" id="perm">permission</button><input class="a" id="t" autocomplete="off">
+<select class="a" id="sel"><option>one</option><option>two</option><option>three</option></select>
+<p class="a" id="p">alpha beta gamma</p><p class="a" id="needle">needle one needle two needle three</p>
+<div class="a" id="mv"></div><div class="a" id="ed" contenteditable="true"></div><a class="a" id="link" href="?page=2">next</a>
+<script>
+const $ = id => document.getElementById(id), s = {d: '', t: '', e: '', sel: 'one', perm: ''};
+function out() { document.title = `ui|d=${s.d}|t=${s.t}|e=${s.e}|sel=${s.sel}|perm=${s.perm}|vw=${innerWidth}|`; }
+$('alert').onclick = () => { alert('ui alert'); s.d = 'alert'; out(); };
+$('confirm').onclick = () => { s.d = 'confirm=' + confirm('ui confirm?'); out(); };
+$('prompt').onclick = () => { s.d = 'prompt=' + prompt('ui prompt', 'dflt'); out(); };
+$('perm').onclick = () => {
+  const done = v => { s.perm = String(v); out(); };
+  if (typeof Notification !== 'undefined') Notification.requestPermission().then(done, e => done('error:' + e.name));
+  else navigator.geolocation.getCurrentPosition(() => done('granted'), e => done('geo:' + e.code));
+};
+$('t').oninput = () => { s.t = $('t').value; out(); };
+$('ed').oninput = () => { s.e = $('ed').textContent; out(); };
+$('sel').onchange = () => { s.sel = $('sel').value; out(); };
+addEventListener('resize', out); addEventListener('load', out);
+</script></html>

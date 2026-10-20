@@ -334,37 +334,8 @@ class FeelHarness(gui_test.Harness):
         return [int(pid) for pid in subprocess.run(['pgrep', '-f', HOST], capture_output=True, text=True).stdout.split()]
 
     def tab_menu(self, label, name):
-        rect = self.chrome_script('const r = gBrowser.selectedTab.getBoundingClientRect();'
-                                  'return {x: mozInnerScreenX + r.left + Math.min(r.width / 2, 60), '
-                                  'y: mozInnerScreenY + r.top + r.height / 2, scale: devicePixelRatio};')
-        self.xdotool('mousemove', '--sync', round(rect['x'] * rect['scale']), round(rect['y'] * rect['scale']))
-        self.xdotool('click', '3')
-        opened = self.wait(lambda: self.chrome_script("""
-            const menu = document.getElementById('tabContextMenu');
-            if (menu.state !== 'open') return null;
-            const item = document.getElementById('axiosozo-context-engine');
-            const submenu = document.getElementById('axiosozo-context-engine-menu');
-            return {item: item && !item.hidden ? {label: item.getAttribute('label'), note: item.getAttribute('acceltext'),
-                      disabled: item.getAttribute('disabled') === 'true'} : null,
-                    submenu: submenu && !submenu.hidden ? [...submenu.querySelectorAll('menuitem')].map(entry =>
-                      ({label: entry.getAttribute('label'), note: entry.getAttribute('acceltext'),
-                        checked: entry.getAttribute('checked') === 'true', disabled: entry.getAttribute('disabled') === 'true'})) : null};
-        """), 'tab context menu open', timeout=15)
-        time.sleep(0.6)
-        self.screenshot(name + '-menu', settle=False)
-        picked = self.chrome_script("""
-            const [label] = arguments;
-            const menu = document.getElementById('tabContextMenu');
-            const item = document.getElementById('axiosozo-context-engine');
-            if (item && !item.hidden && item.getAttribute('label') === label) { menu.activateItem(item); return 'item'; }
-            const entry = [...document.querySelectorAll('#axiosozo-context-engine-menu menuitem')]
-              .find(node => 'Open in ' + node.getAttribute('label') === label && node.getAttribute('disabled') !== 'true');
-            if (entry) { menu.activateItem(entry); return 'submenu'; }
-            menu.hidePopup(); return null;
-        """, [label])
-        if not picked:
-            raise AssertionError(f'tab menu has no enabled "{label}": ' + repr(opened))
-        return {'menu': opened, 'picked': picked}
+        """Zen's tab context menu with real pointer clicks (the "Open in" submenu with three engines)."""
+        return WEBKIT.tab_menu_switch(self, label, name)
 
     def ensure_webkit(self, name):
         if self.wk_tab and self.state()['tabId'] != self.wk_tab:

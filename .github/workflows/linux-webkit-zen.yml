@@ -154,9 +154,13 @@ jobs:
       - name: Newest Linux Zen build artifact
         id: zen
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=20" \
-            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[0] // empty
-                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}' \
+          # cloud/webkit-feel prefers linux-platform's build 39337785340: it carries the SWGL
+          # backdrop-filter fix (docs/handoff/linux-platform.md); newer artifacts of other branches may not.
+          preferred=""; [ "$GITHUB_REF_NAME" = cloud/webkit-feel ] && preferred=39337785340
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$ARTIFACT&per_page=30" \
+            --jq "[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse
+                  | ((map(select(.workflow_run.id == ${preferred:-0})) + .) | .[0]) // empty
+                  | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}" \
             > "$EVIDENCE_OUT/zen-artifact.json" || true
           cat "$EVIDENCE_OUT/zen-artifact.json"
           run=$(python3 -c 'import json,sys; d=open(sys.argv[1]).read().strip(); print(json.loads(d)["run_id"] if d else "")' "$EVIDENCE_OUT/zen-artifact.json")
