@@ -154,6 +154,8 @@ const e = document.elementFromPoint(x, y);
 if (!e || e.closest('input,textarea,select,button,a[href],[draggable="true"]') || e.isContentEditable) return 'skip';
 const r = document.caretRangeFromPoint(x, y);
 if (!r) return 'skip';
+// The press itself collapses the selection to a caret here (WebKit's own press may still be queued).
+getSelection().collapse(r.startContainer, r.startOffset);
 window.__axioDrag = {node: r.startContainer, offset: r.startOffset, ours: false};
 return 'armed';
 )JS";

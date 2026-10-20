@@ -834,7 +834,7 @@ export class WebKitPresenter {
       cursor: record.cursor, inputFeatures: record.adapter.inputFeatures, ready: record.adapter.host?.ready ?? null,
       renderScaleLimited: !!record.renderScaleLimited, fixtureOnly: true, ownedTabIds: this.owners(),
       browserUI: !!record.browserUI, uiLog: [...(record.uiLog ?? [])], uiFailures: [...(this.uiFailures ?? [])],
-      focus: (active => active === record.canvas ? "canvas" : (record.overlay.contains(active) ? "proxy-" + active.localName : null))(
+      focus: (active => active === record.canvas ? "canvas" : (record.overlay.contains?.(active) ? "proxy-" + active.localName : null))(
         this.window.document.activeElement),
       failures: [...this.failures], pending: !!this.pending };
   }
