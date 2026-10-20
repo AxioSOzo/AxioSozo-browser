@@ -342,7 +342,7 @@ public:
     gint64 since = g_get_monotonic_time() - lastButtonUs_;
     if (host_.browserUI() && since >= 0 && since < ButtonSettleUs) {
       holding_ = true;
-      held_.push_back([this, action] { runEdit(action); });
+      heldInput_.push_back([this, action] { runEdit(action); });
       later(int((ButtonSettleUs - since) / 1000) + 1, [](WpeView& view) { view.releaseHeld(); });
       return true;
     }
@@ -426,20 +426,20 @@ private:
   static constexpr gint64 ButtonSettleUs = 80000;
   gint64 lastButtonUs_ = 0;
   bool holding_ = false;
-  std::deque<std::function<void()>> held_;
+  std::deque<std::function<void()>> heldInput_;
   bool hold(std::function<void()> run) {
     if (!holding_) return false;
-    held_.push_back(std::move(run));
+    heldInput_.push_back(std::move(run));
     return true;
   }
   void releaseHeld() {
     holding_ = false;
     std::deque<std::function<void()>> runs;
-    runs.swap(held_);
+    runs.swap(heldInput_);
     // An input that starts a new hold keeps the rest behind it, in order.
     while (!runs.empty()) {
       auto run = std::move(runs.front()); runs.pop_front();
-      if (holding_) held_.push_back(std::move(run)); else run();
+      if (holding_) heldInput_.push_back(std::move(run)); else run();
     }
   }
   std::string lastSelection_;

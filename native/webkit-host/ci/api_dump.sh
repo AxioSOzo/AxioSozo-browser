@@ -8,5 +8,7 @@ dpkg -l | grep -i wpe > /out/versions.txt || true
 cd /src/native/webkit-host
 set +e
 g++ -std=c++20 -O1 -Wall -Wextra -fsyntax-only host_wpe.cpp $(pkg-config --cflags wpe-webkit-2.0 wpebackend-fdo-1.0 wayland-server) > /out/compile.log 2>&1
-echo "{\"compile_exit\": $?}" > /out/compile.json
+code=$?
+echo "{\"compile_exit\": $code}" > /out/compile.json
 cat /out/compile.json
+[ "$code" = 0 ] || { tail -40 /out/compile.log; exit 1; }
