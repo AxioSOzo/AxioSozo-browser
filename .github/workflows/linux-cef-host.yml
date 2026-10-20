@@ -207,7 +207,7 @@ jobs:
         run: python3 -c "import json,sys; v=json.load(open('$EVIDENCE_OUT/verdict.json')); print(v); sys.exit(v['verdict']!='PASS')"
 
   # Chromium inside Zen on Linux: the GUI harness (scripts/gui_test.py) drives a
-  # prebuilt Linux AxioSozo app (newest linux-zen-build artifact) and switches the
+  # prebuilt Linux AxioSozo app (pinned ZEN_RUN, chrome overlay) and switches the
   # fixture tab to the CEF host built here, sandbox on. Without an app artifact the
   # job records BLOCKED_ENV and does not fail.
   zen-gui-chromium:
@@ -224,23 +224,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Newest Linux Zen app artifact
+      - name: Pinned Linux Zen app artifact
         id: zen
         env:
           GH_TOKEN: ${{ github.token }}
+          # A reviewed linux-perf-build / linux-zen-build run; when it has expired, the newest build
+          # of cloud/integration or dev in this repository (never a PR build implicitly).
+          ZEN_RUN: "39383407870"
         run: |
           mkdir -p "$EVIDENCE_OUT"
-          run=""
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/linux-zen-build.yml/runs?per_page=30" \
-                        --jq '.workflow_runs[] | select(.status=="completed" and .head_repository.id == .repository.id and (.head_branch == "cloud/integration" or .head_branch == "dev")) | .id'); do
-            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
-                 --jq '.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not)) | .id' | grep -q .; then
-              run=$id; break
-            fi
-          done
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=50" \
+            --jq '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse
+                  | ((map(select((.workflow_run.id | tostring) == env.ZEN_RUN))
+                      + map(select(.workflow_run.head_repository_id == .workflow_run.repository_id
+                                   and (.workflow_run.head_branch == "cloud/integration" or .workflow_run.head_branch == "dev"))))
+                     | .[0].workflow_run.id) // empty')
           echo "run_id=$run" >> "$GITHUB_OUTPUT"
           if [ -z "$run" ]; then
-            echo '{"status": "BLOCKED_ENV", "reason": "no linux-zen-build run has an axiosozo-zen-linux-x86_64 artifact yet"}' \
+            echo '{"status": "BLOCKED_ENV", "reason": "no trusted axiosozo-zen-linux-x86_64 artifact"}' \
               | tee "$EVIDENCE_OUT/gui-chromium.json"
           else
             echo "{\"zen_build_run\": $run}" | tee "$EVIDENCE_OUT/zen-artifact.json"
@@ -283,9 +284,15 @@ jobs:
           run-id: ${{ steps.zen.outputs.run_id }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-      - name: Verify and unpack (./dev fetch-build)
+      - name: Verify and unpack (./dev fetch-build), TEST-ONLY chrome overlay
         if: steps.zen.outputs.run_id != ''
-        run: ./dev fetch-build --from-dir artifact --run "${{ steps.zen.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+        run: |
+          set -o pipefail
+          ./dev fetch-build --from-dir artifact --run "${{ steps.zen.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+          # The app's packaged AxioSozo chrome JS is replaced by this checkout's when the artifact
+          # predates it (TEST-ONLY, recorded in chrome-overlay.json; compiled code is the artifact's).
+          app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$AXIOSOZO_BUILD_ROOT/linux-app/current.json")
+          python3 scripts/webkit_package.py overlay-chrome --app "$app" --out "$EVIDENCE_OUT/chrome-overlay.json" > "$EVIDENCE_OUT/chrome-overlay.log" 2>&1
       - name: GUI harness, engine chromium (launch, chrome, fixture)
         if: steps.zen.outputs.run_id != ''
         run: |
