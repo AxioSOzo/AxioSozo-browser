@@ -259,8 +259,9 @@ async function initialize() {
     Presenter: CEFPresenter,
     onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
-  // Linux with a configured WebKit host: three-engine switching over the Chromium probe.
-  // Null everywhere else (macOS included), and then the Chromium probe is used as before.
+  // A configured WebKit host (Linux WPE, or macOS WKWebView with axiosozo.engines.webkit.enabled
+  // and AXIOSOZO_WEBKIT_BINARY): three-engine switching over the Chromium probe. Null otherwise
+  // (the macOS default), and then the Chromium probe is used as before.
   const engineProbe = guarded("webkit engine", () => optionalModule("WebKitEngineControls.sys.mjs")?.installWebKitEngine(window, adapter, {
     chromium: chromiumProbe, onFailure: () => console.error("AxioSozo WebKit switch unavailable; Firefox tab retained"),
   })) ?? chromiumProbe;

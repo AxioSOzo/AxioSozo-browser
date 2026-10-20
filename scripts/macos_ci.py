@@ -406,7 +406,19 @@ BASE_SHIM = {
 }
 
 
+def require_ci_runner(action):
+    """base-shim rewrites a checkout to accept AXIOSOZO_MACOS_CI=1: GitHub Actions runners only, never
+    a machine with the owner's storage layout (the same refusal as scripts/storage.py's CI mode)."""
+    owner = (Path('/Volumes/T9'), Path('/Users/wout/.local/bin/mount-dev-storage'), Path('/Users/wout/.local/bin/dev-external'))
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        raise SystemExit(f'{action} refused: GitHub Actions runners only (GITHUB_ACTIONS=true)')
+    present = [str(path) for path in owner if path.exists()]
+    if present:
+        raise SystemExit(f'{action} refused: the owner macOS layout exists ({", ".join(present)})')
+
+
 def base_shim(checkout):
+    require_ci_runner('base-shim')
     checkout = Path(checkout)
     for name, edits in BASE_SHIM.items():
         path = checkout / name

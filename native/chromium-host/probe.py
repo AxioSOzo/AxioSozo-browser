@@ -570,6 +570,23 @@ def linux_sandbox_status():
     return status
 
 
+SUID_INSTALL = r"""
+import hashlib, os, stat, sys
+path, want = sys.argv[1], sys.argv[2]
+fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+info = os.fstat(fd)
+if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+    sys.exit('chrome-sandbox is not a single regular file')
+os.fchown(fd, 0, 0)
+hasher = hashlib.sha256()
+while chunk := os.read(fd, 1 << 20):
+    hasher.update(chunk)
+if hasher.hexdigest() != want:
+    sys.exit('chrome-sandbox changed before it became root-owned; not installed')
+os.fchmod(fd, 0o4755)
+"""
+
+
 def install_sandbox():
     """Explicit privileged step: the unchanged pinned chrome-sandbox becomes root:root 4755."""
     linux_host_check()
@@ -578,8 +595,11 @@ def install_sandbox():
         raise RuntimeError('BLOCKED_ENV: run `probe.py setup` first; chrome-sandbox must equal the pinned file')
     print('Installing the pinned Chromium SUID sandbox helper (sudo chown root:root, chmod 4755): ' + str(helper),
           flush=True)
-    for command in (['sudo', 'chown', 'root:root', str(helper)], ['sudo', 'chmod', '4755', str(helper)]):
-        subprocess.run(command, check=True, timeout=300)
+    # One privileged step on one open file: no symlink is followed, the owner changes first, and
+    # the digest is checked again on the now root-owned inode before the SUID bit is set, so the
+    # file cannot be swapped between the check above and the chmod (security review, final-review).
+    subprocess.run(['sudo', sys.executable, '-I', '-c', SUID_INSTALL, str(helper), digest(CEF / 'Release/chrome-sandbox')],
+                   check=True, timeout=300)
     status = linux_sandbox_status()
     emit('PASS' if status['suid_helper_installed'] else 'FAIL', action='install_sandbox', sandbox=status)
     return 0 if status['suid_helper_installed'] else 1

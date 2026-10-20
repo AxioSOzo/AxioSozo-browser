@@ -381,10 +381,23 @@ export function validMemfdFrame(metadata, capability, expectedBytes) {
  * The slot reader: `read(path, {offset, maxBytes})` → Uint8Array (IOUtils.read). The pid is the
  * spawned host's own (Subprocess `pid`), the fd the one its authenticated ready event announced.
  */
-export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read?.bind(globalThis.IOUtils)) {
+export function memfdSlotReader(pid, capability, read = globalThis.IOUtils?.read?.bind(globalThis.IOUtils),
+  stat = globalThis.IOUtils?.stat?.bind(globalThis.IOUtils)) {
   if (!Number.isInteger(pid) || pid <= 1 || typeof read !== "function") throw new Error("MEMFD_UNAVAILABLE");
   const path = `/proc/${pid}/fd/${capability.fd}`;
+  // Before the first read: the named descriptor is the announced ring (a regular file of exactly
+  // slots × slot_bytes), not a pipe or socket of the host (the native receiver checks the same).
+  let checked = typeof stat !== "function";
+  const ring = async () => {
+    if (checked) return true;
+    try {
+      const info = await stat(path);
+      checked = info?.type === "regular" && info.size === capability.slots * capability.slot_bytes;
+    } catch { checked = false; }
+    return checked;
+  };
   const once = async (slot, bytes) => {
+    if (!await ring()) return null;
     try {
       const data = await read(path, { offset: slot * capability.slot_bytes, maxBytes: bytes });
       return data && data.byteLength === bytes ? data : null;

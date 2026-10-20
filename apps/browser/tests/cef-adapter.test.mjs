@@ -941,6 +941,20 @@ test('Linux memfd frames: a partial frame after the fallback without a whole one
   resetMemfdFrames();
 });
 
+test('memfd slot reader reads only a regular ring of the announced size',async()=>{
+  const {memfdSlotReader}=await import('../chrome/EngineFrameSurface.sys.mjs');
+  const ring={fd:12,slot_bytes:64,slots:2};let reads=0;
+  const read=async(path,{maxBytes})=>{reads++;return new Uint8Array(maxBytes);};
+  const good=memfdSlotReader(4242,ring,read,async path=>{assert.equal(path,'/proc/4242/fd/12');return {type:'regular',size:128};});
+  assert.equal((await good(0,4)).byteLength,4);
+  for(const info of [{type:'other',size:128},{type:'regular',size:64}]){
+    reads=0;
+    await assert.rejects(memfdSlotReader(4242,ring,read,async()=>info)(0,4),/MEMFD_READ_FAILED/);
+    assert.equal(reads,0,'nothing is read from a descriptor that is not the ring');
+  }
+  await assert.rejects(memfdSlotReader(4242,ring,read,async()=>{throw new Error('ENOENT');})(0,4),/MEMFD_READ_FAILED/);
+});
+
 test('memfd slot reader retries once and probes /proc/<pid>/fd before the hello',async()=>{
   const {memfdSlotReader,memfdProcReadable,memfdFramesDisabled,resetMemfdFrames}=await import('../chrome/EngineFrameSurface.sys.mjs');
   resetMemfdFrames();
