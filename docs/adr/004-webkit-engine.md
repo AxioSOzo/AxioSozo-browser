@@ -171,6 +171,9 @@ spread on a shared 3-core VM ([STATUS.json](../evidence/macos/webkit/STATUS.json
 | zero-copy stand-in (use held 40 ms), internal 60 Hz | – / 54.6 | – ; 16.8 / 30.2 ms | – / 74 % | – / 22.5 ms |
 | AXCF pipe fallback, 60 Hz | 59.6 / 60.4 | 15.2 / 27.8 ms; 15.4 / 27.5 ms | 79 % / 86 % | 24.9 / 29.4 ms |
 
+A third run (39346635281) measured surface internal 60 Hz at 42.4 fps / 49 % CPU and the
+zero-copy stand-in with internal pacing at 41.2 fps: the 3-core shared VM varies by ±15 %.
+
 Per frame: host copy into the ring IOSurface + Mach send 0.85–1.08 ms (p50), FRAME paint to
 receipt ~1 ms; every snapshot took the zero-conversion path (WebKit already returns sRGB
 premultiplied BGRA). For comparison, the Linux in-Zen WebKit tab ran 48 fps / 33 ms
