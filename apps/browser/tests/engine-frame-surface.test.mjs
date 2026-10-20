@@ -200,6 +200,9 @@ test("native receiver: sinks apply every frame per target, presenters bind once 
   const target = { native_target_id: "7" };
   const frame = await sinks.apply({ target, slot: 1, payload_bytes: 32, width: 4, height: 2, damage: [[0, 0, 4, 2]] });
   assert.ok(frame instanceof NativeFrame); assert.equal(frame.byteLength, 32);
+  // Recognised across module instances (a spare host's frames reach another instance's presenter).
+  const { isNativeFrame } = await import("../chrome/EngineFrameSurface.sys.mjs?other-instance");
+  assert.equal(isNativeFrame(frame), true); assert.equal(isNativeFrame({ sink: {}, byteLength: 1 }), false);
   await sinks.apply({ target, slot: 0, payload_bytes: 4, width: 4, height: 2, damage: [[1, 1, 1, 1]] });
   assert.deepEqual(calls.map(c => c.slice(0, 2)), [[1, "apply"], [1, "apply"]], "one sink per target");
   assert.deepEqual(calls[1].slice(2), [0, 4, 4, 2, 1, 1, 1, 1]);

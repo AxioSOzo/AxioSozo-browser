@@ -405,9 +405,17 @@ export function nativeFrameRing(pid, capability, { prefs = globalThis.Services?.
 }
 
 /** Passed to the presenters instead of pixels when the native receiver applied the frame. */
+const NATIVE_FRAME_BRAND = Symbol.for("axiosozo.engine-frame.native-frame");
 export class NativeFrame {
   constructor(sink, byteLength) { this.sink = sink; this.byteLength = byteLength; }
+  get [NATIVE_FRAME_BRAND]() { return true; }
 }
+/**
+ * A NativeFrame of any module instance of this file: a host started through the shared
+ * (system-global) module instance (e.g. a warm spare host) delivers frames to a presenter
+ * of a window's own module graph, where `instanceof NativeFrame` names another class.
+ */
+export function isNativeFrame(value) { return value?.[NATIVE_FRAME_BRAND] === true; }
 
 /**
  * The readers' side of the native receiver: one sink per native target, each delivered memfd

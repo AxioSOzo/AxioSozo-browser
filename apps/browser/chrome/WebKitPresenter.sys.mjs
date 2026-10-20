@@ -11,7 +11,7 @@
 import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG, representNativeFrame } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame, isNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_WEBKIT_TABS = 8;
@@ -291,7 +291,7 @@ export class WebKitPresenter {
       record.firstFrameAt ??= this.window.performance.now();
       record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
     };
-    if (pixels instanceof NativeFrame) {
+    if (isNativeFrame(pixels)) {
       // Native receiver: the component presents the frame; nothing to convert here.
       const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
       if (paint) { if (paint !== true) onPaint(paint); return; }

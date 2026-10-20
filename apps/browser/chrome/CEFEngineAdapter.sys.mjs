@@ -5,7 +5,7 @@
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
-  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
+  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, isNativeFrame, NativeFrameSinks, nativeFrameRing,
   workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
 import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_REFILL_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
@@ -684,8 +684,8 @@ export class CEFHostConnection {
       }
       // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
       // After a memfd fallback, a frame worker's targets take the pipe payloads too.
-      if (kind === 2 && this.#native?.acceptsBuffers && !(pixels instanceof NativeFrame)) pixels = await this.#native.applyBuffer(value, pixels);
-      if (kind === 2 && this.#assembler && !(pixels instanceof NativeFrame)) pixels = this.#assembler.apply(value, pixels);
+      if (kind === 2 && this.#native?.acceptsBuffers && !isNativeFrame(pixels)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !isNativeFrame(pixels)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -1441,7 +1441,9 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
   const host = spare ?? await launchHost("fixture", origin);
   // The next spare: soon after this tab's host closes, at the latest PREWARM_REFILL_MS from now.
   prewarmCEFFixtureHost(win, PREWARM_REFILL_MS);
-  const adapter = new CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
+  // A spare comes from the shared module instance: its adapter class too (as in web mode).
+  const Adapter = (spare && sharedInstance()?.CEFEngineAdapter) || CEFEngineAdapter;
+  const adapter = new Adapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
     identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
     element, onGeometry });
   // A fixture host exists for exactly this one tab.

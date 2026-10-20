@@ -6,7 +6,7 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
-  nativeFallbackFrame, nativeFramePNG, representNativeFrame } from "./EngineFrameSurface.sys.mjs";
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame, isNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -797,7 +797,7 @@ export class CEFPresenter {
       record.firstFrameAt ??= this.window.performance.now();
       record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
     };
-    if (pixels instanceof NativeFrame) {
+    if (isNativeFrame(pixels)) {
       // Native receiver: the component presents the frame; nothing to convert here.
       const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
       if (paint) { if (paint !== true) onPaint(paint); return; }
