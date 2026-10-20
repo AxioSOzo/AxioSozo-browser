@@ -1,0 +1,28 @@
+✔ full static RGB/RGBA framing and contiguous split IDATs have independently generated CRCs (4.322167ms)
+✔ optional sRGB and DisplayP3 cICP is unique, pre-IDAT and narrowly validated (2.581583ms)
+✔ unique first IHDR, actual IEND, no trailing bytes and complete lengths are mandatory (2.049542ms)
+✔ CRC of every allowed chunk is checked, including IDAT and IEND (0.756875ms)
+✔ unknown critical/ancillary, reserved-bit, palette/metadata and all APNG chunks refuse (0.905458ms)
+✔ allowed format is8bit RGB/RGBA noninterlaced default filter/compression only (1.083417ms)
+✔ raw dimensions/pixels/bytes and chunk count cap before any native load (7.109333ms)
+✔ base64 padding bits, alphabet, size and binary decoder result are checked (1.518542ms)
+✔ boxing uses both sides, preserves no upscale, and permits portrait output below64 (0.647583ms)
+✔ validation forces same-size SYNC_DECODE encoder and checks actual input/output decode dimensions (2.443667ms)
+✔ CRC-correct framing with corrupted compressed pixels fails native full decode (1.665084ms)
+✔ both exact target dimensions are passed to ImageLib for tall and wide screens (12.496791ms)
+✔ forged targets, upscale, claimed dimensions and accessor facts cause no native load (28.97575ms)
+✔ output byte budget prevents oversized reads and output chunks/dimensions are revalidated (35.451958ms)
+✔ short reads, trailing available bytes and native decoder/encoder failures never return an image (0.737583ms)
+✔ failed binary stream close retains exact ownership and explicit close retries (6.969ms)
+✔ reader creation or binding failure still closes the exact raw stream (2.420125ms)
+✔ abort/owner-close during async native service loading prevents all decode/scale effects (1.492292ms)
+✔ diagnostics are categorical and never read/decode/encode/close native resources (0.497875ms)
+✔ capture lease composes full PNG validation and boxing for decision/handoff while original bridge min remains64 (45.449167ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 262.520416

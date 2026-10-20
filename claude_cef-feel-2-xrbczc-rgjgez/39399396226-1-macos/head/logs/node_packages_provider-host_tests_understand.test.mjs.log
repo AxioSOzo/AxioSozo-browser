@@ -1,0 +1,25 @@
+✔ Read-only argument arrays are fixed arrays, never shell strings (2.223125ms)
+✔ Claude fake: brief over stdin, minimal env, project cwd, exact argv, normalized strict document (80.245708ms)
+✔ Codex fake: explain_errors embeds the console errors as untrusted data and returns the explanation (35.277708ms)
+✔ Failures: non-zero exit, invalid JSON and unknown keys never return a document or stderr (161.28525ms)
+✔ stdout over 256 KiB is invalid_output and the CLI is killed (33.4205ms)
+✔ Timeout kills the whole process group, including a grandchild (305.407833ms)
+✔ Queue: one running, at most four queued, then busy; cancel queued and running; close kills (78.679875ms)
+✔ Without the test-only launch, a real CLI is never started: NOT_AUTHORIZED, or not installed (0.596333ms)
+✔ Request validation: project root, kind/cli, input shape, timeout bounds, unknown keys (1.307875ms)
+✔ Strict document validators reject unknown keys, over-cap strings, bad hosts and unsafe paths (1.228ms)
+✔ Host understand/* methods: available, run, cancel; host close kills; UNSUPPORTED without a runner (109.622208ms)
+✔ setup: kinds, exact argv with a model alias / the client default (no dated model id); brief and explain_errors argv unchanged (0.411208ms)
+✔ setup: prompt keeps the marker, read-only rules and embeds SETUP_SCHEMA; no input section (0.117833ms)
+✔ setup: pickSetupCli prefers Codex, then Claude Code, else null (0.078542ms)
+✔ setup: validateSetup normalizes the canned document and rejects unsafe or unknown shapes (2.897917ms)
+✔ setup: Codex and Claude fakes run with model args and return the validated document (102.1055ms)
+✔ setup: without the test-only launch it stays NOT_AUTHORIZED and sends nothing (0.680541ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1004.831917
