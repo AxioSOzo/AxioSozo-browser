@@ -141,7 +141,15 @@ int main(int argc, char** argv) {
   }
   config.subprocessPath = directory + "/AxioCEFProbeHelper";
   config.switches.push_back("ozone-platform=" + ozonePlatform());
-  fprintf(stderr, "AXIO_CEF_LINUX platform=%s ozone=%s\n", axio::platform::name(), ozonePlatform().c_str());
+  // Look like the Gecko tabs next to it (GTK): overlay scrollbars instead of classic ones.
+  config.switches.push_back("enable-features=OverlayScrollbar,FluentOverlayScrollbar");
+  // Fonts as Gecko resolves them on Linux: its default prefs name the fontconfig generics
+  // (font.default.x-western=serif, font.name.*.x-western=serif/sans-serif/monospace), where
+  // Chromium names Times New Roman/Arial. Chromium accepts a generic family name only as
+  // "serif", "sans" or "monospace" (any fontconfig match), so these are the spellings.
+  config.fonts = {"serif", "serif", "sans", "monospace"};
+  fprintf(stderr, "AXIO_CEF_LINUX platform=%s ozone=%s fonts=%s/%s/%s/%s\n", axio::platform::name(), ozonePlatform().c_str(),
+          config.fonts.standard.c_str(), config.fonts.serif.c_str(), config.fonts.sansSerif.c_str(), config.fonts.fixed.c_str());
   int status = axio::host::runBrowser(argc, argv, config);
   // Nothing of this host outlives it. After shutdown only the zygotes remain (they would
   // exit with this process); they are ended now, other helpers get up to 1 s.

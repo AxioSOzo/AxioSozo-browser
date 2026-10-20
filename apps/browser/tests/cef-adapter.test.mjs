@@ -986,3 +986,16 @@ test('presenter uploads only the damaged rectangle once its canvas is current',a
 
 // The shared pipe pixel path of both presenters (EngineFrameSurface.sys.mjs).
 import './engine-frame-surface.test.mjs';
+
+test('datalist events: geometry, value and page-defined options within bounds', async () => {
+  const { validDatalist, DATALIST_LIMITS } = await import('../chrome/CEFEngineAdapter.sys.mjs');
+  const good = { x: 1, y: 2, width: 100, height: 30, value: 'ap', options: [{ value: 'apple', label: '' }] };
+  assert.equal(validDatalist(good), true);
+  assert.equal(validDatalist({ ...good, options: [] }), true, 'no options: the list closes');
+  for (const bad of [{ ...good, x: -1 }, { ...good, width: Infinity }, { ...good, value: 'x'.repeat(DATALIST_LIMITS.value + 1) },
+    { ...good, options: [{ value: '', label: '' }] }, { ...good, options: [{ value: 'a', label: '', extra: 1 }] },
+    { ...good, options: Array.from({ length: DATALIST_LIMITS.options + 1 }, () => ({ value: 'a', label: '' })) },
+    { ...good, options: [{ value: 'a\0', label: '' }] }, { ...good, options: 'apple' }]) {
+    assert.equal(validDatalist(bad), false, JSON.stringify(bad).slice(0, 80));
+  }
+});

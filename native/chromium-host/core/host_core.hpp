@@ -27,6 +27,9 @@ struct LaunchConfig {
   std::string evidence;                // cef-runtime.log and E0 PNG frames
   std::string subprocessPath;          // browser_subprocess_path (empty: this executable)
   std::vector<std::string> switches;   // fixed browser-process switches "name=value" (platform policy)
+  // Default font families of every web browser (platform policy, never caller supplied).
+  // Empty keeps Chromium's own default for that family.
+  struct Fonts { std::string standard, serif, sansSerif, fixed; } fonts;
 };
 
 // E0 accepts only the synthetic local fixture page.

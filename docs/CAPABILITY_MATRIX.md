@@ -106,6 +106,16 @@ Linux Zen artifact + this branch's chrome JS (TEST-ONLY `chrome-overlay`). Resul
 `docs/evidence/linux/cef-zen/` were inspected. "Gecko baseline" = the same page and
 input in a Gecko tab of the same session.
 
+Round 2 (workstream cef-feel-2, run 39399390970, branch `claude/cef-feel-2-xrbczc-rgjgez`): prebuilt app
+run 39362552105 + chrome overlay + the CEF host built from the branch. **Frame path:** on that app
+Chromium frames over memfd (the Linux default since perf round 2) capture 100% black in every
+screenshot, with the JS presenter as well (`nativeReceiver` null, `frameTransport: memfd`,
+`frameUpload: imagedata`); with `axiosozo.engines.linux.memfd_frames=false` (pipe frames,
+`videoframe` upload) the view has pixels (black fraction 0.001). The workflow's step 0 measures this
+per run (`framepath.json`); the matrix runs use the TEST-ONLY pref `memfd_frames=false` and say so in
+`test_only_switches`. Owner of the memfd defect: the frame path (cloud/perf-phase2). Evidence copies:
+`docs/evidence/linux/cef-zen/39399390970/`.
+
 | Gate (Chromium Linux column) | Status | Evidence (run 39359724324 unless noted; paths under `docs/evidence/linux/cef-zen/39359724324/`) |
 | --- | --- | --- |
 | E1: Chromium pixels inside Zen's content area (web switch via Zen's tab menu) | PASS | `web/02-chromium.png`; `native-osr-bgra`, Gecko browser hidden |
@@ -123,18 +133,26 @@ input in a Gecko tab of the same session.
 | Cursor shapes (pointer, text, move, wait, crosshair, not-allowed, grab, col-resize→ew-resize, default) | PASS | engine view CSS cursor (xwd has no pointer) |
 | `<select>` popup | PASS (Chromium-drawn, composited in frame) | `web/09-select-open.png` |
 | `<input type=color>` chooser | PASS (Chromium-drawn, composited) | `web/09-color.png`, `09-color-picked.png` |
-| `<datalist>` suggestions | EXPERIMENTAL | typing works; windowless CEF shows no suggestion list (`web/09-datalist.png`) |
+| `<datalist>` suggestions | PASS (run 39399390970; Zen draws the list from the host `datalist` event) | `39399390970/web/09-datalist-chromium.png`: "apple", "apricot" under the field; Down+Return picks "apple" as in Gecko (`09-datalist-gecko.png`) |
 | Context menu drawn by Zen with engine items (Copy, Select All, Search, Open Page in Firefox, Inspect disabled) | PASS | items/placement asserted; xwd captures menupopups black for Firefox's own menu too (`10-gecko-context-menu.png`) |
 | JS alert/confirm/prompt in Zen's dialog, answered by keyboard | PASS | `web/11-alert.png`, `11-confirm.png`, `11-prompt.png` |
 | beforeunload in Zen's "Are you sure?" dialog (Escape stays, Return leaves) | PASS | `web/17-beforeunload-1.png` |
-| Find in page via Zen's findbar | PASS | `web/12-find.png`: 3 matches found and highlighted by Chromium; the count reads "0 of 3" where Firefox says "1 of 3", and Chromium highlights all matches without "Highlight All" (follow-up) |
+| Find in page via Zen's findbar | PASS (run 39399390970) | "1 of 3", Return "2 of 3", again "3 of 3", same as Firefox; without Highlight All only the active match is marked (`39399390970/web/12-find-next.png`), with it all three (`12-find-highlight-all.png`). Linux CEF reports no ordinal for a new find session, so the finder takes one find-next step |
 | Page zoom Ctrl+= / Ctrl+- / Ctrl+0 and the URL-bar indicator | PASS (fixed: zoom commands follow the Chromium zoom) | `web/13-zoomed-chromium.png` |
 | Reload F5 / Ctrl+R / reload button | PASS (fixed: reload commands re-enabled for Chromium tabs) | `matrix.reload_keys`: Chromium and Gecko baseline both reload on F5 and Ctrl+R |
 | Shortcut ownership: Ctrl+W (closes the Chromium tab), Ctrl+Tab/Ctrl+Shift+Tab, Alt+Left, F-keys never reach the page | PASS | `matrix.shortcut_ownership` |
-| Ctrl+L over a Chromium page (focus, Escape, click back types into the page; same as Gecko) | PASS (run 39345299134) / BLOCKED in 39359724324 | the Linux parent crashes intermittently around address-bar focus, also on the Gecko baseline tab (run 39354267095); owned by cloud/linux-platform |
-| Ctrl+T over a Chromium page | EXPERIMENTAL | opens Zen's new-tab address bar (run 39351480361, `20-ctrl-t.png` in ci-results); dismissing it crashed the parent (same known bug) |
+| Ctrl+L over a Chromium page (focus, Escape, click back types into the page; same as Gecko) | PASS (runs 39371098391, 39399390970; SWGL crash fixed) | `39399390970/web/21-ctrl-l-chromium.png` |
+| Ctrl+T over a Chromium page (and the Gecko baseline) | PASS (runs 39371098391, 39399390970) | `39399390970/web/23-ctrl-t-chromium.png`: Zen's new-tab address bar |
+| Fonts: default, serif, sans-serif, monospace, system-ui, ui-monospace as Gecko resolves them | PASS (run 39399390970) | equal CSS widths in both engines; `39399390970/web/30-fonts-chromium.png` vs `30-fonts-gecko.png` (sans/system-ui = DejaVu Sans). Host: default families are the fontconfig generics |
+| Overlay scrollbars like GTK Gecko | PASS (run 39399390970) | scrollbar layout width 0 in both; `39399390970/web/31-scrollbar-chromium.png` (`OverlayScrollbar,FluentOverlayScrollbar`) |
+| "Not secure" badge / fixture "Return to Gecko" chip never cover page content | PASS (run 39399390970) | badge inside the address bar (`39399390970/web/32-not-secure-badge.png`); the chip wraps under the address bar (`harness/fixture-chromium.png` in ci-results) |
 | Middle-click paste (PRIMARY) both ways; autoscroll | PASS (fixed: host `text_selection` → Zen PRIMARY) | Chromium selection → PRIMARY "alpha"; Gecko PRIMARY pasted in Chromium; no autoscroll in either (Linux default) |
 | Dead keys / Ctrl+Shift+U compose via the proxy editor | BLOCKED_ENV | under Xvfb + xdotool the Gecko baseline does not compose either; proxy editor focus asserted (`proxy-textarea`) |
-| Accessibility (AT-SPI), devtools, downloads, permissions, certificate UI on Linux | NOT_VERIFIED | not exercised by this workflow |
+| Downloads in Zen's download UI (Firefox's list, panel button, download dir) | PASS (run 39399390970) | `39399390970/web/34-download-chromium.png`; 63-byte file, content checked, Gecko baseline alike. Fixed: an update before Firefox registered the entry was dropped |
+| Permission prompt in Zen's doorhanger; Block (and no answer) denies | PASS (run 39399390970) | geolocation: Zen's prompt (asserted from PopupNotifications; Xvfb captures doorhangers black, `39399390970/web/35-permission-chromium.png`), Block → page sees `denied:1`, as in Gecko. Fixed: the host rejected CEF's requesting origin `http://h:p/` and denied everything |
+| File chooser via Zen (GTK; no portal under Xvfb) | PASS (run 39399390970) | `39399390970/web/36-file-chooser-chromium.png`: the chosen file reaches the page |
+| Certificate errors fail closed with Zen's error page | PASS (run 39399390970) | `39399390970/web/37-cert-error-chromium.png` (NET::ERR_CERT_AUTHORITY_INVALID, Go back / Open in Firefox; nothing loaded) vs Firefox's `about:certerror` (`37-cert-error-gecko.png`) |
+| Accessibility: the Chromium tree on AT-SPI, assistive press | PASS (run 39399390970, GNOME_ACCESSIBILITY=1) | push button "Increment", link "Page 2", entry "Type here" as in the Gecko tab; AT-SPI press clicks the button (count 0→1). Fixed: a tab switch dropped the tree. AT-SPI *focus* follows Zen's canvas/proxy, not Chromium's focused node: NOT_VERIFIED |
+| Developer tools | PASS (run 39399390970) as "explained": Ctrl+Shift+I etc. show "Developer tools aren't available for Chromium tabs yet…" and never open Firefox's toolbox on the hidden document; Chromium DevTools are not embedded (NOT_VERIFIED as a feature) |
 
-Green runs: `linux-cef-zen` 39359724324 (fixture-probe harness PASS, fixture E1/E2 PASS, web matrix PASS with the BLOCKED gates above, 2× subset PASS). Earlier runs and what each fixed are listed in `docs/handoff/cef-zen-feel.md`.
+Green runs: `linux-cef-zen` 39399390970 (round 2: verdict PASS, only the IME compose gate BLOCKED_ENV; frame-path probe chose `memfd-off`), 39359724324 (fixture-probe harness PASS, fixture E1/E2 PASS, web matrix PASS with the BLOCKED gates above, 2× subset PASS). Earlier runs and what each fixed are listed in `docs/handoff/cef-zen-feel.md`.
