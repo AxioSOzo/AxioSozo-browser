@@ -1,66 +1,144 @@
-Status: PARTIAL
+Status: DONE
 
 # Handoff: cef-feel-2 (Chromium tabs inside Zen on Linux, round 2)
 
 PR (draft, into `cloud/integration`): https://github.com/AxioSOzo/AxioSozo-browser/pull/18
-(supersedes #17, whose branch `claude/cef-feel-2-xrbczc` was the first session's).
-Branch: `claude/cef-feel-2-xrbczc-rgjgez` (session 2's designated branch; linux-cef-zen
-triggers on it, on `claude/cef-feel-2-xrbczc` and on `cloud/cef-feel-2`).
+(supersedes #17, which was the first session's branch `claude/cef-feel-2-xrbczc`).
+Branch: `claude/cef-feel-2-xrbczc-rgjgez`, merged with `origin/cloud/integration` at 15e20bf6.
 
-Work in progress. This file is updated after each run; the final version lists every run id.
+**Read this first.** All gates below pass with one TEST-ONLY profile pref,
+`axiosozo.engines.linux.memfd_frames=false`. With the product default (memfd frames, perf round 2),
+every Chromium screenshot on prebuilt app 39362552105 is 100% black. This happens with the JS
+presenter too: `nativeReceiver` null, `frameTransport: memfd`, `frameUpload: imagedata`. The frame
+path belongs to cloud/perf-phase2, not this workstream. Details are under "Blockers".
 
-## Established so far (linux-cef-zen run 39371098391, prebuilt app 39362552105 + chrome overlay)
-- Ctrl+L over a Chromium page and over the Gecko baseline: PASS (`ctrl_l_escape`, `ctrl_l_gecko_baseline`).
-- Ctrl+T over Chromium and Gecko: PASS (`ctrl_t`). The SWGL crash fix holds.
-- Fonts: PASS, identical CSS widths to Gecko for the default (unknown) family, serif,
-  sans-serif, monospace, system-ui and ui-monospace.
-  - fontconfig: serif→DejaVu Serif, sans→DejaVu Sans, monospace→DejaVu Sans Mono.
-  - The host now sets Chromium's default families to the fontconfig generics, as Gecko does.
-- Overlay scrollbars: PASS, layout width 0 in both engines (Chromium `OverlayScrollbar,FluentOverlayScrollbar`).
-- "Not secure" badge: PASS. It is shown for a plain-HTTP page on the runner's LAN address and
-  is inside Zen's address bar, never over the page.
-- The fixture probe chip "Return to Gecko" overflowed Zen's 181 px nav bar onto the page by
-  119 px. FAIL, fixed by CSS wrap; to be re-verified.
-- AT-SPI: Chromium's tree is exposed under the tab (push button "Increment", link "Page 2",
-  entry "Type here", as in the Gecko tab).
-  - The AT-SPI press raced the mirror rebuild; the harness now retries.
-- Find: the first match reads "1 of 3" like Firefox. Find-next stayed at "1 of 3" where
-  Firefox shows "2 of 3": FAIL, fix pushed.
+## Machine resources
+- Cloud session: Ubuntu 24.04, 4 vCPU, ~15 GiB RAM. It edited files, ran the node/python unit
+  tests and `scripts/zen.py check`, and nothing heavy.
+- Actions: `ubuntu-24.04` runners (4 CPU), Xvfb 1280×800 and 2560×1600, WebRender software.
+  The pinned CEF host is built from the branch per run. Prebuilt Zen comes from run 39362552105
+  with the TEST-ONLY chrome overlay. A full linux-cef-zen run takes ~75 min.
 
-## Run 39372285095 (commit 90a79973, before the 3437ae48 fixes)
-- Certificate error: Chromium FAILS CLOSED with Zen's panel ("Be careful. Something doesn't
-  look right.", NET::ERR_CERT_AUTHORITY_INVALID, Go back / Open in Firefox), screenshot
-  37-cert-error-chromium.png inspected. The gate failed only because the harness then waited
-  for a feel page on that tab (fixed in session 2), which also cascaded into devtools/to_gecko.
-- Popups: `<select>` PASS; the datalist probe threw on PopupAutoComplete.view (fixed).
-- Permission: no Zen prompt within 15 s; the view was black (native receiver) so no visual
-  clue; diagnostics added.
+## What changed (this workstream, both sessions)
+- Linux CEF host (`native/chromium-host/core`, `linux/`; Linux-only files, macOS untouched):
+  - Default font families are the fontconfig generics Gecko uses.
+  - Overlay scrollbars (`OverlayScrollbar,FluentOverlayScrollbar`).
+  - **Permission prompts reach Zen.** CEF passes the requesting origin as `http://h:p/`, which
+    `webOrigin()` rejected, so the host denied every request before Zen could ask. Only a bare
+    trailing `/` is stripped; anything else still fails closed.
+- `ChromiumBrowserUI.sys.mjs`:
+  - **Find:** one request at a time. A newer search replaces queued ones, results below the
+    request's identifier floor are ignored, and there is a 2.5 s timeout. After a new session
+    without an ordinal (Linux CEF reports active 0), the finder takes one find-next step, so the
+    findbar reads "1 of 3", "2 of 3", "3 of 3" like Firefox. Highlight All parity: the finder
+    stops the session but keeps the selection.
+  - `<datalist>`: Zen draws the list (previous session).
+  - **Downloads:** updates that arrive before Firefox's Download is registered are kept and
+    applied. A finish before `execute()` completes at once. Before this, small downloads stuck
+    at 0 bytes.
+  - Linux prompts say "your computer"; macOS keeps "your Mac".
+- `ChromiumAccessibility.sys.mjs`:
+  - Linux AT-SPI DOM mirror (previous session).
+  - **The mirror keeps a hidden tab's tree** (`keepWhileHidden`, Linux only). Chromium does not
+    resend the tree after accessibility goes off and on, so a tab switch left AT-SPI with only
+    the page root.
+- `CEFPresenter.sys.mjs`:
+  - Developer-tools shortcuts over a Chromium tab show a notice instead of opening Firefox's
+    toolbox on the hidden document.
+  - The fixture probe chip wraps under the address bar. The rule moved out of
+    browser-experience.css because of its AxioSozo-id scoping test.
+- `scripts/cef_zen_e2e.py`:
+  - New gates: fonts, scrollbars, badge/chip geometry, datalist, find parity with Gecko,
+    download, permission, file chooser, certificate error, devtools and AT-SPI.
+  - `--pref axiosozo.engines.linux.*=V` adds a TEST-ONLY pref, listed in `test_only_switches`.
+  - The view's black fraction is gated in E1.
+- `scripts/atspi_probe.py`: the press searches every matching root and clears the client cache
+  between retries.
+- `.github/workflows/linux-cef-zen.yml`:
+  - Runs on this branch.
+  - **Step 0 is a frame-path probe.** It tries the product default, then `frame_worker=false`,
+    `memfd_frames=false`, and both off. Runs 2–5 use the first variant with pixels;
+    `framepath.json` and `verdict.frame_path_probe` record the choice.
+- `docs/CAPABILITY_MATRIX.md`: Chromium Linux rows updated, with curated evidence under
+  `docs/evidence/linux/cef-zen/39399390970/`.
 
-## Session 2 (claude/cef-feel-2-xrbczc-rgjgez), in progress
-- Run 39374652910 (commit 3437ae48): every cef_zen_e2e step captured the Chromium view
-  100% black from the first screenshot, also with `native_receiver=false`. Its diagnostics
-  show `nativeReceiver: null`, `frameWorker: null`, `frameTransport: memfd`,
-  `frameUpload: imagedata`: the native receiver was never active, so the earlier attribution
-  to it was wrong. gui_test step 1 (fixture) still shows pixels (`harness/fixture-chromium.png`;
-  the probe chip now wraps under the address bar).
-- linux-cef-zen step 0 now probes frame-path variants (product default, then TEST-ONLY
-  `frame_worker=false`, `memfd_frames=false`, both off) and runs 2-5 use the first variant
-  with pixels (`framepath.json`, `verdict.frame_path_probe`).
-- Fixes pushed, awaiting a run (commit 781893fb):
-  - Permission: the Linux host rejected CEF's requesting origin `http://h:p/` (trailing
-    slash), so Chromium denied every request before Zen could ask. Fixed in `core/handlers.inc`.
-  - Certificate-error flow in the harness; datalist probe; AT-SPI press retry on a fresh root;
-    find-next polls until the ordinal settles.
-  - The chip-wrap CSS moved to CEFPresenter's style (browser-experience.css scoping test).
-  - Linux prompts say "your computer" (macOS keeps "your Mac").
+## Runs (linux-cef-zen unless noted; results in `ci-results:claude_cef-feel-2-xrbczc-rgjgez/`)
+| run | commit | result |
+| --- | --- | --- |
+| 39371098391 (first session) | 729112dd | Ctrl+L, Ctrl+T, fonts, scrollbars, badge PASS. Pixels were already black but not gated yet. |
+| 39374652910 | 3437ae48 | E1 view 100% black with the native receiver pref off too, so the native receiver was not the cause. |
+| 39382614880 | 781893fb | Probe: default and worker-off black; memfd-off has pixels. Permission (after the origin fix), certificate error, datalist, download and file chooser PASS. Find, devtools and a11y FAIL. |
+| 39387935674 | 22b6aed9 | devtools PASS. The find log shows the missing ordinal; the download gets stuck (race). |
+| 39393555837 | 72286d26 | Find PASS (1→2→3 of 3) and AT-SPI PASS (press 0→1); download stuck again. |
+| **39399390970** | 8893cf18 | **Verdict PASS**: harness, fixture, web, web-2x and a11y. Only `ime_dead_keys_compose` is BLOCKED_ENV, and the Gecko baseline doesn't compose under Xvfb either. |
+| (pending at time of writing) | 19168a04 | Matrix and evidence commit, plus the devtools shot taken before the 4 s notice fades. |
 
-## Found: Chromium pixels capture black on the native Linux frame receiver (frame path, not this workstream)
-- With the product-default native receiver (engine-view/linux, app 39362552105), every
-  Chromium screenshot after the first frames is black.
-  - This happens in fixture and web mode and at 1× and 2×; input, title and page state keep working.
-- The gui_test fixture screenshot taken right after the first frame shows pixels, and so do
-  WebKit tabs on the same app.
-- Owner: cloud/perf-phase2 (frame path).
-- From run 3437ae48 on, the matrix runs use the TEST-ONLY pref
-  `axiosozo.engines.linux.native_receiver=false`. A separate informational step 6 measures the
-  default path: the black fraction of the view, plus frame-path diagnostics.
+Linux check-and-test (PR): green on 22b6aed9 (39387943035). It had failed on dc253a2d
+(39379426485) because of the CSS scoping test, which is fixed.
+
+macOS CI (PR): 39382644091 on 936a411b reports no REGRESSION rows. It shows 8 PRE_EXISTING
+failures and two NEW_GATE_NOT_PASSING WebKit gates that came from integration. The macOS run on 19168a04 was pending at time of writing.
+
+## Screenshots inspected (run 39399390970 unless noted)
+- Fonts: identical in both engines (crop compared); sans and system-ui render in DejaVu Sans.
+- Overlay scrollbar: thin, over the page.
+- "Not secure" badge: inside the address bar.
+- Chip: under the address bar (`harness/fixture-chromium.png`, 39374652910).
+- Ctrl+L: Zen's floating address bar over the Chromium page. Ctrl+T: the new-tab address bar.
+- Datalist: Zen-drawn "apple" and "apricot" under the field.
+- Find: "2 of 3" with only the active match marked; Highlight All marks all three ("3 of 3").
+- Certificate error: Zen's "Be careful" panel; nothing loaded.
+- Download: Zen's download button shows a finished download.
+- File chooser: the file name is on the page.
+- Permission: the doorhanger region captures black under Xvfb (Firefox's own popups do too); the
+  prompt itself is asserted from PopupNotifications.
+
+## Verified vs NOT_VERIFIED
+- PASS (run 39399390970, TEST-ONLY `memfd_frames=false`):
+  - E1/E2 fixture and web, 1× and 2×; typing, click, focus, selection, clipboard, wheel, cursors.
+  - Select and colour popups, context menu, JS dialogs, beforeunload, zoom, history, shortcuts,
+    middle click, host kill.
+  - Ctrl+L and Ctrl+T over Chromium and Gecko; fonts; overlay scrollbars; badge and chip.
+  - Datalist; find parity and Highlight All.
+  - Downloads, permission (deny by default), file chooser, certificate error (fail closed).
+  - AT-SPI tree and press; devtools shortcut explained.
+- BLOCKED_ENV: dead keys and Ctrl+Shift+U compose. Gecko fails them under Xvfb + xdotool too.
+- NOT_VERIFIED:
+  - AT-SPI focus tracking of Chromium's focused node: focus stays on Zen's canvas or proxy.
+  - Embedded Chromium DevTools: not provided.
+  - Portal file chooser: no portal under Xvfb.
+  - A visible doorhanger image.
+  - Anything with the product-default memfd frame path.
+
+## Blockers / for other workstreams
+- **cloud/perf-phase2 (frame path):**
+  - Chromium memfd frames draw black on app 39362552105, on the main-thread JS imagedata path.
+  - The worker and native receiver were not active (`frameWorker` null, `nativeReceiver` null),
+    so no component or worker was in use.
+  - Pipe frames are fine.
+  - Data: `framepath.json` per run (black fraction 1.0 vs 0.001) and
+    `framepath-default/02-chromium.png`.
+  - gui_test's early fixture shot shows pixels, so the first frame(s) may come before memfd
+    takes over.
+  - Once that is fixed, step 0 picks `default` automatically and the matrix runs drop the
+    TEST-ONLY pref.
+- macOS: the shared JS changes (finder, download race, prompt wording gate) keep macOS behaviour.
+  The finder only steps when Chromium reports no ordinal, and the mirror and keep-while-hidden
+  changes are Linux-only services.
+
+## Interface/contract notes
+- No protocol change.
+- The host now sends `permission` prompts with an origin without the root slash. This was always
+  the documented form; the Linux host simply never sent any.
+- `ChromiumFinder.events` holds a bounded diagnostic log (sent/stop/results, counts only; no
+  text).
+
+## Next steps
+1. perf-phase2: fix the memfd black frames for Chromium, then confirm that the step 0 probe
+   chooses `default` in linux-cef-zen.
+2. AT-SPI focus: expose Chromium's focused node as AT-SPI focus. Options are
+   `aria-activedescendant` on a focusable mirror root, or moving DOM focus into the mirror
+   without stealing Zen's key routing.
+3. Doorhanger screenshots: capture via `drawSnapshot` of the panel, since xwd shows popups
+   black.
+4. When a newer prebuilt app exists, bump `ZEN_RUN` in linux-cef-zen.yml.
