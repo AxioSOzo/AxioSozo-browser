@@ -49,7 +49,7 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
   const payloadOf = (id,fields) => damagePayload&&fields.damage?new Uint8Array(fields.damage[0][2]*fields.damage[0][3]*4).fill(id):new Uint8Array(16);
   // memfd ({readSlot}): the payload goes into the frame's slot, the pipe carries none (engine-stream-v1 §6.3).
   const slots=[],sendFrame = (target=current,id=frameID++,fields=frameFields) => {
-    if(!memfd) return pipe.push(packet(2,{...frame(target,id),...fields},payloadOf(id,fields)));
+    if(!memfd||memfd.piped) return pipe.push(packet(2,{...frame(target,id),...fields},payloadOf(id,fields)));
     const data=payloadOf(id,fields),slot=id%2;slots[slot]=data;
     pipe.push(packet(2,{...frame(target,id),...fields,slot,payload_bytes:data.length},new Uint8Array(0)));
   };
@@ -102,7 +102,8 @@ function fixture({autoFrame=true,overrideReady={},manualHistory=false,historyRac
   const callbacks={onFrame:(meta,pixels)=>rendered.push({meta,pixels}),onFailure:error=>failures.push(error),onEvent:value=>events.push(value)};
   // `platform`: an owned connection built the way launchHost builds one on that platform.
   const host=platform?new CEFHostConnection(process,{token,timers,deadline:1000,browsingMode,platform,damagePayload,
-    ...(memfd?{frameTransport:'memfd',readSlot:async(ring,slot,bytes)=>{memfd.reads.push([slot,bytes]);return slots[slot].slice(0,bytes).buffer;}}:{}),
+    ...(memfd?{frameTransport:'memfd',readSlot:async(ring,slot,bytes)=>{memfd.reads.push([slot,bytes]);
+      if(memfd.failRead===memfd.reads.length)throw new Error('MEMFD_READ_FAILED');return slots[slot].slice(0,bytes).buffer;}}:{}),
     instance:pending.engine_instance,identity:pending.identity}):process;
   const adapter=new CEFEngineAdapter(host,{token,pendingTarget:pending,timers,deadline:1000,browsingMode,...callbacks});
   return {adapter,host,pipe,writes,rendered,failures,events,sendFrame,event,slots};
@@ -904,6 +905,59 @@ test('Linux memfd frames: the slot is read and rebuilt, the pipe carries none; a
   }
   assert.throws(()=>new CEFHostConnection({wait:()=>new Promise(()=>{})},{token,timers,instance:'i',identity:origin,platform:'macosarm64',
     frameTransport:'memfd'}),/INVALID_CEF_BOOTSTRAP/,'never on macOS');
+});
+
+test('Linux memfd frames: an unreadable slot drops the frame and its ack moves the host to the pipe',async()=>{
+  const {resetMemfdFrames,memfdFramesDisabled,memfdFramesWanted}=await import('../chrome/EngineFrameSurface.sys.mjs');
+  resetMemfdFrames();
+  const ring={fd:12,slot_bytes:64,slots:2},memfd={reads:[],failRead:2};
+  const f=fixture({platform:'linux64',overrideReady:{platform:'linux64'},damagePayload:true,memfd,frameFields:{damage:[[0,0,2,2]]},
+    capabilities:{frame_damage:true,damage_payload:true,frame_transport:'memfd',memfd:ring}});
+  await f.host.connect();await f.adapter.connect();await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  const presented=f.rendered.length;
+  f.sendFrame(undefined,undefined,{damage:[[1,1,1,1]]});await tick();await tick();
+  assert.equal(f.rendered.length,presented,'the unreadable frame is never presented');
+  const ack=f.writes.filter(w=>w.method==='frame_ack').at(-1);
+  assert.equal(ack.frame_id,2);assert.equal(ack.frame_transport,'pipe');
+  assert.equal(f.host.memfd,null);assert.equal(f.host.frameTransport,'pipe');assert.equal(f.adapter.frameTransport,'pipe');
+  assert.equal(memfdFramesDisabled().reason,'slot_read_failed');assert.equal(memfdFramesWanted({getBoolPref:()=>true}),false,'later hosts use the pipe');
+  // The host now sends the target whole through the pipe.
+  memfd.piped=true;f.sendFrame(undefined,undefined,{damage:[[0,0,2,2]]});await tick();await tick();
+  assert.deepEqual([...new Uint8Array(f.rendered.at(-1).pixels)],Array(16).fill(3));
+  assert.equal(f.writes.filter(w=>w.method==='frame_ack').at(-1).frame_transport,undefined);
+  resetMemfdFrames();
+});
+
+test('Linux memfd frames: a partial frame after the fallback without a whole one is a protocol error',async()=>{
+  const {resetMemfdFrames}=await import('../chrome/EngineFrameSurface.sys.mjs');
+  resetMemfdFrames();
+  const ring={fd:12,slot_bytes:64,slots:2},memfd={reads:[],failRead:2};
+  const f=fixture({platform:'linux64',overrideReady:{platform:'linux64'},damagePayload:true,memfd,frameFields:{damage:[[0,0,2,2]]},
+    capabilities:{frame_damage:true,damage_payload:true,frame_transport:'memfd',memfd:ring}});
+  await f.host.connect();await f.adapter.connect();await f.adapter.create(origin+'/engine.html',{width:2,height:2,device_scale:1});
+  f.sendFrame(undefined,undefined,{damage:[[1,1,1,1]]});await tick();await tick();
+  memfd.piped=true;f.sendFrame(undefined,undefined,{damage:[[1,1,1,1]]});await tick();await tick();await tick();
+  assert.ok(f.failures.length||f.host.status==='failed','a payload against the dropped frame is refused');
+  resetMemfdFrames();
+});
+
+test('memfd slot reader retries once and probes /proc/<pid>/fd before the hello',async()=>{
+  const {memfdSlotReader,memfdProcReadable,memfdFramesDisabled,resetMemfdFrames}=await import('../chrome/EngineFrameSurface.sys.mjs');
+  resetMemfdFrames();
+  let calls=0;const ring={fd:12,slot_bytes:64,slots:2};
+  const flaky=memfdSlotReader(4242,ring,async(path,{offset,maxBytes})=>{calls++;assert.equal(path,'/proc/4242/fd/12');
+    if(calls===1)throw new Error('EINTR');return new Uint8Array(maxBytes).fill(offset/64+1);});
+  assert.deepEqual([...new Uint8Array(await flaky(1,4))],[2,2,2,2]);assert.equal(calls,2);
+  const broken=memfdSlotReader(4242,ring,async()=>{throw new Error('EACCES');});
+  await assert.rejects(broken(0,4),/MEMFD_READ_FAILED/);
+  const short=memfdSlotReader(4242,ring,async()=>new Uint8Array(3));
+  await assert.rejects(short(0,4),/MEMFD_READ_FAILED/);
+  assert.equal(await memfdProcReadable(4242,async path=>{assert.equal(path,'/proc/4242/fd');return [];}),true);
+  assert.equal(memfdFramesDisabled(),null);
+  assert.equal(await memfdProcReadable(4242,async()=>{throw new Error('EACCES');}),false);
+  assert.equal(memfdFramesDisabled().reason,'proc_fd_unreadable');
+  assert.equal(await memfdProcReadable(1,async()=>[]),false);
+  resetMemfdFrames();
 });
 
 test('presenter uploads only the damaged rectangle once its canvas is current',async()=>{

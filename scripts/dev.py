@@ -147,9 +147,10 @@ def run(argv, build=False, env=None, label=None):
         raise RuntimeError("DEFAULT_SIGCHLD_REQUIRED")
     label = label or " ".join(Path(str(item)).name if index == 0 else str(item)
                               for index, item in enumerate(argv[:4]))
-    if build and LINUX:
-        # No mount helper or dev-external on Linux: storage.py creates the
-        # build root and routes temporary/cache/Cargo output into it.
+    if build and (LINUX or storage.MACOS_CI):
+        # No mount helper or dev-external on Linux or in the macOS CI mode:
+        # storage.py creates the build root and routes temporary/cache/Cargo
+        # output into it.
         storage.ensure()
         CARGO_HOME_DIR.mkdir(parents=True, exist_ok=True)
         argv = [sys.executable, ROOT / "scripts/storage.py", "exec", "--", *argv]

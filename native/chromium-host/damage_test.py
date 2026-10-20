@@ -11,7 +11,9 @@ import http.server
 import importlib.util
 import json
 from pathlib import Path
+import os
 import signal
+import struct
 import tempfile
 import threading
 import time
@@ -50,6 +52,91 @@ def apply(view, width, damage, pixels):
     for row in range(y, y + h):
         start = (row * width + x) * 4
         view[start:start + w * 4] = pixels[start:start + w * 4]
+
+
+def raw_packet(session, deadline):
+    """One AXCF item with any payload size (damage payloads, memfd frames)."""
+    pipe = session.process.stdout
+    magic, version, kind, metadata_size, size = struct.unpack('>4sHHII', stream.read_exact(pipe, 16, deadline))
+    assert magic == b'AXCF' and version == 1 and kind in (1, 2) and 1 <= metadata_size <= 8192, (magic, version, kind)
+    metadata = json.loads(stream.read_exact(pipe, metadata_size, deadline))
+    return kind, metadata, stream.read_exact(pipe, size, deadline)
+
+
+def memfd_fallback(origin, directory):
+    """engine-stream-v1 §6.3 on the real CEF host: memfd frames with damage payloads read through
+    /proc/<pid>/fd, then one frame treated as unreadable and acknowledged with
+    frame_transport "pipe": every later frame must carry its payload in the pipe, the first whole."""
+    (directory / 'memfd').mkdir()
+    session = stream.Session(origin, directory / 'memfd', hello_fields=dict(frame_damage=True, damage_payload=True,
+                                                                             frame_transport='memfd'))
+    out = dict(status='FAIL')
+    try:
+        deadline = time.monotonic() + 60
+        ring = None
+        while ring is None:
+            kind, item, _ = raw_packet(session, deadline)
+            if kind == 1 and item.get('event') == 'ready':
+                assert item['capabilities'].get('frame_transport') == 'memfd', item['capabilities']
+                ring = item['capabilities']['memfd']
+        pending = dict(tab_id='memfd-tab', engine_instance=session.instance, identity=origin,
+                       document_generation=1, navigation_generation=1, private_mode=False)
+        session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=2)
+        path = f"/proc/{session.process.pid}/fd/{ring['fd']}"
+        memfd_frames, pipe_frames, dropped, after = 0, 0, None, []
+        deadline = time.monotonic() + 45
+        out['trace'] = trace = []
+        while len(after) < 12:
+            try:
+                kind, item, payload = raw_packet(session, deadline)
+            except EOFError:
+                time.sleep(1)
+                out.update(memfd_frames=memfd_frames, dropped_frame=dropped, pipe_frames_after=pipe_frames,
+                           exit_code=session.process.poll())
+                raise
+            trace.append([kind, item.get('event') or item.get('frame_id'), len(payload)] + ([item.get('damage')] if kind == 2 else []))
+            del trace[:-12]
+            if item.get('target'):
+                session.target = item['target']
+            if kind != 2:
+                continue
+            x, y, w, h = item['damage'][0]
+            if dropped is None:
+                assert not payload and item['payload_bytes'] == w * h * 4, item
+                if memfd_frames < 8:
+                    with open(path, 'rb', buffering=0) as handle:
+                        data = os.pread(handle.fileno(), item['payload_bytes'], item['slot'] * ring['slot_bytes'])
+                    assert len(data) == item['payload_bytes']
+                    memfd_frames += 1
+                    session.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
+                    continue
+                dropped = item['frame_id']  # treated as unreadable: dropped, never read
+                session.command('frame_ack', target=item['target'], frame_id=item['frame_id'], frame_transport='pipe')
+                continue
+            assert 'slot' not in item and 'payload_bytes' not in item and len(payload) == w * h * 4, item
+            after.append([x, y, w, h, item['width'], item['height']])
+            pipe_frames += 1
+            session.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
+        out.update(memfd_frames=memfd_frames, dropped_frame=dropped, pipe_frames_after=pipe_frames,
+                   first_after=after[0], partial_after=sum(1 for a in after[1:] if a[2:4] != a[4:6]))
+        assert after[0][:2] == [0, 0] and after[0][2:4] == after[0][4:6], after[0]
+        assert out['partial_after'] >= 5, out
+        close = session.command('close')
+        # Damage payloads are not whole frames: read raw items (and keep acknowledging) until closed.
+        while True:
+            kind, item, _ = raw_packet(session, deadline)
+            if kind == 2:
+                session.command('frame_ack', target=item['target'], frame_id=item['frame_id'])
+            elif item.get('event') == 'completed' and item.get('request_id') == close:
+                break
+        out.pop('trace', None)
+        out['status'] = 'PASS'
+    except (Exception, KeyboardInterrupt) as exc:
+        out['error'] = type(exc).__name__ + ': ' + str(exc)[:500]
+    finally:
+        session.close()
+        out['profile_removed'] = session.profile_removed
+    return out
 
 
 def run():
@@ -112,10 +199,15 @@ def run():
         resized = session.until(lambda kind, item: kind == 2 and item['width'] == 1600, 15)
         result['first_after_resize'] = resized['damage']
         assert resized['damage'] == [[0, 0, 1600, 1200]], resized
-        result['status'] = 'PASS'
         result['platform'] = ready['platform']
         close = session.command('close')
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close)
+        session.close()
+        result['profile_removed'] = session.profile_removed
+        session = None
+        result['memfd_fallback'] = memfd_fallback(origin, directory)
+        assert result['memfd_fallback']['status'] == 'PASS', result['memfd_fallback']
+        result['status'] = 'PASS'
     except (Exception, KeyboardInterrupt) as exc:
         result['error'] = type(exc).__name__ + ': ' + str(exc)[:2000]
     finally:

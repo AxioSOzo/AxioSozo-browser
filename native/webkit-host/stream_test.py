@@ -150,6 +150,11 @@ class Session:
         # /proc/<pid>/fd/<fd>, as Zen does (IOUtils.read with offset/maxBytes).
         self.memfd = None
         self.memfd_requested = memfd
+        # §6.3 fallback: the next memfd frame is treated as unreadable (dropped, acked with
+        # frame_transport "pipe"); later frames must come through the pipe, each target whole first.
+        self.fallback_next = False
+        self.fallback_frame = None
+        self.pipe_frames_after_fallback = 0
         if memfd:
             hello['frame_transport'] = 'memfd'
         hello.update(hello_extra or {})
@@ -179,8 +184,15 @@ class Session:
                                              memfd=self.memfd_requested)
             if kind == 1 and item.get('event') == 'ready' and self.memfd_requested:
                 self.memfd = item['capabilities']['memfd']
+            if kind == 2 and self.memfd_requested and self.fallback_next:
+                self.fallback_next, self.memfd_requested, self.fallback_frame = False, False, item['frame_id']
+                self.whole.pop(item['target']['native_target_id'], None)
+                self.command('frame_ack', target=item['target'], frame_id=item['frame_id'], frame_transport='pipe')
+                continue
             if kind == 2 and self.memfd_requested:
                 pixels = self.read_slot(item)
+            elif kind == 2 and self.fallback_frame is not None:
+                self.pipe_frames_after_fallback += 1
             if kind == 2 and self.damage_payload:
                 pixels = self.assemble(item, pixels)
             if kind == 1:
@@ -480,9 +492,10 @@ def damage_scenario(binary, origin, directory, engine):
         assert not session.orphans, session.orphans
 
 
-def damage_payload_scenario(binary, origin, directory, engine, memfd=False):
+def damage_payload_scenario(binary, origin, directory, engine, memfd=False, fallback=False):
     """hello.damage_payload: rectangle-only payloads rebuild exactly the frame a forced whole frame shows.
-    With memfd=True the same through frame_transport "memfd" (§6.3)."""
+    With memfd=True the same through frame_transport "memfd" (§6.3); with fallback=True the first
+    frame after creation is treated as unreadable and the host must move to the pipe (§6.3 fallback)."""
     session = Session(binary, origin, directory, frame_damage=True, damage_payload=True, memfd=memfd)
     try:
         ready = session.until(lambda kind, item: item.get('event') == 'ready')
@@ -492,12 +505,19 @@ def damage_payload_scenario(binary, origin, directory, engine, memfd=False):
                        document_generation=1, navigation_generation=1, private_mode=False)
         session.command('create', target=pending, url=origin + '/engine.html', width=900, height=650, device_scale=1)
         session.until(lambda kind, item: kind == 2)
+        session.fallback_next = fallback
         session.command('focus', focused=True)
         count = session.frames
         for character in 'payload':
             session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text=character)
         session.title('input=payload |')
         session.frame_after(count, seconds=10)
+        if fallback:
+            # After the fallback: the whole re-send, then damage payloads through the pipe.
+            count = session.frames
+            session.command('key', type='char', native_key_code=0, windows_key_code=0, modifiers=0, text='x')
+            session.title('input=payloadx |')
+            session.frame_after(count, seconds=10)
         # Let typing settle (caret blink keeps sending small frames), then force a whole frame.
         time.sleep(0.5)
         session.command('visibility', visible=False)
@@ -517,7 +537,11 @@ def damage_payload_scenario(binary, origin, directory, engine, memfd=False):
         assert session.damage_violations == 0, session.damage_violations
         assert session.payload_bytes < session.whole_bytes, (session.payload_bytes, session.whole_bytes)
         assert differing <= 0.01 * whole['width'] * whole['height'], differing
+        if fallback:
+            assert session.fallback_frame is not None and session.pipe_frames_after_fallback >= 2, \
+                (session.fallback_frame, session.pipe_frames_after_fallback)
         return dict(status='PASS', frames=session.frames, partial_frames=partial_frames,
+                    fallback_frame=session.fallback_frame, pipe_frames_after_fallback=session.pipe_frames_after_fallback,
                     payload_bytes=session.payload_bytes, whole_frame_bytes=session.whole_bytes,
                     rebuilt_vs_forced_whole_differing_pixels=differing, last_rebuilt_frame=rebuilt[0]['frame_id'],
                     forced_whole_frame=whole['frame_id'], frame_before_whole=before_whole)
@@ -557,6 +581,9 @@ def run(binary=None, engine='webkit', port='wpe'):
             memfd_dir = directory / 'memfd'
             memfd_dir.mkdir()
             result['memfd'] = damage_payload_scenario(binary, origin, memfd_dir, engine, memfd=True)
+            fallback_dir = directory / 'memfd-fallback'
+            fallback_dir.mkdir()
+            result['memfd_fallback'] = damage_payload_scenario(binary, origin, fallback_dir, engine, memfd=True, fallback=True)
             result['fixture_requests'] = [json.loads(line) for line in server.request_log.read_text().splitlines()]
             assert all(r['method'] == 'GET' and r['status'] == 200 for r in result['fixture_requests']), result['fixture_requests']
             assert engine != 'webkit' or result['fixture_requests'], 'WebKit fetched no fixture page'

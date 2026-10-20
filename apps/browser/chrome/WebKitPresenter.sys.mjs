@@ -10,7 +10,8 @@
 // any page.
 import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
-import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect } from "./EngineFrameSurface.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
+  nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_WEBKIT_TABS = 8;
@@ -253,7 +254,8 @@ export class WebKitPresenter {
     }
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
-    record.canvas.width = 1; record.canvas.height = 1;
+    // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
+    try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
     record.tab.removeAttribute?.(ENGINE_ATTRIBUTE);
     record.tab.toggleAttribute?.("busy", false);
     if (wasCommitted && record.tab.isConnected !== false) {
@@ -279,17 +281,25 @@ export class WebKitPresenter {
   /** EngineFrameSurface converts and uploads the damage at the next refresh tick (once per tick). */
   #draw(record, metadata, pixels) {
     if (this.disposed) return;
-    record.frames ??= new EngineFrameSurface(this.window, record.canvas, {
-      // A frame that is not painted makes the next paint whole.
-      isPaintable: () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden)),
-      onPaint: paint => {
-        if (paint.uploadedPixels < paint.framePixels) record.damageFrames++;
-        record.uploadedPixels += paint.uploadedPixels; record.fullPixels += paint.framePixels;
-        record.supersededFrames += paint.superseded;
-        record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
-        record.firstFrameAt ??= this.window.performance.now();
-        record.lastFrameId = paint.frameId;
-      } });
+    const isPaintable = () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden));
+    const onPaint = paint => {
+      if (paint.uploadedPixels < paint.framePixels) record.damageFrames++;
+      record.uploadedPixels += paint.uploadedPixels; record.fullPixels += paint.framePixels;
+      record.supersededFrames += paint.superseded;
+      record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+      record.firstFrameAt ??= this.window.performance.now();
+      record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
+    };
+    if (pixels instanceof NativeFrame) {
+      // Native receiver: the component presents the frame; nothing to convert here.
+      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
+      if (paint) { if (paint !== true) onPaint(paint); return; }
+      const fallback = nativeFallbackFrame(metadata, pixels);
+      if (!fallback) return;
+      ({ metadata, pixels } = fallback);
+    }
+    // A frame that is not painted makes the next paint whole.
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, { isPaintable, onPaint });
     record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
@@ -542,7 +552,8 @@ export class WebKitPresenter {
     const record = this.active;
     if (!record) return { engine: "gecko", ownedTabIds: this.owners(), failures: [...this.failures], pending: !!this.pending };
     return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra", frameTransport: record.adapter.frameTransport ?? "pipe",
-      pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
+      memfdFallback: record.adapter.memfdFallback ?? null, frameUpload: record.frameUpload ?? null,
+      nativeReceiver: record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null, pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
       uploadedPixels: record.uploadedPixels, fullPixels: record.fullPixels,
       meanDrawMilliseconds: record.displayedFrames ? record.drawMilliseconds / record.displayedFrames : 0,
       firstFrameMilliseconds: record.firstFrameAt === null ? null : record.firstFrameAt - record.startedAt,
@@ -557,7 +568,8 @@ export class WebKitPresenter {
   captureFixtureFrame() {
     const record = this.active;
     if (!record?.displayedFrames || !allowedFixtureURL(record.latestURL, record.originalTarget.identity)) throw new Error("NO_VERIFIED_WEBKIT_FIXTURE_FRAME");
-    return { png: record.canvas.toDataURL("image/png"), diagnostics: this.diagnostics() };
+    return { png: (record.nativeSink && nativeFramePNG(this.window, record.nativeSink)) || record.canvas.toDataURL("image/png"),
+      diagnostics: this.diagnostics() };
   }
   async dispose() {
     if (this.disposed) return;

@@ -10,6 +10,12 @@ Linux: a plain, user-owned directory. By default the gitignored `.build/`
 directory of this checkout; `AXIOSOZO_BUILD_ROOT` may name another absolute
 directory (for example a larger disk). No volume, image, mount helper or
 macOS path is used or required.
+
+macOS CI (GitHub-hosted runners, docs/MACOS_CI.md): with AXIOSOZO_MACOS_CI=1 on a
+GitHub Actions runner that has none of the owner's layout (T9, dev-external,
+mount-dev-storage), the explicit AXIOSOZO_BUILD_ROOT is a plain directory exactly
+like Linux. Wherever that layout exists the mode is refused, so the volume and
+helpers stay required on the owner's Mac.
 """
 import argparse
 import contextlib
@@ -31,6 +37,26 @@ ROOT = Path(__file__).resolve().parents[1]
 # Platform selection. Every macOS path below stays as it was; Linux uses
 # linux_build_root() and never calls a macOS helper, hdiutil or diskutil.
 LINUX = platform.system() == 'Linux'
+
+
+def macos_ci():
+    """True only for an explicit macOS CI build root (see the module docstring).
+    A request in any other situation is an error, never a silent fallback."""
+    if platform.system() != 'Darwin' or os.environ.get('AXIOSOZO_MACOS_CI') != '1':
+        return False
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        raise RuntimeError('AXIOSOZO_MACOS_CI=1 is only for GitHub Actions macOS runners')
+    # The owner's layout: T9 and the per-user helpers (mount-dev-storage, dev-external).
+    owner = (Path('/Volumes/T9'), MOUNT_SHARED, MOUNT_SHARED.with_name('dev-external'))
+    present = [str(path) for path in owner if path.exists()]
+    if present:
+        raise RuntimeError('AXIOSOZO_MACOS_CI=1 refused: the owner macOS layout exists (' + ', '.join(present)
+                           + '); use the T9 build volume')
+    if not os.environ.get('AXIOSOZO_BUILD_ROOT'):
+        raise RuntimeError('AXIOSOZO_MACOS_CI=1 requires an explicit AXIOSOZO_BUILD_ROOT')
+    return True
+
+
 # Gitignored default Linux build root of this checkout (see .gitignore).
 LINUX_DEFAULT_ROOT = ROOT / '.build'
 # Linux build roots never live in kernel/virtual filesystems.
@@ -86,7 +112,7 @@ def linux_build_root(value=None):
 def build_root(value=None):
     """The volume root, or one named build root directly below it. Anything
     else (relative, nested, `..`, a shared top-level name) is refused."""
-    if LINUX:
+    if LINUX or MACOS_CI:
         return linux_build_root(value)
     return darwin_build_root(value)
 
@@ -103,8 +129,10 @@ def darwin_build_root(value=None):
     return path
 
 
+# A plain build directory instead of the T9 volume: Linux, or the macOS CI mode.
+MACOS_CI = macos_ci()
 BUILD_ROOT = build_root()
-if LINUX:
+if LINUX or MACOS_CI:
     # No shared volume on Linux: the build root also holds the pinned
     # toolchains, the Cargo home and the engine components.
     VOLUME = BUILD_ROOT
@@ -158,7 +186,7 @@ def linux_free_gib():
 
 def mounted():
     """The verified project volume is mounted and this build root exists on it."""
-    if LINUX:
+    if LINUX or MACOS_CI:
         return linux_ready()
     if not volume_verified():
         return False
@@ -170,9 +198,9 @@ def mounted():
 
 
 def report():
-    if LINUX:
+    if LINUX or MACOS_CI:
         ready = linux_ready()
-        return {'platform': 'linux', 'build_root': str(BUILD_ROOT),
+        return {'platform': 'linux' if LINUX else 'macos-ci', 'build_root': str(BUILD_ROOT),
                 'default_build_root': str(LINUX_DEFAULT_ROOT),
                 'configured_by': 'AXIOSOZO_BUILD_ROOT' if os.environ.get('AXIOSOZO_BUILD_ROOT') else 'default',
                 'mounted': ready, 'build_free_gib': linux_free_gib()}
@@ -324,7 +352,7 @@ def linux_ensure():
 
 
 def ensure():
-    if LINUX:
+    if LINUX or MACOS_CI:
         return linux_ensure()
     mount_shared()
     if mounted():
@@ -376,8 +404,8 @@ def main():
         return 0
     # macOS: run this via dev-external. Its inherited defaults are overridden only
     # for this owned command; no global helper or user configuration is modified.
-    # Linux: there is no wrapper; the build root is created on demand.
-    if LINUX:
+    # Linux and macOS CI: there is no wrapper; the build root is created on demand.
+    if LINUX or MACOS_CI:
         linux_ensure()
     if not mounted():
         raise RuntimeError('Project APFS volume is not mounted; run storage.py setup')

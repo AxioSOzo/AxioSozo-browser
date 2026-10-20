@@ -62,6 +62,30 @@ else:
 EVIDENCE = ROOT / 'docs/evidence'
 EXTERNAL = '/Users/wout/.local/bin/dev-external'
 MOUNT = '/Users/wout/.local/bin/mount-dev-storage'
+
+
+def macos_ci():
+    """scripts/storage.py's macOS CI build root rule (GitHub-hosted runners only;
+    docs/MACOS_CI.md). Refused wherever the owner's layout exists, so on the owner's
+    Mac the T9 volume, DevStorage and both helpers stay required."""
+    if platform.system() != 'Darwin' or os.environ.get('AXIOSOZO_MACOS_CI') != '1':
+        return False
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        raise RuntimeError('BLOCKED_ENV: AXIOSOZO_MACOS_CI=1 is only for GitHub Actions macOS runners')
+    if any(Path(path).exists() for path in ('/Volumes/T9', EXTERNAL, MOUNT)):
+        raise RuntimeError('BLOCKED_ENV: AXIOSOZO_MACOS_CI=1 refused: the owner macOS layout exists')
+    if not os.environ.get('AXIOSOZO_BUILD_ROOT'):
+        raise RuntimeError('BLOCKED_ENV: AXIOSOZO_MACOS_CI=1 requires an explicit AXIOSOZO_BUILD_ROOT')
+    return True
+
+
+MACOS_CI = macos_ci()
+if MACOS_CI:
+    # Same commands without the owner's helpers: `env` runs the wrapped command
+    # (every call site already sets TMPDIR/CLANG_MODULE_CACHE_PATH into BASE) and
+    # there is no volume to mount.
+    EXTERNAL = '/usr/bin/env'
+    MOUNT = '/usr/bin/true'
 SECURITY = '/usr/bin/security'
 IDENTITY_ENV = 'AXIOSOZO_CODESIGN_IDENTITY'
 ADHOC_HINT = ('signing: ad hoc (no ' + IDENTITY_ENV + '); macOS Keychain will ask about '
@@ -105,6 +129,15 @@ def run_command(args, **kwargs):
 def host_check():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise RuntimeError('BLOCKED_ENV: the pinned binary needs macOS arm64')
+    if MACOS_CI:
+        # CI runner: an existing, user-owned, real build directory replaces the volume.
+        info = BUILD_ROOT.lstat() if BUILD_ROOT.exists() else None
+        if (info is None or not BUILD_ROOT.is_dir() or BUILD_ROOT.is_symlink() or info.st_uid != os.getuid()
+                or BUILD_ROOT.resolve() != BUILD_ROOT):
+            raise RuntimeError('BLOCKED_ENV: macOS CI build root must be a real directory owned by this user')
+        if not shutil.which('xcrun'):
+            raise RuntimeError('BLOCKED_ENV: Xcode command line tools missing')
+        return
     if not Path('/Volumes/DevStorage').is_mount():
         raise RuntimeError('BLOCKED_ENV: DevStorage is not mounted')
     if not BUILD_ROOT.is_mount():
@@ -991,7 +1024,10 @@ if __name__ == '__main__':
             raise RuntimeError('BLOCKED_ENV: install-sandbox is the Linux SUID sandbox step; macOS uses its own seatbelt')
         commands = {'setup': linux_setup if IS_LINUX else setup, 'check': check, 'run': run,
                     'test-native': native_test, 'install-sandbox': install_sandbox}
-        sys.exit(commands[args.command]() or 0)
+        result = commands[args.command]()
+        # linux_check() returns the sandbox status for in-process callers (stream_test.py);
+        # only an int is an exit code.
+        sys.exit(result if isinstance(result, int) else 0)
     except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
         emit('BLOCKED_ENV' if 'BLOCKED_ENV' in str(exc) else 'FAIL', message=str(exc))
         sys.exit(2)
