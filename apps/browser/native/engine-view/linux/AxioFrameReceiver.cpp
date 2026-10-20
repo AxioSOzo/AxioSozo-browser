@@ -188,7 +188,7 @@ struct SinkState {
       if (!mValid) {
         return;
       }
-      mozilla::gfx::IntSize size(int32_t(mWidth), int32_t(mHeight));
+      mozilla::gfx::IntSize size{int32_t(mWidth), int32_t(mHeight)};
       // BGRX: the engine frame is opaque (the 2D path's canvas is alpha:false too).
       RefPtr<mozilla::layers::SharedRGBImage> shared =
           mContainer->CreateSharedRGBImage();
