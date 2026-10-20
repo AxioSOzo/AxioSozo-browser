@@ -42,7 +42,11 @@ FRAME_KEYS = {'version', 'target', 'frame_id', 'width', 'height', 'stride', 'dev
 
 
 def read_packet(pipe, deadline, damage=False):
-    header = read_exact(pipe, 16, deadline)
+    # The caller's deadline applies until a packet starts; a started packet is always read
+    # whole, so a timed-out wait can never leave the stream mid-packet.
+    first = read_exact(pipe, 1, deadline)
+    deadline = max(deadline, time.monotonic() + 20)
+    header = first + read_exact(pipe, 15, deadline)
     magic, version, kind, metadata_size, size = struct.unpack('>4sHHII', header)
     if magic != b'AXCF' or version != 1 or kind not in (1, 2):
         raise ValueError('invalid AXCF header')
@@ -119,6 +123,7 @@ class Session:
         self.process = subprocess.Popen([str(binary), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.error,
                                         start_new_session=True, bufsize=0, env=env)
+        probe.MAC_HOST_PIDS.add(self.process.pid)
         self.token = secrets.token_hex(32)
         self.instance = 'webkit-fixture-' + secrets.token_hex(8)
         self.counter = 0

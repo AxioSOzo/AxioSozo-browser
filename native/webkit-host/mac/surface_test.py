@@ -11,6 +11,7 @@ wire protocol only, never E1/E2 inside Zen.
 """
 import argparse
 import contextlib
+import ctypes
 import http.server
 import json
 import os
@@ -67,6 +68,17 @@ def build(out):
     return receiver
 
 
+def responsible_pid(pid):
+    """launchd's responsible pid for an XPC service (libquarantine), or None."""
+    try:
+        function = ctypes.CDLL('/usr/lib/system/libquarantine.dylib').responsibility_get_pid_responsible_for_pid
+    except (OSError, AttributeError):
+        return None
+    function.argtypes, function.restype = [ctypes.c_int], ctypes.c_int
+    value = function(pid)
+    return value if value > 0 else None
+
+
 def webkit_helpers():
     done = subprocess.run(['/bin/ps', '-axo', 'pid=,comm='], capture_output=True, text=True)
     out = {}
@@ -103,12 +115,19 @@ def run_case(receiver, host, name, directory, origin, seconds, **options):
             os.killpg(process.pid, signal.SIGKILL)
         err = b''
     (case / 'receiver-stderr.log').write_bytes(err or b'')
-    # Process cleanup: no WebKit XPC helper started for this host may outlive it.
+    # Process cleanup: no WebKit XPC helper launchd attributes to this host may outlive it
+    # (other runner processes use WebKit too, so "new since start" is not ownership).
+    host_pid = result.get('host_pid')
+    attributed = responsible_pid(os.getpid()) is not None
+    def ours():
+        return {p: n for p, n in webkit_helpers().items()
+                if (responsible_pid(p) == host_pid if attributed else p not in before)}
     deadline = time.monotonic() + 8
-    leaked = {p: n for p, n in webkit_helpers().items() if p not in before}
+    leaked = ours()
     while leaked and time.monotonic() < deadline:
         time.sleep(.2)
-        leaked = {p: n for p, n in webkit_helpers().items() if p not in before}
+        leaked = ours()
+    result['helper_attribution'] = 'launchd_responsible_pid' if attributed else 'new_since_case_start'
     result['orphan_helpers'] = [dict(pid=p, comm=n) for p, n in leaked.items()]
     if leaked:
         result['status'] = 'FAIL'

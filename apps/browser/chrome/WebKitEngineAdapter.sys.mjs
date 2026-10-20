@@ -241,7 +241,9 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   // (or without a canvas to bind) this build uses the BGRA pipe fallback, and says so.
   const service = isMac(platform) && element ? webkitSurfaceService() : null;
   let endpoint = null;
-  try { endpoint = service?.createEndpoint(true) ?? null; } catch { endpoint = null; }
+  // Internal pacing (no BEGIN_FRAME): the host snapshots on its own frame_rate clock. Measured on
+  // macos-15 (run 39344367832): 56 fps internal vs 32 fps with external ticks at 60 Hz (ADR 004).
+  try { endpoint = service?.createEndpoint(false) ?? null; } catch { endpoint = null; }
   if (isMac(platform) && !endpoint) {
     console.warn("AXIOSOZO_WEBKIT_RENDER_PATH", JSON.stringify({ renderPath: WEBKIT_MAC_RENDER_PATH_PIPE,
       reason: service ? "surface_endpoint_failed" : "surface_service_unavailable" }));

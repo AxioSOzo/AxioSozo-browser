@@ -36,6 +36,7 @@
 #include <vector>
 #include "../../../chromium-host/engine_surface_v1.h"
 #include <libproc.h>
+#include <dlfcn.h>
 
 extern char** environ;
 
@@ -371,12 +372,21 @@ std::set<pid_t> helperBaseline;
 double rusageFactor = 0;  // proc_pid_rusage units -> ms (calibrated on ourselves)
 double cpuSelfMs() { rusage u{}; getrusage(RUSAGE_SELF, &u); return (u.ru_utime.tv_sec + u.ru_stime.tv_sec) * 1e3 + (u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e3; }
 double rawRusage(pid_t pid) { rusage_info_v2 info{}; return proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t*)&info) ? -1 : double(info.ri_user_time + info.ri_system_time); }
+// launchd's responsible pid for an XPC service (libquarantine); other runner processes use
+// WebKit too, so helpers are attributed to the host this way when the function exists.
+int responsiblePid(pid_t pid) {
+  using Function = int (*)(int);
+  static Function function = reinterpret_cast<Function>(dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid"));
+  return function ? function(pid) : -1;
+}
 std::vector<pid_t> helpers() {
   std::vector<pid_t> pids(4096), out;
   int count = proc_listallpids(pids.data(), int(pids.size() * sizeof(pid_t)));
   for (int i = 0; i < count; ++i) {
     char name[256] = {};
-    if (proc_name(pids[i], name, sizeof name) > 0 && !strncmp(name, "com.apple.WebKit", 16) && !helperBaseline.count(pids[i])) out.push_back(pids[i]);
+    if (proc_name(pids[i], name, sizeof name) <= 0 || strncmp(name, "com.apple.WebKit", 16)) continue;
+    int responsible = responsiblePid(pids[i]);
+    if (responsible > 0 ? responsible == child : !helperBaseline.count(pids[i])) out.push_back(pids[i]);
   }
   return out;
 }
