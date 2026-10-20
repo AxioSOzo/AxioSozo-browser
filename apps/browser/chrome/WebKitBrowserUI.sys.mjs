@@ -212,9 +212,29 @@ export class WebKitBrowserUI {
       entry.addEventListener("command", () => { chosen = true; this.#answer(record, state, prompt, index); });
       popup.appendChild(entry);
     });
+    // Keyboard as in Firefox's own <select> dropdown, whatever has focus underneath (the engine view).
+    const items = () => [...popup.children].filter(node => node.localName === "menuitem" && node.getAttribute("disabled") !== "true");
+    const keys = key => {
+      if (popup.state !== "open") return;
+      const list = items(), current = list.indexOf(popup.activeChild);
+      let next = null;
+      if (key.key === "ArrowDown") next = list[Math.min(list.length - 1, current + 1)];
+      else if (key.key === "ArrowUp") next = list[Math.max(0, current < 0 ? 0 : current - 1)];
+      else if (key.key === "Home" || key.key === "PageUp") next = list[0];
+      else if (key.key === "End" || key.key === "PageDown") next = list.at(-1);
+      else if (key.key === "Enter" || key.key === " ") {
+        const item = popup.activeChild;
+        if (item && item.dataset.index !== undefined) { chosen = true; this.#answer(record, state, prompt, Number(item.dataset.index)); popup.hidePopup(); }
+      } else if (key.key === "Escape" || key.key === "Tab") popup.hidePopup();
+      else return;
+      key.preventDefault(); key.stopPropagation();
+      if (next) popup.activeChild = next;
+    };
+    this.#win.addEventListener("keydown", keys, true);
     popup.addEventListener("popupshown", () => { if (selected) popup.activeChild = selected; });
     popup.addEventListener("popuphidden", hidden => {
       if (hidden.target !== popup) return;
+      this.#win.removeEventListener("keydown", keys, true);
       popup.remove();
       if (!chosen) this.#answer(record, state, prompt, -1);
     });

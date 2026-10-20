@@ -674,6 +674,11 @@ void WpeView::mouse(const MouseInput& mouse) {
     if (mouse.modifiers & FlagMiddle) held |= wpe_input_pointer_modifier_button3;
     event.type = wpe_input_pointer_event_type_motion;
     event.modifiers = keyboardModifiers(mouse.modifiers) | held;
+    // WPE's event factory takes the WebKit button from `button` for motion too: without it a
+    // drag is a plain move to WebCore (no text selection by dragging).
+    if (held & wpe_input_pointer_modifier_button1) event.button = 1;
+    else if (held & wpe_input_pointer_modifier_button2) event.button = 2;
+    else if (held & wpe_input_pointer_modifier_button3) event.button = 3;
   } else {
     bool pressed = mouse.type == "down";
     if (pressed) buttons_ |= mask; else buttons_ &= ~mask;
@@ -681,6 +686,8 @@ void WpeView::mouse(const MouseInput& mouse) {
     event.modifiers = keyboardModifiers(mouse.modifiers) | buttons_;
   }
   wpe_view_backend_dispatch_pointer_event(backend_, &event);
+  // WebKit reports a new hit test only when its context changes; the CSS cursor can change on any move.
+  if (host_.browserUI() && mouse.type == "move") hovered();
   // A finished left click or drag may have selected text: X11 PRIMARY (§8.2).
   if (host_.browserUI() && mouse.type == "up" && button == 1) selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
   // A right press opens the context menu (the engine's own signal if it fires, else the fallback).

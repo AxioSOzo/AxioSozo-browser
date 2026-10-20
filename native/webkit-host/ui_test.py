@@ -122,15 +122,14 @@ def scenario(session, origin, directory):
     click(session, round(x), P_TOP, clicks=2)
     results['double_click_selection'] = text_event(session, 'text_selection').strip()
     assert results['double_click_selection'] == 'beta', results
-    # Context menu over the selection, then Copy: Zen's clipboard gets the text.
-    click(session, round(x), P_TOP, button='right')
-    context = event(session, 'prompt', lambda item: item['kind'] == 'context_menu')
-    details = context['details']
-    assert details['selection_text'].strip() == 'beta' and details['type_flags'] & 16 and details['edit_flags'] & 8, details
-    session.completed(session.command('context_menu_command', prompt_id=context['prompt_id'], command='copy', index=0))
-    results['context_copy'] = text_event(session, 'clipboard_text').strip()
-    assert results['context_copy'] == 'beta', results
-    results['context_menu'] = {k: details[k] for k in ('x', 'y', 'type_flags', 'edit_flags', 'editable', 'media_type')}
+    # Drag across "alpha": text selection by dragging.
+    session.command('mouse', type='move', x=21, y=P_TOP, modifiers=0, button='left', click_count=1, mouse_leave=False)
+    session.command('mouse', type='down', x=21, y=P_TOP, modifiers=0, button='left', click_count=1, mouse_leave=False)
+    for step in (40, 60, 80):
+        session.command('mouse', type='move', x=step, y=P_TOP, modifiers=1 << 4, button='left', click_count=1, mouse_leave=False)
+    session.command('mouse', type='up', x=80, y=P_TOP, modifiers=0, button='left', click_count=1, mouse_leave=False)
+    results['drag_selection'] = text_event(session, 'text_selection').strip()
+    assert results['drag_selection'].startswith('alph'), results
 
     # Find: three matches of "needle".
     find = session.command('find', text='needle', forward=True, match_case=False, find_next=False)
@@ -176,6 +175,22 @@ def scenario(session, origin, directory):
     session.completed(session.command('permission_reply', prompt_id=permission['prompt_id'], decision='deny'))
     results['permission'] = {'asked': permission['details']['permissions'], 'page': wait_state(session, lambda s: s.get('perm') != '')['perm']}
     assert results['permission']['page'] == 'denied', results
+
+    # Context menu over a selection (WebKit's signal or the host's fallback), then Copy.
+    click(session, round(20 + CHAR * 13.5), P_TOP, clicks=2)
+    assert text_event(session, 'text_selection').strip() == 'gamma'
+    click(session, round(20 + CHAR * 13.5), P_TOP, button='right')
+    context = event(session, 'prompt', lambda item: item['kind'] == 'context_menu')
+    details = context['details']
+    assert details['selection_text'].strip() == 'gamma' and details['type_flags'] & 16 and details['edit_flags'] & 8, details
+    session.completed(session.command('context_menu_command', prompt_id=context['prompt_id'], command='copy', index=0))
+    results['context_copy'] = text_event(session, 'clipboard_text').strip()
+    assert results['context_copy'] == 'gamma', results
+    results['context_menu'] = {k: details[k] for k in ('x', 'y', 'type_flags', 'edit_flags', 'editable', 'media_type')}
+    # Input still reaches the page after the menu (no engine-side menu state left behind).
+    click(session, *AT['t'])
+    session.completed(session.command('paste_text', text='!'))
+    results['input_after_context_menu'] = wait_state(session, lambda s: s.get('t', '').endswith('!'))['t']
 
     # A navigation closes an open prompt with its safe default before generations advance.
     click(session, *AT['alert'])

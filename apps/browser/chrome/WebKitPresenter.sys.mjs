@@ -199,7 +199,10 @@ export class WebKitPresenter {
         currentURL: record => record.latestURL,
         notice: (record, message) => this.#notice(record, message),
         paste: record => this.#paste(record),
-        failure: error => this.onFailure(error),
+        failure: error => {
+          this.uiFailures = [...(this.uiFailures ?? []), String(error?.message ?? error).slice(0, 120)].slice(-8);
+          this.onFailure(error);
+        },
       },
     });
     this.restoreHooks.push(() => { this.ui?.dispose(); this.ui = null; });
@@ -261,6 +264,7 @@ export class WebKitPresenter {
       this.#visibility(record);
       canvas.focus();
       this.#indicator(); this.#syncChrome(record);
+      this.#applyIcon(record); // a favicon that arrived with the first load
       return target;
     } catch (error) {
       await this.#remove(record);
@@ -390,6 +394,11 @@ export class WebKitPresenter {
     record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
+    // Diagnostics: the last browser-UI events (names and kinds or codes only, never contents).
+    if (!["heartbeat", "title", "url", "loading", "cursor"].includes(event.event)) {
+      (record.uiLog ??= []).push([event.event, event.kind ?? event.code ?? event.reason ?? event.mode ?? null]);
+      if (record.uiLog.length > 24) record.uiLog.shift();
+    }
     if (record.browserUI && event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); return; }
     if (record.browserUI && event.event === "text_input") { this.#textInput(record, event); return; }
     if (record.browserUI && this.ui?.handle(record, event)) return;
@@ -824,6 +833,9 @@ export class WebKitPresenter {
         canGoForward: record.loading.can_go_forward } : null,
       cursor: record.cursor, inputFeatures: record.adapter.inputFeatures, ready: record.adapter.host?.ready ?? null,
       renderScaleLimited: !!record.renderScaleLimited, fixtureOnly: true, ownedTabIds: this.owners(),
+      browserUI: !!record.browserUI, uiLog: [...(record.uiLog ?? [])], uiFailures: [...(this.uiFailures ?? [])],
+      focus: (active => active === record.canvas ? "canvas" : (record.overlay.contains(active) ? "proxy-" + active.localName : null))(
+        this.window.document.activeElement),
       failures: [...this.failures], pending: !!this.pending };
   }
   /** Explicit diagnostic call in privileged chrome only: the presented WebKit pixels as PNG. */

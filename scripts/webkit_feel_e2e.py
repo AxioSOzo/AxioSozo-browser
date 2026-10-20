@@ -46,8 +46,8 @@ from gui_engines.webkit import ENGINE as WEBKIT
 ROOT = Path(__file__).resolve().parents[1]
 FEEL = ROOT / 'tests/fixtures/webkit-feel.html'
 SCENARIOS = ('launch', 'chrome', 'switch', 'polish', 'typing', 'selection', 'clipboard', 'middle_click', 'wheel', 'cursor',
-             'select_popup', 'context_menu', 'dialogs', 'beforeunload', 'permission', 'file_dialog', 'download', 'find',
-             'zoom', 'ime', 'shortcuts', 'hidpi', 'crash_retry')
+             'select_popup', 'dialogs', 'beforeunload', 'permission', 'file_dialog', 'download', 'find', 'zoom', 'ime',
+             'context_menu', 'shortcuts', 'hidpi', 'crash_retry')
 HOST = 'AxioWebKitHost --stream'
 # Fixed CSS-pixel geometry of tests/fixtures/webkit-feel.html (centres).
 AT = {'text': (170, 38), 'count': (410, 38), 'link': (520, 38), 'area': (170, 150), 'select': (420, 138),
@@ -246,6 +246,35 @@ class FeelHarness(gui_test.Harness):
             self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
+
+    def run_one(self, name):
+        outcome = super().run_one(name)
+        if outcome['status'] == 'FAIL':
+            # Evidence for the failure, then leave nothing open for the next scenario.
+            try:
+                native = (self.state().get('native') or {})
+                outcome['webkit'] = {k: native.get(k) for k in ('uiLog', 'uiFailures', 'focus', 'cursor', 'frames', 'title')}
+            except (gui_test.MarionetteError, OSError, KeyError, TypeError):
+                pass
+            for method in ('WebDriver:DismissAlert',):
+                try:
+                    self.marionette.call(method)
+                    outcome.setdefault('recovery', []).append(method)
+                except (gui_test.MarionetteError, OSError):
+                    pass
+            try:
+                self.key('Escape')
+                self.chrome_script('for (const p of document.querySelectorAll("menupopup")) if (p.state === "open") p.hidePopup();'
+                                   'try { FullZoom.reset(); } catch {} return true;')
+            except (gui_test.MarionetteError, OSError, subprocess.SubprocessError):
+                pass
+        return outcome
+
+    def live(self, name):
+        """The WebKit page still takes input: one click on Increment is counted."""
+        before = self.page()['c']
+        self.click_at(*AT['count'])
+        return self.wait_page(lambda page: page['c'] > before, f'the WebKit page still takes input after {name}', timeout=10)['c']
 
     # -- state and geometry ---------------------------------------------------------------
     def state(self):
@@ -703,13 +732,14 @@ class FeelHarness(gui_test.Harness):
         self.screenshot('10-page-menu', settle=False)
         self.key('Escape')
         self.wait(lambda: not self.chrome_script(CONTEXT_MENU)['open'], 'context menu closed by Escape', timeout=10)
+        alive = self.live('the context menus')
         link_actions = [i['action'] for i in link_menu['items']]
         image_actions = [i['action'] for i in image_menu['items']]
         ok = 'open_link_new_tab' in link_actions and 'copy_link' in link_actions and 'copy_image_link' in image_actions
         self.gate('context_menu', 'PASS' if ok else 'FAIL', screenshots=['10-context-menu.png', '10-link-menu.png', '10-image-menu.png',
                   '10-page-menu.png'], aria_label=menu['label'], selection_items=[i['label'] for i in menu['items']],
                   link_items=[i['label'] for i in link_menu['items']], image_items=[i['label'] for i in image_menu['items']],
-                  page_items=[i['label'] for i in page_menu['items']], copied=copied.get('text'),
+                  page_items=[i['label'] for i in page_menu['items']], copied=copied.get('text'), input_after=alive,
                   note='xwd may capture XUL popups black under software WebRender (as Firefox\'s own); items are asserted from the open menupopup')
         if not ok:
             raise AssertionError('link/image items missing: ' + repr({'link': link_actions, 'image': image_actions}))
