@@ -35,6 +35,7 @@ import { DEEP_LINK_TARGETS, HandoverError, TARGET_CLIENTS, TARGET_LABELS, TARGET
 import { basename, findOnPath, isAbsolutePath, oneLine, randomHex, randomUuid, runOnce, startSupervised, trimSlashes } from "./process.sys.mjs";
 import { eventsOf, failureText, lastSentence, rateLimitText, summarySentence } from "./streams.sys.mjs";
 import { claudeInterrupt, claudeUserMessage, normalizeImage } from "./ai.sys.mjs";
+import { words } from "../overview/platform-words.mjs";
 
 export const AGENT_STATES = Object.freeze(["starting", "working", "needs_you", "done", "failed", "stopped"]);
 export const FINAL_STATES = Object.freeze(["needs_you", "done", "failed", "stopped"]);
@@ -397,7 +398,7 @@ export function createAgentsService({ runtime, discovery, scratch, environment, 
     const name = CLIENT_LABELS[task.client];
     let launch;
     try { launch = await discovery.launch(task.client); }
-    catch (error) { throw new AgentError("CLIENT_UNAVAILABLE", "client unavailable", { reason: error?.status?.reason ?? `${name} is not available on this Mac.` }); }
+    catch (error) { throw new AgentError("CLIENT_UNAVAILABLE", "client unavailable", { reason: error?.status?.reason ?? words(`${name} is not available on this Mac.`) }); }
     if (!launch.status.capabilities.includes("task")) throw new AgentError("CLIENT_UNAVAILABLE", "no task capability", { reason: launch.status.reason });
     if (task.image && !launch.status.capabilities.includes("image") && task.client !== "claude-code") {
       throw new AgentError("UNSUPPORTED", "image", { reason: `${name} cannot take a picture here.` });
@@ -654,7 +655,7 @@ export function createAgentsService({ runtime, discovery, scratch, environment, 
     let launch;
     try { launch = await discovery.locate?.(record.client); } catch { launch = null; }
     const path = launch?.path;
-    if (!path) throw new AgentError("CLIENT_UNAVAILABLE", "client missing", { reason: `${CLIENT_LABELS[record.client]} is not available on this Mac.` });
+    if (!path) throw new AgentError("CLIENT_UNAVAILABLE", "client missing", { reason: words(`${CLIENT_LABELS[record.client]} is not available on this Mac.`) });
     const text = terminalScript({ root: trimSlashes(project.root), argv: [path, ...resumeArgs(record.client, record.sessionId)], title: record.title ?? "" });
     try {
       const dir = await scratch.handoverDir();

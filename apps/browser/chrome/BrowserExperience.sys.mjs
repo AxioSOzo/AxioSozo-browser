@@ -3,6 +3,7 @@
 import { getProfileSavedPages } from "./SavedPages.sys.mjs";
 import { openProviderSettings } from "./ProviderSettings.sys.mjs";
 import { installProviderPanel } from "./ProviderPanel.sys.mjs";
+import { MAC, accelKey, accelOnly, currentPlatform, shortcutLabel } from "./overview/platform-words.mjs";
 
 const NS = "http://www.w3.org/1999/xhtml";
 const MAX_QUERY = 512;
@@ -47,20 +48,20 @@ export function installBrowserExperience(win, { engineProbe = null } = {}) {
   const badge = doc.createXULElement("toolbarbutton");
   badge.id = "axiosozo-actions";
   badge.setAttribute("label", "Actions");
-  badge.setAttribute("tooltiptext", "Browser actions · ⌘K");
+  badge.setAttribute("tooltiptext", `Browser actions · ${shortcutLabel("⌘K")}`);
   badge.setAttribute("aria-label", "Browser actions");
   doc.getElementById("nav-bar-customization-target")?.appendChild(badge);
 
   const commands = Object.freeze([
-    { id: "new-tab", label: "New tab", keywords: "open search", contexts: ["browser"], shortcut: "⌘T", permissions: [] },
-    { id: "navigate", label: "Go to address", keywords: "url current tab", contexts: ["browser"], shortcut: "⌘L", permissions: [] },
-    { id: "commands", label: "Browser actions", keywords: "palette", contexts: ["browser"], shortcut: "⌘K", permissions: [] },
+    { id: "new-tab", label: "New tab", keywords: "open search", contexts: ["browser"], shortcut: shortcutLabel("⌘T"), permissions: [] },
+    { id: "navigate", label: "Go to address", keywords: "url current tab", contexts: ["browser"], shortcut: shortcutLabel("⌘L"), permissions: [] },
+    { id: "commands", label: "Browser actions", keywords: "palette", contexts: ["browser"], shortcut: shortcutLabel("⌘K"), permissions: [] },
     { id: "save-close", label: "Save and close", keywords: "keep find later", contexts: ["web-page"], shortcut: null, permissions: ["local-profile-write"] },
     { id: "undo-save-close", label: "Undo save and close", keywords: "reopen restore", contexts: ["browser"], shortcut: null, permissions: ["local-profile-write"] },
     { id: "ask", label: "Ask AI", keywords: "codex claude antigravity page help", contexts: ["web-page"], shortcut: null, permissions: ["provider-scope"] },
     { id: "identity", label: "Environment", keywords: "container account identity", contexts: ["browser"], shortcut: null, permissions: [] },
     { id: "engine", label: "Engine", keywords: "chromium firefox gecko", contexts: ["browser"], shortcut: null, permissions: [] },
-    { id: "settings", label: "Settings", keywords: "providers Jev", contexts: ["browser"], shortcut: "⌘,", permissions: [] },
+    { id: "settings", label: "Settings", keywords: "providers Jev", contexts: ["browser"], shortcut: shortcutLabel("⌘,"), permissions: [] },
   ]);
 
   function close(restoreFocus = true) {
@@ -142,7 +143,7 @@ export function installBrowserExperience(win, { engineProbe = null } = {}) {
         const matches = await saved.search(query, userContextId);
         if (current !== generation || !panelOpen) return;
         setOptions([...immediate, ...matches.map(item => ({ kind: "Saved", label: item.title || item.url,
-          detail: item.url, keys: "⌘⌫", keysLabel: "remove", savedId: item.id,
+          detail: item.url, keys: currentPlatform() === MAC ? "⌘⌫" : "Ctrl+Delete", keysLabel: "remove", savedId: item.id,
           run: () => openURL(item.url, "tab", item.userContextId) }))]);
       } catch { if (current === generation) showStatus("Saved results are unavailable; navigation still works."); }
     }
@@ -237,7 +238,7 @@ export function installBrowserExperience(win, { engineProbe = null } = {}) {
       }
       if (event.key === "Enter") { event.preventDefault(); activate().catch(() => showStatus("Could not open that destination.")); }
       if (event.key === "Escape") { event.preventDefault(); close(); }
-      if (event.key === "Delete" && event.metaKey) { event.preventDefault(); deleteSelected(); }
+      if (event.key === "Delete" && accelKey(event)) { event.preventDefault(); deleteSelected(); }
     });
   }
   function show(next) {
@@ -291,7 +292,7 @@ export function installBrowserExperience(win, { engineProbe = null } = {}) {
     event.preventDefault(); event.stopImmediatePropagation(); run(action).catch(() => {});
   }
   function onKey(event) {
-    if (!event.isTrusted || event.isComposing || !event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+    if (!event.isTrusted || event.isComposing || !accelOnly(event) || event.repeat) return;
     const action = event.key.toLowerCase() === "t" && !event.shiftKey ? "new-tab"
       : event.key.toLowerCase() === "l" && !event.shiftKey ? "navigate"
       : event.key.toLowerCase() === "k" && !event.shiftKey ? "commands"

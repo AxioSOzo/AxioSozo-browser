@@ -45,6 +45,7 @@
 import { CLIENT_IDS, CLIENT_LABELS as LABELS, answerArgs, isModel } from "./clients.sys.mjs";
 import { base64, oneLine, randomHex, startSupervised, trimSlashes } from "./process.sys.mjs";
 import { eventsOf, failureText, rateLimitText } from "./streams.sys.mjs";
+import { words } from "../overview/platform-words.mjs";
 
 export const AI_CLIENTS = CLIENT_IDS;
 export const CLIENT_LABELS = LABELS;
@@ -83,7 +84,7 @@ export function aiErrorText(code, client = null) {
   const name = CLIENT_LABELS[client] ?? "The assistant";
   switch (code) {
     case "AI_NOT_CONNECTED": return "AI is not connected to the Lab in this build. Nothing was sent.";
-    case "CLIENT_UNAVAILABLE": return `${name} is not available on this Mac right now. Nothing was sent.`;
+    case "CLIENT_UNAVAILABLE": return words(`${name} is not available on this Mac right now. Nothing was sent.`);
     case "UNSUPPORTED": return `${name} cannot do this here. Nothing was sent.`;
     case "PRIVATE_WINDOW": return "AI is never used in private windows.";
     case "ABORTED": return "Stopped.";
@@ -200,7 +201,7 @@ export function createCliAiBackend({ runtime, discovery, scratch, environment, p
       const status = await discovery.status(id, { check: true }).catch(() => null);
       if (status?.available && status.capabilities.includes("answer")) return id;
     }
-    throw new LabAiError("CLIENT_UNAVAILABLE", "no client is ready", { reason: "Neither Claude Code nor Codex is ready on this Mac." });
+    throw new LabAiError("CLIENT_UNAVAILABLE", "no client is ready", { reason: words("Neither Claude Code nor Codex is ready on this Mac.") });
   }
 
   async function runTurn(turn) {

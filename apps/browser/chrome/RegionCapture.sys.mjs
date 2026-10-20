@@ -34,6 +34,7 @@
 // exactly as described above. See docs/design/region-capture.md.
 import * as defaultCore from "./contexts/index.mjs";
 import { XHTML, defaultTimers, prefEnabled, webURL } from "./DevLoop.sys.mjs";
+import { MAC, currentPlatform } from "./overview/platform-words.mjs";
 
 export const REGION_STYLESHEET = "chrome://browser/content/axiosozo/region-capture.css";
 export const REGION_MENU_ITEM = "axiosozo-context-capture-area";
@@ -379,8 +380,10 @@ export function installRegionCapture(window, { services, adapter, engineOf = () 
     if (gesture?.phase === "select") return; // the select overlay handles its own mouse
     // The secondary button, or Control with the primary one: macOS (and a
     // trackpad without secondary click) sends that as a left press that asks
-    // for the context menu.
-    const secondary = event.button === 2 || (event.button === 0 && event.ctrlKey && !event.metaKey && !event.altKey);
+    // for the context menu. Elsewhere Control-click is an ordinary click
+    // (Linux: open the link in a new tab), so only the secondary button counts.
+    const secondary = event.button === 2 || (event.button === 0 && event.ctrlKey && !event.metaKey && !event.altKey
+      && currentPlatform(window) === MAC);
     if (!secondary || !prefEnabled(window, REGION_PREFS.rightDrag, true)) return;
     const browser = browserUnder(event);
     if (!browser || modalOpen()) return;

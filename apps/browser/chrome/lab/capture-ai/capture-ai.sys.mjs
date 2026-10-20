@@ -24,6 +24,7 @@
 import { registerCaptureExtension } from "../../RegionCapture.sys.mjs";
 import { CLIENT_LABELS, aiErrorText, outgoingText } from "../ai.sys.mjs";
 import { el, thinking } from "../kit.sys.mjs";
+import { words } from "../../overview/platform-words.mjs";
 
 export const EXTENSION_ID = "capture-ai";
 /** Before start-task's section and buttons. */
@@ -154,7 +155,7 @@ export async function pickAnswerClient(ai) {
     const status = (Array.isArray(statuses) ? statuses : []).find(item => item?.id === id);
     if (status?.available === true && NEEDED.every(need => status.capabilities?.includes(need))) return { client: id, reason: null };
   }
-  return { client: null, reason: "Neither Claude Code nor Codex is ready on this Mac. Nothing was sent." };
+  return { client: null, reason: words("Neither Claude Code nor Codex is ready on this Mac. Nothing was sent.") };
 }
 
 // ---- the bar section ----------------------------------------------------------------------

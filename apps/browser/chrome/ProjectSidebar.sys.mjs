@@ -21,6 +21,7 @@
 // command is shown before its first run (ProjectRunner approvals).
 import { displayState, localAddress, targetUrl } from "./ProjectRunner.sys.mjs";
 import { showAxioSozoToast } from "./AxioSozoToast.sys.mjs";
+import { words } from "./overview/platform-words.mjs";
 
 // Projects shown before the rest fold into "N more"; current and running
 // projects are always among them.
@@ -613,7 +614,7 @@ export function installProjectSidebar(window, ctx) {
     const { target } = view;
     const key = tkey(project.id, target.key);
     const item = el("li", { className: "axiosozo-pp-confirm", attrs: { role: "group", "aria-label": `Run ${target.name}?` } }, list);
-    el("p", { className: "axiosozo-pp-confirm-title", text: `Run ${target.name} on this Mac?` }, item);
+    el("p", { className: "axiosozo-pp-confirm-title", text: words(`Run ${target.name} on this Mac?`) }, item);
     el("code", { className: "axiosozo-pp-command", text: target.command }, item);
     el("p", { className: "axiosozo-pp-confirm-where", text: `in ${ctx.displayPath(target.cwd ? `${project.root}/${target.cwd}` : project.root)}. `
       + "It runs like a terminal command and stops when you stop it or quit AxioSozo. Only run commands you trust." }, item);

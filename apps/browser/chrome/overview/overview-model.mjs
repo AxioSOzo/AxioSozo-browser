@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
+import { words } from "./platform-words.mjs";
+
 // Pure, DOM-free logic for about:axiosozo. Loaded by the page and by Node
 // tests. It converts between editor form state and contract records
 // (site-rule-v1, context-v1 manifest). The services layer validates again
@@ -41,8 +43,8 @@ export const PROVIDER_TEXT = Object.freeze({
   openai: "Not available in this build: OpenAI has no consent setting yet and its decision format is not verified, so this rule sends nothing to OpenAI.",
 });
 // Product decision calls are NOT_AUTHORIZED in this build (decision-v1).
-export const DECISIONS_UNAVAILABLE = "Decision calls are not available in this build, so nothing leaves this Mac for judgement yet.";
-export const RULE_DATA_TEXT = `Data can only leave this Mac for Jev when Jev consent is on in AI & keys, a Jev key is stored in the macOS Keychain, and this rule has a level above Nothing and at least one effect; every call shows the outgoing-data indicator in the address bar. ${DECISIONS_UNAVAILABLE}`;
+export const DECISIONS_UNAVAILABLE = words("Decision calls are not available in this build, so nothing leaves this Mac for judgement yet.");
+export const RULE_DATA_TEXT = words(`Data can only leave this Mac for Jev when Jev consent is on in AI & keys, a Jev key is stored in the macOS Keychain, and this rule has a level above Nothing and at least one effect; every call shows the outgoing-data indicator in the address bar. ${DECISIONS_UNAVAILABLE}`);
 export const EFFECT_TEXT = Object.freeze({
   nudge: "Nudge: a small notice you can dismiss.",
   suggest_leave: "Suggest leaving: offers to save the page and close the tab.",
@@ -54,17 +56,17 @@ export const OVERRIDE_TEXT = Object.freeze({
   delay_10s: "Wait 10 seconds before continuing",
 });
 // Exactly the conditions SiteRuleRuntime and the provider host enforce; keep in step with them.
-export const JEV_STATEMENT = "Jev is called only when all three are true: you turned on consent below, a Jev key is stored in the macOS Keychain, and a site rule has an observation level above None and at least one effect. Otherwise site rules run on this machine only (limits and allowed hours) and nothing is sent. Consent is off until you turn it on.";
+export const JEV_STATEMENT = words("Jev is called only when all three are true: you turned on consent below, a Jev key is stored in the macOS Keychain, and a site rule has an observation level above None and at least one effect. Otherwise site rules run on this machine only (limits and allowed hours) and nothing is sent. Consent is off until you turn it on.");
 export const JEV_SENT_TEXT = "What leaves this machine on each Jev call: the page origin and path (never the query or fragment), the page title, the rule's id, instruction and effects, the context type, today's time on the site and the length of the current visit. Only for the tab in front of a focused, non-private window, within the hourly limit, and only while the outgoing-data indicator is shown in the address bar.";
 
 /** Key status line for the Jev settings. The Overview cannot read the Keychain;
  * keyPresent is true/false only when a trusted source reported it. */
 export function jevKeyNote({ keyEntryEnabled = false, keyPresent } = {}) {
-  if (keyPresent === true) return "A Jev key is stored in the macOS Keychain, so Jev is called whenever consent is on and a rule allows it.";
-  if (keyPresent === false) return "No Jev key is stored in the macOS Keychain, so no Jev calls are made even with consent on.";
+  if (keyPresent === true) return words("A Jev key is stored in the macOS Keychain, so Jev is called whenever consent is on and a rule allows it.");
+  if (keyPresent === false) return words("No Jev key is stored in the macOS Keychain, so no Jev calls are made even with consent on.");
   return keyEntryEnabled
-    ? "This page cannot see whether a Jev key is stored in the macOS Keychain. If one is, Jev is called whenever consent is on and a rule allows it."
-    : "Jev key entry is not available in this build. A Jev key that is already stored in the macOS Keychain is still used whenever consent is on and a rule allows it.";
+    ? words("This page cannot see whether a Jev key is stored in the macOS Keychain. If one is, Jev is called whenever consent is on and a rule allows it.")
+    : words("Jev key entry is not available in this build. A Jev key that is already stored in the macOS Keychain is still used whenever consent is on and a rule allows it.");
 }
 
 const LOOPBACK_SERVICE_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -73,10 +75,10 @@ export function isCheckedService(url) {
   try { return LOOPBACK_SERVICE_HOSTS.has(new URL(url).hostname); } catch { return false; }
 }
 export function serviceStatusText(service, status) {
-  if (!isCheckedService(service?.url)) return "not checked (only services on this Mac are checked)";
+  if (!isCheckedService(service?.url)) return words("not checked (only services on this Mac are checked)");
   return status === "up" || status === "down" ? status : "not checked";
 }
-export const SERVICES_HELP = "Check services opens one connection to the declared port on this Mac (localhost, 127.0.0.1 or [::1]) and sends nothing. Remote services are never contacted.";
+export const SERVICES_HELP = words("Check services opens one connection to the declared port on this Mac (localhost, 127.0.0.1 or [::1]) and sends nothing. Remote services are never contacted.");
 
 const HOST_PATTERN = /^(\*\.[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+|[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})*)$/;
 const TIME_OF_DAY = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -958,7 +960,7 @@ export function displayAddress(url) {
 
 export const STATUS_TEXT = Object.freeze({ up: "Running", down: "Not running", checking: "Checking…",
   unchecked: "Not checked yet", unknown: "Could not check", remote: "Not checked" });
-export const STATUS_NOTE = "Only servers on this Mac are checked, with one connection to the declared port. Preview and production addresses are never contacted.";
+export const STATUS_NOTE = words("Only servers on this Mac are checked, with one connection to the declared port. Preview and production addresses are never contacted.");
 
 // The declared local service an environment's address points at (same port; its app first).
 function serviceForEnvironment(project, env) {
@@ -1231,7 +1233,7 @@ export function agentEndpointView(endpoint, { error = null } = {}) {
   const disable = { kind: "disable", label: "Turn off" };
   const reason = typeof endpoint.reason === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(endpoint.reason) ? endpoint.reason : null;
   if (endpoint.state === "listening") {
-    return view("ok", "On", "Agents on this Mac can report to AxioSozo until you turn this off or quit AxioSozo.",
+    return view("ok", "On", words("Agents on this Mac can report to AxioSozo until you turn this off or quit AxioSozo."),
       { action: disable, listening: true });
   }
   // Asked to start but not begun yet (projects are read first): starting too.
@@ -1317,8 +1319,8 @@ export function briefView(brief) {
 // authorization from an installed CLI, a version, a key or an earlier result.
 export const UNDERSTAND_CLIS = Object.freeze(["claude-code", "codex"]);
 export const UNDERSTAND_INTRO = Object.freeze({
-  fixture: "Synthetic test mode: a stand-in for your own Claude Code or Codex reads this folder on this Mac and writes a brief here. No assistant or provider is contacted. Switching tabs or leaving this page stops it.",
-  production: "Your own Claude Code or Codex could read this folder on this Mac and write a brief here. Reading is not available in this build, so nothing is sent.",
+  fixture: words("Synthetic test mode: a stand-in for your own Claude Code or Codex reads this folder on this Mac and writes a brief here. No assistant or provider is contacted. Switching tabs or leaving this page stops it."),
+  production: words("Your own Claude Code or Codex could read this folder on this Mac and write a brief here. Reading is not available in this build, so nothing is sent."),
   unknown: "Reading this project is not available right now. Nothing is sent.",
 });
 export const BRIEF_EMPTY_FIXTURE = "No brief yet. Read the project below to write one; it shows here once it is saved.";
@@ -1575,7 +1577,7 @@ const NOT_VERIFIED = "Answers through this browser have not been verified yet.";
 /** One sentence on how the AI & keys cards were read (ProviderStatus: an offline capability check, or installation metadata). */
 export function providerSummary(status) {
   if (!status) return "Checking which assistants are installed…";
-  if (status.checks === "ok") return `Checked on this Mac without sending anything: each assistant ran offline in the browser sandbox. ${NOT_VERIFIED}`;
+  if (status.checks === "ok") return words(`Checked on this Mac without sending anything: each assistant ran offline in the browser sandbox. ${NOT_VERIFIED}`);
   if (status.discovery !== "ok") return "Could not read which assistants are installed. No client was started.";
   if (status.checks === "unavailable") return `Could not check the assistants; showing installation details only. Nothing was sent. ${NOT_VERIFIED}`;
   return `Read from installation metadata only: no assistant was started and nothing was sent. ${NOT_VERIFIED}`;
@@ -1584,9 +1586,9 @@ export function providerSummary(status) {
 /** Can the Jev key form be used, and why not. */
 export function jevKeyForm(jev, { isPrivate = false } = {}) {
   if (isPrivate) return { enabled: false, reason: "Keys cannot be changed from a private window." };
-  if (!jev) return { enabled: false, reason: "Checking the macOS Keychain…" };
+  if (!jev) return { enabled: false, reason: words("Checking the macOS Keychain…") };
   if (!jev.keyEntryEnabled) return { enabled: false, reason: "Jev key entry is turned off in this build (axiosozo.jev.keyEntry.enabled)." };
-  if (jev.key === "unavailable") return { enabled: false, reason: "The Keychain helper is not available in this build." };
+  if (jev.key === "unavailable") return { enabled: false, reason: words("The Keychain helper is not available in this build.") };
   return { enabled: true, reason: null, canRemove: jev.key === "stored" || jev.key === "unknown" };
 }
 
@@ -1599,16 +1601,16 @@ export function keychainErrorText(code) {
     case "KEY_ENTRY_DISABLED":
     case "JEV_KEY_ENTRY_DISABLED": return "Key not stored. Adding a key is turned off in this build.";
     case "INVALID_PROVIDER": return "That provider is not supported. Nothing was changed.";
-    case "KEYCHAIN_HELPER_UNAVAILABLE": return "The Keychain helper was not available or did not finish, so the change could not be confirmed.";
-    case "KEYCHAIN_REFUSED": return "The macOS Keychain refused the change. Unlock the Keychain and try again.";
-    case "HELPER_TIMEOUT": return "The macOS Keychain did not respond in time, so the change could not be confirmed.";
-    case "HELPER_OUTPUT_LIMIT": return "The Keychain helper answered unexpectedly, so the change could not be confirmed.";
+    case "KEYCHAIN_HELPER_UNAVAILABLE": return words("The Keychain helper was not available or did not finish, so the change could not be confirmed.");
+    case "KEYCHAIN_REFUSED": return words("The macOS Keychain refused the change. Unlock the Keychain and try again.");
+    case "HELPER_TIMEOUT": return words("The macOS Keychain did not respond in time, so the change could not be confirmed.");
+    case "HELPER_OUTPUT_LIMIT": return words("The Keychain helper answered unexpectedly, so the change could not be confirmed.");
     case "SETTINGS_CLOSED": return "Cancelled before it finished, so the change could not be confirmed.";
     case "BUSY": return "A change to this key is still running. Wait for it to finish.";
     case "PRIVATE_WINDOW": return "Keys are managed from a normal window, never a private one.";
     case "NO_WINDOW": return "Open this page in a browser window first.";
-    case "DOCUMENT_GONE": return "This page changed before the Keychain answered, so the change could not be confirmed. Check again.";
-    default: return "The Keychain change could not be confirmed.";
+    case "DOCUMENT_GONE": return words("This page changed before the Keychain answered, so the change could not be confirmed. Check again.");
+    default: return words("The Keychain change could not be confirmed.");
   }
 }
 
@@ -1650,7 +1652,7 @@ export function decisionKeyCard(entry) {
 export function keyRefusalText(code) {
   if (code === "PRIVATE_WINDOW" || code === "NO_WINDOW" || code === "DOCUMENT_GONE") return keychainErrorText(code);
   if (code === "NOT_CONNECTED" || code === "SENDER_REJECTED" || code === "ACTOR_ERROR") return "This page is not connected to AxioSozo.";
-  return "The macOS Keychain could not be checked from this page. Use Check again.";
+  return words("The macOS Keychain could not be checked from this page. Use Check again.");
 }
 
 /** What one provider's key form shows and allows. Storing follows the
@@ -1661,10 +1663,10 @@ export function decisionKeyView(provider, card, { busy = null, refused = null } 
   const stored = card?.key === "stored";
   const canStore = !refused && card?.canStore === true;
   const canRemove = !refused && card?.canRemove === true;
-  let help = `Stored only in the macOS Keychain; this page never shows it again. Storing sends nothing to ${label} and does not turn on consent.`;
+  let help = words(`Stored only in the macOS Keychain; this page never shows it again. Storing sends nothing to ${label} and does not turn on consent.`);
   if (refused) help = "";
-  else if (!card) help = "Checking the macOS Keychain…";
-  else if (card.state === "unavailable") help = "The Keychain helper is not available in this build.";
+  else if (!card) help = words("Checking the macOS Keychain…");
+  else if (card.state === "unavailable") help = words("The Keychain helper is not available in this build.");
   else if (!card.keyEntryEnabled) help = `Adding ${provider === "openai" ? "an" : "a"} ${label} key is turned off in this build (${KEY_PREFS[provider]}).${canRemove ? " You can still remove the stored key." : ""}`;
   return {
     tagLabel: busy ? KEY_WORKING[busy] : refused ? "Not available here" : card?.stateLabel ?? KEY_WORKING.check,
@@ -1683,8 +1685,8 @@ export function decisionKeyView(provider, card, { busy = null, refused = null } 
 export function keyChangedText(provider, change) {
   const label = PROVIDER_LABELS[provider];
   return change === "stored"
-    ? `${label} key stored in the macOS Keychain. Nothing was sent and consent did not change.`
-    : `${label} key removed from the macOS Keychain.`;
+    ? words(`${label} key stored in the macOS Keychain. Nothing was sent and consent did not change.`)
+    : words(`${label} key removed from the macOS Keychain.`);
 }
 // These failures leave the outcome unknown, so presence is read again.
 export const KEY_RECHECK = Object.freeze(["KEYCHAIN_HELPER_UNAVAILABLE", "KEYCHAIN_REFUSED", "HELPER_TIMEOUT", "HELPER_OUTPUT_LIMIT"]);
@@ -1814,7 +1816,7 @@ export const WATCH_INTERVALS = Object.freeze([1, 2, 5, 10, 15, 30]);
 export const WATCH_DEFAULT_INTERVAL = 5;
 export const WATCH_LIMITS = Object.freeze({ question: 500, label: 80, outcomesMin: 2, outcomesMax: 6, url: 2048, records: 256 });
 export const WATCH_NOTE = "A watch asks one question about one page and answers with one of your own answers. You create every watch yourself; nothing else does.";
-export const WATCH_LIVE_NOTE = "Live checks are not authorized in this build. Check now records that nothing was checked, and nothing leaves this Mac.";
+export const WATCH_LIVE_NOTE = words("Live checks are not authorized in this build. Check now records that nothing was checked, and nothing leaves this Mac.");
 export const WATCH_CONSENT_TEXT = "Allow this watch to send what it observes to the provider when live checks become available. Nothing is sent in this build.";
 const WATCH_CONTROL_CHARS = /[\u0000-\u001f\u007f]/u;
 const WATCH_OUTCOME_ID = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -1975,7 +1977,7 @@ const WATCH_ACTION_TEXT = Object.freeze({
   // Neither of these knows whether the change reached the saved list.
   DOCUMENT_GONE: "The page changed before that finished, so it cannot be confirmed here. The list shows what AxioSozo has now.",
   NO_WINDOW: "Watches are managed from a normal browser window.", PRIVATE_WINDOW: "Watches are managed from a normal browser window.",
-  STORAGE_ERROR: "Saving the watches on this Mac failed, so the change is not confirmed. The list shows what AxioSozo has now.",
+  STORAGE_ERROR: words("Saving the watches on this Mac failed, so the change is not confirmed. The list shows what AxioSozo has now."),
   INVALID_STORE: "The saved watches could not be read, so nothing was changed.",
   CLOSED: "Watches are closing with AxioSozo.", NOTHING_TO_RETRY: "There was nothing left to retry.",
 });
@@ -1988,7 +1990,7 @@ export function watchActionText(code) {
 export function watchReportText(report) {
   if (report?.code === "NOT_AUTHORIZED") return "Recorded: not checked, because live checks are not authorized in this build. Nothing was sent.";
   const sent = report?.data_sent === true
-    ? report.disclosure === "conservative" ? "Data may have left this Mac." : "Data was sent." : "Nothing was sent.";
+    ? report.disclosure === "conservative" ? words("Data may have left this Mac.") : "Data was sent." : "Nothing was sent.";
   const what = report?.code === "APPLIED" ? "Checked; the answer is shown above."
     : WATCH_ACTION_TEXT[report?.code] ?? (WATCH_REASON_TEXT[report?.reason] ? `${WATCH_REASON_TEXT[report.reason]}.` : "The check did not finish.");
   return `${what} ${sent}`;
@@ -2016,7 +2018,7 @@ export function watchStatusView(status, { error = null } = {}) {
     notice: failure ? { action: failure.action ?? null, code: failure.code, watchId: failure.watch_id ?? null,
       tone: WATCH_NOTICES.includes(failure.code) ? "info" : "warn", text: watchActionText(failure.code) } : null,
     busy: status.busy === true,
-    disclosure: status.pending_disclosure ? "Data may have left this Mac for the running check; its answer has not arrived."
+    disclosure: status.pending_disclosure ? words("Data may have left this Mac for the running check; its answer has not arrived.")
       : status.last?.data_sent === true && status.last?.disclosure === "conservative"
         ? "The last check may have sent data to the provider before it ended." : null,
   };
@@ -2034,7 +2036,7 @@ export const SAFETY_OUTCOME_LABELS = Object.freeze({
   RESTORED: "My earlier settings are back", EXTERNAL_CHANGED: "I changed them myself", ACCEPTED: "Keep them as they are now" });
 export const SAFETY_OUTCOMES = Object.freeze(["RESTORED", "EXTERNAL_CHANGED", "ACCEPTED"]);
 const SAFETY_REASON_TEXT = Object.freeze({
-  PREF_LOCKED: "DNS over HTTPS is locked by a policy on this Mac, so AxioSozo changed nothing.",
+  PREF_LOCKED: words("DNS over HTTPS is locked by a policy on this Mac, so AxioSozo changed nothing."),
   EXTERNAL_DOH_CONFIGURATION: "Another DNS over HTTPS setup is in place, so AxioSozo changed nothing.",
   PREF_READ_FAILED: "The DNS settings could not be read, so nothing was changed.",
   PREFS_CHANGED: "The DNS settings changed meanwhile, so AxioSozo left them as they are.",
@@ -2161,11 +2163,11 @@ export function labNeedsClients(state) {
 export function labNeedsText(experiment) {
   const names = labClients(experiment?.needs).map(need => LAB_CLIENT_LABELS[need]);
   const prefix = experiment?.graduated ? "" : "Experimental. ";
-  return names.length ? `${prefix}Uses ${orList(names)} on this Mac when you click.` : `${prefix}Uses no AI.`;
+  return names.length ? words(`${prefix}Uses ${orList(names)} on this Mac when you click.`) : `${prefix}Uses no AI.`;
 }
 
 export const LAB_CLIENTS_TITLE = "Your assistants";
-export const LAB_CLIENTS_HELP = "The Lab runs Claude Code, Codex and Antigravity as installed on this Mac, whatever their version, after checking the options it uses. Checking starts each one without sending anything.";
+export const LAB_CLIENTS_HELP = words("The Lab runs Claude Code, Codex and Antigravity as installed on this Mac, whatever their version, after checking the options it uses. Checking starts each one without sending anything.");
 
 /** One assistant's status as the Lab shows it: a dot, a short tag and its sentence. */
 function labClientView(id, status, { checking = false } = {}) {
@@ -2287,7 +2289,7 @@ export function labErrorText(code) {
 export const TODAY_GROUP_TITLES = Object.freeze({ waiting: "Waiting for you", failed: "Failed", finished: "Finished", due: "Due" });
 /** The dot of a line (the overview's dot words; "due" is the accent). */
 export const TODAY_DOTS = Object.freeze({ waiting: "warn", failed: "down", finished: "up", due: "due" });
-export const TODAY_NOTE = "Composed on this Mac from your agents, servers and errands, without AI. Nothing was sent. Close this tab when you are done.";
+export const TODAY_NOTE = words("Composed on this Mac from your agents, servers and errands, without AI. Nothing was sent. Close this tab when you are done.");
 export const TODAY_SUGGEST_HELP = "Asks your own assistant once: Claude Code, or Codex when Claude Code is not ready. The lines above go to it, without addresses.";
 export const TODAY_OFF = "Today is a Lab experiment that is off. Turn it on under Lab.";
 const TODAY_ORDER = Object.freeze(["waiting", "failed", "finished", "due"]);
