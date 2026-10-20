@@ -22,6 +22,14 @@ memfd frames ON; frame worker ON (memfd only, probe-gated); main-thread upload B
 (probe-gated, imagedata fallback); native receiver OFF (pref, needs this branch's app build).
 
 ## Runs so far
+- **linux-perf 39355570329 (defaults vs cloud/integration, 3 reps × 2 rounds, 48/48 PASS)**: 2× Zen parent CPU
+  −35…−38 % (both engines), 2× p99 −20…−26 %, key → frame −33…−43 % except WebKit 2× (+2…4 %, WPE-bound);
+  soak with defaults PASS (30 cycles/10 min, no RSS trend). Tables in docs/perf/pixel-path.md.
+- linux-webkit-zen 39355570147 (9bf9fea, worker default): E2E PASS (launch, chrome, round trip, host failure,
+  three engines) with transport memfd + upload worker.
+- linux-cef-host 39355570129 (9bf9fea): x86_64 + arm64 PASS, macOS compile PASS (zen-gui-chromium known setup failure).
+- linux-perf-build 39350827997 (cold, daf88cf): Zen build FAILED in mach build (error not captured: the
+  evidence error list filled with Rust lint lines); rebuild with a C/C++/IDL error capture: 39360822222.
 - linux-perf 39352857399: presenter bench (VideoFrame identical output, Firefox 158 damage band 0.60 → 0.12 ms);
   A/B base/cand/worker/imagedata both engines — worker: 2× parent CPU −40 %, Chromium key → frame −44 %
   (tables in docs/perf/pixel-path.md).
