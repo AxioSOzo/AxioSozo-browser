@@ -115,6 +115,11 @@ class Soak(zen_bench.ZenBench):
         out['scroll_load'] = self.engine_load(self.assign(server, 'scroll'), 'scroll')
         out['scroll'] = self.engine_window(0, during=self.wheel)
         out['static_load'] = self.engine_load(self.assign(server, 'static'), 'static')
+        # Pixel content of the engine view on screen (the static page: dark text on a light page),
+        # so a path that delivers frames but shows black (cef-feel-2's memfd regression) fails.
+        box = self.chrome_script(self.ENGINE_VIEW_BOX)
+        shot = self.screenshot(f'soak-{engine}-static')
+        out['pixels'] = {**gui_test.view_pixels(shot, [box['x'], box['y'], box['w'], box['h']]), 'view_engine': box['engine']}
         out['key_load'] = self.engine_load(self.assign(server, 'text'), 'text')
         out['key'] = self.engine_key_latency(self.args.samples)
         out['diagnostics'] = self.chrome_script(DIAGNOSTICS)
@@ -142,6 +147,9 @@ class Soak(zen_bench.ZenBench):
             problems.append(f'cycle {cycle} {engine}: transport {d.get("frameTransport")} != {self.args.expect_transport}')
         if d.get('memfdFallback'):
             problems.append(f'cycle {cycle} {engine}: memfd fallback {d["memfdFallback"]}')
+        pixels = record.get('pixels') or {}
+        if not pixels.get('content') or pixels.get('view_engine') != engine:
+            problems.append(f'cycle {cycle} {engine}: no page content on screen {pixels}')
         if record['key']['keys_without_frame']:
             problems.append(f'cycle {cycle} {engine}: {record["key"]["keys_without_frame"]} keys without a frame')
 

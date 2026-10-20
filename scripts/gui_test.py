@@ -185,6 +185,57 @@ def xwd_to_png(data):
             + chunk(b'IDAT', zlib.compress(bytes(rows), 9)) + chunk(b'IEND', b''))
 
 
+def read_harness_png(path):
+    """(width, height, raw) of a harness PNG (xwd_to_png: 8-bit RGB, filter 0 on every row)."""
+    data = Path(path).read_bytes()
+    width = height = 0
+    idat = b''
+    at = 8
+    while at < len(data):
+        size, = struct.unpack('>I', data[at:at + 4])
+        kind = data[at + 4:at + 8]
+        if kind == b'IHDR':
+            width, height = struct.unpack('>II', data[at + 8:at + 16])
+        elif kind == b'IDAT':
+            idat += data[at + 8:at + 8 + size]
+        at += 12 + size
+    return width, height, zlib.decompress(idat)
+
+
+def view_pixels(path, box, step=2):
+    """Pixel content of box [x, y, w, h] (device pixels) of a root-window screenshot.
+
+    Guards against a view that "renders" without content (the Chromium memfd black frames of
+    cef-feel-2): `black` is the share of near-black pixels, `light`/`dark` the shares of
+    luminance > 180 / < 110, `text_rows` the number of 8-px row bands holding dark pixels.
+    `content` is True when the view is not mostly black and shows text-like dark strokes on
+    a lighter page over several lines (every AxioSozo test fixture: dark text on a light page).
+    """
+    width, height, raw = read_harness_png(path)
+    stride = width * 3 + 1
+    x0, y0 = max(0, int(box[0])), max(0, int(box[1]))
+    x1, y1 = min(width, int(box[0] + box[2])), min(height, int(box[1] + box[3]))
+    total = black = light = dark = 0
+    bands = set()
+    for y in range(y0, y1, step):
+        row = raw[y * stride + 1:(y + 1) * stride]
+        for x in range(x0, x1, step):
+            r, g, b = row[x * 3:x * 3 + 3]
+            luma = (299 * r + 587 * g + 114 * b) // 1000
+            total += 1
+            black += r + g + b < 24
+            light += luma > 180
+            if luma < 110:
+                dark += 1
+                bands.add((y - y0) // 8)
+    if not total:
+        return {'black': None, 'light': None, 'dark': None, 'text_rows': 0, 'content': False, 'box': [x0, y0, x1 - x0, y1 - y0]}
+    out = {'black': round(black / total, 4), 'light': round(light / total, 4), 'dark': round(dark / total, 4),
+           'text_rows': len(bands), 'box': [x0, y0, x1 - x0, y1 - y0]}
+    out['content'] = out['black'] < 0.5 and out['light'] >= 0.3 and 0.0005 <= out['dark'] <= 0.4 and out['text_rows'] >= 3
+    return out
+
+
 def which(name):
     return shutil.which(name, path=os.environ.get('PATH', '') + ':/usr/bin:/bin')
 
@@ -305,6 +356,28 @@ class Harness:
             except (MarionetteError, OSError):
                 pass
         time.sleep(0.5)
+
+    ENGINE_VIEW_BOX = """
+const stack = gBrowser.selectedBrowser.parentNode;
+const overlay = stack?.querySelector?.('[data-axiosozo-cef], [data-axiosozo-engine-view]');
+const canvas = overlay && overlay.style.display !== 'none' ? overlay.querySelector('canvas') : null;
+const r = (canvas ?? gBrowser.selectedBrowser).getBoundingClientRect(), s = window.devicePixelRatio;
+return {x: (mozInnerScreenX + r.left) * s, y: (mozInnerScreenY + r.top) * s, w: r.width * s, h: r.height * s,
+        engine: canvas ? (overlay.getAttribute('data-axiosozo-engine-view') || 'chromium') : 'gecko'};
+"""
+
+    def assert_view_content(self, shot, gate=None, engine=None):
+        """Pixel-content gate on the selected tab's engine view in a root screenshot: not black,
+        light page with text-like strokes (view_pixels). Records the measurement; raises on failure."""
+        box = self.chrome_script(self.ENGINE_VIEW_BOX)
+        pixels = view_pixels(shot, [box['x'], box['y'], box['w'], box['h']])
+        pixels.update(engine=box['engine'], screenshot=Path(shot).name)
+        self.result.setdefault('pixel_checks', []).append(pixels)
+        if engine and box['engine'] != engine:
+            raise AssertionError(f'pixel check expected a {engine} view, found {box["engine"]}: {pixels}')
+        if not pixels['content']:
+            raise AssertionError(f'{gate or "view"}: no page content in the {box["engine"]} view of {Path(shot).name}: {pixels}')
+        return pixels
 
     def screenshot(self, name, settle=True):
         if settle and self.marionette and self.browser is not None and self.browser.poll() is None:
@@ -448,8 +521,8 @@ class Harness:
         shown = self.engine.show(self, self.fixture.url)
         rendered = self.engine.assert_rendered(self, 'AxioSozo fixture')
         self.wait(lambda: 'AxioSozo fixture' in self.window_title(), 'X11 window title showing the fixture')
-        self.screenshot('fixture-' + self.engine.name)
-        return {'fixture': self.fixture.identity(), 'shown': shown, 'rendered': rendered,
+        pixels = self.assert_view_content(self.screenshot('fixture-' + self.engine.name), 'fixture', engine=self.engine.name)
+        return {'fixture': self.fixture.identity(), 'shown': shown, 'rendered': rendered, 'pixels': pixels,
                 'x11_window_title': self.window_title()}
 
     def scenario_input(self):

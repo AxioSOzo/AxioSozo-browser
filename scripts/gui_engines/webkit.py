@@ -233,7 +233,7 @@ class WebKitEngine(GuiEngine):
         first = self.native(harness)
         steps['webkit']['native'] = first
         harness.wait(lambda: 'AxioSozo fixture' in harness.window_title(), 'X11 title from the WebKit page')
-        harness.screenshot('02-webkit')
+        steps['webkit']['pixels'] = harness.assert_view_content(harness.screenshot('02-webkit'), 'webkit_e1', engine='webkit')
 
         # Type into the field (click focuses it in WebKit), then click Increment.
         point = self.screen_point(harness, '#text')
@@ -392,14 +392,14 @@ class WebKitEngine(GuiEngine):
         steps['webkit'] = self.tab_menu_switch(harness, 'Open in WebKit', '21-three-to-webkit')
         steps['webkit']['native'] = {k: v for k, v in self.assert_rendered(harness, 'AxioSozo fixture').items()
                                      if k in ('engineOf', 'overlay', 'tabEngineAttribute')}
-        harness.screenshot('21-three-webkit')
+        steps['webkit']['pixels'] = harness.assert_view_content(harness.screenshot('21-three-webkit'), 'three_engines_webkit', engine='webkit')
         steps['gecko_2'] = self.tab_menu_switch(harness, 'Open in Firefox', '22-three-to-gecko')
         self.wait_gecko_again(harness, 'Gecko after WebKit')
         steps['gecko_2']['rendered'] = GECKO.assert_rendered(harness, 'AxioSozo fixture')['tab']
         harness.screenshot('22-three-gecko')
         steps['chromium'] = self.tab_menu_switch(harness, 'Open in Chromium', '23-three-to-chromium')
         steps['chromium']['rendered'] = CHROMIUM.assert_rendered(harness, 'AxioSozo fixture')
-        harness.screenshot('23-three-chromium')
+        steps['chromium']['pixels'] = harness.assert_view_content(harness.screenshot('23-three-chromium'), 'three_engines_chromium', engine='chromium')
         steps['gecko_3'] = self.tab_menu_switch(harness, 'Open in Firefox', '24-three-to-gecko')
         harness.wait(lambda: (lambda s: s if s['engineOf'] == 'gecko' and s['geckoVisibility'] != 'hidden' else None)(
             self.diagnostics(harness)), 'Gecko after Chromium')

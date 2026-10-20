@@ -590,14 +590,15 @@ class CEFZenHarness(gui_test.Harness):
         time.sleep(1)
         shot = self.screenshot('02-chromium')
         black = self.view_black(shot, state)
+        pixels = self.view_content(shot, state)
         self.gate('window_title', 'PASS', x11_title=self.window_title())
-        self.gate('e1_render_in_content_area', 'PASS' if black is not None and black < 0.5 else 'FAIL', screenshot='02-chromium.png',
+        self.gate('e1_render_in_content_area', 'PASS' if pixels.get('content') else 'FAIL', screenshot='02-chromium.png', pixels=pixels,
                   seconds=seconds, surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'),
                   black_fraction=black, frame_path={k: native.get(k) for k in ('frameUpload', 'nativeReceiver', 'memfdFallback',
                                                                               'frameTransport', 'frameWorker', 'frameUploadError',
                                                                               'framePixels')})
-        if black is None or black >= 0.5:
-            raise AssertionError(f'the Chromium view is {black} black in 02-chromium.png; frame path {native}')
+        if not pixels.get('content'):
+            raise AssertionError(f'no page content in the Chromium view of 02-chromium.png ({pixels}); frame path {native}')
         return {'menu': menu, 'seconds': seconds, 'gecko_page': gecko, 'state': {k: state[k] for k in
                 ('engine', 'mode', 'view', 'geckoHidden', 'geckoURL', 'overlay', 'label', 'tabs', 'focus')},
                 'native': native}
@@ -782,6 +783,16 @@ class CEFZenHarness(gui_test.Harness):
             raise AssertionError(f'AT-SPI: {found}, press {before}->{after}: {pressed.get("pressed")}')
         return {'found': found, 'chromium': chromium, 'gecko': {'root': gecko.get('root'), 'nodes': gecko.get('nodes', [])[:80]},
                 'pressed': pressed.get('pressed'), 'focused': focused}
+
+    def view_content(self, shot, state=None):
+        """gui_test.view_pixels of the engine view (not black, text visible); {} when unreadable."""
+        view = (state or self.web())['view']
+        scale = self.chrome_script('return window.devicePixelRatio;')
+        try:
+            return gui_test.view_pixels(shot, [view['x'] * scale, view['y'] * scale, view['w'] * scale, view['h'] * scale])
+        except (OSError, ValueError, KeyError) as error:
+            self.result.setdefault('notes', []).append(f'view_pixels: {error}')
+            return {}
 
     def view_black(self, shot, state=None):
         view = (state or self.web())['view']
@@ -1920,7 +1931,8 @@ class CEFZenHarness(gui_test.Harness):
         state = self.wait(lambda: (lambda s: s if s and not s['pending'] and (s['native'] or {}).get('frames', 0) >= 1
                                    and str(s['tabLabel']).startswith('AxioSozo fixture') else None)(self.fixture_state()),
                           'Chromium frames of the fixture', timeout=60)
-        self.screenshot('f02-chromium')
+        shot = self.screenshot('f02-chromium')
+        pixels = self.assert_view_content(shot, 'fixture_e1', engine='chromium')
         # Targets from the hidden (same-size) Gecko copy of the fixture.
         point = self.element_screen_point('#text')
         self.xdotool('mousemove', '--sync', *point)
@@ -1937,7 +1949,7 @@ class CEFZenHarness(gui_test.Harness):
         self.screenshot('f04-page2')
         back = self.click_toolbar('back-button', 'toolbar Back for the fixture')
         page1 = self.wait(lambda: (lambda t: t if 'page=1' in t else None)(self.fixture_state()['tabLabel']), 'back to page 1')
-        self.gate('fixture_e1', 'PASS', screenshots=['f02-chromium.png', 'f03-typed.png', 'f04-page2.png'],
+        self.gate('fixture_e1', 'PASS', screenshots=['f02-chromium.png', 'f03-typed.png', 'f04-page2.png'], pixels=pixels,
                   native={k: state['native'].get(k) for k in ('renderPath', 'surface', 'frames', 'firstFrameMilliseconds')})
         # The fixture probe's "Return to Gecko" chip stays in Zen's toolbar, never over the page.
         geometry = self.chrome_script(self.BADGE_GEOMETRY)
