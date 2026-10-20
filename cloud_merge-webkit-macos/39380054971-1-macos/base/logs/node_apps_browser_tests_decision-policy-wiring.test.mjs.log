@@ -1,0 +1,40 @@
+AxioSozo: decision shutdown not registered; decisions stay unavailable ServicesError: SHUTDOWN_OWNER_UNAVAILABLE
+    at fail (file:///Users/runner/work/_temp/base/apps/browser/chrome/AxioSozoServices.sys.mjs:141:30)
+    at AxioSozoServices.getDecisionRuntime (file:///Users/runner/work/_temp/base/apps/browser/chrome/AxioSozoServices.sys.mjs:1894:58)
+    at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/decision-policy-wiring.test.mjs:280:32)
+    at Test.runInAsyncScope (node:async_hooks:228:14)
+    at Test.run (node:internal/test_runner/test:1118:25)
+    at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+    at Test.postRun (node:internal/test_runner/test:1247:19)
+    at Test.run (node:internal/test_runner/test:1175:12)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+  code: 'SHUTDOWN_OWNER_UNAVAILABLE'
+}
+AxioSozo: decision shutdown not registered; decisions stay unavailable Error: shutdown phase already passed
+    at Object.onShutdown (file:///Users/runner/work/_temp/base/apps/browser/tests/decision-policy-wiring.test.mjs:55:84)
+    at AxioSozoServices.getDecisionRuntime (file:///Users/runner/work/_temp/base/apps/browser/chrome/AxioSozoServices.sys.mjs:1895:20)
+    at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/decision-policy-wiring.test.mjs:280:32)
+    at async Test.run (node:internal/test_runner/test:1125:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+✔ initial authority is unready at limit 0; the first runtime call hydrates the complete rule store; one frozen interface (2.49475ms)
+✔ a failed read publishes nothing; the next revalidation (another window's runtime call) publishes the complete store (0.627542ms)
+✔ a write invalidates before its first await: new unready revision, every lease revoked, listeners told; only its settling hydrates (0.769292ms)
+✔ a superseded or pending hydration never publishes; the latest complete one does (1.371625ms)
+✔ listeners: synchronous frozen snapshots, owned unsubscribe per registration, and a reentrant listener cannot restore authority (0.512708ms)
+✔ a rejected write after a ready 30 stays unready at limit 0 (never the cached 30 or the attempted 0); revalidation waits for a successful write (0.514708ms)
+✔ a write that fails while a later one succeeds: the later success publishes only after both settle; an earlier failure after it does not block (0.277833ms)
+✔ a positive answer that arrives after a policy write began is stale: neutral, and its data_sent disclosure is kept (0.753125ms)
+✔ without a registered shutdown owner, decisions stay unavailable: never ready, no lease, no reservation and no host (1.26125ms)
+✔ decide preflight: an unknown, mismatched, revoked or aborted lease answers neutral before any host exists, and spends no hook (0.410833ms)
+✔ the router guard requires the caller's literal synchronous true and the captured policy before and after it (0.383709ms)
+✔ an invalidation while the host starts revokes the lease before the awaited hand-off (0.248541ms)
+✔ two windows share the one runtime; closing a window closes neither the host nor the router nor another owner's lease (0.295833ms)
+✔ registration takes exactly requestId, level and a guard; a duplicate live id is refused (0.212166ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71.209
