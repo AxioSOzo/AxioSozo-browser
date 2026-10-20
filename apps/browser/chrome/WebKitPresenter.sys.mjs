@@ -96,7 +96,7 @@ export const WHEEL_SMOOTH_MS = 150;
 /** Splits a notch delta over the animation: the cumulative distance after `t` ms (ease-out). */
 export function smoothWheelProgress(total, t, duration = WHEEL_SMOOTH_MS) {
   const x = Math.min(1, Math.max(0, t / duration));
-  return Math.round(total * (1 - (1 - x) ** 3));
+  return Math.round(total * (1 - (1 - x) ** 3)) || 0;
 }
 const PROXY_STYLE = "position:absolute;left:0;top:0;width:2px;height:1em;margin:0;padding:0;border:0;"
   + "opacity:0;pointer-events:none;resize:none;overflow:hidden;background:transparent;color:transparent;"
