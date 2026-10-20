@@ -1,0 +1,24 @@
+✔ native 2/3/4-byte scalars split byte by byte preserve the entire CWD (6.069791ms)
+✔ a decoded-empty UTF-8 lead is not raw EOF and cannot authorize early metadata (1.162042ms)
+✔ legacy decoded-only pipes fail closed and are retired (0.498041ms)
+✔ malformed UTF-8 CWD cannot be converted to another folder (4.792958ms)
+✔ truncated stdout scalar at raw EOF rejects before any metadata (0.456042ms)
+✔ truncated stderr scalar rejects even with complete successful stdout (0.425459ms)
+✔ valid split Unicode stderr drains without leaking into an offer (0.836833ms)
+✔ 1MiB stdout cap includes raw bytes cumulatively across all four commands (5.993708ms)
+✔ 16KiB stderr cap includes raw bytes cumulatively across commands (2.747917ms)
+✔ BOM bytes count against the raw stderr budget (1.0405ms)
+✔ abort after a UTF-8 lead closes pending raw pipes, kills and waits (0.382792ms)
+✔ deadline after decoded-empty lead does not wait for raw EOF (11.082834ms)
+✔ normal exit still drains all buffered raw Unicode before completion (1.080666ms)
+✔ raw pipe read failure is retired without any metadata (0.234541ms)
+✔ late native child after abort is still adopted, closed, killed and waited (1.144917ms)
+✔ 64-byte UID-local raw cap retires an overlong stream before blocked stderr (1.373958ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147.60925
