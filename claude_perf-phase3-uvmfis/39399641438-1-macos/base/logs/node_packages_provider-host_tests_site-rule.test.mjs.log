@@ -1,0 +1,23 @@
+✔ site_rule_v1 valid choices return the exact suggestion-only result shape (32.546458ms)
+✔ site_rule_v1 sends only none plus listed effects with fixed texts and untrusted-data instructions (2.168834ms)
+✔ An effect the rule does not list becomes none with malformed_output (0.815334ms)
+✔ Low confidence becomes none; the optional reason is fixed-code only (4.728666ms)
+✔ Malformed, oversized, wrong-model and bad-probability responses fail closed to none (2.389083ms)
+✔ 401, HTTP and network errors map to none and still disclose the transmission (0.362333ms)
+✔ Deadline aborts the actual fetch once; caller abort cancels; no retry (56.9565ms)
+✔ No key means zero fetch calls and data_sent false; Keychain failure likewise (0.459333ms)
+✔ Strict request validation rejects unknown keys, caps and level violations without Keychain or fetch (7.91525ms)
+✔ The diagnostic choice set is unchanged and now discloses data_sent (1.325792ms)
+✔ Host decision/site_rule replies with the decision result and never starts a provider client (3.994166ms)
+✔ Host enforces the default rolling-hour budget of 30 and never fetches when exhausted (7.8895ms)
+✔ Budget counts only real transmissions: no key and invalid input never consume it (0.53575ms)
+✔ Host decision/cancel aborts the in-flight fetch; closing the host aborts too (0.447458ms)
+✔ Actual stdio framing accepts a 64 KiB decision state and replies on one line (26.724833ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 248.344667

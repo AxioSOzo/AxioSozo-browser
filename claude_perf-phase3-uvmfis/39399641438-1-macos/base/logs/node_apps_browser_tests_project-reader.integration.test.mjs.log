@@ -1,0 +1,42 @@
+✖ real secure helper feeds all four detection phases from a synthetic project (2.245959ms)
+✖ untrusted or missing reader configuration refuses detection without spawning (0.864042ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63.50975
+
+✖ failing tests:
+
+test at apps/browser/tests/project-reader.integration.test.mjs:129:1
+✖ real secure helper feeds all four detection phases from a synthetic project (2.245959ms)
+  AssertionError [ERR_ASSERTION]: use external workstation wrapper TMPDIR
+      at syntheticFixture (file:///Users/runner/work/_temp/base/apps/browser/tests/project-reader.integration.test.mjs:83:10)
+      at async TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/project-reader.integration.test.mjs:130:29)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at apps/browser/tests/project-reader.integration.test.mjs:182:1
+✖ untrusted or missing reader configuration refuses detection without spawning (0.864042ms)
+  AssertionError [ERR_ASSERTION]: use external workstation wrapper TMPDIR
+      at syntheticFixture (file:///Users/runner/work/_temp/base/apps/browser/tests/project-reader.integration.test.mjs:83:10)
+      at async TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/project-reader.integration.test.mjs:183:20)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
