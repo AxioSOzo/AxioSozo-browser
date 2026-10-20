@@ -36,6 +36,21 @@ static void configureStream() {
     tab->popupVisible = show;
     invalidateView(value);
   };
+#if defined(__linux__)
+  // X11 PRIMARY: windowless Chromium never publishes its selection, so the selected text
+  // goes to Zen, which owns the desktop selection (as Firefox does for its own pages).
+  // Web sessions only; never a password field; empty or oversized selections are not sent.
+  render.api.on_text_selection_changed = [](cef_render_handler_t*, cef_browser_t* value, const cef_string_t* text,
+                                            const cef_range_t*) {
+    HOLD(value);
+    Tab* tab = tabFor(value);
+    if (!webBrowsing || !tab || tab->textMode == 2 || !text || !text->length || text->length > 16384) return;
+    std::string selected = utf8(text);
+    if (selected == tab->selectionText) return;
+    tab->selectionText = selected;
+    tabEvent(tab, "text_selection", json::object({{"text", selected}}));
+  };
+#endif
   display.api.on_cursor_change = [](cef_display_handler_t*, cef_browser_t* value, cef_cursor_handle_t, cef_cursor_type_t type,
                                     const cef_cursor_info_t*) {
     HOLD(value);

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AxioSozo feel</title>
+<!-- Synthetic, engine-neutral fixture for the Chromium-in-Zen native-feel matrix
+     (scripts/cef_zen_e2e.py). Every control sits at a fixed CSS-pixel position so the
+     harness can aim real X11 input at it without reading the page's DOM; the page
+     reports what it saw in document.title as "AxioSozo feel {json}". No network, no
+     storage beyond sessionStorage load counting, no accounts. -->
+<style>
+html{color-scheme:light}body{margin:0;font:16px/20px monospace;background:#f4f7f9;color:#14202b;height:3200px}
+.a{position:absolute;box-sizing:border-box}
+input,button,select,textarea{font:16px/20px monospace;margin:0}
+#text{left:20px;top:20px;width:300px;height:36px}
+#count{left:340px;top:20px;width:140px;height:36px}
+#link{left:500px;top:28px}
+#sel{left:20px;top:80px;width:600px;height:24px;margin:0;white-space:pre}
+#area{left:20px;top:120px;width:300px;height:60px}
+#select{left:340px;top:120px;width:160px;height:36px}
+#color{left:520px;top:120px;width:60px;height:36px}
+#dl{left:600px;top:120px;width:160px;height:36px}
+.cur{top:200px;width:80px;height:40px;border:1px solid #889;text-align:center;line-height:38px;font-size:12px}
+#c-pointer{left:20px;cursor:pointer}#c-text{left:110px;cursor:text}#c-move{left:200px;cursor:move}
+#c-wait{left:290px;cursor:wait}#c-crosshair{left:380px;cursor:crosshair}#c-not-allowed{left:470px;cursor:not-allowed}
+#c-grab{left:560px;cursor:grab}#c-col-resize{left:650px;cursor:col-resize}#c-default{left:740px;cursor:default}
+.dlg{top:260px;width:120px;height:32px}
+#d-alert{left:20px}#d-confirm{left:150px}#d-prompt{left:280px}#d-unload{left:410px}
+#edit{left:20px;top:310px;width:400px;height:40px;border:1px solid #889;padding:8px}
+#find{left:20px;top:370px;white-space:pre}
+#bottom{left:20px;top:3100px}
+:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}
+</style>
+<input class="a" id="text" autocomplete="off" placeholder="Type here">
+<button class="a" id="count">Increment</button>
+<a class="a" id="link" href="?page=2">Page 2</a>
+<p class="a" id="sel">alpha beta gamma delta</p>
+<textarea class="a" id="area" spellcheck="false"></textarea>
+<select class="a" id="select"><option>one</option><option>two</option><option>three</option></select>
+<input class="a" id="color" type="color" value="#336699">
+<input class="a" id="dl" list="dl-list" autocomplete="off"><datalist id="dl-list"><option value="apple"><option value="apricot"><option value="banana"></datalist>
+<div class="a cur" id="c-pointer">pointer</div><div class="a cur" id="c-text">text</div><div class="a cur" id="c-move">move</div>
+<div class="a cur" id="c-wait">wait</div><div class="a cur" id="c-crosshair">crosshair</div><div class="a cur" id="c-not-allowed">not-allowed</div>
+<div class="a cur" id="c-grab">grab</div><div class="a cur" id="c-col-resize">col-resize</div><div class="a cur" id="c-default">default</div>
+<button class="a dlg" id="d-alert">alert</button><button class="a dlg" id="d-confirm">confirm</button>
+<button class="a dlg" id="d-prompt">prompt</button><button class="a dlg" id="d-unload">arm unload</button>
+<div class="a" id="edit" contenteditable="true"></div>
+<p class="a" id="find">find the needle here; another needle there; a third needle.</p>
+<p class="a" id="bottom">bottom of the feel fixture</p>
+<script>
+const $ = id => document.getElementById(id);
+const page = new URLSearchParams(location.search).get('page') || '1';
+let loads = 1;
+try { loads = Number(sessionStorage.getItem('loads') || 0) + 1; sessionStorage.setItem('loads', String(loads)); } catch {}
+const state = {p: page, l: loads, t: '', a: '', e: '', c: 0, s: '', y: 0, f: '', sel: 'one', col: '#336699', dl: '',
+  d: [], k: '', mb: '', z: [devicePixelRatio, innerWidth], ws: null, cm: 0};
+function report() {
+  state.y = Math.round(scrollY); state.z = [Math.round(devicePixelRatio * 100) / 100, innerWidth];
+  document.title = 'AxioSozo feel ' + JSON.stringify(state);
+}
+$('text').addEventListener('input', () => { state.t = $('text').value; report(); });
+$('area').addEventListener('input', () => { state.a = $('area').value; report(); });
+$('edit').addEventListener('input', () => { state.e = $('edit').textContent; report(); });
+$('count').addEventListener('click', () => { state.c++; report(); });
+$('select').addEventListener('change', () => { state.sel = $('select').value; report(); });
+$('color').addEventListener('input', () => { state.col = $('color').value; report(); });
+$('dl').addEventListener('input', () => { state.dl = $('dl').value; report(); });
+document.addEventListener('selectionchange', () => {
+  const active = document.activeElement;
+  state.s = active && /^(INPUT|TEXTAREA)$/.test(active.tagName)
+    ? active.value.slice(active.selectionStart, active.selectionEnd) : String(getSelection());
+  report();
+});
+document.addEventListener('focusin', () => { state.f = document.activeElement?.id || ''; report(); });
+document.addEventListener('focusout', () => setTimeout(() => { state.f = document.activeElement?.id || ''; report(); }, 0));
+document.addEventListener('keydown', event => {
+  state.k = [event.ctrlKey && 'C', event.altKey && 'A', event.shiftKey && 'S', event.metaKey && 'M'].filter(Boolean).join('')
+    + ':' + event.key + ':' + event.code; report();
+});
+document.addEventListener('contextmenu', () => { state.cm++; report(); });
+document.addEventListener('mousedown', event => { if (event.button === 1) { state.mb = 'middle@' + (event.target.id || event.target.tagName); report(); } });
+// Wheel smoothness: how many distinct scroll positions follow one wheel input, over how long.
+let wheelAt = 0, samples = [];
+addEventListener('wheel', () => { if (!wheelAt) { wheelAt = performance.now(); samples = []; } }, {passive: true});
+addEventListener('scroll', () => {
+  if (wheelAt) samples.push([Math.round(performance.now() - wheelAt), Math.round(scrollY)]);
+  report();
+}, {passive: true});
+setInterval(() => {
+  if (wheelAt && performance.now() - wheelAt > 700) {
+    const positions = new Set(samples.map(sample => sample[1]));
+    state.ws = {n: positions.size, ms: samples.length ? samples[samples.length - 1][0] : 0, y: Math.round(scrollY)};
+    wheelAt = 0; report();
+  }
+}, 100);
+$('d-alert').addEventListener('click', () => { alert('feel alert'); state.d.push('alert'); report(); });
+$('d-confirm').addEventListener('click', () => { state.d.push('confirm=' + confirm('feel confirm?')); report(); });
+$('d-prompt').addEventListener('click', () => { state.d.push('prompt=' + prompt('feel prompt', 'dflt')); report(); });
+$('d-unload').addEventListener('click', () => {
+  addEventListener('beforeunload', event => { event.preventDefault(); event.returnValue = ''; });
+  state.d.push('armed'); report();
+});
+addEventListener('resize', report);
+report();
+</script></html>

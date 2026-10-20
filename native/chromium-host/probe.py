@@ -1024,7 +1024,10 @@ if __name__ == '__main__':
             raise RuntimeError('BLOCKED_ENV: install-sandbox is the Linux SUID sandbox step; macOS uses its own seatbelt')
         commands = {'setup': linux_setup if IS_LINUX else setup, 'check': check, 'run': run,
                     'test-native': native_test, 'install-sandbox': install_sandbox}
-        sys.exit(commands[args.command]() or 0)
+        result = commands[args.command]()
+        # linux_check() returns the sandbox status for in-process callers (stream_test.py);
+        # only an int is an exit code.
+        sys.exit(result if isinstance(result, int) else 0)
     except (RuntimeError, subprocess.CalledProcessError, OSError) as exc:
         emit('BLOCKED_ENV' if 'BLOCKED_ENV' in str(exc) else 'FAIL', message=str(exc))
         sys.exit(2)

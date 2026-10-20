@@ -22,6 +22,17 @@ const ERROR_ICONS = { certificate_error: "chrome://global/skin/icons/warning.svg
 // Tab state Gecko's hidden about:blank browser would otherwise overwrite.
 const TAB_STATE = ["image", "busy", "progress"];
 
+/**
+ * Loopback hosts are potentially trustworthy origins (W3C Secure Contexts §3.2): neither
+ * Firefox nor Chromium marks them "Not secure", so a Chromium tab does not either.
+ */
+export function loopbackURL(value) {
+  let host;
+  try { host = new URL(value).hostname; } catch { return false; }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]"
+    || /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/u.test(host);
+}
+
 /** Firefox's tab label for a page without a title: its address without the scheme. */
 export function addressLabel(url) {
   if (!transferableURL(url)) return "";
@@ -556,7 +567,7 @@ export class CEFPresenter {
   }
   #updateBadge(record = this.active) {
     if (!this.badge || !record || this.active !== record) return;
-    const insecure = record.latestURL?.startsWith("http:") && this.#urlbarShowsPage();
+    const insecure = record.latestURL?.startsWith("http:") && !loopbackURL(record.latestURL) && this.#urlbarShowsPage();
     this.badge.toggleAttribute("insecure", !!insecure);
   }
 
@@ -829,6 +840,7 @@ export class CEFPresenter {
     if (event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); }
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
+    if (event.event === "text_selection") this.#primarySelection(record, event.text);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -856,6 +868,24 @@ export class CEFPresenter {
       this.#action(record, target => record.adapter.focus(target, true));
     }
     if (record.committed) this.#syncChrome(record);
+  }
+  /**
+   * Linux: the desktop PRIMARY selection follows a Chromium tab's selection as it follows a
+   * Firefox page's, so middle-click paste works across tabs and applications. Like Gecko's
+   * auto-copy (mouse, keyboard or select-all reasons only), only a selection made by the
+   * user's own input in this view is published; script selections are not.
+   */
+  #primarySelection(record, text) {
+    if (this.keyPlatform !== "linux" || !record.committed || typeof text !== "string" || !text) return;
+    const input = record.userInputAt ?? -Infinity;
+    if (this.window.performance.now() - input > 1000) return;
+    try {
+      const { Cc, Ci } = this.window;
+      const clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+      if (!clipboard.isClipboardTypeSupported(Ci.nsIClipboard.kSelectionClipboard)) return;
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper)
+        .copyStringToClipboard(text, Ci.nsIClipboard.kSelectionClipboard);
+    } catch (error) { this.onFailure(error); }
   }
   #openInNewTab(record, url, background) {
     const gBrowser = this.window.gBrowser;
@@ -914,6 +944,12 @@ export class CEFPresenter {
     if (this.#labelTitle(record)) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
+    // Firefox disables reloading for the blank Gecko document a web-mode Chromium tab keeps
+    // hidden, which made F5, Ctrl+R and the reload button dead over Chromium pages. The tab's
+    // page is Chromium's; Firefox recomputes these for its own tabs on their next location change.
+    for (const id of ["Browser:Reload", "Browser:ReloadSkipCache", "Browser:ReloadOrDuplicate"]) {
+      this.window.document.getElementById?.(id)?.removeAttribute("disabled");
+    }
     // The explicit nsIURI updates address text; Gecko security UI is masked.
     const shown = record.latestURL === "about:blank" ? null : record.latestURL;
     if (!this.window.gURLBar.focused) {
@@ -923,10 +959,14 @@ export class CEFPresenter {
   }
   /** The tab label: Firefox's error-page title while an error page shows, else the page title, else its address. */
   #labelTitle(record) { return record.errorTitle || record.title || addressLabel(record.latestURL); }
-  #setLabel(record) { this.#setTabLabel(record.tab, this.#labelTitle(record)); }
-  #setTabLabel(tab, title) {
+  #setLabel(record) {
+    // Firefox puts a tab's label in the window title only when it is a document title
+    // (an error page's title counts); an address-only label leaves just the brand.
+    this.#setTabLabel(record.tab, this.#labelTitle(record), !!(record.errorTitle || record.title));
+  }
+  #setTabLabel(tab, title, isContentTitle = true) {
     const gBrowser = this.window.gBrowser;
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title);
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title, { isContentTitle });
     else tab.label = title;
   }
   // ---- Tab icon and throbber ---------------------------------------------------
@@ -1087,6 +1127,7 @@ export class CEFPresenter {
       if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
+      if (type !== "pointermove" || event.buttons) record.userInputAt = this.window.performance.now();
       event.preventDefault();
       const position = point(event);
       let count = record.clicks.count;
@@ -1211,10 +1252,12 @@ export class CEFPresenter {
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
+        record.userInputAt = this.window.performance.now(); // Ctrl+A selects: Gecko auto-copies select-all too
         if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event)));
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
+      record.userInputAt = this.window.performance.now();
       const fields = cefKey(event, type, platform); send("key", fields);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });

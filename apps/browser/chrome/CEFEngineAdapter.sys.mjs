@@ -332,6 +332,8 @@ const EVENT_FIELDS = {
   favicon: ["icon"],
   // Proposed with `ime`: the focused editable's kind and caret, in logical points.
   text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
+  // Linux web sessions: the page's selected text, for the desktop PRIMARY selection.
+  text_selection: ["text"],
   // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
   prompt: ["prompt_id", "kind", "details", "timeout_ms"], prompt_closed: ["prompt_id", "reason"],
   download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
@@ -717,7 +719,8 @@ export class CEFHostConnection {
         if (value.event === "closed") { this.#assembler?.forget(value.target.native_target_id); this.#native?.forget(value.target.native_target_id); }
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
-      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
+      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "text_selection",
+          "favicon"].includes(value.event)
           || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
@@ -1060,6 +1063,8 @@ export class CEFEngineAdapter {
     if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
         || ![value.caret_x, value.caret_y, value.caret_width, value.caret_height]
           .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
+    if (value.event === "text_selection" && (this.browsingMode !== "web" || typeof value.text !== "string"
+        || !value.text.length || value.text.length > 16384)) throw targetError("INVALID_CEF_TEXT_SELECTION");
     if (AX_EVENTS.has(value.event)) {
       if (this.#host.capabilities?.accessibility !== true) throw targetError("INVALID_CEF_ACCESSIBILITY");
       try { (value.event === "ax_tree_update" ? validateAXTreeUpdate : validateAXLocation)(value); }
