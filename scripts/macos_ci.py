@@ -151,7 +151,12 @@ class Lane:
             code = 'oserror'
         text = log.read_text(errors='replace')
         status = 'PASS' if code in expect and code == 0 else 'EXPECTED_NONZERO' if code in expect else 'FAIL'
-        if status in OK and 'Traceback (most recent call last)' in text:
+        # Harnesses that end with a JSON result line (`{"status": ...}`) decide by it;
+        # tracebacks of their fixture servers (client resets) are not failures.
+        final = reported_status(text)
+        if status in OK and final is None and 'Traceback (most recent call last)' in text:
+            status = 'FAIL'
+        if status in OK and final not in (None, 'PASS', 'SKIPPED'):
             status = 'FAIL'
         if classify:
             status = classify(code, text, status)
@@ -245,6 +250,20 @@ class Lane:
         self.gate('dev-check', ['./dev', 'check'], requires=['dev'], ci_root=True, timeout=1500)
         self.gate('dev-test', ['./dev', 'test'], requires=['dev'], ci_root=True, timeout=2400)
         return self.results
+
+
+def reported_status(text):
+    """The `status` of the last JSON object line of a gate's output, if any."""
+    for line in reversed(text.strip().splitlines()[-20:]):
+        line = line.strip()
+        if line.startswith('{') and line.endswith('}'):
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict) and isinstance(value.get('status'), str):
+                return value['status']
+    return None
 
 
 COMPILE_ALL = r'''
@@ -361,6 +380,16 @@ BASE_SHIM = {
         ("run('/Users/wout/.local/bin/dev-external', ",
          "run(MAC_CI ? '/usr/bin/env' : '/Users/wout/.local/bin/dev-external', "),
         ("run('/Users/wout/.local/bin/mount-dev-storage', []", "run(MAC_CI ? '/usr/bin/true' : '/Users/wout/.local/bin/mount-dev-storage', []"),
+    ],
+    'packages/provider-host/tests/sandbox.os.mjs': [
+        ("AXIOSOZO_BUILD_ROOT: process.env.AXIOSOZO_BUILD_ROOT ?? '/Volumes/AxioSozoBuild' }",
+         "AXIOSOZO_BUILD_ROOT: process.env.AXIOSOZO_BUILD_ROOT ?? '/Volumes/AxioSozoBuild',"
+         " AXIOSOZO_MACOS_CI: process.env.AXIOSOZO_MACOS_CI ?? '' }"),
+    ],
+    'native/chromium-host/test_probe.py': [
+        ("        with patch.object(probe.platform, 'system', return_value='Darwin'), \\\n",
+         "        with patch.object(probe, 'MACOS_CI', False), \\\n"
+         "             patch.object(probe.platform, 'system', return_value='Darwin'), \\\n"),
     ],
     'packages/provider-host/src/storage.mjs': [
         ("export function providerBuildRoot() {\n",

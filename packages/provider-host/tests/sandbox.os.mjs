@@ -84,7 +84,10 @@ test('Parent disappearance closes private liveness pipe and native supervisor re
   const runDirectory = prepare();
   try {
     const runner = spawn(process.execPath, [fileURLToPath(new URL('../fixtures/sandbox-parent-exit.mjs', import.meta.url)), runDirectory], {
-      shell: false, env: { PATH: process.env.PATH, AXIOSOZO_BUILD_ROOT: process.env.AXIOSOZO_BUILD_ROOT ?? '/Volumes/AxioSozoBuild' }, stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false, env: { PATH: process.env.PATH, AXIOSOZO_BUILD_ROOT: process.env.AXIOSOZO_BUILD_ROOT ?? '/Volumes/AxioSozoBuild',
+        // macOS CI build root (docs/MACOS_CI.md): only present on GitHub-hosted runners.
+        ...(process.env.AXIOSOZO_MACOS_CI ? { AXIOSOZO_MACOS_CI: process.env.AXIOSOZO_MACOS_CI, GITHUB_ACTIONS: process.env.GITHUB_ACTIONS } : {}) },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const output = await collect(runner); assert.equal(output.code, 0, output.stderr);
     const record = JSON.parse(output.stdout.trim()); await assertGone(record.child_pid); await assertGone(record.broker_pid);

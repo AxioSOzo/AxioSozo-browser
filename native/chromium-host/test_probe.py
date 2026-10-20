@@ -220,7 +220,9 @@ class HostCheckTests(unittest.TestCase):
                              'system-entities': [{'mount-point': str(probe.BUILD_ROOT)}]}]}
         def check_output(argv, **_kwargs):
             return plistlib.dumps(image if Path(argv[0]).name == 'hdiutil' else disk)
-        with patch.object(probe.platform, 'system', return_value='Darwin'), \
+        # The owner volume policy, also when this test runs under the macOS CI build root.
+        with patch.object(probe, 'MACOS_CI', False), \
+             patch.object(probe.platform, 'system', return_value='Darwin'), \
              patch.object(probe.platform, 'machine', return_value='arm64'), \
              patch.object(Path, 'is_mount', return_value=True), \
              patch.object(probe.shutil, 'which', return_value='/usr/bin/xcrun'), \
