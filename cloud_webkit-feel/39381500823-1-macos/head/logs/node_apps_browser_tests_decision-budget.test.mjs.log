@@ -1,0 +1,32 @@
+✔ construction is inert; omitted limit alone defaults to thirty (1.847209ms)
+✔ snapshot and initial history are immutable copies; duplicate calls count separately (0.380708ms)
+✔ actual configured zero, reductions and increases are read synchronously (0.130167ms)
+✔ hour boundary expires only calls outside the rolling hour (0.104667ms)
+✔ future calls are retained and prohibit rollback reservations (0.158541ms)
+✔ high-water clock prevents reopening history after expiry then rollback (0.105541ms)
+✔ rollback during transaction leaves history unchanged (0.133959ms)
+✔ interleaved Promise jobs share one atomic thirty-call limit (0.567084ms)
+✔ nested mutation fails before callback and cannot double spend (0.139958ms)
+✔ clock and limit callback reentrancy cannot obtain mutation authority (0.216959ms)
+✔ limit reduction during callback is checked before commit (0.108375ms)
+✔ entry ceiling prevents a reentrant increase from enlarging that transaction (0.093834ms)
+✔ candidate cannot refund, reorder, replace or append more than one current call (0.198083ms)
+✔ callback throw or rejected asynchronous contract never commits (0.215791ms)
+✔ passive closed data validation never evaluates accessors (0.241917ms)
+✔ unreadable or invalid current limit never silently defaults (0.298917ms)
+✔ actual checkpoints adapter reserves once and failed dispatch has no refund path (0.139709ms)
+✔ older trusted checkpoint timestamp is stamped at owner reservation time (0.057667ms)
+✔ actual watch adapter shares owner with site rules and constructor handoff guard (6.330625ms)
+✔ site reservation while watch opens wins the last shared slot (1.501ms)
+✔ watch pending reply consumes a slot and uncertain write never refunds it (2.896708ms)
+✔ production watch authorization remains closed with zero budget/native/host work (0.303208ms)
+✔ per-request onSending cannot replace the trusted constructor hook (1.297833ms)
+✔ rejected canonical native Promise callbacks are denied without unhandled rejection (6.336042ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.037208
