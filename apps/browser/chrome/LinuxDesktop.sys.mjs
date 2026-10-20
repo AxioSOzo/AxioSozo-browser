@@ -22,8 +22,12 @@
 // the system colour scheme (zen.view.window.scheme=2), WebRender/VA-API/dmabuf.
 
 /** Firefox 156 release defaults (modules/libpref/init/StaticPrefList.yaml, all.js)
- * for the wheel and smooth-scroll prefs Zen retunes off macOS: one wheel notch
- * scrolls as far, and stops as softly, as GNOME/KDE Firefox. */
+ * for the wheel and smooth-scroll prefs Zen retunes off macOS: the scroll
+ * animation (no MSD physics, Firefox's durations and weightings) is GNOME/KDE
+ * Firefox's. Distance per notch was already the same (measured 114 px either
+ * way): Firefox reaches its 2x through mousewheel.system_scroll_override, which
+ * only applies at the default multiplier of 100 and steps aside when the user
+ * set their own desktop scroll speed; Zen's 200 bypassed that. */
 export const FIREFOX_LINUX_SCROLLING = Object.freeze({
   "general.smoothScroll.msdPhysics.enabled": false,
   "general.smoothScroll.currentVelocityWeighting": "0.25",
@@ -71,6 +75,13 @@ export function firefoxWindowSize(screen) {
 }
 
 const WELCOME = "zen-welcome-stage";
+const sizing = new WeakMap(); // window → what installLinuxWindowSizing saw and did (GUI evidence)
+
+/** Read-only record of the welcome sizing in `window`, or null. */
+export function linuxWindowSizingState(window) {
+  const state = sizing.get(window);
+  return state ? { ...state, events: [...state.events] } : null;
+}
 
 /** Zen's welcome locks the first window to 1200x720, centred, and leaves it
  * that size when it ends. On Linux the window then takes the size stock
@@ -81,20 +92,28 @@ const WELCOME = "zen-welcome-stage";
 export function installLinuxWindowSizing(window, { os = globalThis.Services?.appinfo?.OS } = {}) {
   const root = window?.document?.documentElement;
   if (os !== "Linux" || !root || typeof window.MutationObserver !== "function") return null;
-  let seen = root.hasAttribute(WELCOME);
+  const state = { seenAtInstall: root.hasAttribute(WELCOME), events: [] };
+  sizing.set(window, state);
+  let seen = state.seenAtInstall;
+  const apply = () => {
+    state.events.push(`check windowState=${window.windowState}`);
+    if (window.closed || window.windowState !== window.STATE_NORMAL) return;
+    const size = firefoxWindowSize(window.screen);
+    if (size.maximized) { state.events.push("maximize"); window.maximize(); return; }
+    state.events.push(`resize ${size.width}x${size.height}`);
+    window.resizeTo(size.width, size.height);
+    window.moveTo(window.screen.availLeft + (window.screen.availWidth - size.width) / 2,
+      window.screen.availTop + (window.screen.availHeight - size.height) / 2);
+  };
   const observer = new window.MutationObserver(() => {
-    if (root.hasAttribute(WELCOME)) { seen = true; return; }
+    if (root.hasAttribute(WELCOME)) { seen = true; state.events.push("welcome"); return; }
     if (!seen) return;
+    state.events.push("welcome ended");
     observer.disconnect();
-    // After Zen's unlockWindowSize() and its fade-in, on the next frame.
-    window.requestAnimationFrame(() => {
-      if (window.closed || window.windowState !== window.STATE_NORMAL) return;
-      const size = firefoxWindowSize(window.screen);
-      if (size.maximized) { window.maximize(); return; }
-      window.resizeTo(size.width, size.height);
-      window.moveTo(window.screen.availLeft + (window.screen.availWidth - size.width) / 2,
-        window.screen.availTop + (window.screen.availHeight - size.height) / 2);
-    });
+    // Zen fades the browser back in after unlockWindowSize(); size it once
+    // that has settled, then once more in case the fade reset the size.
+    window.requestAnimationFrame(apply);
+    window.setTimeout?.(apply, 1000);
   });
   observer.observe(root, { attributes: true, attributeFilter: [WELCOME] });
   return () => observer.disconnect();

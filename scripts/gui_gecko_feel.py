@@ -459,6 +459,10 @@ class FeelHarness(Harness):
         time.sleep(2.5)
         after = self.chrome_script(WINDOW_SCRIPT)
         state['after_welcome'] = after
+        state['linux_window_sizing'] = self.chrome_script(
+            'try { return ChromeUtils.importESModule("chrome://browser/content/axiosozo/LinuxDesktop.sys.mjs")'
+            '.linuxWindowSizingState?.(window) ?? null; } catch (e) { return String(e); }')
+        state['axiosozo_started'] = self.chrome_script('return !!window.AxioSozo;')
         self.screenshot(f'firstrun-{self.args.scale}x-done')
         width, height = (int(value) for value in self.xdotool('getdisplaygeometry').split())
         scale = after['devicePixelRatio'] or 1
