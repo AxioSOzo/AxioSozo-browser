@@ -1,0 +1,22 @@
+✔ precheck answers privacy facts only: no title and no selected text are read (1.262084ms)
+✔ capture reads the title, and the selection only when the user opted in (0.589667ms)
+✔ password controls deny before any title or selection read: focused, inside a shadow root, in the page, or unknown (1.608625ms)
+✔ focus depth: a focused node left when the bound is used up is unknown and denies, whatever is at the leaf (0.283417ms)
+✔ focus inside a frame, embed or object is unknown and denies; its document is never touched (0.287958ms)
+✔ ordinary focus is fine: a text field, a button, the body or nothing focused (0.20975ms)
+✔ stale documents are refused before any read: not current, closed, another inner window, a subframe or a changed URL (0.149625ms)
+✔ system, null, private and non-web principals are refused; malformed requests are refused (0.186458ms)
+✔ only ranges of this very document count; an unbounded selection is refused (0.104334ms)
+✔ the child reads this.document, never a content window that may already show a newer document (0.210916ms)
+✔ the parent side exposes no receiver: nothing from content can copy, authorize or start anything (0.099041ms)
+✔ actor registration: top-level http(s) web documents only, explicitly safe for web processes, once per process (0.151417ms)
+✔ chrome rebinds every answer: exact keys, the asked URL and inner window, bounded text, no smuggled selection (0.464833ms)
+✔ text normalization: one line titles, prose selections, well-formed UTF-16 (0.129458ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84.345

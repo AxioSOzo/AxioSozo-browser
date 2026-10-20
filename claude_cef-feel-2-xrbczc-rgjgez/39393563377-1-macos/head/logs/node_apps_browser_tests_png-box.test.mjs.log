@@ -1,0 +1,28 @@
+✔ full static RGB/RGBA framing and contiguous split IDATs have independently generated CRCs (1.751875ms)
+✔ optional sRGB and DisplayP3 cICP is unique, pre-IDAT and narrowly validated (0.844125ms)
+✔ unique first IHDR, actual IEND, no trailing bytes and complete lengths are mandatory (1.311917ms)
+✔ CRC of every allowed chunk is checked, including IDAT and IEND (0.387792ms)
+✔ unknown critical/ancillary, reserved-bit, palette/metadata and all APNG chunks refuse (0.680292ms)
+✔ allowed format is8bit RGB/RGBA noninterlaced default filter/compression only (0.406042ms)
+✔ raw dimensions/pixels/bytes and chunk count cap before any native load (3.248167ms)
+✔ base64 padding bits, alphabet, size and binary decoder result are checked (0.319958ms)
+✔ boxing uses both sides, preserves no upscale, and permits portrait output below64 (0.644458ms)
+✔ validation forces same-size SYNC_DECODE encoder and checks actual input/output decode dimensions (2.774ms)
+✔ CRC-correct framing with corrupted compressed pixels fails native full decode (1.5525ms)
+✔ both exact target dimensions are passed to ImageLib for tall and wide screens (13.798958ms)
+✔ forged targets, upscale, claimed dimensions and accessor facts cause no native load (20.5875ms)
+✔ output byte budget prevents oversized reads and output chunks/dimensions are revalidated (18.273334ms)
+✔ short reads, trailing available bytes and native decoder/encoder failures never return an image (0.801125ms)
+✔ failed binary stream close retains exact ownership and explicit close retries (0.372125ms)
+✔ reader creation or binding failure still closes the exact raw stream (0.3845ms)
+✔ abort/owner-close during async native service loading prevents all decode/scale effects (1.151834ms)
+✔ diagnostics are categorical and never read/decode/encode/close native resources (1.043791ms)
+✔ capture lease composes full PNG validation and boxing for decision/handoff while original bridge min remains64 (54.109958ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 227.113083

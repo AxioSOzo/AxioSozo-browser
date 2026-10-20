@@ -1,0 +1,37 @@
+AxioSozo: deleted container still mapped; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+AxioSozo: deleted container still mapped; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+AxioSozo: container reset not saved; project links wait for a retry SYNTHETIC_WRITE_FAILURE
+✔ construction and window registration start nothing; first use creates one channel that only loads the guarded cache (6.370417ms)
+✔ a routing mutation invalidates before its first await; only the final quiescent scope refreshes, never an intermediate snapshot (13.983417ms)
+✔ the guarded loader refuses a write that started and settled inside its read, even with nothing pending (3.349709ms)
+✔ a failed write keeps the original error and the last committed authority; a failing refresh cannot mask a result (1.798833ms)
+✔ enabling while a project write is pending is refused without any native admission; an explicit retry then listens (2.809708ms)
+✔ a deleted container's whole cleanup is one scope: nested assignment and verification never refresh early (2.094292ms)
+✔ a failed deletion cleanup stays quarantined after its writes settle, until a tracked retry succeeds (6.148167ms)
+✔ an older failed deletion attempt cannot latch over a newer successful one (1.456041ms)
+✔ a failed container reset blocks authority until a tracked reset retry succeeds; invalid observer ids change nothing (2.193625ms)
+✔ handoff authority: captured at quiescence, checked synchronously, refused while pending; no project only when none matches (1.549ms)
+✔ handoff authority is refused for a private window (0.300541ms)
+✔ presenters: only registered normal windows; approval goes to the most recent one with the project's name; Deny and Allow (4.603167ms)
+✔ private-only presenters: a bridge request is denied without any prompt; closing the last normal window cancels its prompt (1.223792ms)
+✔ approval expires after 55 s as a denial and aborts the presentation (1.018792ms)
+✔ status reports: parsed records reach the home, attention and the most recent normal presenter; never another root (5.350458ms)
+✔ home re-entrancy: a write to this project started from an expiry callback during the home read refuses the stale home (5.74275ms)
+✔ home re-entrancy: a write to another project keeps this home's own mark but revokes the activity cache: activity is null (4.020792ms)
+✔ home re-entrancy: without any callback write the home and its activity read normally (8.667792ms)
+✔ hook settings only for a normal window while listening; diagnostics keep counts and booleans only; shutdown closes the channel (4.828208ms)
+✔ a native start failure is reported honestly and an explicit retry starts it; disable stops it (4.079834ms)
+✔ no verified hook builder means no hook settings, never a constructed fallback (4.341792ms)
+✔ plugin settings: a normal window while listening; the builder gets exactly the agent and the channel's own socket; stale answers are refused (7.764416ms)
+✔ without a verified bridge builder no plugin settings are constructed (1.290875ms)
+✔ the tools owner: registered once with its shutdown; its fixed capabilities reach the endpoint state; tools install into the channel (4.12525ms)
+✔ approval for tools is the channel's own predicate: pending, denied, revoked and read-ended sessions are not approved (5.043542ms)
+✔ project.info for tools: names, roots, environment links and integrations from the validated cache; never account labels (5.221417ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 251.969208

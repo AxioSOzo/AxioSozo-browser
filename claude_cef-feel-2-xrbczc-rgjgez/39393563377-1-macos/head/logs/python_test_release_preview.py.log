@@ -1,0 +1,33 @@
+test_branding_scan_clean_bundle (test_release_preview.BundleChecks) ... ok
+test_branding_scan_reports_marks (test_release_preview.BundleChecks) ... ok
+test_chromium_enabled_by_launch_environment_blocks (test_release_preview.BundleChecks) ... ok
+test_exfat_stage_root_is_refused (test_release_preview.BundleChecks) ... skipped 'project folder is not on exFAT here'
+test_notice_presence (test_release_preview.BundleChecks) ... ok
+test_packaged_omni_ja_is_read (test_release_preview.BundleChecks) ... ok
+test_safe_browsing_absent_is_labelled (test_release_preview.BundleChecks) ... ok
+test_stage_root_must_be_external (test_release_preview.BundleChecks) ... FAIL
+test_symlink_leaving_bundle_blocks (test_release_preview.BundleChecks) ... ok
+test_updater_enabled_blocks (test_release_preview.BundleChecks) ... ok
+test_sha256sums_format (test_release_preview.Checksums) ... ok
+test_dry_run_prints_every_codesign_and_modifies_nothing (test_release_preview.DryRunPlan) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'
+test_plan_is_inside_out_with_helpers_before_main_app (test_release_preview.DryRunPlan) ... ok
+test_ad_hoc_identity_is_not_accepted (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'
+test_identity_path_signs_inside_out_without_contacting_apple (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'
+test_missing_identity_blocks_after_identity_free_steps (test_release_preview.SigningIdentity) ... skipped '/Volumes/AxioSozoBuild (project APFS volume) is not mounted'
+test_notarize_requires_explicit_authorization (test_release_preview.SigningIdentity) ... ok
+test_commit_mismatch_refuses (test_release_preview.SourceGate) ... ok
+test_modified_tracked_file_refuses (test_release_preview.SourceGate) ... ok
+test_untracked_file_refuses_before_any_write (test_release_preview.SourceGate) ... ok
+
+======================================================================
+FAIL: test_stage_root_must_be_external (test_release_preview.BundleChecks)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/AxioSozo-browser/AxioSozo-browser/tests/test_release_preview.py", line 424, in test_stage_root_must_be_external
+    self.assertIsNone(preview.stage_root_problem(self.stage_root))
+AssertionError: '/Users/runner/work/AxioSozo-browser/AxioSozo-browser/.local/release-tests/case-es_78bse/stage is not on external storage under /Volumes' is not None
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.820s
+
+FAILED (failures=1, skipped=5)
