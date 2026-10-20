@@ -1,0 +1,80 @@
+gui-test chromium/chrome: PASS
+gui-test chromium/switch: PASS
+gui-test chromium/typing: PASS
+gui-test chromium/click: PASS
+gui-test chromium/focus: PASS
+gui-test chromium/selection: PASS
+gui-test chromium/clipboard: PASS
+gui-test chromium/wheel: PASS
+gui-test chromium/cursor: PASS
+gui-test chromium/popups: PASS
+gui-test chromium/context_menu: PASS
+gui-test chromium/dialogs: PASS
+gui-test chromium/find: PASS
+gui-test chromium/zoom: FAIL (AssertionError: timed out waiting for Ctrl+0 resets zoom; last page state {'p': '1', 'l': 1, 't': 'delta', 'a': 'from zen', 'e': '', 'c': 2, 's': '', 'y': 0, 'f': '', 'sel': 'two', 'col': '#336699', 'dl': 'ap', 'd': ['alert', 'confirm=false', 'prompt=zen'], 'k': 'C:Control:ControlLeft', 'mb': '', 'z': [1.1, 866], 'ws': {'n': 18, 'ms': 297, 'y': 0}, 'cm': 2})
+gui-test chromium/ime: FAIL (AssertionError: timed out waiting for dead acute + e = é; last page state {'p': '1', 'l': 1, 't': 'e', 'a': 'from zen', 'e': '', 'c': 2, 's': '', 'y': 0, 'f': 'text', 'sel': 'two', 'col': '#336699', 'dl': 'ap', 'd': ['alert', 'confirm=false', 'prompt=zen'], 'k': ':e:KeyE', 'mb': '', 'z': [1.1, 866], 'ws': {'n': 18, 'ms': 297, 'y': 0}, 'cm': 2})
+gui-test chromium/middle_click: PASS
+gui-test chromium/history: FAIL (AssertionError: timed out waiting for link click opens page 2 in Chromium; last page state {'p': '1', 'l': 1, 't': 'e', 'a': 'beta', 'e': '', 'c': 3, 's': '', 'y': 0, 'f': 'count', 'sel': 'two', 'col': '#336699', 'dl': 'ap', 'd': ['alert', 'confirm=false', 'prompt=zen'], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1.1, 866], 'ws': {'n': 18, 'ms': 297, 'y': 0}, 'cm': 2})
+gui-test chromium/beforeunload: FAIL (AssertionError: timed out waiting for beforeunload armed (with a user gesture); last page state {'p': '1', 'l': 1, 't': 'e', 'a': 'beta', 'e': '', 'c': 3, 's': '', 'y': 0, 'f': '', 'sel': 'two', 'col': '#336699', 'dl': 'ap', 'd': ['alert', 'confirm=false', 'prompt=zen'], 'k': ':Backspace:Backspace', 'mb': 'middle@area', 'z': [1.1, 866], 'ws': {'n': 18, 'ms': 297, 'y': 0}, 'cm': 2})
+gui-test chromium/to_gecko: PASS
+gui-test chromium/host_kill: FAIL (AssertionError: the Gecko tab changed: {'engine': 'chromium', 'native': {'engine': 'chromium', 'version': '154.0.8037.17', 'target': {'document_generation': 2, 'engine': 'chromium', 'engine_instance': 'ec324204-d3e4-4b77-b84c-87b33ef2ef99', 'identity': 'https://axiosozo.invalid', 'native_target_id': '2', 'navigation_generation': 2, 'private_mode': False, 'tab_id': 'd7df5b78-b27c-4d2a-9efc-162cb6f85c0c'}, 'renderPath': 'native-osr-bgra', 'pipeFallback': True, 'frames': 4, 'meanDrawMilliseconds': 4.966475500026718, 'uploadedPixelShare': 1, 'firstFrameMilliseconds': 58.79298100003507, 'lastFrameId': 615, 'surface': {'width': 953, 'height': 704, 'device_scale': 1}, 'surfaceGeometry': None, 'surfaceStats': None, 'renderScaleLimited': False, 'inputFeatures': {'keyVerdict': True, 'wheelPhases': True, 'pinch': True, 'ime': True}, 'fixtureOnly': False, 'ownedTabIds': ['d7df5b78-b27c-4d2a-9efc-162cb6f85c0c']}, 'failure': 'CEF_CRASH_OUTCOME_UNCERTAIN', 'pending': False, 'mode': 'web', 'page': {'url': 'http://127.0.0.1:44177/feel.html', 'title': 'AxioSozo feel {"p":"1","l":1,"t":"","a":"","e":"","c":0,"s":"","y":0,"f":"","sel":"one","col":"#336699","dl":"","d":[],"k":"","mb":"","z":[1.1,866],"ws":null,"cm":0}', 'engine': 'chromium', 'tabId': 'd7df5b78-b27c-4d2a-9efc-162cb6f85c0c'}, 'geckoHidden': True, 'geckoURL': 'about:blank', 'geckoTitle': '', 'overlay': {'display': 'block', 'mode': 'web'}, 'view': {'x': 191, 'y': 8, 'w': 953, 'h': 704, 'cursor': ''}, 'panel': {'title': 'Chromium stopped', 'buttons': ['Reload', 'Open in Firefox']}, 'notice': None, 'scale': 1, 'tabs': 4, 'tabIndex': 1, 'label': 'Tab crash reporter', 'urlbarFocused': False, 'urlbar': 'http://127.0.0.1:44177/feel.html', 'focus': 'body'})
+gui-test chromium/shortcuts: FAIL (AssertionError: timed out waiting for Ctrl+T opens a tab)
+gui-test chromium/urlbar_gecko: FAIL (AssertionError: timed out waiting for Escape returns focus to the gecko page)
+gui-test chromium/urlbar_chromium: FAIL (AssertionError: timed out waiting for Escape returns focus to the chromium page)
+{
+  "status": "FAIL",
+  "scenarios": {
+    "launch": "PASS",
+    "chrome": "PASS",
+    "switch": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus": "PASS",
+    "selection": "PASS",
+    "clipboard": "PASS",
+    "wheel": "PASS",
+    "cursor": "PASS",
+    "popups": "PASS",
+    "context_menu": "PASS",
+    "dialogs": "PASS",
+    "find": "PASS",
+    "zoom": "FAIL",
+    "ime": "FAIL",
+    "middle_click": "PASS",
+    "history": "FAIL",
+    "beforeunload": "FAIL",
+    "to_gecko": "PASS",
+    "host_kill": "FAIL",
+    "shortcuts": "FAIL",
+    "urlbar_gecko": "FAIL",
+    "urlbar_chromium": "FAIL"
+  },
+  "matrix": {
+    "window_title": "PASS",
+    "e1_render_in_content_area": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus_ring_caret": "PASS",
+    "selection_drag_double_click": "PASS",
+    "clipboard_ctrl_c_v": "PASS",
+    "wheel_precise_vs_notch": "PASS",
+    "cursor_shapes": "PASS",
+    "select_popup": "PASS",
+    "datalist_popup": "EXPERIMENTAL",
+    "color_popup": "PASS",
+    "context_menu": "PASS",
+    "js_dialogs": "PASS",
+    "find_in_page": "PASS",
+    "middle_click_paste_autoscroll": "EXPERIMENTAL",
+    "return_to_gecko": "PASS",
+    "zoom": "FAIL",
+    "ime": "FAIL",
+    "history": "FAIL",
+    "beforeunload": "FAIL",
+    "host_kill": "FAIL",
+    "shortcuts": "FAIL",
+    "urlbar_gecko": "FAIL",
+    "urlbar_chromium": "FAIL"
+  },
+  "reason": null
+}
