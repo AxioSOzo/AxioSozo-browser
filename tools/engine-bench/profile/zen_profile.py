@@ -89,6 +89,33 @@ return {engine: n.engine ?? null, frameTransport: n.frameTransport ?? null, fram
         memfdFallback: n.memfdFallback ?? null, nativeReceiver: n.nativeReceiver ?? null, frames: n.frames ?? null};
 '''
 NOW = 'return performance.now();'
+# perf-phase3 diagnostics: the engine canvas and every ancestor up to the root with the computed
+# styles that decide how WebRender composites it (a rounded/clip-path clip needs a mask, opacity/
+# filter/transform/will-change make a nested picture, object-fit and a size mismatch scale it).
+CANVAS_CHAIN = '''
+const canvas = document.querySelector('[data-axiosozo-cef] canvas, [data-axiosozo-engine-view] canvas');
+if (!canvas) return null;
+const dpr = window.devicePixelRatio, chain = [];
+const keys = ['position', 'overflow', 'borderRadius', 'clipPath', 'mask', 'opacity', 'filter', 'backdropFilter', 'transform',
+              'willChange', 'mixBlendMode', 'isolation', 'contain', 'zIndex', 'display', 'visibility', 'boxShadow'];
+for (let node = canvas; node && node.nodeType === 1; node = node.parentElement) {
+  const cs = getComputedStyle(node), r = node.getBoundingClientRect(), row = {};
+  row.node = node.localName + (node.id ? '#' + node.id : '') + (node.classList.length ? '.' + [...node.classList].slice(0, 4).join('.') : '');
+  row.rect_device = [r.x * dpr, r.y * dpr, r.width * dpr, r.height * dpr].map(v => Math.round(v * 100) / 100);
+  for (const k of keys) {
+    const v = cs[k];
+    if (v && !['none', 'visible', 'auto', 'normal', '1', '0px', 'static', 'block'].includes(v)) row[k] = v;
+  }
+  chain.push(row);
+}
+const r = canvas.getBoundingClientRect(), cs = getComputedStyle(canvas);
+return {dpr, canvas_pixels: [canvas.width, canvas.height], css_rect: [r.x, r.y, r.width, r.height],
+        device_rect: [r.x * dpr, r.y * dpr, r.width * dpr, r.height * dpr],
+        exact_device_size: Math.abs(r.width * dpr - canvas.width) < 0.01 && Math.abs(r.height * dpr - canvas.height) < 0.01,
+        integral_device_origin: Math.abs(r.x * dpr - Math.round(r.x * dpr)) < 0.01 && Math.abs(r.y * dpr - Math.round(r.y * dpr)) < 0.01,
+        object_fit: cs.objectFit, moz_opaque: canvas.hasAttribute('moz-opaque'), chain};
+'''
+PROMOTION_LINE = re.compile(r'Surface promotion of prim at (.*?) (failed|failure ignored) with: (.*?)\.?$')
 
 
 # ---- Per-thread CPU (/proc) --------------------------------------------------------------
@@ -374,7 +401,20 @@ class ZenProfile(zen_bench.ZenBench):
         return self.chrome_script(HOOKS, [command, None])
 
     def launch(self, session, executable, profile):
-        super().launch(session, executable, profile)
+        extra = dict(self.args.browser_env)
+        if extra:
+            # TEST-ONLY logging environment for the browser (MOZ_LOG / RUST_LOG only), recorded in the result.
+            engine, original = self.engine, self.engine.browser_environment
+            engine.browser_environment = lambda harness: {**original(harness), **extra}
+            self.result['test_env'] = {'env': extra, 'label': 'TEST-ONLY logging environment (zen_profile --wr-promotion-log)'}
+        try:
+            super().launch(session, executable, profile)
+        finally:
+            if extra:
+                try:
+                    del engine.browser_environment
+                except AttributeError:
+                    engine.browser_environment = original
         if any(p in ('trace', 'profile') for p in self.args.passes):
             # Before any engine host is spawned: the Subprocess.call wrapper must see the spawn.
             self.result['hooks'] = self.hooks('install')
@@ -449,7 +489,13 @@ class ZenProfile(zen_bench.ZenBench):
             state = self.wait(lambda: (lambda p: p if p['engine'] == self.engine.name and str(p['title'] or '').startswith('bench:static')
                                        and (p['frames'] or 0) > 0 else None)(self.presented()), self.engine.name + ' frames')
             return dict(gecko_to_engine_switch_ms=ms, presenter=state)
-        return self.measured('switch-to-engine', switch)
+        record = self.measured('switch-to-engine', switch)
+        try:
+            time.sleep(0.5)
+            self.result.setdefault('canvas_chain', []).append(dict(pass_=self.pass_name, chain=self.chrome_script(CANVAS_CHAIN)))
+        except Exception as error:  # diagnostics only
+            self.result.setdefault('canvas_chain', []).append(dict(pass_=self.pass_name, error=f'{type(error).__name__}: {error}'[:200]))
+        return record
 
     def one_pass(self, server):
         out = dict(pass_=self.pass_name)
@@ -519,6 +565,24 @@ class ZenProfile(zen_bench.ZenBench):
             server.close()
 
 
+def promotion_log(evidence):
+    """WebRender's surface-promotion failures (gfx.webrender.debug.surface-promotion-logging) from browser-stderr.log,
+    counted by reason and rect; the raw log may be too large to publish."""
+    path = evidence / 'browser-stderr.log'
+    if not path.is_file():
+        return None
+    reasons, lines = {}, 0
+    with path.open(errors='replace') as stream:
+        for line in stream:
+            match = PROMOTION_LINE.search(line.strip())
+            if not match:
+                continue
+            lines += 1
+            key = f'{match.group(3)} | {match.group(2)} | {match.group(1)}'
+            reasons[key] = reasons.get(key, 0) + 1
+    return dict(lines=lines, reasons=dict(sorted(reasons.items(), key=lambda kv: -kv[1])[:40]))
+
+
 def compact(windows):
     """One row per (pass, window): the numbers the findings table uses."""
     rows = []
@@ -574,7 +638,22 @@ def main():
                         help="TEST-ONLY layout.css.devPixelsPerPx (zen_bench.py's 2x mode; use with --size 2304x1440)")
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--launch-timeout', type=float, default=240)
+    parser.add_argument('--pref', action='append', default=[], metavar='NAME=VALUE',
+                        help='TEST-ONLY extra pref (axiosozo.engines.* or gfx.webrender.debug.*), recorded in the result')
+    parser.add_argument('--wr-promotion-log', action='store_true',
+                        help='TEST-ONLY: log why WebRender does not promote images to compositor surfaces (stderr, summarized)')
     args = parser.parse_args()
+    extra_prefs = {}
+    for item in args.pref:
+        name, _, value = item.partition('=')
+        if not (name.startswith('axiosozo.engines.') or name.startswith('gfx.webrender.debug.')):
+            parser.error(f'--pref {name}: not an engine or WebRender debug test pref')
+        extra_prefs[name] = {'true': True, 'false': False}.get(value, int(value) if value.isdigit() else value)
+    args.browser_env = {}
+    if args.wr_promotion_log:
+        extra_prefs['gfx.webrender.debug.surface-promotion-logging'] = True
+        args.browser_env = {'RUST_LOG': 'webrender::tile_cache=warn', 'MOZ_LOG': 'webrender::tile_cache:2'}
+    gui_test.TEST_PREFS.update(extra_prefs)
     args.passes = [p for p in args.passes.split(',') if p]
     if not args.passes or any(p not in PASSES for p in args.passes):
         parser.error('--passes: a comma list of ' + ','.join(PASSES))
@@ -603,6 +682,10 @@ def main():
         harness.result['chrome_overlay'] = {key: overlay.get(key) for key in ('label', 'overlay_commit', 'app_build_commit')} | {
             'replaced': len(overlay.get('replaced') or []), 'added': len(overlay.get('added') or [])}
     harness.result['compact'] = compact(harness.result.get('windows', []))
+    if extra_prefs:
+        harness.result['test_prefs'] = {'prefs': extra_prefs, 'label': 'TEST-ONLY prefs (zen_profile --pref)'}
+    if args.wr_promotion_log:
+        harness.result['wr_promotion_log'] = promotion_log(out)
     harness.result.update(status=status, schema='axiosozo-zen-profile-v1', label=harness.label, engine=args.engine,
                           device_scale=args.device_scale,
                           test_only=['GUI harness (Marionette, throwaway profile)', 'engine fixture mode',

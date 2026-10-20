@@ -14,7 +14,8 @@
 name: linux-engine-profile
 on:
   push:
-    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile]
+    branches: [claude/engine-profile-nipd8o, claude/engine-profile-nipd8o-9upfrm, claude/engine-profile-liqv71, cloud/engine-profile,
+               claude/perf-phase3-uvmfis, cloud/perf-phase3]
     paths:
       - tools/engine-bench/profile/**
       - .github/workflows/linux-engine-profile.yml
@@ -26,6 +27,9 @@ on:
       passes:
         type: string
         default: plain,trace,profile
+      extra:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -42,7 +46,9 @@ env:
   # published the unstripped libxul used to symbolize profiles). With this checkout's chrome JS
   # (TEST-ONLY overlay) and hosts, the defaults are memfd frames + native receiver.
   ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39362552105' }}
-  PROFILE_PASSES: ${{ inputs.passes || 'plain,trace,profile' }}
+  PROFILE_PASSES: ${{ inputs.passes || 'plain' }}  # perf-phase3 diag push: TEMPORARY
+  # Extra zen_profile.py options, e.g. --wr-promotion-log (TEST-ONLY WebRender surface-promotion log).
+  PROFILE_EXTRA: ${{ inputs.extra || '--wr-promotion-log' }}  # perf-phase3 diag push: TEMPORARY
 
 jobs:
   zen-source:
@@ -159,7 +165,7 @@ jobs:
           set -o pipefail
           scale=(); [ "$SCALE" = 2 ] && scale=(--device-scale 2 --size 2304x1440)
           timeout 2700 python3 tools/engine-bench/profile/zen_profile.py --engine "$ENGINE" --label "$LABEL" "${scale[@]}" --app fetched \
-            --out "$EVIDENCE_OUT/$LABEL" --passes "$PROFILE_PASSES" --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
+            --out "$EVIDENCE_OUT/$LABEL" --passes "$PROFILE_PASSES" $PROFILE_EXTRA --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
       - name: Upload raw profiles (14 days)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -233,7 +239,7 @@ jobs:
           docker pull -q "$WEBKIT_IMAGE"
           start=$(date +%s); set +e
           mkdir -p "$GITHUB_WORKSPACE/../libxul-symbols"
-          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e PROFILE_PASSES \
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e PROFILE_PASSES -e PROFILE_EXTRA \
             -v "$GITHUB_WORKSPACE/../libxul-symbols:/symbols:ro" \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \

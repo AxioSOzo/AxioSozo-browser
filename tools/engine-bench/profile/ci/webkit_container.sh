@@ -15,6 +15,8 @@
 set -eu
 OUT=/out
 PASSES=${PROFILE_PASSES:-plain,trace,profile}
+# Extra zen_profile.py options (e.g. --wr-promotion-log), word-split on purpose.
+EXTRA=${PROFILE_EXTRA:-}
 mkdir -p "$OUT"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/steps.log"; }
 export DEBIAN_FRONTEND=noninteractive
@@ -90,18 +92,18 @@ install -d -o axio -g axio "$OUT/webkit" "$OUT/gecko-debian" "$OUT/webkit-2x"
 wstatus=0
 log "zen_profile --engine webkit ($PASSES)"
 as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --app fetched --chrome-overlay "$OUT/chrome-overlay.json" \
-  --out "$OUT/webkit" --passes "$PASSES" >"$OUT/zen-profile-webkit.log" 2>&1 || wstatus=$?
+  --out "$OUT/webkit" --passes "$PASSES" $EXTRA >"$OUT/zen-profile-webkit.log" 2>&1 || wstatus=$?
 log "webkit profile exit $wstatus"
 tail -n 15 "$OUT/zen-profile-webkit.log"
 gstatus=0
 log "zen_profile --engine gecko in the same container ($PASSES)"
 as_axio timeout -k 10 1800 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine gecko --label gecko-debian --app fetched --chrome-overlay "$OUT/chrome-overlay.json" \
-  --out "$OUT/gecko-debian" --passes "$PASSES" >"$OUT/zen-profile-gecko-debian.log" 2>&1 || gstatus=$?
+  --out "$OUT/gecko-debian" --passes "$PASSES" $EXTRA >"$OUT/zen-profile-gecko-debian.log" 2>&1 || gstatus=$?
 log "gecko (debian) profile exit $gstatus"
 w2status=0
 log "zen_profile --engine webkit at 2x (TEST-ONLY layout.css.devPixelsPerPx=2, 2304x1440) ($PASSES)"
 as_axio timeout -k 10 2400 python3 "$REPO/tools/engine-bench/profile/zen_profile.py" --engine webkit --label webkit-2x --device-scale 2 --size 2304x1440 \
-  --app fetched --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-2x" --passes "$PASSES" >"$OUT/zen-profile-webkit-2x.log" 2>&1 || w2status=$?
+  --app fetched --chrome-overlay "$OUT/chrome-overlay.json" --out "$OUT/webkit-2x" --passes "$PASSES" $EXTRA >"$OUT/zen-profile-webkit-2x.log" 2>&1 || w2status=$?
 log "webkit 2x profile exit $w2status"
 log "summarize profiles (report.py process)"
 for d in webkit gecko-debian webkit-2x; do
