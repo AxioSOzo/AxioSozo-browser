@@ -1,0 +1,5835 @@
+{
+ "harness": "axiosozo-zen-profile",
+ "version": 1,
+ "engine": "webkit",
+ "started_utc": "2026-10-20T07:18:23+00:00",
+ "host": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.41",
+  "machine": "x86_64",
+  "cpus": 4
+ },
+ "test_only_switches": [
+  "-marionette",
+  "--remote-allow-system-access",
+  "loopback Marionette port",
+  "throwaway owned profile"
+ ],
+ "scenarios": {},
+ "screenshots": [
+  "/out/webkit-2x/visual-plain-a.png",
+  "/out/webkit-2x/visual-plain-b.png",
+  "/out/webkit-2x/visual-profile-a.png",
+  "/out/webkit-2x/visual-profile-b.png",
+  "/out/webkit-2x/zen-profile-webkit-2x.png"
+ ],
+ "bench": {
+  "parent_kind": "axiosozo-dev"
+ },
+ "app": {
+  "executable": "/home/axio/build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+  "source": "fetched-artifact",
+  "run_id": "39362552105",
+  "repository_commit": "35782ef55f54f726e3d2730072026ced386d110d",
+  "fingerprint": "f3c8116e5f2df142c693e5200d79e18f6e60a1dfef76b2159be7ed7eb9c8f4b7",
+  "fingerprint_matches_checkout": false
+ },
+ "windows": [
+  {
+   "window": "switch-to-engine",
+   "pass_": "plain",
+   "result": {
+    "gecko_to_engine_switch_ms": 207.1,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.04395899999963149,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 201.78145099999892,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "spare_hosts": {
+     "chromium": null,
+     "webkit": {
+      "launched": 1,
+      "taken": 1,
+      "refused": 0,
+      "dropped": 0,
+      "failed": 0,
+      "state": "none"
+     }
+    }
+   },
+   "window_epoch_ms": [
+    1792480709335.592,
+    1792480709586.632
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 0.235,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 68.0,
+     "zen-parent": 59.7,
+     "AxioWebKitHost": 8.5,
+     "WPENetworkProce": 8.5
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 25.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 21.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 4.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 59.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 25.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 21.3
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 8.5
+     },
+     {
+      "process": "WPENetworkProce",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 8.5
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 8.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 4.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 2,
+     "presented": 2,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 4451,
+     "presentMicros": 6066,
+     "apply_ms_per_frame": 2.225,
+     "present_ms_per_frame": 3.033,
+     "apply_share_of_one_core": 0.0177,
+     "present_share_of_one_core": 0.0242,
+     "same_sink": false
+    }
+   }
+  },
+  {
+   "window": "idle",
+   "pass_": "plain",
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 0,
+    "input_wall_s": 2.0,
+    "canvas_updates": 0,
+    "fps": null,
+    "fps_whole_window": 0.0,
+    "interval_ms": {
+     "n": 0
+    },
+    "interval_p99_ms": null,
+    "long_intervals_share": null,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 2,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.03264600000011342,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 201.78145099999892,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 10.9,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 0.0,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "WPENetworkProce": 0.0,
+      "WPEWebProcess": 0.0,
+      "Web Content": 4.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 6.4,
+      "bwrap": 0.0,
+      "forkserver": 0.5
+     },
+     "client_cpu_percent": 0.9,
+     "processes": 18,
+     "rss_mb": 2234.2,
+     "pss_mb": 1107.0,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 169.7,
+      "Isolated Web Co": 102.9,
+      "Privileged Cont": 160.6,
+      "RDD Process": 32.7,
+      "Socket Process": 32.2,
+      "Utility Process": 30.6,
+      "WPENetworkProce": 69.8,
+      "WPEWebProcess": 264.4,
+      "Web Content": 521.1,
+      "WebExtensions": 151.9,
+      "axiosozo-dev": 661.8,
+      "bwrap": 3.3,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 6.4
+    }
+   },
+   "window_epoch_ms": [
+    1792480710096.107,
+    1792480712137.664
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 2.032,
+    "cpu_percent_by_process": {
+     "zen-parent": 5.4,
+     "Web Content": 4.4,
+     "forkserver": 0.5,
+     "AxioWebKitHost": 0.5
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "Web Content",
+      "thread": "main",
+      "threads": 3,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "forkserver",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 0,
+     "presented": 0,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 0,
+     "presentMicros": 0,
+     "apply_ms_per_frame": null,
+     "present_ms_per_frame": null,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "window": "raf",
+   "pass_": "plain",
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 175,
+    "input_wall_s": 3.0,
+    "canvas_updates": 175,
+    "fps": 58.04,
+    "fps_whole_window": 57.7,
+    "interval_ms": {
+     "n": 174,
+     "median": 17.316,
+     "p95": 22.697,
+     "min": 12.096,
+     "max": 24.39,
+     "mean": 17.23,
+     "stdev": 3.103
+    },
+    "interval_p99_ms": 23.866565000000264,
+    "long_intervals_share": 0.0,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 722,
+     "title": "bench:raf|page=1",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.10335272853188653,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 201.78145099999892,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 256.9,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 25.8,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "WPENetworkProce": 0.3,
+      "WPEWebProcess": 189.5,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 41.3,
+      "bwrap": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 0.8,
+     "processes": 18,
+     "rss_mb": 2233.2,
+     "pss_mb": 1099.8,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 175.3,
+      "Isolated Web Co": 104.3,
+      "Privileged Cont": 159.8,
+      "RDD Process": 32.7,
+      "Socket Process": 32.2,
+      "Utility Process": 30.6,
+      "WPENetworkProce": 69.7,
+      "WPEWebProcess": 272.4,
+      "Web Content": 522.8,
+      "WebExtensions": 151.8,
+      "axiosozo-dev": 645.2,
+      "bwrap": 3.3,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 41.3
+    }
+   },
+   "window_epoch_ms": [
+    1792480721815.001,
+    1792480724891.909
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.061,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 190.1,
+     "zen-parent": 40.9,
+     "AxioWebKitHost": 26.9,
+     "Privileged Cont": 0.3
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 11.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 9.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 168.3
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 23.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 11.8
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 10.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 9.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.9
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 6.2
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 5.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 2,
+      "cpu_percent": 2.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "VBlankMonitor",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 178,
+     "presented": 178,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 64599,
+     "presentMicros": 220340,
+     "apply_ms_per_frame": 0.363,
+     "present_ms_per_frame": 1.238,
+     "apply_share_of_one_core": 0.021,
+     "present_share_of_one_core": 0.0716,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "window": "raf-nosampler",
+   "pass_": "plain",
+   "result": {
+    "sampler": "off",
+    "seconds": 3.0
+   },
+   "window_epoch_ms": [
+    1792480724897.859,
+    1792480727934.739
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.01,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 186.7,
+     "zen-parent": 47.5,
+     "AxioWebKitHost": 22.9
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 9.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Socket Thread",
+      "threads": 1,
+      "cpu_percent": 4.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "BgIOThr~Pool #",
+      "threads": 1,
+      "cpu_percent": 3.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 3.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 2.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Cache2 I/O",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SSL Cert #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 165.8
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 20.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 9.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 9.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 6.0
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 5.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Socket Thread",
+      "threads": 1,
+      "cpu_percent": 4.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "BgIOThr~Pool #",
+      "threads": 1,
+      "cpu_percent": 3.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 3.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 2.0
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 2,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Cache2 I/O",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SSL Cert #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 173,
+     "presented": 173,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 65135,
+     "presentMicros": 218363,
+     "apply_ms_per_frame": 0.377,
+     "present_ms_per_frame": 1.262,
+     "apply_share_of_one_core": 0.0214,
+     "present_share_of_one_core": 0.0719,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "window": "scroll",
+   "pass_": "plain",
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 108,
+    "input_wall_s": 1.986,
+    "canvas_updates": 108,
+    "fps": 55.48,
+    "fps_whole_window": 53.52,
+    "interval_ms": {
+     "n": 107,
+     "median": 17.203,
+     "p95": 27.383,
+     "min": 4.103,
+     "max": 38.577,
+     "mean": 18.024,
+     "stdev": 5.295
+    },
+    "interval_p99_ms": 35.48872399999527,
+    "long_intervals_share": 0.0654,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1008,
+     "title": "bench:scroll|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.09280162797625284,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 201.78145099999892,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 271.0,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 24.8,
+      "Isolated Web Co": 0.0,
+      "Privileged Cont": 0.0,
+      "RDD Process": 0.0,
+      "Socket Process": 0.0,
+      "Utility Process": 0.0,
+      "WPENetworkProce": 0.0,
+      "WPEWebProcess": 192.0,
+      "Web Content": 0.0,
+      "WebExtensions": 0.0,
+      "axiosozo-dev": 54.1,
+      "bwrap": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 1.5,
+     "processes": 18,
+     "rss_mb": 2312.8,
+     "pss_mb": 1178.5,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 180.2,
+      "Isolated Web Co": 104.3,
+      "Privileged Cont": 159.8,
+      "RDD Process": 32.7,
+      "Socket Process": 32.2,
+      "Utility Process": 30.6,
+      "WPENetworkProce": 69.4,
+      "WPEWebProcess": 311.4,
+      "Web Content": 523.4,
+      "WebExtensions": 150.1,
+      "axiosozo-dev": 682.4,
+      "bwrap": 3.3,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 54.1
+    },
+    "fps_input": 55.48,
+    "interval_p99_input_ms": 35.48872399999527,
+    "frames_input": 108,
+    "input_ms": 1984.6,
+    "input_pacing": {
+     "method": "xdotool",
+     "events": 120,
+     "target_interval_ms": 16,
+     "send_span_s": 1.97
+    }
+   },
+   "window_epoch_ms": [
+    1792480728628.032,
+    1792480730674.49
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 2.036,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 193.5,
+     "zen-parent": 55.1,
+     "AxioWebKitHost": 24.6
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 20.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 11.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 2,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 167.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 20.1
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 17.7
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 11.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 11.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 6.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 5.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 2,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "WPEWebProcess",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 110,
+     "presented": 110,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 118547,
+     "presentMicros": 139212,
+     "apply_ms_per_frame": 1.078,
+     "present_ms_per_frame": 1.266,
+     "apply_share_of_one_core": 0.0579,
+     "present_share_of_one_core": 0.068,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "window": "key",
+   "pass_": "plain",
+   "result": {
+    "samples": 20,
+    "measured_in": "zen-chrome",
+    "title": "bench:text|page=1|len=20",
+    "keydown_to_presented_frame_ms": {
+     "n": 20,
+     "median": 27.699,
+     "p95": 31.492,
+     "min": 23.019,
+     "max": 37.505,
+     "mean": 27.765,
+     "stdev": 3.408
+    },
+    "keys_without_frame": 0
+   },
+   "window_epoch_ms": [
+    1792480731352.198,
+    1792480735021.295
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.658,
+    "cpu_percent_by_process": {
+     "zen-parent": 30.2,
+     "WPEWebProcess": 18.9,
+     "AxioWebKitHost": 3.3
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 12.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 4.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 3.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Indexed~ IO #",
+      "threads": 1,
+      "cpu_percent": 2.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 1.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "IPDL Background",
+      "threads": 1,
+      "cpu_percent": 1.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "StreamTrans #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 15.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 12.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 4.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 3.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Indexed~ IO #",
+      "threads": 1,
+      "cpu_percent": 2.7
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 2.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 1.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "IPDL Background",
+      "threads": 1,
+      "cpu_percent": 1.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 2,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "StreamTrans #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "WPEWebProcess",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 20,
+     "presented": 20,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 63,
+     "presentMicros": 23827,
+     "apply_ms_per_frame": 0.003,
+     "present_ms_per_frame": 1.191,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0065,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "window": "switch-to-gecko",
+   "pass_": "plain",
+   "result": {
+    "engine_to_gecko_switch_ms": 213.1
+   },
+   "window_epoch_ms": [
+    1792480735026.208,
+    1792480735312.285
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 0.237,
+    "cpu_percent_by_process": {
+     "zen-parent": 131.1,
+     "Isolated Web Co": 4.2
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 38.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Indexed~ IO #",
+      "threads": 1,
+      "cpu_percent": 33.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 25.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 16.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "IPDL Background",
+      "threads": 1,
+      "cpu_percent": 8.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.2
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 38.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Indexed~ IO #",
+      "threads": 1,
+      "cpu_percent": 33.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 25.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 16.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "IPDL Background",
+      "threads": 1,
+      "cpu_percent": 8.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.2
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "gecko",
+    "frameTransport": null,
+    "frameUpload": null,
+    "memfdFallback": null
+   }
+  },
+  {
+   "window": "switch-to-engine",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480738814.8015,
+    "dump": {
+     "ok": true,
+     "dump_ms": 232.96663000000262
+    },
+    "file": "profiles/webkit-2x-switch-to-engine.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "gecko_to_engine_switch_ms": 278.2,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.0673979999992298,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 266.55592200000683,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "spare_hosts": {
+     "chromium": null,
+     "webkit": {
+      "launched": 2,
+      "taken": 2,
+      "refused": 0,
+      "dropped": 0,
+      "failed": 0,
+      "state": "none"
+     }
+    }
+   },
+   "window_epoch_ms": [
+    1792480738829.866,
+    1792480739150.23
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 0.303,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 66.1,
+     "zen-parent": 46.2,
+     "Web Content": 29.7,
+     "WPENetworkProce": 9.9,
+     "AxioWebKitHost": 6.6
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 9.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 3.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 3.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 3.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 52.9
+     },
+     {
+      "process": "Web Content",
+      "thread": "main",
+      "threads": 2,
+      "cpu_percent": 29.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 9.9
+     },
+     {
+      "process": "WPENetworkProce",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 9.9
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 6.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 3.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 3.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 3.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 2,
+     "presented": 2,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 4528,
+     "presentMicros": 6151,
+     "apply_ms_per_frame": 2.264,
+     "present_ms_per_frame": 3.075,
+     "apply_share_of_one_core": 0.0141,
+     "present_share_of_one_core": 0.0192,
+     "same_sink": false
+    }
+   },
+   "hook_events": 41,
+   "hook_events_dropped": 0,
+   "switch_timeline": {
+    "write create": {
+     "first_ms": 30.6,
+     "count": 1
+    },
+    "first stdout read resolved": {
+     "first_ms": 38.7,
+     "count": 33
+    },
+    "first frame applied (native receiver)": {
+     "first_ms": 289.0,
+     "count": 2
+    },
+    "write frame_ack": {
+     "first_ms": 290.2,
+     "count": 2
+    },
+    "write visibility": {
+     "first_ms": 298.8,
+     "count": 1
+    },
+    "write focus": {
+     "first_ms": 299.0,
+     "count": 1
+    }
+   },
+   "frames": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js)",
+    "frames_received": 2,
+    "frames_painted": 0,
+    "surface_paints": 0,
+    "frames_superseded": 0,
+    "received_fps": 6.24,
+    "painted_fps": 0.0,
+    "payload_bytes_per_frame": {
+     "n": 2,
+     "median": 0.0,
+     "p95": 0,
+     "min": 0,
+     "max": 0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "damage_share": {
+     "n": 0
+    },
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 33,
+    "header_wait_ms": {
+     "n": 2,
+     "median": 73.78,
+     "p95": 147.532,
+     "min": 0.028,
+     "max": 147.532,
+     "mean": 73.78,
+     "stdev": 73.752
+    },
+    "pixel_read_ms": {
+     "n": 2,
+     "median": 0.0,
+     "p95": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "assemble_ms": {
+     "n": 0
+    },
+    "native_frames": 2,
+    "native_apply_ms": {
+     "n": 2,
+     "median": 3.041,
+     "p95": 3.416,
+     "min": 2.667,
+     "max": 3.416,
+     "mean": 3.041,
+     "stdev": 0.374
+    },
+    "native_resolved_to_ack_ms": {
+     "n": 2,
+     "median": 0.68,
+     "p95": 1.108,
+     "min": 0.253,
+     "max": 1.108,
+     "mean": 0.68,
+     "stdev": 0.427
+    },
+    "received_to_ack_ms": {
+     "n": 2,
+     "median": 4.002,
+     "p95": 4.977,
+     "min": 3.027,
+     "max": 4.977,
+     "mean": 4.002,
+     "stdev": 0.975
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 0
+    },
+    "receive_to_receive_ms": {
+     "n": 1,
+     "median": 24.994,
+     "p95": 24.994,
+     "min": 24.994,
+     "max": 24.994,
+     "mean": 24.994,
+     "stdev": 0.0
+    },
+    "main_thread_frame_work_share": 0.0042,
+    "main_thread_frame_work_note": "pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window"
+   }
+  },
+  {
+   "window": "idle",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480739914.8835,
+    "dump": {
+     "ok": true,
+     "dump_ms": 300.2715720000124
+    },
+    "file": "profiles/webkit-2x-idle.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 0,
+    "input_wall_s": 2.0,
+    "canvas_updates": 0,
+    "fps": null,
+    "fps_whole_window": 0.0,
+    "interval_ms": {
+     "n": 0
+    },
+    "interval_p99_ms": null,
+    "long_intervals_share": null,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 2,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.04897100000016508,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 266.55592200000683,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 49.9,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 0.0,
+      "Isolated Web Co": 1.5,
+      "Privileged Cont": 1.5,
+      "RDD Process": 1.0,
+      "Socket Process": 1.0,
+      "Utility Process": 1.0,
+      "WPENetworkProce": 0.0,
+      "WPEWebProcess": 0.0,
+      "Web Content": 7.4,
+      "WebExtensions": 2.0,
+      "axiosozo-dev": 34.6,
+      "bwrap": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 1.1,
+     "processes": 18,
+     "rss_mb": 2640.8,
+     "pss_mb": 1499.2,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 176.1,
+      "Isolated Web Co": 160.2,
+      "Privileged Cont": 190.1,
+      "RDD Process": 65.3,
+      "Socket Process": 66.9,
+      "Utility Process": 64.6,
+      "WPENetworkProce": 69.6,
+      "WPEWebProcess": 264.1,
+      "Web Content": 644.1,
+      "WebExtensions": 178.2,
+      "axiosozo-dev": 725.0,
+      "bwrap": 3.4,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 34.6
+    }
+   },
+   "window_epoch_ms": [
+    1792480739926.045,
+    1792480741984.599
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 2.044,
+    "cpu_percent_by_process": {
+     "zen-parent": 35.2,
+     "Web Content": 5.4,
+     "Isolated Web Co": 1.5,
+     "Socket Process": 1.0,
+     "WebExtensions": 1.0,
+     "RDD Process": 1.0,
+     "Privileged Cont": 1.0,
+     "Utility Process": 0.5
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 8.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 2,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.5
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 2,
+      "cpu_percent": 8.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "Web Content",
+      "thread": "SamplerThread",
+      "threads": 5,
+      "cpu_percent": 5.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 2,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "Socket Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "WebExtensions",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "RDD Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "Utility Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 0,
+     "presented": 0,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 0,
+     "presentMicros": 0,
+     "apply_ms_per_frame": null,
+     "present_ms_per_frame": null,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0,
+     "same_sink": true
+    }
+   },
+   "hook_events": 4,
+   "hook_events_dropped": 0
+  },
+  {
+   "window": "raf",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480751708.0808,
+    "dump": {
+     "ok": true,
+     "dump_ms": 466.14389800000936
+    },
+    "file": "profiles/webkit-2x-raf.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 177,
+    "input_wall_s": 3.0,
+    "canvas_updates": 177,
+    "fps": 58.03,
+    "fps_whole_window": 58.11,
+    "interval_ms": {
+     "n": 176,
+     "median": 17.15,
+     "p95": 21.56,
+     "min": 8.551,
+     "max": 30.306,
+     "mean": 17.231,
+     "stdev": 2.623
+    },
+    "interval_p99_ms": 25.54519199999777,
+    "long_intervals_share": 0.0114,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 698,
+     "title": "bench:raf|page=1",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.10433516332356878,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 266.55592200000683,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 276.2,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 21.0,
+      "Isolated Web Co": 1.6,
+      "Privileged Cont": 1.6,
+      "RDD Process": 1.0,
+      "Socket Process": 1.0,
+      "Utility Process": 1.3,
+      "WPENetworkProce": 0.0,
+      "WPEWebProcess": 181.2,
+      "Web Content": 8.2,
+      "WebExtensions": 1.6,
+      "axiosozo-dev": 57.6,
+      "bwrap": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 1.0,
+     "processes": 18,
+     "rss_mb": 2705.1,
+     "pss_mb": 1556.6,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 181.1,
+      "Isolated Web Co": 161.3,
+      "Privileged Cont": 190.6,
+      "RDD Process": 65.5,
+      "Socket Process": 67.4,
+      "Utility Process": 64.7,
+      "WPENetworkProce": 69.4,
+      "WPEWebProcess": 271.8,
+      "Web Content": 646.9,
+      "WebExtensions": 179.4,
+      "axiosozo-dev": 770.5,
+      "bwrap": 3.4,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 57.6
+    }
+   },
+   "window_epoch_ms": [
+    1792480751724.972,
+    1792480754825.553
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.075,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 182.7,
+     "zen-parent": 59.3,
+     "AxioWebKitHost": 20.8,
+     "Web Content": 6.5,
+     "WebExtensions": 1.3,
+     "Privileged Cont": 1.3,
+     "Isolated Web Co": 1.3,
+     "Socket Process": 1.0,
+     "Utility Process": 1.0,
+     "RDD Process": 0.7
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 14.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 9.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 2,
+      "cpu_percent": 8.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 8.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 3,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.7
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 163.9
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 18.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 14.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 9.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 2,
+      "cpu_percent": 8.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 8.1
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 8.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.5
+     },
+     {
+      "process": "Web Content",
+      "thread": "SamplerThread",
+      "threads": 5,
+      "cpu_percent": 6.5
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 5.9
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 3.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 3,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "WebExtensions",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "Socket Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "Utility Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.7
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 180,
+     "presented": 180,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 58915,
+     "presentMicros": 232846,
+     "apply_ms_per_frame": 0.327,
+     "present_ms_per_frame": 1.294,
+     "apply_share_of_one_core": 0.019,
+     "present_share_of_one_core": 0.0751,
+     "same_sink": true
+    }
+   },
+   "hook_events": 729,
+   "hook_events_dropped": 0,
+   "frames": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js)",
+    "frames_received": 180,
+    "frames_painted": 0,
+    "surface_paints": 0,
+    "frames_superseded": 0,
+    "received_fps": 58.05,
+    "painted_fps": 0.0,
+    "payload_bytes_per_frame": {
+     "n": 180,
+     "median": 0.0,
+     "p95": 0,
+     "min": 0,
+     "max": 0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "damage_share": {
+     "n": 0
+    },
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 367,
+    "header_wait_ms": {
+     "n": 180,
+     "median": 15.683,
+     "p95": 17.44,
+     "min": 4.034,
+     "max": 28.14,
+     "mean": 15.428,
+     "stdev": 2.247
+    },
+    "pixel_read_ms": {
+     "n": 180,
+     "median": 0.0,
+     "p95": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "assemble_ms": {
+     "n": 0
+    },
+    "native_frames": 180,
+    "native_apply_ms": {
+     "n": 180,
+     "median": 0.455,
+     "p95": 0.695,
+     "min": 0.08,
+     "max": 5.494,
+     "mean": 0.511,
+     "stdev": 0.433
+    },
+    "native_resolved_to_ack_ms": {
+     "n": 180,
+     "median": 0.155,
+     "p95": 0.329,
+     "min": 0.099,
+     "max": 1.907,
+     "mean": 0.209,
+     "stdev": 0.247
+    },
+    "received_to_ack_ms": {
+     "n": 180,
+     "median": 0.742,
+     "p95": 1.603,
+     "min": 0.331,
+     "max": 5.81,
+     "mean": 0.876,
+     "stdev": 0.66
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 0
+    },
+    "receive_to_receive_ms": {
+     "n": 179,
+     "median": 17.192,
+     "p95": 18.986,
+     "min": 11.774,
+     "max": 29.439,
+     "mean": 17.262,
+     "stdev": 1.453
+    },
+    "main_thread_frame_work_share": 0.0122,
+    "main_thread_frame_work_note": "pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window"
+   }
+  },
+  {
+   "window": "raf-nosampler",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480755408.0967,
+    "dump": {
+     "ok": true,
+     "dump_ms": 454.1204460000008
+    },
+    "file": "profiles/webkit-2x-raf-nosampler.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "sampler": "off",
+    "seconds": 3.0
+   },
+   "window_epoch_ms": [
+    1792480755426.697,
+    1792480758455.333
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.012,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 181.9,
+     "zen-parent": 49.9,
+     "AxioWebKitHost": 21.7,
+     "Web Content": 6.0,
+     "WebExtensions": 1.3,
+     "Privileged Cont": 1.3,
+     "Isolated Web Co": 1.3,
+     "Socket Process": 1.0,
+     "RDD Process": 1.0,
+     "Utility Process": 0.7
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 10.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 8.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 7.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 163.0
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 19.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 10.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 8.6
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 8.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 7.0
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 6.0
+     },
+     {
+      "process": "Web Content",
+      "thread": "SamplerThread",
+      "threads": 5,
+      "cpu_percent": 6.0
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 2,
+      "cpu_percent": 1.7
+     },
+     {
+      "process": "WebExtensions",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.3
+     },
+     {
+      "process": "Socket Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "RDD Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "Utility Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 0.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 175,
+     "presented": 175,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 57690,
+     "presentMicros": 216537,
+     "apply_ms_per_frame": 0.33,
+     "present_ms_per_frame": 1.237,
+     "apply_share_of_one_core": 0.019,
+     "present_share_of_one_core": 0.0715,
+     "same_sink": true
+    }
+   },
+   "hook_events": 713,
+   "hook_events_dropped": 0,
+   "frames": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js)",
+    "frames_received": 176,
+    "frames_painted": 0,
+    "surface_paints": 0,
+    "frames_superseded": 0,
+    "received_fps": 58.11,
+    "painted_fps": 0.0,
+    "payload_bytes_per_frame": {
+     "n": 176,
+     "median": 0.0,
+     "p95": 0,
+     "min": 0,
+     "max": 0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "damage_share": {
+     "n": 0
+    },
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 360,
+    "header_wait_ms": {
+     "n": 176,
+     "median": 15.798,
+     "p95": 17.301,
+     "min": 1.9,
+     "max": 19.253,
+     "mean": 15.538,
+     "stdev": 1.835
+    },
+    "pixel_read_ms": {
+     "n": 176,
+     "median": 0.0,
+     "p95": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "assemble_ms": {
+     "n": 0
+    },
+    "native_frames": 176,
+    "native_apply_ms": {
+     "n": 176,
+     "median": 0.452,
+     "p95": 0.701,
+     "min": 0.078,
+     "max": 1.056,
+     "mean": 0.461,
+     "stdev": 0.149
+    },
+    "native_resolved_to_ack_ms": {
+     "n": 176,
+     "median": 0.172,
+     "p95": 0.285,
+     "min": 0.108,
+     "max": 1.121,
+     "mean": 0.191,
+     "stdev": 0.113
+    },
+    "received_to_ack_ms": {
+     "n": 176,
+     "median": 0.789,
+     "p95": 1.158,
+     "min": 0.419,
+     "max": 1.862,
+     "mean": 0.814,
+     "stdev": 0.21
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 0
+    },
+    "receive_to_receive_ms": {
+     "n": 175,
+     "median": 17.238,
+     "p95": 18.578,
+     "min": 14.996,
+     "max": 20.458,
+     "mean": 17.233,
+     "stdev": 0.861
+    },
+    "main_thread_frame_work_share": 0.0111,
+    "main_thread_frame_work_note": "pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window"
+   }
+  },
+  {
+   "window": "scroll",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480759699.069,
+    "dump": {
+     "ok": true,
+     "dump_ms": 295.0170100000032
+    },
+    "file": "profiles/webkit-2x-scroll.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "measured_in": "zen-chrome (presenter frame counter, 2 ms sampler)",
+    "frames": 110,
+    "input_wall_s": 1.99,
+    "canvas_updates": 110,
+    "fps": 55.65,
+    "fps_whole_window": 54.27,
+    "interval_ms": {
+     "n": 109,
+     "median": 17.465,
+     "p95": 26.162,
+     "min": 8.676,
+     "max": 42.132,
+     "mean": 17.971,
+     "stdev": 5.016
+    },
+    "interval_p99_ms": 35.76603500000056,
+    "long_intervals_share": 0.0642,
+    "multi_frame_updates": 0,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1004,
+     "title": "bench:scroll|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.08833148904387596,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 266.55592200000683,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "usage": {
+     "cpu_percent": 306.4,
+     "cpu_percent_by_kind": {
+      "AxioWebKitHost": 23.7,
+      "Isolated Web Co": 2.0,
+      "Privileged Cont": 2.0,
+      "RDD Process": 1.0,
+      "Socket Process": 1.5,
+      "Utility Process": 1.0,
+      "WPENetworkProce": 0.0,
+      "WPEWebProcess": 192.2,
+      "Web Content": 7.9,
+      "WebExtensions": 1.5,
+      "axiosozo-dev": 73.6,
+      "bwrap": 0.0,
+      "forkserver": 0.0
+     },
+     "client_cpu_percent": 1.6,
+     "processes": 18,
+     "rss_mb": 2786.0,
+     "pss_mb": 1624.8,
+     "rss_mb_by_kind": {
+      "AxioWebKitHost": 181.3,
+      "Isolated Web Co": 162.5,
+      "Privileged Cont": 192.4,
+      "RDD Process": 66.2,
+      "Socket Process": 68.1,
+      "Utility Process": 65.2,
+      "WPENetworkProce": 69.2,
+      "WPEWebProcess": 314.0,
+      "Web Content": 653.6,
+      "WebExtensions": 180.9,
+      "axiosozo-dev": 796.2,
+      "bwrap": 3.4,
+      "forkserver": 33.1
+     },
+     "parent_cpu_percent": 73.6
+    },
+    "fps_input": 55.65,
+    "interval_p99_input_ms": 35.76603500000056,
+    "frames_input": 110,
+    "input_ms": 1987.0,
+    "input_pacing": {
+     "method": "xdotool",
+     "events": 120,
+     "target_interval_ms": 16,
+     "send_span_s": 1.974
+    }
+   },
+   "window_epoch_ms": [
+    1792480759707.615,
+    1792480761761.796
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 2.042,
+    "cpu_percent_by_process": {
+     "WPEWebProcess": 192.5,
+     "zen-parent": 74.1,
+     "AxioWebKitHost": 23.1,
+     "Web Content": 6.4,
+     "Isolated Web Co": 1.5,
+     "Socket Process": 1.0,
+     "WebExtensions": 1.0,
+     "RDD Process": 1.0,
+     "Privileged Cont": 1.0,
+     "Utility Process": 0.5
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 25.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 14.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 11.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 2.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 168.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 25.0
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 16.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 14.7
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 11.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 11.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "SkiaCPUWorker",
+      "threads": 2,
+      "cpu_percent": 7.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "AxioWebKitHost",
+      "threads": 1,
+      "cpu_percent": 6.4
+     },
+     {
+      "process": "Web Content",
+      "thread": "SamplerThread",
+      "threads": 5,
+      "cpu_percent": 5.9
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 4.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 2.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "ReceiveQueue",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.5
+     },
+     {
+      "process": "Socket Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "WebExtensions",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "RDD Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.0
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.5
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 110,
+     "presented": 110,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 128955,
+     "presentMicros": 197233,
+     "apply_ms_per_frame": 1.172,
+     "present_ms_per_frame": 1.793,
+     "apply_share_of_one_core": 0.0628,
+     "present_share_of_one_core": 0.096,
+     "same_sink": true
+    }
+   },
+   "hook_events": 1028,
+   "hook_events_dropped": 0,
+   "frames": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js)",
+    "frames_received": 110,
+    "frames_painted": 0,
+    "surface_paints": 0,
+    "frames_superseded": 0,
+    "received_fps": 53.55,
+    "painted_fps": 0.0,
+    "payload_bytes_per_frame": {
+     "n": 110,
+     "median": 0.0,
+     "p95": 0,
+     "min": 0,
+     "max": 0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "damage_share": {
+     "n": 0
+    },
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 691,
+    "header_wait_ms": {
+     "n": 110,
+     "median": 8.853,
+     "p95": 16.56,
+     "min": 1.73,
+     "max": 19.575,
+     "mean": 9.471,
+     "stdev": 4.651
+    },
+    "pixel_read_ms": {
+     "n": 110,
+     "median": 0.0,
+     "p95": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "assemble_ms": {
+     "n": 0
+    },
+    "native_frames": 110,
+    "native_apply_ms": {
+     "n": 110,
+     "median": 1.366,
+     "p95": 3.897,
+     "min": 0.087,
+     "max": 7.003,
+     "mean": 1.694,
+     "stdev": 1.055
+    },
+    "native_resolved_to_ack_ms": {
+     "n": 110,
+     "median": 0.152,
+     "p95": 0.747,
+     "min": 0.097,
+     "max": 2.712,
+     "mean": 0.256,
+     "stdev": 0.334
+    },
+    "received_to_ack_ms": {
+     "n": 110,
+     "median": 1.741,
+     "p95": 4.905,
+     "min": 0.305,
+     "max": 7.276,
+     "mean": 2.147,
+     "stdev": 1.165
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 0
+    },
+    "receive_to_receive_ms": {
+     "n": 109,
+     "median": 17.31,
+     "p95": 22.023,
+     "min": 13.067,
+     "max": 37.47,
+     "mean": 17.952,
+     "stdev": 3.41
+    },
+    "main_thread_frame_work_share": 0.0137,
+    "main_thread_frame_work_note": "pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window"
+   }
+  },
+  {
+   "window": "key",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480762810.2268,
+    "dump": {
+     "ok": true,
+     "dump_ms": 450.8572290000011
+    },
+    "file": "profiles/webkit-2x-key.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "samples": 20,
+    "measured_in": "zen-chrome",
+    "title": "bench:text|page=1|len=20",
+    "keydown_to_presented_frame_ms": {
+     "n": 20,
+     "median": 30.502,
+     "p95": 35.369,
+     "min": 22.022,
+     "max": 36.51,
+     "mean": 29.835,
+     "stdev": 3.935
+    },
+    "keys_without_frame": 0
+   },
+   "window_epoch_ms": [
+    1792480762818.437,
+    1792480766488.301
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 3.657,
+    "cpu_percent_by_process": {
+     "zen-parent": 40.2,
+     "WPEWebProcess": 18.6,
+     "Web Content": 6.8,
+     "AxioWebKitHost": 3.1,
+     "WebExtensions": 1.7,
+     "Privileged Cont": 1.7,
+     "Socket Process": 1.1,
+     "RDD Process": 1.1,
+     "Isolated Web Co": 1.1,
+     "Utility Process": 0.8
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 3.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "WPEWebProcess",
+      "thread": "llvmpipe-",
+      "threads": 4,
+      "cpu_percent": 16.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 13.4
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 7.9
+     },
+     {
+      "process": "Web Content",
+      "thread": "SamplerThread",
+      "threads": 5,
+      "cpu_percent": 6.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 3.6
+     },
+     {
+      "process": "AxioWebKitHost",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 2.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 2.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Timer",
+      "threads": 1,
+      "cpu_percent": 1.6
+     },
+     {
+      "process": "WebExtensions",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.4
+     },
+     {
+      "process": "Privileged Cont",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.4
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "WPEWebProcess",
+      "thread": "eadedCompositor",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "Socket Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "RDD Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 1.1
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRRende~ckend#",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Backgro~Pool #",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "Utility Process",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 0.8
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 0.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "glean.dispatche",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "TaskCon~ller #",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Softwar~cThread",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "WRScene~ilder#",
+      "threads": 1,
+      "cpu_percent": 0.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "ImageBridgeChld",
+      "threads": 1,
+      "cpu_percent": 0.3
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 20,
+     "presented": 20,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 75,
+     "presentMicros": 27783,
+     "apply_ms_per_frame": 0.004,
+     "present_ms_per_frame": 1.389,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0076,
+     "same_sink": true
+    }
+   },
+   "hook_events": 466,
+   "hook_events_dropped": 0,
+   "key_breakdown": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js); chrome event timeStamp and performance.now share one clock",
+    "keys": 20,
+    "keys_with_frame": 20,
+    "chrome_handler_ms": {
+     "n": 20,
+     "median": 0.179,
+     "p95": 0.27,
+     "min": 0.153,
+     "max": 0.354,
+     "mean": 0.202,
+     "stdev": 0.049
+    },
+    "keydown_to_send_ms": {
+     "n": 20,
+     "median": 0.602,
+     "p95": 0.808,
+     "min": 0.467,
+     "max": 1.138,
+     "mean": 0.632,
+     "stdev": 0.147
+    },
+    "send_to_frame_header_ms": {
+     "n": 20,
+     "median": 26.734,
+     "p95": 31.403,
+     "min": 19.369,
+     "max": 33.064,
+     "mean": 26.151,
+     "stdev": 3.968
+    },
+    "pixel_transport_ms": {
+     "n": 20,
+     "median": 0.048,
+     "p95": 0.083,
+     "min": 0.035,
+     "max": 0.15,
+     "mean": 0.055,
+     "stdev": 0.025
+    },
+    "received_to_accept_ms": {
+     "n": 0
+    },
+    "native_apply_ms": {
+     "n": 20,
+     "median": 0.172,
+     "p95": 0.453,
+     "min": 0.078,
+     "max": 0.605,
+     "mean": 0.225,
+     "stdev": 0.146
+    },
+    "received_to_ack_ms": {
+     "n": 20,
+     "median": 0.521,
+     "p95": 0.963,
+     "min": 0.34,
+     "max": 1.092,
+     "mean": 0.564,
+     "stdev": 0.204
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 20,
+     "median": 157.867,
+     "p95": 168.028,
+     "min": 0.126,
+     "max": 172.308,
+     "mean": 106.608,
+     "stdev": 75.222
+    },
+    "keydown_to_surface_paint_end_ms": {
+     "n": 20,
+     "median": 27.722,
+     "p95": 32.966,
+     "min": 20.539,
+     "max": 34.482,
+     "mean": 27.403,
+     "stdev": 3.983
+    },
+    "keydown_to_chrome_paint_ms": {
+     "n": 20,
+     "median": 188.894,
+     "p95": 196.157,
+     "min": 23.22,
+     "max": 201.528,
+     "mean": 134.011,
+     "stdev": 78.263
+    }
+   },
+   "frames": {
+    "measured_in": "zen-chrome TEST-ONLY hooks (hooks.js)",
+    "frames_received": 20,
+    "frames_painted": 0,
+    "surface_paints": 0,
+    "frames_superseded": 0,
+    "received_fps": 5.45,
+    "painted_fps": 0.0,
+    "payload_bytes_per_frame": {
+     "n": 20,
+     "median": 0.0,
+     "p95": 0,
+     "min": 0,
+     "max": 0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "damage_share": {
+     "n": 0
+    },
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 325,
+    "header_wait_ms": {
+     "n": 20,
+     "median": 16.039,
+     "p95": 20.523,
+     "min": 4.358,
+     "max": 21.738,
+     "mean": 13.576,
+     "stdev": 5.93
+    },
+    "pixel_read_ms": {
+     "n": 20,
+     "median": 0.0,
+     "p95": 0.0,
+     "min": 0.0,
+     "max": 0.0,
+     "mean": 0.0,
+     "stdev": 0.0
+    },
+    "assemble_ms": {
+     "n": 0
+    },
+    "native_frames": 20,
+    "native_apply_ms": {
+     "n": 20,
+     "median": 0.172,
+     "p95": 0.453,
+     "min": 0.078,
+     "max": 0.605,
+     "mean": 0.225,
+     "stdev": 0.146
+    },
+    "native_resolved_to_ack_ms": {
+     "n": 20,
+     "median": 0.138,
+     "p95": 0.335,
+     "min": 0.111,
+     "max": 0.349,
+     "mean": 0.177,
+     "stdev": 0.075
+    },
+    "received_to_ack_ms": {
+     "n": 20,
+     "median": 0.521,
+     "p95": 0.963,
+     "min": 0.34,
+     "max": 1.092,
+     "mean": 0.564,
+     "stdev": 0.204
+    },
+    "accept_to_paint_start_ms": {
+     "n": 0
+    },
+    "surface_paint_ms": {
+     "n": 0
+    },
+    "convert_ms": {
+     "n": 0
+    },
+    "put_ms": {
+     "n": 0
+    },
+    "paint_to_chrome_paint_ms": {
+     "n": 0
+    },
+    "receive_to_receive_ms": {
+     "n": 19,
+     "median": 162.39,
+     "p95": 177.698,
+     "min": 159.071,
+     "max": 177.698,
+     "mean": 166.731,
+     "stdev": 7.126
+    },
+    "main_thread_frame_work_share": 0.001,
+    "main_thread_frame_work_note": "pixel read call->resolve (includes waiting on the Subprocess worker) + assembly + surface paints, as a share of the window"
+   }
+  },
+  {
+   "window": "switch-to-gecko",
+   "pass_": "profile",
+   "profiler": {
+    "ok": true,
+    "features": [
+     "js",
+     "mainthreadio",
+     "fileio",
+     "fileioall",
+     "nomarkerstacks",
+     "screenshots",
+     "seqstyle",
+     "stackwalk",
+     "jsallocations",
+     "nostacksampling",
+     "ipcmessages",
+     "audiocallbacktracing",
+     "cpuallthreads",
+     "samplingallthreads",
+     "markersallthreads",
+     "unregisteredthreads",
+     "processcpu",
+     "power",
+     "cpufreq",
+     "bandwidth",
+     "memory",
+     "tracing",
+     "sandbox",
+     "flows",
+     "jssources"
+    ],
+    "epoch": 1792480766971.6462,
+    "dump": {
+     "ok": true,
+     "dump_ms": 154.41955199999938
+    },
+    "file": "profiles/webkit-2x-switch-to-gecko.json",
+    "parent_pid": 8674
+   },
+   "result": {
+    "engine_to_gecko_switch_ms": 217.1
+   },
+   "window_epoch_ms": [
+    1792480766978.906,
+    1792480767261.311
+   ],
+   "threads": {
+    "measured_in": "/proc/<pid>/task/<tid>/stat utime+stime delta (CLK_TCK resolution)",
+    "seconds": 0.241,
+    "cpu_percent_by_process": {
+     "zen-parent": 45.9,
+     "Isolated Web Co": 8.3
+    },
+    "zen_parent_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 12.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "sqldb:p~lite #",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 4.2
+     }
+    ],
+    "top_threads": [
+     {
+      "process": "zen-parent",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 12.5
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Renderer",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SamplerThread",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "Isolated Web Co",
+      "thread": "main",
+      "threads": 1,
+      "cpu_percent": 8.3
+     },
+     {
+      "process": "zen-parent",
+      "thread": "Compositor",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "sqldb:p~lite #",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "SwComposite",
+      "threads": 1,
+      "cpu_percent": 4.2
+     },
+     {
+      "process": "zen-parent",
+      "thread": "DOM Worker",
+      "threads": 1,
+      "cpu_percent": 4.2
+     }
+    ]
+   },
+   "frame_path": {
+    "engine": "gecko",
+    "frameTransport": null,
+    "frameUpload": null,
+    "memfdFallback": null
+   },
+   "hook_events": 9,
+   "hook_events_dropped": 0,
+   "switch_timeline": {
+    "write shutdown": {
+     "first_ms": 20.4,
+     "count": 1
+    },
+    "first stdout read resolved": {
+     "first_ms": 29.3,
+     "count": 5
+    }
+   }
+  }
+ ],
+ "passes": [
+  {
+   "pass_": "plain",
+   "switch": {
+    "gecko_to_engine_switch_ms": 207.1,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.04395899999963149,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 201.78145099999892,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "spare_hosts": {
+     "chromium": null,
+     "webkit": {
+      "launched": 1,
+      "taken": 1,
+      "refused": 0,
+      "dropped": 0,
+      "failed": 0,
+      "state": "none"
+     }
+    }
+   },
+   "raf_load": {
+    "navigate_to_title_wall_ms": 266.9,
+    "title": "bench:raf|page=1",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 24.3,
+     "navigate_to_visible_ms": 64.9,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 37
+    },
+    "error": null
+   },
+   "visual": {
+    "screen_changed": true,
+    "screenshots": [
+     "visual-plain-a.png",
+     "visual-plain-b.png"
+    ]
+   },
+   "scroll_load": {
+    "navigate_to_title_wall_ms": 278.8,
+    "title": "bench:scroll|page=2",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 72.1,
+     "navigate_to_visible_ms": 170.0,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 2
+    },
+    "error": null
+   },
+   "text_load": {
+    "navigate_to_title_wall_ms": 267.4,
+    "title": "bench:text|page=1|len=0",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 30.8,
+     "navigate_to_visible_ms": 60.0,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 1
+    },
+    "error": null
+   },
+   "status": "PASS"
+  },
+  {
+   "pass_": "profile",
+   "switch": {
+    "gecko_to_engine_switch_ms": 278.2,
+    "presenter": {
+     "engine": "webkit",
+     "frames": 1,
+     "title": "bench:static|page=2",
+     "tabEngine": "webkit",
+     "renderPath": "wpe-fdo-shm-bgra",
+     "meanDrawMilliseconds": 0.0673979999992298,
+     "uploadedPixelShare": null,
+     "firstFrameMilliseconds": 266.55592200000683,
+     "supersededFrames": 0,
+     "surface": {
+      "width": 837,
+      "height": 606,
+      "device_scale": 2
+     },
+     "frameTransport": "memfd",
+     "memfdFallback": null,
+     "frameUpload": "native"
+    },
+    "spare_hosts": {
+     "chromium": null,
+     "webkit": {
+      "launched": 2,
+      "taken": 2,
+      "refused": 0,
+      "dropped": 0,
+      "failed": 0,
+      "state": "none"
+     }
+    }
+   },
+   "raf_load": {
+    "navigate_to_title_wall_ms": 287.9,
+    "title": "bench:raf|page=1",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 29.7,
+     "navigate_to_visible_ms": 74.3,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 38
+    },
+    "error": null
+   },
+   "visual": {
+    "screen_changed": true,
+    "screenshots": [
+     "visual-profile-a.png",
+     "visual-profile-b.png"
+    ]
+   },
+   "scroll_load": {
+    "navigate_to_title_wall_ms": 270.3,
+    "title": "bench:scroll|page=2",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 58.4,
+     "navigate_to_visible_ms": 155.5,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 1
+    },
+    "error": null
+   },
+   "text_load": {
+    "navigate_to_title_wall_ms": 266.6,
+    "title": "bench:text|page=1|len=0",
+    "measured_in": "zen-chrome",
+    "timing": {
+     "navigate_to_title_ms": 31.0,
+     "navigate_to_visible_ms": 61.6,
+     "visible_basis": "first frame after the title event",
+     "frames_after_navigate": 1
+    },
+    "error": null
+   },
+   "status": "PASS"
+  }
+ ],
+ "session": "/home/axio/build/runtime/4810cb4f5d4c2d30/profile-b08cac27fbd0e2e4",
+ "display": {
+  "server": "Xvfb",
+  "display": ":90",
+  "size": "2304x1440",
+  "xauth": true,
+  "geometry": "2304 1440"
+ },
+ "test_env": {
+  "env": {
+   "RUST_LOG": "webrender::tile_cache=warn",
+   "MOZ_LOG": "webrender::tile_cache:2"
+  },
+  "label": "TEST-ONLY logging environment (zen_profile --wr-promotion-log)"
+ },
+ "dbus": "private session bus",
+ "command": [
+  "/home/axio/build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+  "-no-remote",
+  "-profile",
+  "/home/axio/build/runtime/4810cb4f5d4c2d30/profile-b08cac27fbd0e2e4/gecko",
+  "-marionette",
+  "--remote-allow-system-access",
+  "about:blank"
+ ],
+ "browser": {
+  "pid": 8674,
+  "marionette_port": 44859,
+  "capabilities": {
+   "browserName": "axiosozo",
+   "browserVersion": "0.1a1",
+   "platformName": "linux"
+  },
+  "seconds_to_marionette": 2.86,
+  "exit_code": 0
+ },
+ "hooks": {
+  "enabled": false,
+  "installed": [
+   "SubprocessImpl.call",
+   "EngineFrameSurface[shared]#0 +NativeFrameSinks",
+   "EngineFrameSurface[current]#1 +NativeFrameSinks",
+   "EngineFrameSurface[contextual] same instance",
+   "ImageData",
+   "putImageData",
+   "MozAfterPaint",
+   "keydown"
+  ],
+  "instances": [
+   "shared",
+   "current"
+  ],
+  "module": "shared",
+  "spawns": 0,
+  "profiler": true,
+  "now": 2400.938588,
+  "value": null
+ },
+ "window_info": {
+  "window_id": "2097155",
+  "xwininfo": {
+   "Width": "2072",
+   "Height": "1296",
+   "Map State": "IsViewable",
+   "Absolute upper-left X": "0",
+   "Absolute upper-left Y": "0"
+  },
+  "title": "AxioSozo \u2014 AxioSozo Dev"
+ },
+ "webkit_prepare": {
+  "facade": true,
+  "state": {
+   "version": 1,
+   "enabled": true,
+   "tabSwitch": true,
+   "pending": false,
+   "disposed": false,
+   "failure": null,
+   "browsingMode": "fixture",
+   "activeEngine": "gecko",
+   "engines": [
+    {
+     "id": "gecko",
+     "label": "Firefox",
+     "available": true,
+     "reason": null
+    },
+    {
+     "id": "chromium",
+     "label": "Chromium",
+     "available": false,
+     "reason": "Chromium is not enabled in this browser"
+    },
+    {
+     "id": "webkit",
+     "label": "WebKit",
+     "available": true,
+     "reason": null,
+     "fixtureOnly": true
+    }
+   ],
+   "webkit": {
+    "available": true,
+    "reason": null,
+    "fixtureOnly": true,
+    "webModeRequested": false,
+    "webMode": "unavailable",
+    "native": {
+     "engine": "gecko"
+    }
+   },
+   "webkitOwnedTabIds": [],
+   "enginePreferences": {
+    "enabled": false,
+    "last": null
+   },
+   "chromium": null,
+   "native": {
+    "engine": "gecko"
+   }
+  },
+  "engineOf": "gecko",
+  "geckoVisibility": "",
+  "geckoURL": "about:axiosozo#projects",
+  "overlay": null,
+  "tabEngineAttribute": null,
+  "tabLabel": "AxioSozo",
+  "urlbar": "about:axiosozo#projects",
+  "indicator": {
+   "hidden": true,
+   "label": "WebKit 2.48.3 \u00b7 test page only \u00b7 back to Firefox"
+  }
+ },
+ "canvas_chain": [
+  {
+   "pass_": "plain",
+   "chain": {
+    "dpr": 2,
+    "canvas_pixels": [
+     1674,
+     1212
+    ],
+    "css_rect": [
+     191,
+     34,
+     837,
+     606
+    ],
+    "device_rect": [
+     382,
+     68,
+     1674,
+     1212
+    ],
+    "exact_device_size": true,
+    "integral_device_origin": true,
+    "object_fit": "fill",
+    "moz_opaque": false,
+    "chain": [
+     {
+      "node": "canvas",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "overflow": "clip"
+     },
+     {
+      "node": "div",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "absolute",
+      "overflow": "hidden"
+     },
+     {
+      "node": "stack.browserStack",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "grid"
+     },
+     {
+      "node": "box.browserContainer",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "grid"
+     },
+     {
+      "node": "hbox#panel-1-3.browserSidebarContainer.deck-selected",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "absolute",
+      "borderRadius": "5px",
+      "zIndex": "0",
+      "display": "flex",
+      "boxShadow": "rgba(0, 0, 0, 0.24) 0px 3px 8px 0px"
+     },
+     {
+      "node": "tabpanels#tabbrowser-tabpanels",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "flex"
+     },
+     {
+      "node": "tabbox#tabbrowser-tabbox",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "zIndex": "2",
+      "display": "flex"
+     },
+     {
+      "node": "hbox#zen-tabbox-wrapper",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "zIndex": "0",
+      "display": "flex"
+     },
+     {
+      "node": "vbox#zen-appcontent-wrapper",
+      "rect_device": [
+       382,
+       0,
+       1690,
+       1296
+      ],
+      "display": "flex"
+     },
+     {
+      "node": "hbox#browser",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "position": "relative",
+      "display": "flex"
+     },
+     {
+      "node": "hbox#zen-main-app-wrapper.browser-toolbox-background",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "display": "flex"
+     },
+     {
+      "node": "body",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "position": "relative",
+      "overflow": "clip",
+      "willChange": "background-color",
+      "contain": "paint",
+      "display": "flex"
+     },
+     {
+      "node": "html#main-window",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "overflow": "clip"
+     }
+    ]
+   }
+  },
+  {
+   "pass_": "profile",
+   "chain": {
+    "dpr": 2,
+    "canvas_pixels": [
+     1674,
+     1212
+    ],
+    "css_rect": [
+     191,
+     34,
+     837,
+     606
+    ],
+    "device_rect": [
+     382,
+     68,
+     1674,
+     1212
+    ],
+    "exact_device_size": true,
+    "integral_device_origin": true,
+    "object_fit": "fill",
+    "moz_opaque": false,
+    "chain": [
+     {
+      "node": "canvas",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "overflow": "clip"
+     },
+     {
+      "node": "div",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "absolute",
+      "overflow": "hidden"
+     },
+     {
+      "node": "stack.browserStack",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "grid"
+     },
+     {
+      "node": "box.browserContainer",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "grid"
+     },
+     {
+      "node": "hbox#panel-1-4.browserSidebarContainer.deck-selected",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "absolute",
+      "borderRadius": "5px",
+      "zIndex": "0",
+      "display": "flex",
+      "boxShadow": "rgba(0, 0, 0, 0.24) 0px 3px 8px 0px"
+     },
+     {
+      "node": "tabpanels#tabbrowser-tabpanels",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "display": "flex"
+     },
+     {
+      "node": "tabbox#tabbrowser-tabbox",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "zIndex": "2",
+      "display": "flex"
+     },
+     {
+      "node": "hbox#zen-tabbox-wrapper",
+      "rect_device": [
+       382,
+       68,
+       1674,
+       1212
+      ],
+      "position": "relative",
+      "zIndex": "0",
+      "display": "flex"
+     },
+     {
+      "node": "vbox#zen-appcontent-wrapper",
+      "rect_device": [
+       382,
+       0,
+       1690,
+       1296
+      ],
+      "display": "flex"
+     },
+     {
+      "node": "hbox#browser",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "position": "relative",
+      "display": "flex"
+     },
+     {
+      "node": "hbox#zen-main-app-wrapper.browser-toolbox-background",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "display": "flex"
+     },
+     {
+      "node": "body",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "position": "relative",
+      "overflow": "clip",
+      "willChange": "background-color",
+      "contain": "paint",
+      "display": "flex"
+     },
+     {
+      "node": "html#main-window",
+      "rect_device": [
+       0,
+       0,
+       2072,
+       1296
+      ],
+      "overflow": "clip"
+     }
+    ]
+   }
+  }
+ ],
+ "notes": [
+  "XTest wheel unavailable (XOpenDisplay failed for :90); xdotool click --repeat used",
+  "XTest wheel unavailable (XOpenDisplay failed for :90); xdotool click --repeat used"
+ ],
+ "hooks_end": {
+  "enabled": false,
+  "installed": [
+   "SubprocessImpl.call",
+   "EngineFrameSurface[shared]#0 +NativeFrameSinks",
+   "EngineFrameSurface[current]#1 +NativeFrameSinks",
+   "EngineFrameSurface[contextual] same instance",
+   "ImageData",
+   "putImageData",
+   "MozAfterPaint",
+   "keydown"
+  ],
+  "instances": [
+   "shared",
+   "current"
+  ],
+  "module": "shared",
+  "spawns": 3,
+  "profiler": true,
+  "now": 63799.030328999994,
+  "value": null
+ },
+ "cleanup": {
+  "state": "DIRECT_CHILDREN_REAPED",
+  "direct_children_reaped": true,
+  "groups": "NOT_VERIFIED"
+ },
+ "chrome_overlay": {
+  "label": "chrome-overlay (TEST-ONLY: prebuilt Zen app, chrome JS from this checkout)",
+  "overlay_commit": "5ecd120bdf0190cd435625fca24cfc03003b0405",
+  "app_build_commit": "35782ef55f54f726e3d2730072026ced386d110d",
+  "replaced": 28,
+  "added": 4
+ },
+ "compact": [
+  {
+   "pass_": "plain",
+   "window": "switch-to-engine",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "WPEWebProcess": 68.0,
+    "zen-parent": 59.7,
+    "AxioWebKitHost": 8.5,
+    "WPENetworkProce": 8.5
+   },
+   "zen_parent_top_threads": {
+    "Renderer": 25.5,
+    "main": 21.3,
+    "WRRende~ckend#": 4.3,
+    "SwComposite": 4.3,
+    "DOM Worker": 4.3
+   },
+   "presenter_draw_ms": 0.04395899999963149,
+   "gecko_to_engine_switch_ms": 207.1,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 2,
+     "presented": 2,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 4451,
+     "presentMicros": 6066,
+     "apply_ms_per_frame": 2.225,
+     "present_ms_per_frame": 3.033,
+     "apply_share_of_one_core": 0.0177,
+     "present_share_of_one_core": 0.0242,
+     "same_sink": false
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "idle",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": 2.0,
+   "cpu_by_process": {
+    "zen-parent": 5.4,
+    "Web Content": 4.4,
+    "forkserver": 0.5,
+    "AxioWebKitHost": 0.5
+   },
+   "zen_parent_top_threads": {
+    "main": 4.4,
+    "TaskCon~ller #": 0.5,
+    "DOM Worker": 0.5
+   },
+   "presenter_draw_ms": 0.03264600000011342,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 0,
+     "presented": 0,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 0,
+     "presentMicros": 0,
+     "apply_ms_per_frame": null,
+     "present_ms_per_frame": null,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "raf",
+   "fps": 58.04,
+   "interval_p99_ms": 23.866565000000264,
+   "input_wall_s": 3.0,
+   "cpu_by_process": {
+    "WPEWebProcess": 190.1,
+    "zen-parent": 40.9,
+    "AxioWebKitHost": 26.9,
+    "Privileged Cont": 0.3
+   },
+   "zen_parent_top_threads": {
+    "main": 11.8,
+    "Backgro~Pool #": 9.5,
+    "Renderer": 6.9,
+    "SwComposite": 3.9,
+    "DOM Worker": 3.9,
+    "WRRende~ckend#": 1.6,
+    "glean.dispatche": 0.7,
+    "Timer": 0.7
+   },
+   "presenter_draw_ms": 0.10335272853188653,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 178,
+     "presented": 178,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 64599,
+     "presentMicros": 220340,
+     "apply_ms_per_frame": 0.363,
+     "present_ms_per_frame": 1.238,
+     "apply_share_of_one_core": 0.021,
+     "present_share_of_one_core": 0.0716,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "raf-nosampler",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "WPEWebProcess": 186.7,
+    "zen-parent": 47.5,
+    "AxioWebKitHost": 22.9
+   },
+   "zen_parent_top_threads": {
+    "main": 9.3,
+    "Backgro~Pool #": 8.3,
+    "Renderer": 6.3,
+    "Socket Thread": 4.7,
+    "SwComposite": 4.3,
+    "BgIOThr~Pool #": 3.7,
+    "DOM Worker": 3.7,
+    "WRRende~ckend#": 2.0
+   },
+   "presenter_draw_ms": null,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 173,
+     "presented": 173,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 65135,
+     "presentMicros": 218363,
+     "apply_ms_per_frame": 0.377,
+     "present_ms_per_frame": 1.262,
+     "apply_share_of_one_core": 0.0214,
+     "present_share_of_one_core": 0.0719,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "scroll",
+   "fps": 55.48,
+   "interval_p99_ms": 35.48872399999527,
+   "input_wall_s": 1.986,
+   "cpu_by_process": {
+    "WPEWebProcess": 193.5,
+    "zen-parent": 55.1,
+    "AxioWebKitHost": 24.6
+   },
+   "zen_parent_top_threads": {
+    "main": 20.1,
+    "Backgro~Pool #": 11.3,
+    "DOM Worker": 7.9,
+    "Renderer": 6.4,
+    "SwComposite": 2.9,
+    "WRRende~ckend#": 1.5,
+    "Compositor": 1.5,
+    "Timer": 1.0
+   },
+   "presenter_draw_ms": 0.09280162797625284,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 110,
+     "presented": 110,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 118547,
+     "presentMicros": 139212,
+     "apply_ms_per_frame": 1.078,
+     "present_ms_per_frame": 1.266,
+     "apply_share_of_one_core": 0.0579,
+     "present_share_of_one_core": 0.068,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "key",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "zen-parent": 30.2,
+    "WPEWebProcess": 18.9,
+    "AxioWebKitHost": 3.3
+   },
+   "zen_parent_top_threads": {
+    "main": 12.0,
+    "DOM Worker": 4.9,
+    "Renderer": 3.0,
+    "Indexed~ IO #": 2.7,
+    "SwComposite": 1.9,
+    "IPDL Background": 1.4,
+    "glean.dispatche": 1.1,
+    "TaskCon~ller #": 0.8
+   },
+   "presenter_draw_ms": null,
+   "keydown_to_presented_frame_ms": 27.699,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 20,
+     "presented": 20,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 63,
+     "presentMicros": 23827,
+     "apply_ms_per_frame": 0.003,
+     "present_ms_per_frame": 1.191,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0065,
+     "same_sink": true
+    }
+   }
+  },
+  {
+   "pass_": "plain",
+   "window": "switch-to-gecko",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "zen-parent": 131.1,
+    "Isolated Web Co": 4.2
+   },
+   "zen_parent_top_threads": {
+    "DOM Worker": 38.1,
+    "Indexed~ IO #": 33.8,
+    "main": 25.4,
+    "Renderer": 16.9,
+    "IPDL Background": 8.5,
+    "WRRende~ckend#": 4.2,
+    "SwComposite": 4.2
+   },
+   "presenter_draw_ms": null,
+   "engine_to_gecko_switch_ms": 213.1,
+   "frame_path": {
+    "engine": "gecko",
+    "frameTransport": null,
+    "frameUpload": null,
+    "memfdFallback": null
+   }
+  },
+  {
+   "pass_": "profile",
+   "window": "switch-to-engine",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "WPEWebProcess": 66.1,
+    "zen-parent": 46.2,
+    "Web Content": 29.7,
+    "WPENetworkProce": 9.9,
+    "AxioWebKitHost": 6.6
+   },
+   "zen_parent_top_threads": {
+    "main": 13.2,
+    "DOM Worker": 13.2,
+    "SamplerThread": 9.9,
+    "Softwar~cThread": 3.3,
+    "Compositor": 3.3,
+    "Backgro~Pool #": 3.3
+   },
+   "presenter_draw_ms": 0.0673979999992298,
+   "gecko_to_engine_switch_ms": 278.2,
+   "frames": {
+    "received_fps": 6.24,
+    "painted_fps": 0.0,
+    "frames_superseded": 0,
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 33,
+    "payload_bytes_per_frame": 0.0,
+    "damage_share": null,
+    "header_wait_ms": 73.78,
+    "pixel_read_ms": 0.0,
+    "assemble_ms": null,
+    "native_frames": 2,
+    "native_apply_ms": 3.041,
+    "native_resolved_to_ack_ms": 0.68,
+    "received_to_ack_ms": 4.002,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": null,
+    "main_thread_frame_work_share": 0.0042
+   },
+   "switch_timeline": {
+    "write create": 30.6,
+    "first stdout read resolved": 38.7,
+    "first frame applied (native receiver)": 289.0,
+    "write frame_ack": 290.2,
+    "write visibility": 298.8,
+    "write focus": 299.0
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 2,
+     "presented": 2,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 4528,
+     "presentMicros": 6151,
+     "apply_ms_per_frame": 2.264,
+     "present_ms_per_frame": 3.075,
+     "apply_share_of_one_core": 0.0141,
+     "present_share_of_one_core": 0.0192,
+     "same_sink": false
+    }
+   },
+   "profile": "profiles/webkit-2x-switch-to-engine.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "idle",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": 2.0,
+   "cpu_by_process": {
+    "zen-parent": 35.2,
+    "Web Content": 5.4,
+    "Isolated Web Co": 1.5,
+    "Socket Process": 1.0,
+    "WebExtensions": 1.0,
+    "RDD Process": 1.0,
+    "Privileged Cont": 1.0,
+    "Utility Process": 0.5
+   },
+   "zen_parent_top_threads": {
+    "main": 13.2,
+    "DOM Worker": 8.8,
+    "SamplerThread": 7.3,
+    "TaskCon~ller #": 4.4,
+    "Timer": 1.5
+   },
+   "presenter_draw_ms": 0.04897100000016508,
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 0,
+     "presented": 0,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 0,
+     "presentMicros": 0,
+     "apply_ms_per_frame": null,
+     "present_ms_per_frame": null,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0,
+     "same_sink": true
+    }
+   },
+   "profile": "profiles/webkit-2x-idle.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "raf",
+   "fps": 58.03,
+   "interval_p99_ms": 25.54519199999777,
+   "input_wall_s": 3.0,
+   "cpu_by_process": {
+    "WPEWebProcess": 182.7,
+    "zen-parent": 59.3,
+    "AxioWebKitHost": 20.8,
+    "Web Content": 6.5,
+    "WebExtensions": 1.3,
+    "Privileged Cont": 1.3,
+    "Isolated Web Co": 1.3,
+    "Socket Process": 1.0,
+    "Utility Process": 1.0,
+    "RDD Process": 0.7
+   },
+   "zen_parent_top_threads": {
+    "main": 14.3,
+    "DOM Worker": 9.8,
+    "Backgro~Pool #": 8.8,
+    "SamplerThread": 8.1,
+    "Renderer": 6.5,
+    "SwComposite": 3.9,
+    "WRRende~ckend#": 1.6,
+    "Timer": 1.3
+   },
+   "presenter_draw_ms": 0.10433516332356878,
+   "frames": {
+    "received_fps": 58.05,
+    "painted_fps": 0.0,
+    "frames_superseded": 0,
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 367,
+    "payload_bytes_per_frame": 0.0,
+    "damage_share": null,
+    "header_wait_ms": 15.683,
+    "pixel_read_ms": 0.0,
+    "assemble_ms": null,
+    "native_frames": 180,
+    "native_apply_ms": 0.455,
+    "native_resolved_to_ack_ms": 0.155,
+    "received_to_ack_ms": 0.742,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": null,
+    "main_thread_frame_work_share": 0.0122
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 180,
+     "presented": 180,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 58915,
+     "presentMicros": 232846,
+     "apply_ms_per_frame": 0.327,
+     "present_ms_per_frame": 1.294,
+     "apply_share_of_one_core": 0.019,
+     "present_share_of_one_core": 0.0751,
+     "same_sink": true
+    }
+   },
+   "profile": "profiles/webkit-2x-raf.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "raf-nosampler",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "WPEWebProcess": 181.9,
+    "zen-parent": 49.9,
+    "AxioWebKitHost": 21.7,
+    "Web Content": 6.0,
+    "WebExtensions": 1.3,
+    "Privileged Cont": 1.3,
+    "Isolated Web Co": 1.3,
+    "Socket Process": 1.0,
+    "RDD Process": 1.0,
+    "Utility Process": 0.7
+   },
+   "zen_parent_top_threads": {
+    "DOM Worker": 10.0,
+    "Backgro~Pool #": 8.6,
+    "SamplerThread": 7.6,
+    "main": 7.3,
+    "Renderer": 7.0,
+    "SwComposite": 4.0,
+    "WRRende~ckend#": 1.7,
+    "Compositor": 1.7
+   },
+   "presenter_draw_ms": null,
+   "frames": {
+    "received_fps": 58.11,
+    "painted_fps": 0.0,
+    "frames_superseded": 0,
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 360,
+    "payload_bytes_per_frame": 0.0,
+    "damage_share": null,
+    "header_wait_ms": 15.798,
+    "pixel_read_ms": 0.0,
+    "assemble_ms": null,
+    "native_frames": 176,
+    "native_apply_ms": 0.452,
+    "native_resolved_to_ack_ms": 0.172,
+    "received_to_ack_ms": 0.789,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": null,
+    "main_thread_frame_work_share": 0.0111
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 175,
+     "presented": 175,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 57690,
+     "presentMicros": 216537,
+     "apply_ms_per_frame": 0.33,
+     "present_ms_per_frame": 1.237,
+     "apply_share_of_one_core": 0.019,
+     "present_share_of_one_core": 0.0715,
+     "same_sink": true
+    }
+   },
+   "profile": "profiles/webkit-2x-raf-nosampler.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "scroll",
+   "fps": 55.65,
+   "interval_p99_ms": 35.76603500000056,
+   "input_wall_s": 1.99,
+   "cpu_by_process": {
+    "WPEWebProcess": 192.5,
+    "zen-parent": 74.1,
+    "AxioWebKitHost": 23.1,
+    "Web Content": 6.4,
+    "Isolated Web Co": 1.5,
+    "Socket Process": 1.0,
+    "WebExtensions": 1.0,
+    "RDD Process": 1.0,
+    "Privileged Cont": 1.0,
+    "Utility Process": 0.5
+   },
+   "zen_parent_top_threads": {
+    "main": 25.0,
+    "DOM Worker": 14.7,
+    "Backgro~Pool #": 11.3,
+    "SamplerThread": 7.3,
+    "Renderer": 6.4,
+    "SwComposite": 2.9,
+    "WRRende~ckend#": 2.0,
+    "Timer": 1.5
+   },
+   "presenter_draw_ms": 0.08833148904387596,
+   "frames": {
+    "received_fps": 53.55,
+    "painted_fps": 0.0,
+    "frames_superseded": 0,
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 691,
+    "payload_bytes_per_frame": 0.0,
+    "damage_share": null,
+    "header_wait_ms": 8.853,
+    "pixel_read_ms": 0.0,
+    "assemble_ms": null,
+    "native_frames": 110,
+    "native_apply_ms": 1.366,
+    "native_resolved_to_ack_ms": 0.152,
+    "received_to_ack_ms": 1.741,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": null,
+    "main_thread_frame_work_share": 0.0137
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 110,
+     "presented": 110,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 128955,
+     "presentMicros": 197233,
+     "apply_ms_per_frame": 1.172,
+     "present_ms_per_frame": 1.793,
+     "apply_share_of_one_core": 0.0628,
+     "present_share_of_one_core": 0.096,
+     "same_sink": true
+    }
+   },
+   "profile": "profiles/webkit-2x-scroll.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "key",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "zen-parent": 40.2,
+    "WPEWebProcess": 18.6,
+    "Web Content": 6.8,
+    "AxioWebKitHost": 3.1,
+    "WebExtensions": 1.7,
+    "Privileged Cont": 1.7,
+    "Socket Process": 1.1,
+    "RDD Process": 1.1,
+    "Isolated Web Co": 1.1,
+    "Utility Process": 0.8
+   },
+   "zen_parent_top_threads": {
+    "main": 13.4,
+    "DOM Worker": 7.9,
+    "SamplerThread": 7.9,
+    "Renderer": 3.6,
+    "SwComposite": 2.2,
+    "Timer": 1.6,
+    "WRRende~ckend#": 0.8,
+    "Backgro~Pool #": 0.8
+   },
+   "presenter_draw_ms": null,
+   "keydown_to_presented_frame_ms": 30.502,
+   "frames": {
+    "received_fps": 5.45,
+    "painted_fps": 0.0,
+    "frames_superseded": 0,
+    "received_mb_per_s": 0.0,
+    "stdout_reads": 325,
+    "payload_bytes_per_frame": 0.0,
+    "damage_share": null,
+    "header_wait_ms": 16.039,
+    "pixel_read_ms": 0.0,
+    "assemble_ms": null,
+    "native_frames": 20,
+    "native_apply_ms": 0.172,
+    "native_resolved_to_ack_ms": 0.138,
+    "received_to_ack_ms": 0.521,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": null,
+    "main_thread_frame_work_share": 0.001
+   },
+   "key_breakdown_median": {
+    "chrome_handler_ms": 0.179,
+    "keydown_to_send_ms": 0.602,
+    "send_to_frame_header_ms": 26.734,
+    "pixel_transport_ms": 0.048,
+    "received_to_accept_ms": null,
+    "native_apply_ms": 0.172,
+    "received_to_ack_ms": 0.521,
+    "accept_to_paint_start_ms": null,
+    "surface_paint_ms": null,
+    "convert_ms": null,
+    "put_ms": null,
+    "paint_to_chrome_paint_ms": 157.867,
+    "keydown_to_surface_paint_end_ms": 27.722,
+    "keydown_to_chrome_paint_ms": 188.894
+   },
+   "frame_path": {
+    "engine": "webkit",
+    "frameTransport": "memfd",
+    "frameUpload": "native",
+    "memfdFallback": null,
+    "native_receiver": {
+     "applied": 20,
+     "presented": 20,
+     "skipped": 0,
+     "failed": 0,
+     "applyMicros": 75,
+     "presentMicros": 27783,
+     "apply_ms_per_frame": 0.004,
+     "present_ms_per_frame": 1.389,
+     "apply_share_of_one_core": 0.0,
+     "present_share_of_one_core": 0.0076,
+     "same_sink": true
+    }
+   },
+   "profile": "profiles/webkit-2x-key.json"
+  },
+  {
+   "pass_": "profile",
+   "window": "switch-to-gecko",
+   "fps": null,
+   "interval_p99_ms": null,
+   "input_wall_s": null,
+   "cpu_by_process": {
+    "zen-parent": 45.9,
+    "Isolated Web Co": 8.3
+   },
+   "zen_parent_top_threads": {
+    "main": 12.5,
+    "Renderer": 8.3,
+    "SamplerThread": 8.3,
+    "Compositor": 4.2,
+    "sqldb:p~lite #": 4.2,
+    "SwComposite": 4.2,
+    "DOM Worker": 4.2
+   },
+   "presenter_draw_ms": null,
+   "engine_to_gecko_switch_ms": 217.1,
+   "switch_timeline": {
+    "write shutdown": 20.4,
+    "first stdout read resolved": 29.3
+   },
+   "frame_path": {
+    "engine": "gecko",
+    "frameTransport": null,
+    "frameUpload": null,
+    "memfdFallback": null
+   },
+   "profile": "profiles/webkit-2x-switch-to-gecko.json"
+  }
+ ],
+ "test_prefs": {
+  "prefs": {
+   "axiosozo.engines.prewarm": true,
+   "gfx.webrender.debug.surface-promotion-logging": true
+  },
+  "label": "TEST-ONLY prefs (zen_profile --pref)"
+ },
+ "wr_promotion_log": {
+  "lines": 0,
+  "reasons": {}
+ },
+ "status": "PASS",
+ "schema": "axiosozo-zen-profile-v1",
+ "label": "webkit-2x",
+ "device_scale": 2.0,
+ "test_only": [
+  "GUI harness (Marionette, throwaway profile)",
+  "engine fixture mode",
+  "TEST-ONLY chrome overlay",
+  "runtime timing hooks (trace/profile passes)",
+  "Gecko profiler (profile pass)"
+ ],
+ "E1": "NOT_TESTED",
+ "E2": "NOT_TESTED",
+ "machine": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.41",
+  "machine": "x86_64",
+  "nproc": 4,
+  "python": "3.13.5",
+  "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "mem_total_mb": 15988,
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "gpu_dri": [],
+  "pipe_max_size": 1048576,
+  "loadavg_start": [
+   "2.88",
+   "1.47",
+   "0.59"
+  ]
+ }
+}
