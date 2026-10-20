@@ -156,7 +156,17 @@ WPEBackend-fdo path the host uses, sandbox on), Debian 13's own build dependenci
 extra `-dev` packages listed in `build-extra-deps.txt`, and the sha256-pinned tarballs of
 `webkit.upstream`. ccache started empty (0 % hits), so the times are cold-build times.
 
-UPSTREAM_RERUN_PLACEHOLDER
+**Re-run (Actions run 39352196059, cloud/webkit-feel, 2.54.1 only).** Build PASS again
+(`build-time.json`: configure 22 s, build 8580 s with a partly warm ccache), setup PASS with the
+deb13u3 pin, `check` PASS, the engine-free suites PASS (unit, fake-engine stream and security).
+The real-WPE suites (stream, input, security) FAIL in the first seconds: `WPEWebProcess` and
+`WPENetworkProcess` could not load `libWPEWebKit-2.0.so.1` (`runs/webkit-wpe-stream-*/stderr.log`).
+The host binary has an RPATH to the prefix, but WebKit's helper processes have none, and
+bubblewrap starts them with a clean environment. This is an install-layout issue of the test
+image, not a WebKit or sandbox defect. Fix in `upstream/build.sh` (commit c17efbef): register the
+prefix with `ldconfig` after the install. The sandbox binds `/etc/ld.so.cache` and `/usr`, so the
+sandbox stays on and unchanged. The next `linux-webkit-upstream` run on cloud/webkit-feel
+verifies it. Until then the host suites against 2.54.1 are NOT_VERIFIED.
 
 **Recommendation for a maintained pin.** Move the product pin to the **2.54.x stable series**,
 built from the official wpewebkit.org tarball (sha256 from the release's `.sums`, as in
