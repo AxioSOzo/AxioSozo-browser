@@ -365,3 +365,38 @@ The pipe's worker was the largest parent cost; memfd frames remove the pixel byt
 moves (A/B: a further −15 points at 2×). What is left is the chrome's own work, the AXCF metadata
 and events through the pipe, and software compositing (WebRender is ~6 % of the parent in these
 windows); the native receiver removes the remaining JS frame handling.
+
+## Result: phase-2 defaults vs cloud/integration (run 39355570329)
+
+Same-job A/B, 3 repetitions × 2 alternating rounds per variant, prebuilt app 39337785340 + TEST-ONLY
+chrome overlay. base = cloud/integration `d5cc1a8`; **cand = this branch's defaults** (memfd frames +
+frame worker + BGRX VideoFrame); jsmain = cand with the frame worker off. All 48 bench runs PASS.
+Round 1 / round 2 medians:
+
+| | Chromium base → cand | WebKit base → cand |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 50.9 → 37.5 / 53.1 → 37.5 % (−26/−29 %) | 43.6 → 36.1 / 49.6 → 39.7 % (−17/−20 %) |
+| 1× rAF CPU, whole browser | 74.4 → 63.0 / 78.9 → 62.3 % | 98.2 → 93.6 / 109.7 → 103.1 % |
+| 1× rAF p99 interval | 20.5 → 20.8 / 21.0 → 22.4 ms (flat, at 60 fps) | 22.3 → 21.8 / 23.7 → 22.3 ms |
+| 1× key → presented frame | 19.6 → 12.1 / 20.1 → 12.0 ms (−38/−40 %) | 24.8 → 16.4 / 24.7 → 16.6 ms (−34/−33 %) |
+| 1× scroll fps (p99) | 53.9 → 59.8 (36.4 → 23.0) / 52.4 → 59.8 (35.3 → 21.3) | 50.7 → 57.2 (38.6 → 33.1) / 51.2 → 57.1 (41.5 → 34.8) |
+| 2× rAF fps | 56.7 → 60.0 / 56.8 → 60.0 | 54.3 → 57.6 / 50.9 → 57.8 |
+| 2× rAF p99 interval | 33.2 → 24.5 / 36.2 → 27.5 ms (−26/−24 %) | 33.6 → 26.9 / 36.8 → 28.5 ms (−20/−23 %) |
+| 2× rAF CPU, Zen parent | 125.8 → 81.9 / 130.2 → 80.6 % (−35/−38 %) | 124.7 → 81.0 / 131.6 → 84.6 % (−35/−36 %) |
+| 2× rAF CPU, whole browser | 171.8 → 124.1 / 177.7 → 124.1 % | 296.0 → 260.1 / 314.3 → 273.9 % |
+| 2× key → presented frame | 20.9 → 12.4 / 21.4 → 12.2 ms (−41/−43 %) | 29.5 → 30.7 / 30.1 → 30.8 ms (+4/+2 %, NOT improved) |
+| 2× scroll fps (p99) | 24.6 → 59.7 (98 → 24) / 23.2 → 59.8 (101 → 25) | 22.6 → 49.9 (88 → 39) / 20.6 → 47.4 (85 → 42) |
+| 2× static navigate → visible | 120.3 → 49.0 / 111.0 → 60.3 ms | 102.8 → 87.6 / 91.2 → 61.1 ms |
+| 2× RSS, whole browser | 3160 → 2752 / 3030 → 2770 MB | 2410 → 2396 / 2397 → 2384 MB |
+
+jsmain (memfd, main thread) sits between: e.g. Chromium 2× parent 101.7 / 99.0 %, key → frame
+21.0 / 20.7 ms — the worker accounts for the key → frame gain (frames drawn on arrival, not at the
+next refresh tick) and about half the CPU gain. WebKit key → frame at 2× is bound by WPE's own
+software rendering on the 4-vCPU runner (WPE ~150 % CPU), not by Zen; it is the one acceptance
+row that did not improve. 1× rAF p99 for Chromium was already at the 60 fps floor (≈ 20 ms).
+
+Soak with these defaults (same run, `soak` job): 30 cycles / 10 min, WebKit + Chromium + Gecko tabs,
+PASS, transport memfd + worker in every window, no fallback, Zen parent RSS 698–778 MB with no
+trend (−2.8 MB from cycle 2 to 30; the per-frame slot buffers of the main-thread path are gone),
+host descriptors flat; medians WebKit 57.8 fps / p99 23.4 ms / scroll 56.0 fps / key 21.1 ms,
+Chromium 60.0 fps / 21.4 ms / 59.0 fps / 12.9 ms, Gecko 59.0 fps.
