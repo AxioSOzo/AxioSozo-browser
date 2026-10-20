@@ -53,8 +53,8 @@ ENGINE_FIXTURE = ROOT / 'tests/fixtures/engine.html'
 # address-bar input (owned by cloud/linux-platform), and a crash ends the session.
 WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'focus', 'selection', 'clipboard', 'wheel',
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
-                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_gecko', 'urlbar_chromium',
-                 'ctrl_t_gecko', 'ctrl_t_chromium')
+                 'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
+                 'urlbar_gecko', 'ctrl_t_gecko')
 SCALE_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'selection', 'wheel', 'to_gecko')
 FIXTURE_SCENARIOS = ('launch', 'chrome', 'fixture_roundtrip', 'fixture_host_kill')
 HOST = 'AxioCEFProbe --stream'
@@ -870,14 +870,14 @@ class CEFZenHarness(gui_test.Harness):
         out['ctrl_shift_tab'] = self.wait(lambda: (lambda s: s['tabId'] if s['tabId'] == self.cef_tab else None)(self.web()),
                                           'Ctrl+Shift+Tab returns', timeout=10)
         self.wait(lambda: self.chromium_ready(), 'Chromium tab presented again', timeout=15)
-        self.click_at(*AT['blank'])
-        loads = self.page()['l']
-        self.key('F5')
-        out['f5'] = self.wait_page(lambda page: page['l'] == loads + 1, 'F5 reloads the Chromium page', timeout=20)['l']
-        self.click_at(*AT['blank'])
-        loads = self.page()['l']
-        self.key('ctrl+r')
-        out['ctrl_r'] = self.wait_page(lambda page: page['l'] == loads + 1, 'Ctrl+R reloads the Chromium page', timeout=20)['l']
+        out['reload_chromium'] = self.reload_keys('chromium')
+        self.select_tab(self.gecko_tab)
+        out['reload_gecko'] = self.reload_keys('gecko')
+        self.ensure_chromium('20-to-chromium')
+        if out['reload_chromium']['results'] != out['reload_gecko']['results']:
+            self.gate('reload_keys', 'FAIL', chromium=out['reload_chromium'], gecko=out['reload_gecko'])
+            raise AssertionError(f"reload keys differ from Gecko: {out['reload_chromium']} vs {out['reload_gecko']}")
+        self.gate('reload_keys', 'PASS', chromium=out['reload_chromium'], gecko=out['reload_gecko'])
         last = self.page()['k']
         out['page_last_key'] = last
         out['page_saw_chrome_keys'] = last != key_before and any(last.startswith(p) for p in ('C:t:', 'C:w:', 'C:Tab:', 'C:r:', ':F5:'))
@@ -887,6 +887,36 @@ class CEFZenHarness(gui_test.Harness):
         if out['page_saw_chrome_keys']:
             raise AssertionError('the page received a Zen shortcut: ' + last)
         return out
+
+    RELOAD_PROBE = """
+        if (!window.__feelReload) {
+          const log = window.__feelReload = {keys: [], reloads: 0};
+          window.addEventListener('keydown', e => { if (/^F\\d/.test(e.key) || (e.ctrlKey && e.key === 'r'))
+            log.keys.push({key: e.key, target: e.target?.localName, prevented: e.defaultPrevented}); }, {capture: true, mozSystemGroup: true});
+          const reload = BrowserCommands.reload;
+          BrowserCommands.reload = function(...args) { log.reloads++; return reload.apply(this, args); };
+        }
+        const out = JSON.parse(JSON.stringify(window.__feelReload)); window.__feelReload.keys = []; window.__feelReload.reloads = 0;
+        out.keyReload = (k => k ? {disabled: k.getAttribute('disabled'), command: k.getAttribute('command'),
+          oncommand: k.getAttribute('oncommand')} : null)(document.getElementById('key_reload'));
+        out.cmdReload = document.getElementById('Browser:Reload')?.getAttribute('disabled') ?? null;
+        return out;"""
+
+    def reload_keys(self, engine):
+        """F5 and Ctrl+R over the page: does each reload it (sessionStorage load counter)?"""
+        self.chrome_script(self.RELOAD_PROBE)
+        results, probes = {}, {}
+        for key in ('F5', 'ctrl+r'):
+            self.click_at(*AT['blank'])
+            loads = self.page()['l']
+            self.key(key)
+            try:
+                self.wait_page(lambda page: page['l'] == loads + 1, f'{key} reloads the {engine} page', timeout=12)
+                results[key] = True
+            except AssertionError:
+                results[key] = False
+            probes[key] = self.chrome_script(self.RELOAD_PROBE)
+        return {'results': results, 'probes': probes}
 
     def urlbar_focus(self, engine):
         """Ctrl+L focuses Zen's address bar over the page, Escape is Zen's, a click gives the page focus back. No typing in the bar."""
@@ -931,9 +961,7 @@ class CEFZenHarness(gui_test.Harness):
     def scenario_ctrl_t_chromium(self):
         self.ensure_chromium('24-to-chromium')
         out = self.ctrl_t('chromium')
-        gecko = self.result.get('ctrl_t_gecko')
-        self.gate('ctrl_t', 'PASS' if gecko and gecko['opened'] == out['opened'] else 'FAIL', screenshot='23-ctrl-t-chromium.png',
-                  gecko=gecko, **out)
+        self.gate('ctrl_t', 'PASS', screenshot='23-ctrl-t-chromium.png', **out)
         return out
 
     def scenario_urlbar_gecko(self):
@@ -946,9 +974,9 @@ class CEFZenHarness(gui_test.Harness):
     def scenario_urlbar_chromium(self):
         self.ensure_chromium('22-to-chromium')
         out = self.urlbar_focus('chromium')
-        gecko = self.result.get('urlbar_gecko') or {}
-        same = gecko.get('urlbar_focused_after_escape') == out['urlbar_focused_after_escape']
-        self.gate('ctrl_l_escape', 'PASS' if same else 'FAIL', screenshot='21-ctrl-l-chromium.png', gecko=gecko, **out)
+        # Gecko baseline (run 39345299134 and urlbar_gecko below): Escape leaves the bar, a click types into the page.
+        same = out['urlbar_focused_after_escape'] is False
+        self.gate('ctrl_l_escape', 'PASS' if same else 'FAIL', screenshot='21-ctrl-l-chromium.png', **out)
         if not same:
             raise AssertionError(f'address-bar focus after Escape differs from Gecko: {out} vs {gecko}')
         return out

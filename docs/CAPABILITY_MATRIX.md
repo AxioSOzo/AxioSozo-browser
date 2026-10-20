@@ -40,3 +40,18 @@ WebKit is the third engine of a Zen tab (EngineRegistry `webkit`, label "WebKit"
 Failure handling: a failed start, a crash or exit (codes 70, 76), a protocol violation, a fixture
 load failure or a Gecko navigation that raced the switch shows the tab's Gecko document again,
 unchanged.
+
+## Chromium (CEF) inside Zen on Linux: E1/E2 and native-feel gates
+
+Chromium tabs on Linux run in the sandboxed CEF host (SUID `chrome-sandbox` on the
+runners) and are drawn by `CEFPresenter` inside Zen's own content area (AXCF BGRA pipe,
+`native-osr-bgra`). Web mode stays behind the existing developer gate
+(`AXIOSOZO_ENGINE_SWITCHING=1`); nothing here widens it. Evidence: workflow
+`linux-cef-zen` (`scripts/cef_zen_e2e.py`, page `tests/fixtures/cef-zen-feel.html`),
+Ubuntu 24.04 runner, Xvfb 1280×800 (2560×1600 for 2×), WebRender software, prebuilt
+Linux Zen artifact + this branch's chrome JS (TEST-ONLY `chrome-overlay`). Results:
+`ci-results:claude_cef-zen-feel-dx16ke/<run>-1-cef-zen-e2e/`; the copies under
+`docs/evidence/linux/cef-zen/` were inspected. "Gecko baseline" = the same page and
+input in a Gecko tab of the same session.
+
+<!-- CEF_LINUX_GATES -->
