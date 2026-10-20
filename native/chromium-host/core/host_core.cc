@@ -327,7 +327,13 @@ static bool validTarget(const Value* value, bool pending) {
          integer(value->get("navigation_generation")) && boolean(privateMode) && !privateMode->boolean &&
          (pending || (value->str("engine") == "chromium" && identifier(value->get("native_target_id"))));
 }
-static void failProtocol() { transport.reject(); streamClosing = true; }
+// The source line of a protocol failure goes to stderr (diagnostics; no command content).
+static void failProtocolAt(int line) {
+  fprintf(stderr, "AXIO_CEF_PROTOCOL_FAILURE line=%d\n", line);
+  transport.reject();
+  streamClosing = true;
+}
+#define failProtocol() failProtocolAt(__LINE__)
 static void tabEvent(Tab* tab, const std::string& kind, Value fields = json::emptyObject()) {
   fields.type = Value::Type::Object;
   fields["event"] = kind;

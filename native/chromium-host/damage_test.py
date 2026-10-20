@@ -85,8 +85,17 @@ def memfd_fallback(origin, directory):
         path = f"/proc/{session.process.pid}/fd/{ring['fd']}"
         memfd_frames, pipe_frames, dropped, after = 0, 0, None, []
         deadline = time.monotonic() + 45
+        out['trace'] = trace = []
         while len(after) < 12:
-            kind, item, payload = raw_packet(session, deadline)
+            try:
+                kind, item, payload = raw_packet(session, deadline)
+            except EOFError:
+                time.sleep(1)
+                out.update(memfd_frames=memfd_frames, dropped_frame=dropped, pipe_frames_after=pipe_frames,
+                           exit_code=session.process.poll())
+                raise
+            trace.append([kind, item.get('event') or item.get('frame_id'), len(payload)] + ([item.get('damage')] if kind == 2 else []))
+            del trace[:-12]
             if kind != 2:
                 continue
             x, y, w, h = item['damage'][0]
@@ -113,6 +122,8 @@ def memfd_fallback(origin, directory):
         close = session.command('close')
         session.until(lambda kind, item: item.get('event') == 'completed' and item.get('request_id') == close)
         out['status'] = 'PASS'
+    except (Exception, KeyboardInterrupt) as exc:
+        out['error'] = type(exc).__name__ + ': ' + str(exc)[:500]
     finally:
         session.close()
         out['profile_removed'] = session.profile_removed
