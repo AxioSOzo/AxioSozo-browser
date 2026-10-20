@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-19",
+  "workstream": "webkit-zen (branch cloud/webkit-zen; PR #4 merged, follow-up draft PR #7)",
+  "overall": "PASS (EXPERIMENTAL, fixture-only, Linux x86_64): WebKit inside Zen E2E (runs 39325934205, 39337226571) and the three-engine round trip Gecko -> WebKit -> Gecko -> Chromium -> Gecko on one Zen tab (run 39337226571). macOS not built; never READY.",
+  "workflow": ".github/workflows/linux-webkit-zen.yml (jobs unit, adapter, e2e)",
+  "results": {
+    "unit": {
+      "label": "PASS",
+      "runs": [
+        39303310867,
+        39305854779,
+        39337226571
+      ],
+      "what": "node --test of webkit-engine (adapter/presenter/controls with a scripted host), engine-registry, engine-tabs, engine-preference, engine-probe-controls, chromium-tabs, cef-adapter, coordinator, console-errors-native: 0 failures; cargo test -p browser-core 11/11 (webkit enum)",
+      "note": "scripted host packets are protocol fixtures, never WebKit rendering"
+    },
+    "adapter_live_host": {
+      "label": "PASS (component evidence, not Zen E1/E2)",
+      "run": 39305854779,
+      "where": "GitHub Actions ubuntu-24.04, pinned debian:trixie-20261005 container, real AxioWebKitHost on WPE WebKit 2.48.3, bubblewrap sandbox on, pinned Node 24.14.0",
+      "test": "apps/browser/tests/webkit-host-live.test.mjs",
+      "verified": [
+        "ready identity equals the lockfile pins (webkit 2.48.3, libwpe 1.16.2, WPEBackend-fdo 1.16.0, linux-x86_64, bubblewrap, wpe-fdo-shm-bgra) through validateWebKitReady",
+        "create 900x650@2 -> first presented frame 1800x1300, whole (no damage key)",
+        "frame_damage negotiated; smallest damage rectangle 8.3% of the frame; credit released per frame",
+        "XKB keycode key down/char/up 'w' + ime_commit_text 'k' -> title and the field's pixels show 'wk' (run-39305854779-adapter/live-typed.png, inspected)",
+        "wheel delta_y -400 -> 77% of sampled pixels changed, page scrolled (live-scrolled.png, inspected)",
+        "navigate ?page=2 advances both generations by exactly 1; a command for the old target is refused by the host with stale_target",
+        "back -> load http_status 200 restored_from_history true (WebKit back/forward cache, accepted by the profile's 200/0 rule); second back -> history_boundary",
+        "resize 800x600@1 -> 800x600 frame; only 2 fixture requests (back did not refetch)",
+        "close -> shutdown, host exit 0"
+      ],
+      "curated": "run-39305854779-adapter/"
+    },
+    "zen_gui_e2e": {
+      "label": "PASS (EXPERIMENTAL, fixture-only, Linux x86_64, WebRender software on Xvfb)",
+      "run": 39325934205,
+      "ci_results": "ci-results:cloud_webkit-zen/39325934205-1-webkit-zen-e2e/",
+      "where": "GitHub Actions ubuntu-24.04, pinned debian:trixie-20261005 container (unprivileged test user), WPE WebKit 2.48.3 host with bubblewrap sandbox on",
+      "app": "axiosozo-zen-linux-x86_64 artifact of linux-zen-build run 39319467610 (cloud/linux-platform, b0baccec) + TEST-ONLY chrome overlay of ed6b923 (chrome-overlay.json); compiled code is the artifact's",
+      "scenarios": {
+        "harness launch/chrome/fixture (--engine webkit)": "PASS",
+        "roundtrip": "PASS: Gecko fixture tab -> tab menu \"Open in WebKit\" (real right click) -> WebKit frames in Zen's content area, Gecko browser hidden -> xdotool typing \"webkit\" -> click Increment (count=1) -> fixture link to ?page=2 (generation 2->3, urlbar follows) -> Zen toolbar Back (generation 4, canGoForward) -> wheel scroll (77% pixels changed) -> \"Open in Firefox\" -> same Gecko content process (pid 8280), no host left",
+        "host_failure": "PASS: SIGKILL of the WebKit host while presenting -> ENGINE_EXIT_SIGNAL, same Gecko tab/URL/content process (pid 8368), typing \"kept\" reaches the Gecko page, no host left",
+        "three_engines": "PASS (run 39337226571, app artifact of linux-zen-build run 39325384904 / 832ac3e3 + TEST-ONLY chrome overlay d6b5542): one fixture tab, Zen tab menu \"Open in\" submenu opened and picked with real pointer clicks each time: Gecko -> WebKit (overlay canvas 939x704, tab engine attribute webkit) -> Gecko -> Chromium (CEF host 154.0.23 / Chromium 154.0.8037.17 in its namespace sandbox, render path native-osr-bgra, 2 frames, first frame 452 ms, tab title from host events, Gecko browser hidden) -> Gecko; the same Gecko content process (pid 8521) throughout"
+      },
+      "screenshots_inspected": "run-39325934205-e2e/*.png (curated 7 of 19): 01-gecko, 02-to-webkit-menu, 03-typed, 05-page2, 07-scrolled, 09-gecko-again, 12-gecko-typed-after-kill",
+      "not_verified": [
+        "the harness input scenario (types into the address bar: Linux parent SIGSEGV on Return, owned by cloud/linux-platform)",
+        "process-group cleanup (direct children reaped only)"
+      ],
+      "runs": [
+        39325934205,
+        39337226571
+      ],
+      "run_39337226571": {
+        "ci_results": "ci-results:cloud_webkit-zen/39337226571-1-webkit-zen-e2e/",
+        "harness": "PASS",
+        "roundtrip": "PASS (now through the three-engine submenu)",
+        "host_failure": "PASS",
+        "three_engines": "PASS",
+        "curated": "run-39337226571-e2e/ (20..24 screenshots inspected; the submenu popup itself is captured as a black rectangle by the Xvfb screenshot)"
+      }
+    }
+  },
+  "not_claimed": [
+    "macOS E1/E2 (never READY without real macOS runs)",
+    "WebKit web browsing (fixture only by design)",
+    "macOS WebKit (unavailable by design)",
+    "Chromium or WebKit web browsing inside Zen (fixture page only in this lineup)"
+  ]
+}
