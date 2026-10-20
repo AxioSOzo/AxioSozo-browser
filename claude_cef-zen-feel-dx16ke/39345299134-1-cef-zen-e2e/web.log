@@ -1,0 +1,80 @@
+gui-test chromium/switch: PASS
+gui-test chromium/typing: PASS
+gui-test chromium/click: PASS
+gui-test chromium/focus: PASS
+gui-test chromium/selection: PASS
+gui-test chromium/clipboard: PASS
+gui-test chromium/wheel: PASS
+gui-test chromium/cursor: PASS
+gui-test chromium/popups: PASS
+gui-test chromium/context_menu: PASS
+gui-test chromium/dialogs: PASS
+gui-test chromium/find: PASS
+gui-test chromium/zoom: FAIL (AssertionError: Ctrl+0 differs: chromium {'base': 1, 'ctrl_equal': 1.1, 'ctrl_0': 1.1, 'zen_reset': 1, 'ctrl_minus': 0.9, 'urlbar_zoom_button': {'hidden': True, 'label': '100%'}} gecko {'base': 1, 'ctrl_equal': 1.09, 'ctrl_0': 1, 'zen_reset': 1, 'ctrl_minus': 0.9, 'urlbar_zoom_button': {'hidden': True, 'label': '90%'}})
+gui-test chromium/ime: BLOCKED_ENV (compose does not work in the Gecko baseline here either: {'focus': 'browser', 'keymap_apostrophe': 2, 'dead_acute': "got 'e'", 'ctrl_shift_u': "got '20ac '"})
+gui-test chromium/middle_click: PASS
+gui-test chromium/history: PASS
+gui-test chromium/beforeunload: FAIL (AssertionError: timed out waiting for Zen "leave page?" dialog)
+gui-test chromium/to_gecko: PASS
+gui-test chromium/host_kill: PASS
+gui-test chromium/shortcuts: FAIL (AssertionError: timed out waiting for Ctrl+T opens a tab)
+gui-test chromium/urlbar_gecko: PASS
+gui-test chromium/urlbar_chromium: PASS
+{
+  "status": "FAIL",
+  "scenarios": {
+    "launch": "PASS",
+    "chrome": "PASS",
+    "switch": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus": "PASS",
+    "selection": "PASS",
+    "clipboard": "PASS",
+    "wheel": "PASS",
+    "cursor": "PASS",
+    "popups": "PASS",
+    "context_menu": "PASS",
+    "dialogs": "PASS",
+    "find": "PASS",
+    "zoom": "FAIL",
+    "ime": "BLOCKED_ENV",
+    "middle_click": "PASS",
+    "history": "PASS",
+    "beforeunload": "FAIL",
+    "to_gecko": "PASS",
+    "host_kill": "PASS",
+    "shortcuts": "FAIL",
+    "urlbar_gecko": "PASS",
+    "urlbar_chromium": "PASS"
+  },
+  "matrix": {
+    "window_title": "PASS",
+    "e1_render_in_content_area": "PASS",
+    "typing": "PASS",
+    "click": "PASS",
+    "focus_ring_caret": "PASS",
+    "selection_drag_double_click": "PASS",
+    "clipboard_ctrl_c_v": "PASS",
+    "wheel_precise_vs_notch": "PASS",
+    "cursor_shapes": "PASS",
+    "select_popup": "PASS",
+    "datalist_popup": "EXPERIMENTAL",
+    "color_popup": "PASS",
+    "context_menu": "PASS",
+    "js_dialogs": "PASS",
+    "find_in_page": "PASS",
+    "page_zoom": "FAIL",
+    "ime_dead_keys_compose": "BLOCKED_ENV",
+    "middle_click_paste_autoscroll": "EXPERIMENTAL",
+    "history_toolbar_and_alt_left": "PASS",
+    "return_to_gecko": "PASS",
+    "e2_host_kill_preserves_gecko": "PASS",
+    "ctrl_l_gecko_baseline": "PASS",
+    "ctrl_l_escape": "PASS",
+    "zoom": "FAIL",
+    "beforeunload": "FAIL",
+    "shortcuts": "FAIL"
+  },
+  "reason": null
+}
