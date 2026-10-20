@@ -1,0 +1,52 @@
+# TEMPORARY (cloud/webkit-feel): dump the WPE WebKit 2.48.3 API surface (headers + GIR
+# signal signatures) from the pinned Debian 13 -dev packages, so host changes are written
+# against the exact pinned API (the cloud session cannot reach Debian). Evidence only.
+name: linux-webkit-feel-api
+on:
+  push:
+    branches: [cloud/webkit-feel]
+    paths: [.github/workflows/linux-webkit-feel-api.yml]
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          mkdir -p "$EVIDENCE_OUT"
+          docker run --rm -v "$EVIDENCE_OUT:/out" docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5 sh -c '
+            set -e; apt-get update >/dev/null
+            apt-get install -y --no-install-recommends python3 libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev >/out/apt.log 2>&1 || true
+            dpkg -l | grep -i wpe > /out/versions.txt || true
+            ls -R /usr/include/wpe-webkit-2.0 > /out/headers-list.txt 2>&1 || true
+            for f in WebKitWebView WebKitScriptDialog WebKitContextMenu WebKitContextMenuItem WebKitContextMenuActions WebKitHitTestResult WebKitOptionMenu WebKitOptionMenuItem WebKitFindController WebKitInputMethodContext WebKitPermissionRequest WebKitFileChooserRequest WebKitSettings WebKitColorChooserRequest WebKitEditingCommands WebKitWebResource WebKitFaviconDatabase WebKitWebsiteDataManager WebKitNetworkSession WebKitPointerLockPermissionRequest WebKitClipboardPermissionRequest WebKitGeolocationPermissionRequest WebKitNotificationPermissionRequest WebKitUserMediaPermissionRequest WebKitDeviceInfoPermissionRequest WebKitMediaKeySystemPermissionRequest WebKitWebsiteDataAccessPermissionRequest WebKitRectangle WebKitInputMethodContext; do
+              p=$(find /usr/include/wpe-webkit-2.0 -name "$f.h" | head -1); [ -n "$p" ] && { echo "==== $p"; grep -v "^ \*\|^/\*\*\|^$" "$p"; } >> /out/headers.txt || echo "missing $f" >> /out/headers.txt
+            done
+            cat /usr/include/wpe-1.0/wpe/input.h > /out/libwpe-input.h 2>/dev/null || true
+            g=$(find / -name "WPEWebKit-2.0.gir" 2>/dev/null | head -1); echo "gir: $g" > /out/gir-path.txt
+            if [ -n "$g" ]; then python3 - "$g" > /out/signals.txt <<PY || true
+import sys, xml.etree.ElementTree as E
+ns={"c":"http://www.gtk.org/introspection/core/1.0"}
+t=E.parse(sys.argv[1]).getroot()
+for cls in t.iter("{%s}class"%ns["c"]):
+  for s in cls.findall("glib:signal",{"glib":"http://www.gtk.org/introspection/glib/1.0"}):
+    ps=[(p.get("name"),(p.find("c:type",ns).get("name") if p.find("c:type",ns) is not None else "?")) for p in s.findall("c:parameters/c:parameter",ns)]
+    r=s.find("c:return-value/c:type",ns)
+    print(cls.get("name"), s.get("name"), ps, "->", r.get("name") if r is not None else "?")
+PY
+            fi
+            find /usr/share/gir-1.0 /usr/lib -name "*.gir" 2>/dev/null | head > /out/girs.txt || true
+          ' || true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: webkit-feel-api
