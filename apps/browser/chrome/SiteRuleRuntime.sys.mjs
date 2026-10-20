@@ -30,6 +30,7 @@
 import * as defaultCore from "./contexts/index.mjs";
 import { WPL, webURL, defaultTimers, prefEnabled, ensureRuntimeStylesheet, addTabsProgressListener,
   element, browserStackOf } from "./DevLoop.sys.mjs";
+import { words } from "./overview/platform-words.mjs";
 
 export const TICK_INTERVAL_MS = 30000;
 export const FLUSH_INTERVAL_MS = 60000;
@@ -445,9 +446,9 @@ export function installSiteRuleRuntime(window, { services, adapter, decisions = 
       const jevActive = provider === "jev" && jev.consent && asked && (level !== "screen" || SCREEN_SUPPORTED);
       const sent = jevActive ? (OUTLINE_SUPPORTED ? level : "address") : null;
       fact(PROVIDER_NAMES[provider], sent ? `may see the page ${sent === "address" ? "address and title" : "outline"}`
-        : asked && !NATIVE_DECISION_PROVIDERS.includes(provider) ? "not available in this build; nothing leaves this Mac"
-          : asked && level === "screen" ? "screenshots are not available in this build; nothing leaves this Mac"
-            : "off; nothing leaves this Mac");
+        : asked && !NATIVE_DECISION_PROVIDERS.includes(provider) ? words("not available in this build; nothing leaves this Mac")
+          : asked && level === "screen" ? words("screenshots are not available in this build; nothing leaves this Mac")
+            : words("off; nothing leaves this Mac"));
       if (lastJev && jevActive) {
         fact("Last Jev check", `${lastJev.dataSent ? "sent" : "not sent"} at ${new Date(lastJev.at).toLocaleTimeString()}`);
       }

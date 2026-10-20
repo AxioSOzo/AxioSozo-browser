@@ -31,6 +31,7 @@ import {
   DATE_SCHEMA, MAX_TITLE, datePrompt, daysBetween, dueChoices, dueText, errandCounts, errandStore, errandUrl, isDay, localDay, longDay, oneLine,
   readDateAnswer, readableAddress, visibleErrands,
 } from "./errand-store.sys.mjs";
+import { words } from "../../overview/platform-words.mjs";
 
 export const ERRANDS_STYLESHEET = "chrome://browser/content/axiosozo/lab/errands/errands.css";
 export const MENU_ITEM_ID = "axiosozo-lab-errand-remember";
@@ -242,7 +243,7 @@ export function createErrands(window, ctx, { store, prefs = globalThis.Services?
     function findIdle(client) {
       if (sensitive) {
         findArea.replaceChildren(el(document, "p", { class: "axiosozo-lab-errand-quiet",
-          text: "Find the date is not offered on sensitive sites, such as banking, health or government sign-ins. The errand stays on this Mac." }));
+          text: words("Find the date is not offered on sensitive sites, such as banking, health or government sign-ins. The errand stays on this Mac.") }));
         return;
       }
       if (!client) { findArea.replaceChildren(); return; }
@@ -302,7 +303,7 @@ export function createErrands(window, ctx, { store, prefs = globalThis.Services?
         const errand = await store.add({ title: name, url, space, due: state.due, dueFrom: state.dueFrom });
         card?.close("saved");
         const when = errand.due ? `, ${lowerFirst(dueText(errand.due, today()))}` : "";
-        ctx.toast?.({ title: `Remembered: ${oneLine(name, 60)}`, description: `${space ? `In ${spaceName(ctx, space) ?? "this space"}` : "Kept on this Mac"}${when}.`,
+        ctx.toast?.({ title: `Remembered: ${oneLine(name, 60)}`, description: words(`${space ? `In ${spaceName(ctx, space) ?? "this space"}` : "Kept on this Mac"}${when}.`),
           button: { label: "Undo", onCommand: () => { store.remove(errand.id).catch(() => {}); } }, timeoutMs: UNDO_MS });
       } catch (error) {
         findArea.replaceChildren(el(document, "p", { class: "axiosozo-lab-errand-quiet", role: "alert",

@@ -31,6 +31,7 @@ import time
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 PRESENTER = ROOT / 'apps/browser/chrome/CEFPresenter.sys.mjs'
+SURFACE = ROOT / 'apps/browser/chrome/EngineFrameSurface.sys.mjs'
 FIREFOX_PREFS = {
     'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False,
     'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.reportingpolicy.firstRun': False,
@@ -63,11 +64,15 @@ def main():
     parser.add_argument('--baseline-presenter', help='an older CEFPresenter.sys.mjs to A/B against this checkout')
     args = parser.parse_args()
     function = extract_function(PRESENTER.read_text(), 'bgraToRGBA')
+    # The presenter's pixel path lives in EngineFrameSurface.sys.mjs (cloud/perf-pixel-path); its
+    # bgraToRGBA delegates there, so the page gets that module's source too (imports/exports stripped).
+    surface_source = SURFACE.read_text() if SURFACE.exists() else ''
+    surface_js = re.sub(r'^export ', '', surface_source, flags=re.M)
     baseline = 'const baselineBgraToRGBA = null;'
     if args.baseline_presenter:
         baseline = extract_function(Path(args.baseline_presenter).read_text(), 'bgraToRGBA').replace(
             'function bgraToRGBA(', 'function baselineBgraToRGBA(', 1)
-    page = (HERE / 'page.html').read_text().replace('/*BGRA_TO_RGBA*/', function).replace(
+    page = (HERE / 'page.html').read_text().replace('/*ENGINE_FRAME_SURFACE*/', surface_js).replace('/*BGRA_TO_RGBA*/', function).replace(
         '/*BASELINE_BGRA_TO_RGBA*/', baseline).encode()
     done = threading.Event()
     box = {}
@@ -121,6 +126,7 @@ def main():
     result = box.get('result') or {'error': 'no result within %d s' % args.timeout}
     result.update(browser=args.browser, browser_version=version, wall_s=round(time.monotonic() - started, 1),
                   bgraToRGBA_source_sha256=hashlib.sha256(function.encode()).hexdigest(),
+                  engine_frame_surface_sha256=hashlib.sha256(surface_source.encode()).hexdigest() if surface_source else None,
                   baseline_presenter=args.baseline_presenter,
                   baseline_bgraToRGBA_source_sha256=hashlib.sha256(baseline.encode()).hexdigest() if args.baseline_presenter else None,
                   source=str(PRESENTER.relative_to(ROOT)), stderr_tail=stderr.decode(errors='replace')[-1500:] if not ok else None)

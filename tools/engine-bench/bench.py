@@ -333,12 +333,16 @@ class ProtocolError(RuntimeError):
 
 
 class Session:
-    def __init__(self, engine, origin, directory, frame_damage=False):
+    def __init__(self, engine, origin, directory, frame_damage=False, damage_payload=False):
         self.engine, self.origin, self.directory = engine, origin, directory
         self.profile = Path(tempfile.mkdtemp(prefix=engine.name + '-bench-profile-', dir=engine.profile_parent()))
         os.chmod(self.profile, 0o700)
         self.stderr = (directory / f'stderr-{engine.name}.log').open('ab')
         self.frame_damage = frame_damage
+        # hello.damage_payload (engine-stream-v1 §6.2): payloads are the damage rectangle's rows,
+        # patched into one whole frame per size here (as Zen's DamagePayloadAssembler does).
+        self.damage_payload = damage_payload and frame_damage
+        self.whole = {}
         self.t_spawn = time.monotonic()
         self.process = subprocess.Popen([str(engine.binary()), '--stream', str(self.profile), str(directory)],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
@@ -362,6 +366,8 @@ class Session:
         hello = dict(version=1, method='hello', token=self.token, engine_instance=self.instance, fixture_origin=origin)
         if frame_damage:
             hello['frame_damage'] = True
+        if self.damage_payload:
+            hello['damage_payload'] = True
         self.write(hello)
 
     # -- output
@@ -407,8 +413,12 @@ class Session:
                 raise ProtocolError('event with payload')
             self.event_bytes += 16 + meta_size
             return kind, meta, t_header
-        if size != meta['width'] * meta['height'] * 4 or meta['stride'] != meta['width'] * 4 or meta['format'] != 'BGRA8':
+        whole_size = meta['width'] * meta['height'] * 4
+        expected = meta['damage'][0][2] * meta['damage'][0][3] * 4 if self.damage_payload else whole_size
+        if size != expected or meta['stride'] != meta['width'] * 4 or meta['format'] != 'BGRA8':
             raise ProtocolError('invalid frame geometry')
+        if self.damage_payload:
+            return self.payload_packet(meta, size, meta_size, whole_size, t_header, deadline)
         # Two rotating buffers per size: no allocation per frame, previous frame kept for diffs.
         pair = self.buffers.setdefault(size, [bytearray(size), bytearray(size)])
         buffer = pair[0] if self.current is not pair[0] else pair[1]
@@ -431,6 +441,33 @@ class Session:
         if self.recorder is not None:
             self.recorder.append(record)
         return kind, meta, t_done
+
+    def payload_packet(self, meta, size, meta_size, whole_size, t_header, deadline):
+        payload = self.buffers.setdefault(('payload', size), bytearray(size))
+        self.read_into(memoryview(payload), deadline)
+        t_done = time.monotonic()
+        self.command('frame_ack', target=meta['target'], frame_id=meta['frame_id'])  # credit back at once
+        x, y, w, h = meta['damage'][0]
+        key = (meta['target']['native_target_id'], meta['width'], meta['height'])
+        if (x, y, w, h) == (0, 0, meta['width'], meta['height']):
+            self.whole[key] = bytearray(payload)
+        else:
+            frame = self.whole.get(key)
+            if frame is None:
+                raise ProtocolError('partial damage payload without a whole frame of its size')
+            row = w * 4
+            for line in range(h):
+                start = ((y + line) * meta['width'] + x) * 4
+                frame[start:start + row] = payload[line * row:(line + 1) * row]
+        self.previous, self.current, self.meta = None, self.whole[key], meta
+        record = dict(t=t_done, read_ms=round((t_done - t_header) * 1000, 3), id=meta['frame_id'], w=meta['width'],
+                      h=meta['height'], scale=meta['device_scale'], bytes=size + 16 + meta_size,
+                      gen=meta['target']['document_generation'],
+                      damage=round(w * h / (meta['width'] * meta['height']), 4))
+        self.frames.append(record)
+        if self.recorder is not None:
+            self.recorder.append(record)
+        return 2, meta, t_done
 
     def handle_event(self, item):
         item = dict(item, _t=time.monotonic())
@@ -704,8 +741,9 @@ class Bench:
 
     def repetition(self, index):
         directory = self.out
-        session = Session(self.engine, self.server.origin, directory, frame_damage=self.args.frame_damage)
-        rep = dict(index=index, frame_damage=self.args.frame_damage)
+        session = Session(self.engine, self.server.origin, directory, frame_damage=self.args.frame_damage,
+                          damage_payload=self.args.damage_payload)
+        rep = dict(index=index, frame_damage=self.args.frame_damage, damage_payload=session.damage_payload)
         try:
             kind, ready, t = session.until(lambda kind, meta, t: kind == 1 and meta.get('event') == 'ready', 60)
             rep['spawn_to_ready_ms'] = round((t - session.t_spawn) * 1000, 1)
@@ -838,6 +876,8 @@ def main():
     parser.add_argument('--reps', type=int, default=5)
     parser.add_argument('--scales', type=float, nargs='+', default=[1.0, 2.0])
     parser.add_argument('--frame-damage', action='store_true', help='negotiate hello.frame_damage (host-reported damage)')
+    parser.add_argument('--damage-payload', action='store_true',
+                        help='with --frame-damage: negotiate hello.damage_payload (payload = damage rectangle only)')
     parser.add_argument('--pipe-experiment', action='store_true', help='also measure 2x windows with a 1 MiB stdout pipe')
     parser.add_argument('--quick', action='store_true', help='short windows and fewer samples (harness checks only)')
     args = parser.parse_args()
@@ -880,7 +920,8 @@ def main():
         result['finished_at'] = time.time()
         with contextlib.suppress(OSError):
             result['machine']['loadavg_end'] = Path('/proc/loadavg').read_text().split()[:3]
-        name = f'bench-{args.engine}' + ('-damage' if args.frame_damage else '') + '.json'
+        name = f'bench-{args.engine}' + ('-damage' if args.frame_damage else '') + \
+            ('-payload' if args.frame_damage and args.damage_payload else '') + '.json'
         (out / name).write_text(json.dumps(result, indent=1) + '\n')
         print(json.dumps(dict(component='engine-bench', engine=args.engine, status=result['status'],
                               passed=result.get('passed_repetitions'), out=str(out / name), error=result.get('error'))), flush=True)

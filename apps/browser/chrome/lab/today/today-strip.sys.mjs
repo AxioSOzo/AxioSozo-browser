@@ -25,6 +25,7 @@ import { todayData, TODAY_PREFS } from "./today-data.sys.mjs";
 import { allLines, stripText, stripTone, GROUP_TONES } from "./today-model.sys.mjs";
 import { errandStore } from "../errands/errand-store.sys.mjs";
 import { errandActions, openErrandPage } from "../errands/errands.sys.mjs";
+import { words } from "../../overview/platform-words.mjs";
 
 export const TODAY_STYLESHEET = "chrome://browser/content/axiosozo/lab/today/today.css";
 export const STRIP_ID = "axiosozo-lab-today-strip";
@@ -145,7 +146,7 @@ export function createTodayStrip(window, ctx, { data, errands, prefs = globalThi
     const date = new Date(since);
     const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const today = new Date(); const day = date.toDateString() === today.toDateString() ? "today" : date.toLocaleDateString("en-GB", { weekday: "long" });
-    return `Finished and failed since you last looked (${day} ${time}). Composed on this Mac; nothing was sent.`;
+    return words(`Finished and failed since you last looked (${day} ${time}). Composed on this Mac; nothing was sent.`);
   }
 
   async function render() {

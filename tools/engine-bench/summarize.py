@@ -78,7 +78,9 @@ def main():
         except (ValueError, OSError):
             continue
         if data.get('schema') == 'axiosozo-engine-bench-v1':
-            key = data['engine'] + ('+damage' if data.get('args', {}).get('frame_damage') else '')
+            args = data.get('args', {})
+            key = data['engine'] + ('+damage' if args.get('frame_damage') else '') + \
+                ('+payload' if args.get('frame_damage') and args.get('damage_payload') else '')
             benches[key] = data
         elif str(data.get('schema', '')).startswith('axiosozo-presenter-'):
             presenters.append(data)

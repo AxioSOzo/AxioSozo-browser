@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
+import { words } from "../overview/platform-words.mjs";
+
 // Handing work to the user's own tools, so the browser never becomes the
 // agent's UI: one click and the session lives in their terminal or app.
 //
@@ -33,7 +35,7 @@ export const TARGET_LABELS = Object.freeze({
 export const TARGET_CLIENTS = Object.freeze({ "claude-cli": "claude-code", "claude-desktop": "claude-code", "claude-resume": "claude-code", "codex-app": "codex" });
 /** The longest prompt each link carries (Claude CLI: 5000; Desktop cuts at 14 336). */
 export const PROMPT_LIMITS = Object.freeze({ "claude-cli": 5000, "claude-desktop": 14000, "codex-app": 8000 });
-export const CLIPBOARD_NOTE = "A screenshot of the area is on the clipboard: paste it with ⌘V.";
+export const CLIPBOARD_NOTE = words("A screenshot of the area is on the clipboard: paste it with ⌘V.");
 
 export class HandoverError extends Error {
   constructor(code, message = code) { super(message); this.name = "HandoverError"; this.code = code; }

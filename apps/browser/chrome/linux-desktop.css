@@ -1,0 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
+
+/* Linux only (LinuxDesktop.sys.mjs loads it there; the media query keeps it
+ * inert anywhere else). Zen's welcome draws white text over a background
+ * H.264 video. Without an H.264 decoder (Fedora and other distributions that
+ * ship no codecs, or a minimal system) the video never paints and the text sits
+ * on the light window background, unreadable. A backdrop in the video's own
+ * deep green sits behind it: hidden while the video plays, readable when not. */
+@media (-moz-platform: linux) {
+  :root[zen-welcome-stage] #zen-welcome {
+    background-color: rgb(30 46 32);
+  }
+}

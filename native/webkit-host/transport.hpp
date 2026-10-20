@@ -1,7 +1,7 @@
 #pragma once
 // Private inherited pipes only. The engine UI thread never performs a pipe write.
 // Copied from native/chromium-host/transport.hpp at a3ab14e (cloud/integration);
-// the only delta is pendingFrame() below, used for computed damage rectangles
+// the deltas are pendingFrame() below and the Linux pipe capacity (pipeBytes), used for computed damage rectangles
 // (contracts/engine-stream-v1.md "Frame damage"). Framing, credit and bounds are
 // byte-for-byte the AXCF v1 implementation.
 #include <algorithm>
@@ -11,6 +11,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <deque>
 #include <map>
 #include <fcntl.h>
@@ -20,10 +22,20 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#endif
 #include <vector>
+#if defined(__linux__) && !defined(F_SETPIPE_SZ)
+#define F_SETPIPE_SZ 1031
+#define F_GETPIPE_SZ 1032
+#endif
 
 namespace axio {
 constexpr size_t MaxLine = 16384, MaxMeta = 8192, MaxFrame = 33554432;
+// Requested stdout pipe capacity on Linux (the unprivileged fs.pipe-max-size default).
+constexpr int PipeBytes = 1 << 20;
 struct Packet {
   uint16_t kind = 1;
   std::string metadata, target;
@@ -45,6 +57,15 @@ class Transport {
   std::string outstandingTarget_;
   bool writing_ = false;
   void (*onInput_)() = nullptr;  // Set before start(); called on the reader thread.
+  // hello.frame_transport "memfd" (engine-stream-v1 §6.3, Linux): frame pixels go into a sealed
+  // memfd slot instead of the pipe; the AXCF frame names the slot and carries no payload. One
+  // frame is in flight, so a slot is rewritten only after Zen acknowledged the frame that used it.
+  // Set once (enableMemfd, after the hello, before any frame exists); read by the writer.
+  std::atomic<int> memfd_{-1};
+  std::atomic<uint8_t*> ring_{nullptr};
+  std::atomic<size_t> slotBytes_{0};
+  std::atomic<uint32_t> slots_{0};
+  uint32_t nextSlot_ = 0;
 
   void fail() { failed_ = true; changed_.notify_all(); }
   bool transfer(const uint8_t* data, size_t size) {
@@ -104,6 +125,16 @@ class Transport {
         } else continue;
         writing_ = true;
       }
+      if (packet.kind == 2 && ring_) {
+        if (packet.pixels.size() > slotBytes_) { fail(); break; }
+        memcpy(ring_.load() + size_t(nextSlot_) * slotBytes_, packet.pixels.data(), packet.pixels.size());
+        char member[64];
+        snprintf(member, sizeof(member), ",\"slot\":%u,\"payload_bytes\":%zu}", nextSlot_, packet.pixels.size());
+        packet.metadata.pop_back();
+        packet.metadata += member;
+        packet.pixels.clear();
+        nextSlot_ = (nextSlot_ + 1) % slots_;
+      }
       std::array<uint8_t, 16> h{'A','X','C','F',0,1,0,uint8_t(packet.kind)};
       uint32_t sizes[2] = {uint32_t(packet.metadata.size()), uint32_t(packet.pixels.size())};
       for (int j = 0; j < 2; ++j)
@@ -130,6 +161,11 @@ public:
     bool redirected = dup2(null, STDIN_FILENO) >= 0 && dup2(null, STDOUT_FILENO) >= 0;
     close(null);
     if (!redirected) return false;
+#ifdef __linux__
+    // A 2x frame is ~9 MB: with the default 64 KiB pipe every frame costs Zen's Subprocess
+    // reader ~150 wakeups and worker round trips. Best effort, within fs.pipe-max-size.
+    if (fcntl(output_, F_GETPIPE_SZ) > 0 && fcntl(output_, F_GETPIPE_SZ) < PipeBytes) fcntl(output_, F_SETPIPE_SZ, PipeBytes);
+#endif
     int inputFlags = fcntl(input_, F_GETFL), outputFlags = fcntl(output_, F_GETFL);
     if (inputFlags < 0 || outputFlags < 0 || fcntl(input_, F_SETFL, inputFlags | O_NONBLOCK) < 0
         || fcntl(output_, F_SETFL, outputFlags | O_NONBLOCK) < 0) return false;
@@ -137,6 +173,38 @@ public:
     writer_ = std::thread([this] { writeLoop(); });
     return true;
   }
+  // The stdout pipe's capacity now (0 where unknown or not a pipe).
+  int pipeBytes() const {
+#ifdef __linux__
+    int size = output_ >= 0 ? fcntl(output_, F_GETPIPE_SZ) : -1;
+    return size > 0 ? size : 0;
+#else
+    return 0;
+#endif
+  }
+  // Linux only: creates the frame memfd (sealed against shrinking/growing, close-on-exec, so
+  // helper processes never inherit it). Call before start(); returns the descriptor or -1.
+  int enableMemfd(uint32_t slots, size_t slotBytes) {
+#ifdef __linux__
+    if (ring_.load() || !slots || slots > 4 || !slotBytes || slotBytes > MaxFrame) return -1;
+    int fd = int(syscall(SYS_memfd_create, "axio-frames", 1u /* MFD_CLOEXEC */ | 2u /* MFD_ALLOW_SEALING */));
+    if (fd < 0) return -1;
+    void* ring = MAP_FAILED;
+    if (ftruncate(fd, off_t(slotBytes * slots)) == 0 &&
+        fcntl(fd, 1033 /* F_ADD_SEALS */, 0x0002 | 0x0004 | 0x0001 /* SHRINK | GROW | SEAL */) == 0)
+      ring = mmap(nullptr, slotBytes * slots, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ring == MAP_FAILED) { close(fd); return -1; }
+    slotBytes_ = slotBytes; slots_ = slots; memfd_ = fd;
+    ring_ = static_cast<uint8_t*>(ring);  // last: the writer only uses a complete ring
+    return fd;
+#else
+    (void)slots; (void)slotBytes;
+    return -1;
+#endif
+  }
+  int memfd() const { return memfd_; }
+  size_t memfdSlotBytes() const { return slotBytes_; }
+  uint32_t memfdSlots() const { return slots_; }
   bool failed() const { return failed_; }
   bool eof() const { return eof_; }
   void reject() { fail(); }
@@ -179,6 +247,10 @@ public:
     if (writer_.joinable()) writer_.join();
     if (input_ >= 0) { close(input_); input_ = -1; }
     if (output_ >= 0) { close(output_); output_ = -1; }
+#ifdef __linux__
+    if (uint8_t* ring = ring_.exchange(nullptr)) munmap(ring, slotBytes_ * slots_);
+    if (memfd_ >= 0) { close(memfd_); memfd_ = -1; }
+#endif
   }
 };
 } // namespace axio

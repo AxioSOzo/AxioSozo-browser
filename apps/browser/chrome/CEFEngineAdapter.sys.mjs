@@ -4,6 +4,7 @@
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
+import { DamagePayloadAssembler, MEMFD_FRAMES_PREF, validMemfdCapability, validMemfdFrame, memfdSlotReader } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -279,7 +280,10 @@ function validDamage(damage, width, height) {
     && x + w <= width && y + h <= height;
 }
 
-export async function readAXCF(pipe, { damage = false } = {}) {
+function frameBytes(metadata, damage, payload) {
+  return damage && payload ? metadata.damage[0][2] * metadata.damage[0][3] * 4 : metadata.stride * metadata.height;
+}
+export async function readAXCF(pipe, { damage = false, payload = false, memfd = null } = {}) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -294,13 +298,19 @@ export async function readAXCF(pipe, { damage = false } = {}) {
   if (!isObject(metadata) || metadata.version !== 1) throw new Error("INVALID_AXCF_METADATA");
   if (kind === 2) {
     const frameKeys = ["version", "target", "frame_id", "width", "height", "stride", "device_scale", "format"];
-    if (!hasKeys(metadata, damage ? [...frameKeys, "damage"] : frameKeys)
+    if (!hasKeys(metadata, [...frameKeys, ...(damage ? ["damage"] : []), ...(memfd ? ["slot", "payload_bytes"] : [])])
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= 4096)
-        || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
+        || metadata.stride !== metadata.width * 4
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
         || metadata.format !== "BGRA8"
-        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))) throw new Error("INVALID_AXCF_FRAME");
+        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))
+        // `damage_payload`: the payload is exactly the damage rectangle's rows; with memfd frames
+        // (engine-stream-v1 §6.3) those bytes are in the named slot and the pipe payload is empty.
+        || !(memfd ? size === 0 && validMemfdFrame(metadata, memfd, frameBytes(metadata, damage, payload))
+          : size === frameBytes(metadata, damage, payload))) {
+      throw new Error("INVALID_AXCF_FRAME");
+    }
     validateCEFTarget(metadata.target, { browsingMode: "web" });
   }
   // Allocate/read large pixels only after both framing and metadata are checked.
@@ -341,7 +351,7 @@ const DELEGATION_EVENTS = new Set(["prompt", "prompt_closed", "download_updated"
 // arbitrary exception messages, pipe contents or authentication material.
 const READ_FAILURE_CODES = new Set([
   "TRUNCATED_AXCF_HEADER", "TRUNCATED_AXCF_METADATA", "TRUNCATED_AXCF_PIXELS",
-  "INVALID_AXCF_HEADER", "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME",
+  "INVALID_AXCF_HEADER", "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_DAMAGE_PAYLOAD", "MEMFD_READ_FAILED",
   "INVALID_CEF_TARGET", "FOREIGN_CEF_TARGET", "INVALID_CEF_CREATION", "UNKNOWN_CEF_TARGET",
   "INVALID_CEF_GENERATION", "STALE_CEF_EVENT", "UNEXPECTED_CEF_FRAME", "FOREIGN_CEF_FRAME",
   "FUTURE_CEF_FRAME", "INVALID_CEF_EVENT", "UNVERIFIED_CEF_RUNTIME", "UNREQUESTED_CEF_CREATION",
@@ -402,10 +412,11 @@ export class CEFHostConnection {
   // Heartbeat watchdog (armed by a ready capability): last accepted sequence, the time anything
   // was last heard or the watchdog last reset, the pending check timer and the wake observer.
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatInterval = null; #heartbeatSeen = 0;
-  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers;
+  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers; #assembler = null; #readSlot = null; #slotReader = null;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
     shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
-    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64" }) {
+    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64", damagePayload = true,
+    frameTransport = "pipe", readSlot = null }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
     if (!CEF_PLATFORMS.includes(platform)) throw new Error("INVALID_CEF_BOOTSTRAP");
     // The IOSurface path (engine-surface-v1) exists on macOS only.
@@ -418,6 +429,14 @@ export class CEFHostConnection {
     this.platform = platform;
     // Linux pipe frames name their changed rectangle so chrome uploads only that.
     this.frameDamage = platform !== "macosarm64" && !surface;
+    // ...and carry only that rectangle (hello `damage_payload`); frames are rebuilt per target.
+    this.damagePayload = this.frameDamage && damagePayload;
+    this.#assembler = this.damagePayload ? new DamagePayloadAssembler() : null;
+    // engine-stream-v1 §6.3 memfd frames: Linux pipe mode only (EXPERIMENTAL, pref-gated by launchHost).
+    if (!["pipe", "memfd"].includes(frameTransport) || (frameTransport === "memfd" && !this.frameDamage)) {
+      throw new Error("INVALID_CEF_BOOTSTRAP");
+    }
+    this.frameTransport = frameTransport; this.#readSlot = readSlot; this.memfd = null;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
@@ -464,7 +483,9 @@ export class CEFHostConnection {
     const hello = { version: 1, method: "hello", token: this.#token,
       engine_instance: this.instance, fixture_origin: this.identity,
       ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}),
-      ...(this.frameDamage ? { frame_damage: true } : {}) };
+      ...(this.frameDamage ? { frame_damage: true } : {}),
+      ...(this.damagePayload ? { damage_payload: true } : {}),
+      ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}) };
     if (this.#endpoint) {
       const endpoint = this.#endpoint;
       try {
@@ -620,7 +641,15 @@ export class CEFHostConnection {
   async #read() {
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout, { damage: this.frameDamage });
+      const packet = await readAXCF(this.#process.stdout, { damage: this.frameDamage, payload: this.damagePayload, memfd: this.memfd });
+      const { kind, metadata: value } = packet;
+      let pixels = packet.pixels;
+      if (kind === 2 && this.memfd && !this.#endpoint) {
+        this.readPhase = "frame_memfd";
+        pixels = await this.#slotReader(value.slot, value.payload_bytes);
+      }
+      // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
+      if (kind === 2 && this.#assembler) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -657,6 +686,7 @@ export class CEFHostConnection {
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_CEF_CREATION");
         adapter = creation?.abandoned ? null : this.#adapterFor(value.target, value.event === "created");
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
+        if (value.event === "closed") this.#assembler?.forget(value.target.native_target_id);
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
       } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
@@ -710,9 +740,20 @@ export class CEFHostConnection {
         || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean"
         // Frame damage is exactly what the hello asked for.
         || (capabilities?.frame_damage ?? false) !== this.frameDamage
+        || (capabilities?.damage_payload ?? false) !== this.damagePayload
+        // memfd frames (engine-stream-v1 §6.3): exactly the transport asked for, a bounded ring.
+        || (capabilities?.frame_transport ?? "pipe") !== this.frameTransport
+        || ("memfd" in (capabilities ?? {})) !== (this.frameTransport === "memfd")
+        || (this.frameTransport === "memfd" && !validMemfdCapability(capabilities.memfd, MAX_PIXELS))
         // Optional liveness announcement; a value that could never fit the 5 s rule is not trusted.
         || (capabilities?.heartbeat_interval_ms !== undefined && !(Number.isInteger(capabilities.heartbeat_interval_ms)
           && capabilities.heartbeat_interval_ms >= 100 && capabilities.heartbeat_interval_ms <= 2000))) throw new Error("UNVERIFIED_CEF_RUNTIME");
+    if (this.frameTransport === "memfd") {
+      const memfd = Object.freeze({ ...capabilities.memfd });
+      try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
+      catch { throw new Error("UNVERIFIED_CEF_RUNTIME"); }
+      this.memfd = memfd;
+    }
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
     this.#startHeartbeatWatchdog(capabilities.heartbeat_interval_ms);
@@ -842,6 +883,8 @@ export class CEFEngineAdapter {
   get nativeExitCode() { return this.#host.nativeExitCode; }
   /** GPU surface presentation (engine-surface-v1). False only in the labelled BGRA pipe fallback. */
   get surfaceMode() { return this.#host.surfaceMode === true; }
+  /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
+  get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
   /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
   get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }
@@ -1287,8 +1330,10 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     const cleanup = () => IOUtils.remove(profile, { recursive: true });
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
+  // engine-stream-v1 §6.3 memfd frames: EXPERIMENTAL, Linux pipe mode only, off unless the pref is set.
+  const frameTransport = !endpoint && platform !== "macosarm64" && Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe";
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
-    shared: browsingMode === "web", platform,
+    shared: browsingMode === "web", platform, frameTransport,
     surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
   try { return await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
