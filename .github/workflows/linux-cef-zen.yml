@@ -119,7 +119,7 @@ jobs:
             zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
             libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
             libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core \
-            fonts-liberation xclip x11-xkb-utils xkb-data > "$EVIDENCE_OUT/apt.log" 2>&1
+            fonts-liberation xclip x11-xkb-utils x11-xserver-utils xkb-data > "$EVIDENCE_OUT/apt.log" 2>&1
           dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool | tee "$EVIDENCE_OUT/tool-versions.tsv"
       - name: Restore pinned CEF archive
         if: steps.zen.outputs.run_id != ''
