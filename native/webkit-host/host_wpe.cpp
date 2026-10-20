@@ -812,7 +812,13 @@ void WpeView::connect() {
     const char* method = webkit_uri_request_get_http_method(request);
     // WebKit reports a null method for history loads of GET entries.
     std::string verb = method ? method : "GET";
-    if (view->host_.navigationPolicy(&view->tab_, uri ? uri : "", verb)) webkit_policy_decision_use(decision);
+    // A data:/blob: main-frame "navigation" is a download link (top-level data: navigation is blocked
+    // by browsers anyway): refused as a download, so Zen says so.
+    std::string target = uri ? uri : "";
+    if (view->host_.browserUI() && (target.rfind("data:", 0) == 0 || target.rfind("blob:", 0) == 0)) {
+      view->host_.denied(&view->tab_, "download_denied"); webkit_policy_decision_ignore(decision); return TRUE;
+    }
+    if (view->host_.navigationPolicy(&view->tab_, target, verb)) webkit_policy_decision_use(decision);
     else webkit_policy_decision_ignore(decision);
     return TRUE;
   }), this);
