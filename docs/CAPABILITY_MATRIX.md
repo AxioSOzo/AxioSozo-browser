@@ -9,14 +9,24 @@
 | Mutating browser actions | Native user input only | Fixture native input only | Fixture native input only (pointer, wheel, keys with XKB codes, text commit) | No exposed tool | No authority |
 | Contextual answer/stream | Not connected | Not connected | Not connected | Live auth/sandbox blocked | Off |
 | TLS, extensions, accessibility, devtools | Native Zen/Firefox inherited; this slice did not run the full regression matrix | Full safety matrix blocked | TLS errors fail closed in the host (no bypass, no TLS UI); no extensions, accessibility or devtools | No override | No override |
-| Dialogs, permissions, downloads, pop-ups, file pickers | Native Zen/Firefox | Delegated to Zen UI in web mode | Denied by the host with explicit codes; Zen shows a notice | No access | Off |
-| IME | Native | Proxy editor (macOS surface mode) | Text commit only (`ime_commit_text`); no composition | — | — |
+| Dialogs, permissions, downloads, pop-ups, file pickers | Native Zen/Firefox | Delegated to Zen UI in web mode | Drawn by Zen (engine-stream-v1 §8.2 browser UI): alert/confirm/prompt and beforeunload in Zen's tab-modal dialogs, permission requests in Zen's doorhanger (fixture mode: nothing remembered, deny unless allowed), the file picker through Zen's nsIFilePicker; downloads and pop-ups refused with a Zen notice; see "WebKit native-feel gates" | No access | Off |
+| IME | Native | Proxy editor (macOS surface mode) | Composition with preedit through Zen's proxy editor and WebKitInputMethodContext (§8.2); commit, cancel; caret via `text_input` | — | — |
 | Inside Zen on Linux (GUI E2E) | Harness launch/chrome/fixture PASS | Host E0/stream/input PASS (cloud/linux-cef); inside Zen: three-engine row | PASS, EXPERIMENTAL (runs 39325934205, 39337226571): Gecko → WebKit → Gecko via Zen's tab menu with real typing, click, link, toolbar Back, wheel scroll; host SIGKILL keeps the Gecko tab | — | — |
 | Three engines on one tab (Linux GUI E2E) | Hub; same content process across all switches | PASS, EXPERIMENTAL (run 39337226571): fixture page only, beside WebKit, via Zen's "Open in" submenu | PASS, EXPERIMENTAL (run 39337226571): fixture page only | — | — |
 
 The `enabled` provider setting is an explicit local policy preference, not a
 claim of authenticated or billed access. Disabled and unverified routes cannot
 pass the admission check. No fallback retries a mutating action.
+
+## WebKit native-feel gates (Linux, fixture page, real Zen app)
+
+Label per gate: PASS (verified end to end in the real Linux Zen app under Xvfb, inspected
+screenshots), EXPERIMENTAL, NOT_VERIFIED, BLOCKED_ENV. The host-level evidence is
+`native/webkit-host/ui_test.py` on real WPE 2.48.3 (Actions run 39365113891, PASS). The Zen
+E2E is `scripts/webkit_feel_e2e.py` (linux-webkit-zen `e2e` job, `FEEL=1`). Its evidence is in
+`docs/evidence/linux/webkit-feel/` and `ci-results:cloud_webkit-feel/<run>-1-webkit-zen-e2e/feel/`.
+
+FEEL_GATES_PLACEHOLDER
 
 ## WebKit gates (all must hold; otherwise the engine menu says why)
 
