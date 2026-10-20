@@ -1,0 +1,681 @@
+1792466227907	Marionette	INFO	Marionette enabled
+1792466228024	Marionette	INFO	Listening on port 42413
+console.debug: "ZenSessionManager:" "Initializing session manager"
+console.debug: "ZenSessionManager:" "Session file path:" "/home/axio/build/runtime/4810cb4f5d4c2d30/profile-b225127eeba1ca55/gecko/zen-sessions.jsonlz4"
+console.debug: "ZenSessionManager:" "Reading Zen session file from disk"
+console.error: "Failed to read backup file /home/axio/build/runtime/4810cb4f5d4c2d30/profile-b225127eeba1ca55/gecko/zen-sessions-backup/clean.jsonlz4" (new NotFoundError("Could not open `/home/axio/build/runtime/4810cb4f5d4c2d30/profile-b225127eeba1ca55/gecko/zen-sessions-backup/clean.jsonlz4': file does not exist (NS_ERROR_FILE_NOT_FOUND)", (void 0)))
+console.debug: "ZenSessionManager:" "No spaces data found in session file, running migration" [object Object]
+console.error: "Failed to read spaces data from database during migration" (new Error("Error(s) encountered during statement execution: no such table: zen_workspaces", "resource://gre/modules/Sqlite.sys.mjs", 1193))
+console.error: "Failed to read pins data from database during migration" (new Error("Error(s) encountered during statement execution: no such table: zen_pins", "resource://gre/modules/Sqlite.sys.mjs", 1193))
+console.debug: "ZenSessionManager:" "Restoring tabs from Places DB after migration" null (void 0) [object Object]
+console.debug: "ZenSessionManager:" "Build ID has changed since last session, not restoring only pinned tabs" ({buildId:"20261020002642", lastBuildId:""})
+console.debug: "ZenSessionManager:" "Saving windata state after migration"
+console.debug: "ZenSessionManager:" "Saving Zen session data with 0 tabs"
+console.warn: "Error loading shortcuts file" (new NotFoundError("Could not open `/home/axio/build/runtime/4810cb4f5d4c2d30/profile-b225127eeba1ca55/gecko/zen-keyboard-shortcuts.json': file does not exist (NS_ERROR_FILE_NOT_FOUND)", (void 0)))
+console.warn: "Zen CKS: Migrating shortcuts from version" 0 "to" 20
+console.debug: "[gZenWorkspaces]:" "Changing workspace to" "{c14a741b-efe0-4d55-a7f2-bbe2489a8ea0}"
+console.warn: "[ZenMods]: No enabled Zen mods."
+console.warn: "[ZenMods]: No enabled Zen mods."
+console.debug: "ZenSessionManager:" "Saving Zen session data with 0 tabs"
+console.debug: "ZenSessionManager:" "Saving Zen session data with 1 tabs"
+console.debug: "ZenSessionManager:" "Saving Zen session data with 2 tabs"
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+console.error: "failed to cleanup Glean crash pings: Error: File at path \"/home/axio/build/linux-app/39346931130/axiosozo-dev/crashreporter\" does not exist, or is not executable"
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+console.debug: "ZenSessionManager:" "Saving Zen session data with 1 tabs"
+console.debug: "ZenSessionManager:" "Saving Zen session data with 2 tabs"
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+
+Unrecognized feature "cpu".
+
+
+Profiler environment variable usage:
+
+  MOZ_PROFILER_HELP
+  If set to any value, prints this message.
+  Use MOZ_BASE_PROFILER_HELP for BaseProfiler help.
+
+  MOZ_LOG
+  Enables logging. The levels of logging available are
+  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).
+
+  MOZ_PROFILER_STARTUP
+  If set to any value other than '' or '0'/'N'/'n', starts the
+  profiler immediately on start-up.
+  Useful if you want profile code that runs very early.
+
+  MOZ_PROFILER_STARTUP_ENTRIES=<16777216..268435456>
+  If MOZ_PROFILER_STARTUP is set, specifies the number of entries per
+  process in the profiler's circular buffer when the profiler is first
+  started.
+  If unset, the platform default is used:
+  16777216 entries per process, or 67108864 when MOZ_PROFILER_STARTUP is set.
+  (8 bytes per entry -> 134217728 or 536870912 total bytes per process)
+  Optional units in bytes: KB, KiB, MB, MiB, GB, GiB
+
+  MOZ_PROFILER_STARTUP_DURATION=<1..>
+  If MOZ_PROFILER_STARTUP is set, specifies the maximum life time of
+  entries in the the profiler's circular buffer when the profiler is
+  first started, in seconds.
+  If unset, the life time of the entries will only be restricted by
+  MOZ_PROFILER_STARTUP_ENTRIES (or its default value), and no
+  additional time duration restriction will be applied.
+
+  MOZ_PROFILER_STARTUP_INTERVAL=<1..5000>
+  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,
+  measured in milliseconds, when the profiler is first started.
+  If unset, the platform default is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD=<Number>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  the integer value of the features bitfield.
+  If unset, the value from MOZ_PROFILER_STARTUP_FEATURES is used.
+
+  MOZ_PROFILER_STARTUP_FEATURES=<Features>
+  If MOZ_PROFILER_STARTUP is set, specifies the profiling features, as
+  a comma-separated list of strings.
+  Ignored if  MOZ_PROFILER_STARTUP_FEATURES_BITFIELD is set.
+  If unset, the platform default is used.
+
+    Features: (x=unavailable, D/d=default/unavailable,
+               S/s=MOZ_PROFILER_STARTUP extra default/unavailable)
+    d       1: "java" (Profile Java code, Android only)
+    D       2: "js" (Get the JS engine to expose the JS stack to the profiler)
+    -       4: "mainthreadio" (Add main thread file I/O)
+    -       8: "fileio" (Add file I/O from all profiled threads, implies mainthreadio)
+    S      16: "fileioall" (Add file I/O from all threads, implies fileio)
+    -      32: "nomarkerstacks" (Markers do not capture stacks, to reduce overhead)
+    D      64: "screenshots" (Take a snapshot of the window on every composition)
+    -     128: "seqstyle" (Disable parallel traversal in styling)
+    D     256: "stackwalk" (Walk the C++ stack, not available on all platforms)
+    -     512: "jsallocations" (Have the JavaScript engine track allocations)
+    -    1024: "nostacksampling" (Disable all stack sampling: Cancels "js", "stackwalk" and labels)
+    x    2048: "nativeallocations" (Collect the stacks from a smaller subset of all native allocations, biasing towards collecting larger allocations)
+    S    4096: "ipcmessages" (Have the IPC layer track cross-process messages)
+    -    8192: "audiocallbacktracing" (Audio callback tracing)
+    x   16384: "notimerresolutionchange" (Do not adjust the timer resolution for sampling, so that other Firefox timers do not get affected)
+    -   32768: "cpuallthreads" (Sample the CPU utilization of all registered threads)
+    -   65536: "samplingallthreads" (Sample the stacks of all registered threads)
+    -  131072: "markersallthreads" (Record markers from all registered threads)
+    -  262144: "unregisteredthreads" (Discover and profile unregistered threads -- beware: expensive!)
+    D  524288: "processcpu" (Sample the CPU utilization of each process)
+    - 1048576: "power" (Record the power used by the entire system with each sample. Only available with Intel CPUs and requires setting the sysctl kernel.perf_event_paranoid to 0.)
+    - 2097152: "cpufreq" (Record the clock frequency of every CPU core for every profiler sample.)
+    - 4194304: "bandwidth" (Record the network bandwidth used for every profiler sample.)
+    - 8388608: "memory" (Track the memory allocations and deallocations per process over time.)
+    - 16777216: "tracing" (Instead of sampling periodically, captures information about every function executed for the duration (JS only))
+    - 33554432: "sandbox" (Report sandbox syscalls and logs in the profiler.)
+    - 67108864: "flows" (Include all flow-related markers. These markers show the programbetter but can cause more overhead in some places than normal.)
+    - 134217728: "jssources" (Collect JavaScript source code information for profiled scripts.)
+    -          "default" (All above D+S defaults)
+
+  MOZ_PROFILER_STARTUP_FILTERS=<Filters>
+  If MOZ_PROFILER_STARTUP is set, specifies the thread filters, as a
+  comma-separated list of strings. A given thread will be sampled if
+  any of the filters is a case-insensitive substring of the thread
+  name. If unset, a default is used.
+
+  MOZ_PROFILER_STARTUP_ACTIVE_TAB_ID=<Number>
+  This variable is used to propagate the activeTabID of
+  the profiler init params to subprocesses.
+
+  MOZ_PROFILER_SHUTDOWN=<Filename>
+  If set, the profiler saves a profile to the named file on shutdown.
+  If the Filename contains "%p", this will be replaced with the'
+  process id of the parent process.
+
+  MOZ_PROFILER_SYMBOLICATE
+  If set, the profiler will pre-symbolicate profiles.
+  *Note* This will add a significant pause when gathering data, and
+  is intended mainly for local development.
+
+  MOZ_PROFILER_LUL_TEST
+  If set to any value, runs LUL unit tests at startup.
+
+  This platform supports native unwinding.
+
+1792466314446	Marionette	INFO	Stopped listening on port 42413
+console.debug: "ZenSessionManager:" "Saving Zen session data with 1 tabs"
+console.error: "about:axiosozo request rejected: not a top-level tab (no embedder element)"
