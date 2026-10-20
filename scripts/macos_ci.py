@@ -237,9 +237,15 @@ class Lane:
                   f'xcrun clang++ -std=c++20 -Wall -Wextra -I native/webkit-host native/webkit-host/tests/fake_host.cc'
                   f' -o "{webkit}/fake_host" && {py} native/webkit-host/tests/core_test.py "{webkit}/fake_host"'],
                   requires=['native/webkit-host/tests/core_test.py'], timeout=600)
-        self.gate('webkit:mac-build', ['xcrun', 'clang++', '-std=c++20', '-fobjc-arc', '-Wall', '-Wextra',
-                  '-framework', 'Cocoa', '-framework', 'WebKit', 'native/webkit-host/mac/host_mac.mm',
-                  '-o', webkit / 'AxioWebKitMacHost'], requires=['native/webkit-host/mac/host_mac.mm'])
+        # The host's own build script links every source it needs (host_mac.mm + surface_host.mm,
+        # engine-surface-v1); checkouts from before it existed compile the single-file scaffold.
+        if (self.checkout / 'native/webkit-host/mac/build.sh').exists():
+            mac_build = ['/bin/bash', 'native/webkit-host/mac/build.sh', webkit]
+        else:
+            mac_build = ['xcrun', 'clang++', '-std=c++20', '-fobjc-arc', '-Wall', '-Wextra',
+                         '-framework', 'Cocoa', '-framework', 'WebKit', 'native/webkit-host/mac/host_mac.mm',
+                         '-o', webkit / 'AxioWebKitMacHost']
+        self.gate('webkit:mac-build', mac_build, requires=['native/webkit-host/mac/host_mac.mm'])
         for part in ['stream', 'input', 'security']:
             self.gate('webkit:mac-' + part, [py, 'native/webkit-host/mac/mac_test.py', webkit / 'AxioWebKitMacHost', part],
                       requires=['native/webkit-host/mac/mac_test.py'], timeout=300)
