@@ -50,7 +50,7 @@ const state = probe?.diagnostics?.() ?? {};
 const n = state.native ?? state.webkit?.native ?? {};
 return {engine: n.engine ?? null, frames: n.frames ?? null, title: n.title ?? gBrowser.selectedTab.label,
         failure: state.failure ?? state.chromium?.failure ?? null, failures: n.failures ?? null,
-        frameTransport: n.frameTransport ?? null, memfdFallback: n.memfdFallback ?? null,
+        frameTransport: n.frameTransport ?? null, memfdFallback: n.memfdFallback ?? null, frameUpload: n.frameUpload ?? null,
         tabEngine: probe?.engineOf?.(gBrowser.selectedTab) ?? null, surface: n.surface ?? null};
 """
 LATCH = """
@@ -235,7 +235,8 @@ def summarize(cycles, engines, parent_kind=None):
             scroll_input_span_s=median([(r['scroll'].get('input_pacing') or {}).get('send_span_s') for r in rows]),
             static_navigate_to_visible_ms=median([r['static_load']['timing'].get('navigate_to_visible_ms') for r in rows]),
             key_to_frame_ms=median([(r['key']['keydown_to_presented_frame_ms'] or {}).get('median') for r in rows]),
-            transport=sorted({r['diagnostics'].get('frameTransport') for r in rows} - {None}))
+            transport=sorted({r['diagnostics'].get('frameTransport') for r in rows} - {None}),
+            upload=sorted({r['diagnostics'].get('frameUpload') for r in rows} - {None}))
     gecko = [c['gecko'] for c in cycles if 'gecko' in c]
     out['gecko'] = dict(cycles=len(gecko), raf_fps=median([g['fps'] for g in gecko]),
                         raf_interval_p99_ms=median([g['interval_p99_ms'] for g in gecko]))
@@ -259,7 +260,7 @@ def markdown(result):
             continue
         lines.append(f"| {engine} | {row['raf_fps']} | {row['raf_interval_p99_ms']} | {row['raf_cpu_percent']} | "
                      f"{row['raf_parent_cpu_percent']} | {row['raf_draw_ms']} | {row['scroll_fps']} | {row['scroll_interval_p99_ms']} | "
-                     f"{row['static_navigate_to_visible_ms']} | {row['key_to_frame_ms']} | {','.join(row['transport'])} |")
+                     f"{row['static_navigate_to_visible_ms']} | {row['key_to_frame_ms']} | {','.join(row['transport'])} {','.join(row.get('upload', []))} |")
     gecko = (s.get('summary') or {}).get('gecko')
     if gecko:
         lines.append(f"| gecko (in-page) | {gecko['raf_fps']} | {gecko['raf_interval_p99_ms']} | | | | | | | | |")

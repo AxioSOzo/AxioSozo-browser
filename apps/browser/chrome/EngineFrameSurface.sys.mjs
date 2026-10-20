@@ -501,7 +501,7 @@ export function nativeFramePNG(win, sink) {
 
 /**
  * Off-main-thread JS path (docs/perf/pixel-path.md, "Frame worker"; pref
- * `axiosozo.engines.linux.frame_worker`, default false; used when the native receiver is not):
+ * `axiosozo.engines.linux.frame_worker`, FRAME_WORKER_DEFAULT; used when the native receiver is not):
  * one ChromeWorker per native target with the same sink interface as the native receiver. The
  * worker opens the host's memfd with IOUtils.openFileForSyncReading, reads each slot into a
  * persistent buffer (no per-frame allocation), keeps the whole frame, and draws presented frames
@@ -510,6 +510,16 @@ export function nativeFramePNG(win, sink) {
  * captureFixtureFrame keeps working: Gecko snapshots a placeholder canvas for toDataURL.
  */
 export const FRAME_WORKER_PREF = "axiosozo.engines.linux.frame_worker";
+/**
+ * On by default since the same-job A/B (linux-perf 39352857399, docs/perf/pixel-path.md "Frame
+ * worker A/B"): at 2× the Zen parent's CPU −40 % for both engines, Chromium key → frame −44 %.
+ * Used only with memfd frames and only after the once-per-process probe succeeded.
+ */
+export const FRAME_WORKER_DEFAULT = true;
+export function frameWorkerWanted(prefs = globalThis.Services?.prefs) {
+  try { return prefs ? prefs.getBoolPref(FRAME_WORKER_PREF, FRAME_WORKER_DEFAULT) : FRAME_WORKER_DEFAULT; }
+  catch { return FRAME_WORKER_DEFAULT; }
+}
 export const FRAME_WORKER_URL = "chrome://browser/content/axiosozo/EngineFrameWorker.js";
 
 /** The worker side (EngineFrameWorker.js loads this module into its own global and calls it). */
@@ -664,8 +674,7 @@ export async function frameWorkersUsable(Worker = globalThis.ChromeWorker, timeo
 
 /** A ring of worker sinks for one host (the native ring's interface), or null (pref off, no workers). */
 export function workerFrameRing(pid, capability, { prefs = globalThis.Services?.prefs, Worker = globalThis.ChromeWorker } = {}) {
-  try { if (!prefs?.getBoolPref(FRAME_WORKER_PREF, false) || !frameWorkerProbe?.ok || typeof Worker !== "function") return null; }
-  catch { return null; }
+  if (!frameWorkerWanted(prefs) || !frameWorkerProbe?.ok || typeof Worker !== "function") return null;
   const path = `/proc/${pid}/fd/${capability.fd}`;
   return { kind: "worker", acceptsBuffers: true,
     createSink: () => new WorkerFrameSink(new Worker(FRAME_WORKER_URL), path, capability.slot_bytes), close() {} };

@@ -16,13 +16,15 @@ ENGINE=$1 BASE=$2 CAND=$3 OUT=$4
 REPS=${REPS:-3} ROUNDS=${ROUNDS:-2} SCALES=${SCALES:-"1 2"}
 # Variants: base = BASE_TREE as is; every other variant = CAND_TREE with TEST-ONLY prefs (prefs_for):
 # cand (its defaults), pipe / memfd (axiosozo.engines.linux.memfd_frames off / on, engine-stream-v1 §6.3),
-# worker (axiosozo.engines.linux.frame_worker on), native (axiosozo.engines.linux.native_receiver on).
+# worker / jsmain (axiosozo.engines.linux.frame_worker on / off), native (axiosozo.engines.linux.native_receiver
+# on), imagedata (axiosozo.engines.linux.frame_upload=imagedata).
 VARIANTS=${VARIANTS:-"base cand memfd"}
 prefs_for() {
   case $1 in
     memfd) echo "--pref axiosozo.engines.linux.memfd_frames=true" ;;
     pipe) echo "--pref axiosozo.engines.linux.memfd_frames=false" ;;
     worker) echo "--pref axiosozo.engines.linux.frame_worker=true" ;;
+    jsmain) echo "--pref axiosozo.engines.linux.frame_worker=false" ;;
     nativeworker) echo "--pref axiosozo.engines.linux.frame_worker=true --pref axiosozo.engines.linux.native_receiver=true" ;;
     native) echo "--pref axiosozo.engines.linux.native_receiver=true" ;;
     imagedata) echo "--pref axiosozo.engines.linux.frame_upload=imagedata" ;;

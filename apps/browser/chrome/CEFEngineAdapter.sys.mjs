@@ -6,7 +6,7 @@ import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBr
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
 import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
   disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, NativeFrameSinks, nativeFrameRing,
-  workerFrameRing, FRAME_WORKER_PREF, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
+  workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
@@ -1368,7 +1368,7 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   // when this child's /proc/<pid>/fd is readable; otherwise the pipe.
   const frameTransport = !endpoint && platform !== "macosarm64" && memfdFramesWanted()
     && await memfdProcReadable(process.pid) ? "memfd" : "pipe";
-  if (frameTransport === "memfd" && Services.prefs.getBoolPref(FRAME_WORKER_PREF, false)) await frameWorkersUsable();
+  if (frameTransport === "memfd" && frameWorkerWanted()) await frameWorkersUsable();
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
     shared: browsingMode === "web", platform, frameTransport,
     surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });

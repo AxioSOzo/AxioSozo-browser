@@ -307,3 +307,44 @@ At 2× memfd takes a quarter of the Zen parent's CPU away and the p99 frame inte
 ~30 % for both engines (WebKit to 56 fps); key → frame stays within ±1.5 ms (the key path is not
 transport-bound once the pipe carries only damage). Evidence: ci-results
 `cloud_perf-phase2/39349238042-1-ab-{chromium,webkit}/ab/ab.md`.
+
+## Frame worker A/B (run 39352857399) → default on
+
+Same-job A/B, base = cloud/integration `d5cc1a8`; cand = this branch at `f467221` (memfd + BGRX
+VideoFrame upload on the main thread); worker = cand + frame worker; imagedata = cand with the JS
+swizzle upload. 2 rounds × 2 repetitions; round 1 / round 2. Scroll = fps while the XTest input is
+delivered.
+
+| Chromium | base | cand | worker | imagedata |
+| --- | --- | --- | --- | --- |
+| 1× rAF CPU, Zen parent | 45.0 / 43.1 % | 39.4 / 38.6 % | **33.2 / 30.7 %** | 39.0 / 34.2 % |
+| 1× key → presented frame | 18.5 / 18.1 ms | 17.3 / 18.3 ms | **10.3 / 10.0 ms** | 18.6 / 17.4 ms |
+| 1× scroll fps (p99 interval) | 54.9 (35.0) / 55.0 (33.7) | 57.2 (31.6) / 54.7 (51.6) | **59.4 (26.0) / 59.7 (26.2)** | 55.7 (38.5) / 56.9 (33.0) |
+| 2× rAF CPU, Zen parent | 109.4 / 108.8 % | 82.4 / 81.9 % | **64.1 / 62.5 %** | 85.4 / 80.3 % |
+| 2× rAF CPU, whole browser | 148.2 / 146.2 % | 119.4 / 119.1 % | **99.7 / 98.2 %** | 121.3 / 116.0 % |
+| 2× rAF p99 interval | 26.7 / 29.8 ms | 20.8 / 20.5 ms | 24.8 / 22.2 ms | 19.5 / 20.8 ms |
+| 2× key → presented frame | 19.3 / 19.3 ms | 18.9 / 18.6 ms | **11.0 / 10.7 ms** | 19.4 / 18.1 ms |
+| 2× scroll fps (p99 interval) | 34.8 (63.1) / 36.2 (62.9) | 51.2 (194.7) / 56.6 (34.0) | **60.0 (22.6) / 59.3 (25.6)** | 55.0 (34.9) / 54.5 (35.7) |
+| 2× presenter main-thread ms/frame | 2.98 / 3.00 | 2.50 / 2.42 | 1.76 / 1.74 | 3.02 / 2.97 |
+
+| WebKit | base | cand | worker | imagedata |
+| --- | --- | --- | --- | --- |
+| 1× rAF CPU, Zen parent | 44.3 / 45.4 % | 36.5 / 35.7 % | **33.3 / 32.9 %** | 36.7 / 36.1 % |
+| 1× key → presented frame | 25.8 / 25.0 ms | 23.7 / 23.8 ms | **18.1 / 17.8 ms** | 24.3 / 25.2 ms |
+| 1× scroll fps (p99 interval) | 49.8 (43.0) / 51.3 (42.8) | 52.1 (68.8) / 51.6 (53.4) | **56.7 (34.1) / 57.1 (31.8)** | 53.3 (71.7) / 53.7 (46.5) |
+| 2× rAF fps (p99 interval) | 55.1 (34.1) / 55.2 (36.6) | 57.5 (27.5) / 57.9 (24.8) | 58.0 (26.2) / 57.9 (26.2) | 57.7 (27.6) / 57.9 (26.8) |
+| 2× rAF CPU, Zen parent | 112.5 / 114.7 % | 82.7 / 83.4 % | **68.6 / 68.9 %** | 87.5 / 85.8 % |
+| 2× key → presented frame | 28.2 / 27.8 ms | 28.7 / 29.7 ms | 27.3 / 26.0 ms | 29.3 / 27.4 ms |
+| 2× scroll fps (p99 interval) | 24.0 (80.0) / 24.1 (79.9) | 45.2 (83.9) / 44.9 (76.7) | **52.5 (41.0) / 50.9 (57.5)** | 40.4 (71.1) / 39.2 (64.7) |
+
+Reading: the worker takes ~40 % of the Zen parent's CPU away at 2× (both engines) and ~25 % at
+1×; key → frame halves for Chromium because a frame is drawn when it arrives instead of at the
+next refresh tick (WebKit at 2× stays bound by WPE's own rendering); scroll at 2× doubles. On the
+main thread the BGRX VideoFrame upload beats the JS swizzle at 2× (2.2–2.5 vs 3.0 ms/frame) and is
+slightly slower at 1× (whole damaged rows: uploaded share 0.42 vs 0.27); it stays the default
+because the 2× case is the expensive one. "Presented" for the worker is the worker's draw
+(reported back to the presenter), like the 2D path's paint. `FRAME_WORKER_DEFAULT = true` (Linux,
+memfd frames, probe passed); `axiosozo.engines.linux.frame_worker=false` keeps the main thread
+path. WebKit 1× static navigate → visible was +8…46 % in all variants of this branch against a
+low base in round 1 (41.5 ms; 56–75 ms in other runs): NOT_VERIFIED as a regression, re-checked in
+the next A/B.

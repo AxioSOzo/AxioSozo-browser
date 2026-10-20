@@ -34,7 +34,7 @@ METRICS = [
     ('memory_all_processes.rss_mb', 'RSS, whole browser (MB)', -1),
 ]
 NAME = re.compile(r'^([a-z][a-z0-9]*)-r(\d+)-([0-9.]+)x$')
-ORDER = ['cand', 'pipe', 'memfd', 'worker', 'native']
+ORDER = ['cand', 'jsmain', 'worker', 'native', 'pipe', 'memfd', 'imagedata']
 
 
 def load(directory):
