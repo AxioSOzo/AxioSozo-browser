@@ -43,6 +43,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       bench: ${{ steps.plan.outputs.bench }}
+      bench_jobs: ${{ steps.plan.outputs.bench_jobs }}
       ab_chromium: ${{ steps.plan.outputs.ab_chromium }}
       ab_webkit: ${{ steps.plan.outputs.ab_webkit }}
       ab_variants: ${{ steps.plan.outputs.ab_variants }}
@@ -71,7 +72,7 @@ jobs:
     permissions: { contents: write, actions: read }
     uses: ./.github/workflows/linux-engine-bench.yml
     with:
-      jobs: presenter,chromium,webkit
+      jobs: ${{ needs.plan.outputs.bench_jobs }}
       presenter_baseline_ref: cloud/integration
       baseline: '39330954155'
 

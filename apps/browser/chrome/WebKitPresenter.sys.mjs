@@ -288,7 +288,7 @@ export class WebKitPresenter {
         record.supersededFrames += paint.superseded;
         record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
         record.firstFrameAt ??= this.window.performance.now();
-        record.lastFrameId = paint.frameId;
+        record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
       } });
     record.frames.accept(metadata, pixels);
   }
@@ -542,7 +542,7 @@ export class WebKitPresenter {
     const record = this.active;
     if (!record) return { engine: "gecko", ownedTabIds: this.owners(), failures: [...this.failures], pending: !!this.pending };
     return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra", frameTransport: record.adapter.frameTransport ?? "pipe",
-      memfdFallback: record.adapter.memfdFallback ?? null, pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
+      memfdFallback: record.adapter.memfdFallback ?? null, frameUpload: record.frameUpload ?? null, pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
       uploadedPixels: record.uploadedPixels, fullPixels: record.fullPixels,
       meanDrawMilliseconds: record.displayedFrames ? record.drawMilliseconds / record.displayedFrames : 0,
       firstFrameMilliseconds: record.firstFrameAt === null ? null : record.firstFrameAt - record.startedAt,

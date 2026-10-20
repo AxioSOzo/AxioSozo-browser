@@ -68,6 +68,12 @@ product change; WebKit's sandbox stays on.
 tarball with a cached ccache and reruns the suites against it with
 `AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=/usr/local/wpe-upstream` (evaluation mode of `probe.py`).
 
+Frame transport (engine-stream-v1 §6.2/§6.3): Linux hellos negotiate `frame_damage` and
+`damage_payload`; with `frame_transport:"memfd"` the pixels sit in a sealed memfd ring that Zen
+reads through `/proc/<pid>/fd`. A `frame_ack` with `frame_transport:"pipe"` (Zen could not read a
+slot) moves every later frame into the pipe and re-sends each target whole. `stream_test.py`
+covers all three (`damage_payload`, `memfd`, `memfd_fallback` in the result).
+
 Diagnostics: `AXIOSOZO_WEBKIT_TRACE=1` makes the host log buffer exports, load events and
 paint-fence decisions to stderr (the tests set it; the log is evidence, not protocol).
 

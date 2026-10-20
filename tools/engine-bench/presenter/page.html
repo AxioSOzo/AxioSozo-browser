@@ -88,7 +88,7 @@ async function run() {
     if (typeof EngineFrameSurface === 'function') {
       // The presenters' path (EngineFrameSurface): convert into a persistent ImageData + dirty-rect put.
       const sw = { requestAnimationFrame() {}, performance, ImageData };
-      const surface = new EngineFrameSurface(sw, canvas, { onPaint() {} });
+      const surface = new EngineFrameSurface(sw, canvas, { onPaint() {}, upload: 'imagedata' });
       let id = 1;
       surface.accept({ frame_id: id++, width: w, height: h }, make()); surface.paint();
       r.surface_draw_full_ms = await time(b => { surface.invalidate(); surface.accept({ frame_id: id++, width: w, height: h }, b);
@@ -100,6 +100,36 @@ async function run() {
       const ref = new Uint8Array(bgraToRGBAFast(make()).buffer);
       r.surface_identical_output = out.every((v, i) => v === ref[i]);
     }
+    if (typeof VideoFrame === 'function') {
+      // BGRX VideoFrame of the (damage) rectangle + drawImage: no JS swizzle (EngineFrameSurface "videoframe").
+      const draw = (b, x, y, rw, rh) => { const vf = new VideoFrame(b, { format: 'BGRX', codedWidth: rw, codedHeight: rh,
+        timestamp: 0, layout: [{ offset: (y * w + x) * 4, stride: w * 4 }] }); ctx.drawImage(vf, x, y); vf.close(); };
+      try {
+        r.candidate_videoframe_full_ms = await time(b => { draw(b, 0, 0, w, h); flush(); }, make);
+        r.candidate_videoframe_damage10_ms = await time(b => { draw(b, 0, 37 % (h - band), w, band); flush(); }, make);
+        const want = new Uint8Array(bgraToRGBAFast(make()).buffer);
+        draw(make(), 0, 0, w, h);
+        const whole = ctx.getImageData(0, 0, w, h).data;
+        r.videoframe_identical_output = whole.every((v, i) => Math.abs(v - want[i]) <= 0);
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+        draw(make(), 13, 7, 50, 20);
+        const rect = ctx.getImageData(13, 7, 50, 20).data;
+        r.videoframe_rect_identical_output = rect.every((v, i) => { const px = (i >> 2), x = 13 + px % 50, y = 7 + ((px / 50) | 0);
+          return Math.abs(v - want[(y * w + x) * 4 + (i & 3)]) <= 0; });
+      } catch (error) { r.videoframe_error = String(error && error.message || error); }
+      if (typeof EngineFrameSurface === 'function') {
+        const vw = { requestAnimationFrame() {}, performance, ImageData, VideoFrame, OffscreenCanvas: self.OffscreenCanvas };
+        const surface = new EngineFrameSurface(vw, canvas, { onPaint() {} });
+        r.surface_upload = surface.upload; r.surface_videoframe_probe = videoFrameUploadProbe();
+        let id = 1;
+        surface.accept({ frame_id: id++, width: w, height: h }, make()); surface.paint();
+        r.surface_upload_draw_full_ms = await time(b => { surface.invalidate(); surface.accept({ frame_id: id++, width: w, height: h }, b);
+          surface.paint(); flush(); }, make);
+        r.surface_upload_draw_damage10_ms = await time(b => { surface.accept({ frame_id: id++, width: w, height: h,
+          damage: [[0, (id * 37) % (h - band), w, band]] }, b); surface.paint(); flush(); }, make);
+        r.surface_upload_after = surface.upload; r.surface_upload_error = surface.uploadError;
+      }
+    } else r.videoframe_error = 'VideoFrame unavailable';
     r.candidate_damage10_fast_put_ms = await time(b => {
       const view = new Uint8Array(b, 0, w * band * 4).slice(0).buffer;  // only the damaged rows are converted
       ctx.putImageData(new ImageData(bgraToRGBAFast(view), w, band), 0, 0); flush(); }, make);

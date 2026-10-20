@@ -784,7 +784,7 @@ export class CEFPresenter {
         record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
         record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
         record.firstFrameAt ??= this.window.performance.now();
-        record.lastFrameId = paint.frameId;
+        record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
       } });
     record.frames.accept(metadata, pixels);
   }
@@ -1523,6 +1523,8 @@ export class CEFPresenter {
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
       frameTransport:record.surfaceMode ? null : record.adapter.frameTransport ?? "pipe",
       memfdFallback:record.surfaceMode ? null : record.adapter.memfdFallback ?? null,
+      // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
+      frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
       // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).

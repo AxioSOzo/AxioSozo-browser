@@ -92,7 +92,8 @@ return {engine: n.engine ?? null, frames: n.frames ?? null, title: n.title ?? gB
         firstFrameMilliseconds: n.firstFrameMilliseconds ?? null,
         // Pipe presenters (EngineFrameSurface): frames replaced before a paint, and the render surface.
         supersededFrames: n.supersededFrames ?? null, surface: n.surface ?? null,
-        frameTransport: n.frameTransport ?? null, memfdFallback: n.memfdFallback ?? null};
+        frameTransport: n.frameTransport ?? null, memfdFallback: n.memfdFallback ?? null,
+        frameUpload: n.frameUpload ?? null};
 """
 # A 2 ms chrome timer records every change of the presenter's frame counter (the canvas got
 # a new engine frame) and every chrome keydown (keys routed to the presenter canvas).

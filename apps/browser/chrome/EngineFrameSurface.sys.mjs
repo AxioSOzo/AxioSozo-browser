@@ -12,6 +12,11 @@
 // - At most one conversion + upload per refresh tick (requestAnimationFrame): a frame
 //   that a newer one supersedes before the tick costs no pixel work, and the host's
 //   frame credit is returned as soon as a frame is accepted, not after its paint.
+// - Upload (pref `axiosozo.engines.linux.frame_upload`): "videoframe" (default where the window
+//   has WebCodecs) wraps the damaged rectangle of the BGRA frame in a VideoFrame of format BGRX
+//   (Gecko's native B8G8R8X8, no JS swizzle, no unpremultiply: the canvas is opaque) and draws it
+//   with drawImage; "imagedata" is the JS swizzle into a persistent ImageData + putImageData. A
+//   VideoFrame failure switches that surface to "imagedata" for good.
 // - With `hello.damage_payload` (engine-stream-v1 §6.2, cef-v1 "Frame damage") the
 //   payload is only the damaged rectangle; DamagePayloadAssembler rebuilds the whole
 //   frame per target, so presenters always see a full frame plus its damage.
@@ -110,6 +115,50 @@ export function convertBGRAInPlace(buffer, width) {
   return convertBGRARect(buffer, width, 0, 0, rgba, width, 0, 0, width, height);
 }
 
+/**
+ * Draws a `w`×`h` rectangle at (x, y) of a premultiplied BGRA frame (`source`, `frameWidth` px
+ * rows, tight stride) onto `context` at the same position, through a VideoFrame of format BGRX
+ * that views only that rectangle (layout offset + the frame's stride): Gecko copies those rows
+ * once into a B8G8R8X8 surface and blits it. Alpha is ignored (opaque engine canvas).
+ */
+export function drawBGRXRect(VideoFrameClass, context, source, frameWidth, x, y, w, h, timestamp = 0) {
+  const frame = new VideoFrameClass(source, { format: "BGRX", codedWidth: w, codedHeight: h, timestamp,
+    layout: [{ offset: (y * frameWidth + x) * 4, stride: frameWidth * 4 }] });
+  try { context.drawImage(frame, x, y); }
+  finally { frame.close(); }
+}
+
+export const FRAME_UPLOAD_PREF = "axiosozo.engines.linux.frame_upload";
+
+// Once per process: does this engine draw a BGRX VideoFrame rectangle (layout offset + stride)
+// exactly? A 3x2 frame's 2x1 rectangle at (1, 1) is drawn on a scratch canvas and read back.
+let videoFrameProbe = null;
+export function videoFrameUploadWorks(win) {
+  if (videoFrameProbe !== null) return videoFrameProbe.ok;
+  const pixels = [[10, 20, 30], [40, 50, 60], [70, 80, 90], [100, 110, 120], [130, 140, 150], [160, 170, 180]];
+  try {
+    const bgra = new Uint8Array(pixels.flatMap(([r, g, b]) => [b, g, r, 255]));
+    const canvas = new win.OffscreenCanvas(3, 2), context = canvas.getContext("2d", { alpha: false });
+    drawBGRXRect(win.VideoFrame, context, bgra.buffer, 3, 1, 1, 2, 1, 0);
+    const out = context.getImageData(1, 1, 2, 1).data, want = [...pixels[4], 255, ...pixels[5], 255];
+    const ok = want.every((value, i) => Math.abs(out[i] - value) <= 2);
+    videoFrameProbe = { ok, ...(ok ? {} : { got: [...out] }) };
+  } catch (error) { videoFrameProbe = { ok: false, error: String(error?.message ?? error) }; }
+  return videoFrameProbe.ok;
+}
+/** The probe's outcome (diagnostics): null before the first surface asked. */
+export function videoFrameUploadProbe() { return videoFrameProbe; }
+/** Test seam: probe again. */
+export function resetVideoFrameProbe() { videoFrameProbe = null; }
+
+/** "videoframe" when the pref allows it and the window draws BGRX VideoFrames exactly, else "imagedata". */
+export function frameUploadMode(win, prefs = globalThis.Services?.prefs) {
+  let wanted = "videoframe";
+  try { wanted = prefs?.getStringPref(FRAME_UPLOAD_PREF, "videoframe") ?? "videoframe"; } catch {}
+  return wanted === "videoframe" && typeof win?.VideoFrame === "function" && videoFrameUploadWorks(win)
+    ? "videoframe" : "imagedata";
+}
+
 function unite(a, b) {
   if (!a) return b;
   const x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
@@ -125,12 +174,16 @@ function unite(a, b) {
 export class EngineFrameSurface {
   #win; #canvas; #isPaintable; #onPaint; #contextOptions;
   #source = null; #metadata = null; #width = 0; #height = 0; #dirty = null; #pending = 0;
-  #image = null; #current = false; #scheduled = false; #disposed = false;
-  constructor(win, canvas, { isPaintable = () => true, onPaint = () => {}, contextOptions = { alpha: false } } = {}) {
+  #image = null; #current = false; #scheduled = false; #disposed = false; #upload = "imagedata"; #uploadError = null;
+  constructor(win, canvas, { isPaintable = () => true, onPaint = () => {}, contextOptions = { alpha: false },
+    upload = frameUploadMode(win) } = {}) {
     this.#win = win; this.#canvas = canvas; this.#isPaintable = isPaintable; this.#onPaint = onPaint;
-    this.#contextOptions = contextOptions;
+    this.#contextOptions = contextOptions; this.#upload = upload;
   }
   get scheduled() { return this.#scheduled; }
+  /** "videoframe" or "imagedata" (after a VideoFrame failure: "imagedata", with `uploadError`). */
+  get upload() { return this.#upload; }
+  get uploadError() { return this.#uploadError; }
   /** A frame from the host: recorded now, converted and uploaded at the next refresh tick. */
   accept(metadata, pixels) {
     if (this.#disposed) return;
@@ -164,17 +217,28 @@ export class EngineFrameSurface {
     }
     const context = canvas.getContext("2d", this.#contextOptions);
     if (!context) throw new Error("ENGINE_CANVAS_UNAVAILABLE");
-    if (!this.#image || this.#image.width !== width || this.#image.height !== height) {
-      this.#image = new this.#win.ImageData(new Uint8ClampedArray(width * height * 4), width, height);
-      this.#current = false;
+    const frameId = this.#metadata.frame_id;
+    let [x, y, w, h] = this.#current ? this.#dirty : [0, 0, width, height];
+    if (this.#upload === "videoframe") {
+      try { drawBGRXRect(this.#win.VideoFrame, context, this.#source, width, x, y, w, h, frameId); }
+      catch (error) {
+        // This window cannot draw BGRX VideoFrames: the JS path from now on, starting whole.
+        this.#upload = "imagedata"; this.#uploadError = String(error?.message ?? error);
+        [x, y, w, h] = [0, 0, width, height];
+      }
     }
-    const [x, y, w, h] = this.#current ? this.#dirty : [0, 0, width, height];
-    convertBGRARect(this.#source, width, x, y, this.#image.data, width, x, y, w, h);
-    context.putImageData(this.#image, 0, 0, x, y, w, h);
-    const superseded = this.#pending - 1, frameId = this.#metadata.frame_id;
+    if (this.#upload === "imagedata") {
+      if (!this.#image || this.#image.width !== width || this.#image.height !== height) {
+        this.#image = new this.#win.ImageData(new Uint8ClampedArray(width * height * 4), width, height);
+        [x, y, w, h] = [0, 0, width, height];
+      }
+      convertBGRARect(this.#source, width, x, y, this.#image.data, width, x, y, w, h);
+      context.putImageData(this.#image, 0, 0, x, y, w, h);
+    }
+    const superseded = this.#pending - 1;
     this.#current = true; this.#dirty = null; this.#pending = 0;
     this.#onPaint({ uploadedPixels: w * h, framePixels: width * height, x, y, width: w, height: h,
-      milliseconds: this.#win.performance.now() - started, frameId, superseded });
+      milliseconds: this.#win.performance.now() - started, frameId, superseded, upload: this.#upload });
     return true;
   }
 }

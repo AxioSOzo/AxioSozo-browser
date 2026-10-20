@@ -97,3 +97,87 @@ test("damage payloads rebuild the whole frame per target and reject a partial fr
   assert.equal(DamagePayloadAssembler.payloadBytes({ damage: [[0, 0, 3, 2]] }), 24);
   assembler.forget("t1"); assert.equal(assembler.size, 0);
 });
+
+test("videoframe upload: the damaged rectangle is wrapped as BGRX (offset + frame stride) and drawn in place", async () => {
+  const { frameUploadMode, drawBGRXRect } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  const frames = [], draws = [];
+  class VideoFrame {
+    constructor(data, init) { this.init = init; this.data = data; this.closed = false; frames.push(this); }
+    close() { this.closed = true; }
+  }
+  const win = { ...fakeWindow(), VideoFrame };
+  const canvas = { width: 0, height: 0, puts: [],
+    getContext: () => ({ drawImage: (frame, x, y) => draws.push({ frame, x, y }), putImageData: () => canvas.puts.push(1) }) };
+  assert.equal(frameUploadMode(win, { getStringPref: () => "videoframe" }), "imagedata", "no OffscreenCanvas: the probe fails");
+  assert.equal(frameUploadMode(win, { getStringPref: () => "imagedata" }), "imagedata");
+  assert.equal(frameUploadMode({}, null), "imagedata", "no WebCodecs: the JS path");
+  const paints = [];
+  const surface = new EngineFrameSurface(win, canvas, { onPaint: paint => paints.push(paint), upload: "videoframe" });
+  const buffer = new ArrayBuffer(10 * 4 * 4);
+  surface.accept({ frame_id: 1, width: 10, height: 4 }, buffer); win.tick();
+  assert.deepEqual(frames[0].init, { format: "BGRX", codedWidth: 10, codedHeight: 4, timestamp: 1, layout: [{ offset: 0, stride: 40 }] });
+  assert.deepEqual([draws[0].x, draws[0].y], [0, 0]);
+  surface.accept({ frame_id: 2, width: 10, height: 4, damage: [[3, 2, 4, 1]] }, buffer); win.tick();
+  assert.deepEqual(frames[1].init, { format: "BGRX", codedWidth: 4, codedHeight: 1, timestamp: 2, layout: [{ offset: (2 * 10 + 3) * 4, stride: 40 }] });
+  assert.equal(frames[1].data, buffer, "the frame buffer itself, no copy in JS");
+  assert.deepEqual([draws[1].x, draws[1].y], [3, 2]);
+  assert.ok(frames.every(frame => frame.closed), "every VideoFrame is closed after the draw");
+  assert.equal(canvas.puts.length, 0); assert.equal(paints.at(-1).upload, "videoframe");
+  assert.equal(paints.at(-1).uploadedPixels, 4);
+  // drawBGRXRect closes the frame even when drawing throws.
+  const failing = { drawImage: () => { throw new Error("NOT_SUPPORTED"); } };
+  assert.throws(() => drawBGRXRect(VideoFrame, failing, buffer, 10, 0, 0, 1, 1), /NOT_SUPPORTED/);
+  assert.equal(frames.at(-1).closed, true);
+});
+
+test("videoframe upload failure switches the surface to imagedata, whole", () => {
+  class VideoFrame { constructor() { throw new TypeError("unsupported format"); } }
+  const win = { ...fakeWindow(), VideoFrame }, canvas = fakeCanvas(), paints = [];
+  const surface = new EngineFrameSurface(win, canvas, { onPaint: paint => paints.push(paint), upload: "videoframe" });
+  surface.accept({ frame_id: 1, width: 4, height: 3 }, new Uint32Array(12).fill(0xffff0000).buffer); win.tick();
+  assert.equal(surface.upload, "imagedata"); assert.match(surface.uploadError, /unsupported format/);
+  assert.deepEqual(canvas.puts.at(-1).rect, [0, 0, 4, 3]);
+  assert.deepEqual([...canvas.puts[0].image.data.subarray(0, 4)], [255, 0, 0, 255]);
+  surface.accept({ frame_id: 2, width: 4, height: 3, damage: [[1, 1, 1, 1]] }, new Uint32Array(12).fill(0xffff0000).buffer); win.tick();
+  assert.deepEqual(canvas.puts.at(-1).rect, [1, 1, 1, 1]); assert.equal(paints.at(-1).upload, "imagedata");
+});
+
+test("the VideoFrame probe accepts an engine that honours layout offset and stride, refuses one that does not", async () => {
+  const { videoFrameUploadWorks, videoFrameUploadProbe, resetVideoFrameProbe } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  // A model of drawImage(VideoFrame BGRX): reads codedWidth x codedHeight from `offset` with `stride`.
+  const engine = honourLayout => {
+    class VideoFrame {
+      constructor(data, init) { this.data = new Uint8Array(data); this.init = init; }
+      close() {}
+    }
+    class OffscreenCanvas {
+      constructor(width, height) { this.width = width; this.pixels = new Uint8ClampedArray(width * height * 4); }
+      getContext() {
+        const canvas = this;
+        return {
+          drawImage(frame, x, y) {
+            const { codedWidth: w, codedHeight: h, layout: [{ offset, stride }] } = frame.init;
+            for (let row = 0; row < h; row++) for (let col = 0; col < w; col++) {
+              const from = honourLayout ? offset + row * stride + col * 4 : (row * w + col) * 4, to = ((y + row) * canvas.width + x + col) * 4;
+              const [b, g, r] = frame.data.subarray(from, from + 3);
+              canvas.pixels.set([r, g, b, 255], to);
+            }
+          },
+          getImageData(x, y, w, h) {
+            const data = [];
+            for (let row = 0; row < h; row++) data.push(...canvas.pixels.subarray(((y + row) * canvas.width + x) * 4, ((y + row) * canvas.width + x + w) * 4));
+            return { data };
+          },
+        };
+      }
+    }
+    return { VideoFrame, OffscreenCanvas };
+  };
+  resetVideoFrameProbe();
+  assert.equal(videoFrameUploadWorks(engine(true)), true);
+  assert.equal(videoFrameUploadWorks(engine(false)), true, "cached once per process");
+  resetVideoFrameProbe();
+  assert.equal(videoFrameUploadWorks(engine(false)), false);
+  assert.equal(videoFrameUploadProbe().ok, false); assert.ok(videoFrameUploadProbe().got);
+  resetVideoFrameProbe();
+});
