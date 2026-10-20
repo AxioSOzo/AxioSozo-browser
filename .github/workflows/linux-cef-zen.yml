@@ -28,6 +28,7 @@ on:
       - scripts/gui_engines/chromium.py
       - scripts/gui_test.py
       - scripts/cef_zen_e2e.py
+      - scripts/atspi_probe.py
       - tests/fixtures/cef-zen-feel.html
       - tests/fixtures/engine.html
       - apps/browser/chrome/browser-experience.css
@@ -70,12 +71,13 @@ jobs:
             apps/browser/tests/cef-adapter.test.mjs apps/browser/tests/chromium-tabs.test.mjs \
             apps/browser/tests/chromium-browser-ui.test.mjs apps/browser/tests/chromium-accessibility.test.mjs \
             apps/browser/tests/engine-probe-controls.test.mjs apps/browser/tests/engine-tabs.test.mjs \
-            apps/browser/tests/engine-registry.test.mjs apps/browser/tests/engine-surface.test.mjs 2>&1 \
+            apps/browser/tests/engine-registry.test.mjs apps/browser/tests/engine-surface.test.mjs \
+            apps/browser/tests/chromium-accessibility-linux.test.mjs 2>&1 \
             | tee "$EVIDENCE_OUT/node-unit.log"
       - name: Python (GUI plug-in tests, syntax)
         run: |
           set -o pipefail
-          python3 -m py_compile scripts/cef_zen_e2e.py scripts/gui_engines/chromium.py
+          python3 -m py_compile scripts/cef_zen_e2e.py scripts/gui_engines/chromium.py scripts/atspi_probe.py
           python3 -m unittest tests/test_gui_engine_chromium.py 2>&1 | tee "$EVIDENCE_OUT/python-unit.log"
       - if: always()
         uses: ./.github/actions/publish-ci-results
@@ -124,8 +126,12 @@ jobs:
             zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdrm2 \
             libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libx11-6 libx11-xcb1 libxcb1 \
             libxshmfence1 libpango-1.0-0 libcairo2 libasound2t64 libglib2.0-0t64 libdbus-1-3 libexpat1 fonts-dejavu-core \
-            fonts-liberation xclip x11-xkb-utils x11-xserver-utils xkb-data > "$EVIDENCE_OUT/apt.log" 2>&1
-          dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool | tee "$EVIDENCE_OUT/tool-versions.tsv"
+            fonts-liberation xclip x11-xkb-utils x11-xserver-utils xkb-data openssl at-spi2-core python3-gi gir1.2-atspi-2.0 \
+            > "$EVIDENCE_OUT/apt.log" 2>&1
+          dpkg-query -W -f='${Package}\t${Version}\n' xclip x11-xkb-utils xkb-data xvfb xdotool at-spi2-core gir1.2-atspi-2.0 \
+            fonts-dejavu-core fonts-liberation | tee "$EVIDENCE_OUT/tool-versions.tsv"
+          fc-match serif | tee "$EVIDENCE_OUT/fontconfig.txt"; fc-match sans | tee -a "$EVIDENCE_OUT/fontconfig.txt"
+          fc-match sans-serif | tee -a "$EVIDENCE_OUT/fontconfig.txt"; fc-match monospace | tee -a "$EVIDENCE_OUT/fontconfig.txt"
       - name: Restore pinned CEF archive
         if: steps.zen.outputs.run_id != ''
         id: cef-cache
@@ -192,6 +198,13 @@ jobs:
           set -o pipefail
           timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/web-2x.log"
+      - name: 5. Web mode, AT-SPI accessibility (GNOME_ACCESSIBILITY=1)
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
+            | tail -n 40 | tee "$EVIDENCE_OUT/a11y.log"
       - name: Leftover processes
         if: always()
         run: ps -eo pid,ppid,stat,etime,args | grep -E "AxioCEFProbe|chrome-sandbox|axiosozo-dev" | grep -v grep | tee "$EVIDENCE_OUT/leftover-processes.txt" || true
@@ -203,7 +216,7 @@ jobs:
           import json, pathlib, sys
           out = pathlib.Path(sys.argv[1])
           runs = {}
-          for name in ('harness', 'fixture', 'web', 'web-2x'):
+          for name in ('harness', 'fixture', 'web', 'web-2x', 'a11y'):
               path = out / name / 'result.json'
               runs[name] = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
           summary = {name: {'status': r.get('status'), 'reason': r.get('reason'),

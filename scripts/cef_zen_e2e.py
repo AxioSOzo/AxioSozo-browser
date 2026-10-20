@@ -55,6 +55,7 @@ WEB_SCENARIOS = ('launch', 'chrome', 'switch', 'fonts', 'scrollbars', 'badge', '
                  'cursor', 'popups', 'context_menu', 'dialogs', 'find', 'zoom', 'ime', 'middle_click',
                  'history', 'beforeunload', 'to_gecko', 'host_kill', 'shortcuts', 'urlbar_chromium', 'ctrl_t_chromium',
                  'urlbar_gecko', 'ctrl_t_gecko')
+A11Y_SCENARIOS = ('launch', 'chrome', 'switch', 'a11y')
 SCALE_SCENARIOS = ('launch', 'chrome', 'switch', 'typing', 'click', 'selection', 'wheel', 'to_gecko')
 FIXTURE_SCENARIOS = ('launch', 'chrome', 'fixture_roundtrip', 'fixture_host_kill')
 HOST = 'AxioCEFProbe --stream'
@@ -235,8 +236,8 @@ class ChromiumWeb(ChromiumEngine):
     name = 'chromium'
     owner = 'cloud/cef-zen-feel'
 
-    def __init__(self, mode, scale):
-        self.mode, self.scale = mode, scale
+    def __init__(self, mode, scale, a11y=False):
+        self.mode, self.scale, self.a11y = mode, scale, a11y
 
     def browser_environment(self, harness):
         env = super().browser_environment(harness)
@@ -247,6 +248,9 @@ class ChromiumWeb(ChromiumEngine):
             for name in ('AXIOSOZO_ENGINE_PROBE', 'AXIOSOZO_ENGINE_FIXTURE_ORIGIN'):
                 env.pop(name, None)
             env['AXIOSOZO_ENGINE_SWITCHING'] = '1'
+        if self.a11y:
+            # As a desktop with an active screen reader: Gecko starts its ATK/AT-SPI bridge.
+            env['GNOME_ACCESSIBILITY'] = '1'
         return env
 
     def prepare(self, harness):
@@ -321,6 +325,10 @@ class CEFZenHarness(gui_test.Harness):
             self.result['prompt_handler'] = 'ignore (handler map refused: %s)' % str(error)[:200]
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
+
+    def start_bus(self, session):
+        self.bus_address = super().start_bus(session)
+        return self.bus_address
 
     # -- state and geometry ---------------------------------------------------------------
     def web(self):
@@ -586,6 +594,65 @@ class CEFZenHarness(gui_test.Harness):
         if covering:
             raise AssertionError(f'chips over the page content: {covering}: {out}')
         return out
+
+    def atspi(self, root_name, root_role=None, press=None):
+        """The app's AT-SPI subtree under the accessible named root_name (scripts/atspi_probe.py)."""
+        if getattr(self, 'bus_address', 'disabled:').startswith('disabled:'):
+            raise gui_test.Blocked('no private D-Bus session bus for AT-SPI')
+        command = ['/usr/bin/python3', '-I', str(ROOT / 'scripts/atspi_probe.py'), '--app-pid', str(self.browser.pid),
+                   '--root-name', root_name]
+        if root_role:
+            command += ['--root-role', root_role]
+        if press:
+            command += ['--press', press]
+        done = subprocess.run(command, env={**self.x_env, 'DBUS_SESSION_BUS_ADDRESS': self.bus_address}, capture_output=True,
+                              text=True, timeout=120)
+        if 'No module named' in done.stderr or 'Namespace Atspi not available' in done.stderr:
+            raise gui_test.Blocked('python3-gi / gir1.2-atspi-2.0 missing: ' + done.stderr.strip()[-200:])
+        try:
+            return json.loads(done.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise AssertionError(f'atspi_probe failed ({done.returncode}): {done.stderr.strip()[-600:]}') from None
+
+    @staticmethod
+    def has(tree, role, name):
+        return any(node['role'] == role and node['name'] == name for node in tree.get('nodes', []))
+
+    def scenario_a11y(self):
+        """Chromium's accessibility tree reaches AT-SPI under the tab (as the Gecko tab's document does), and
+        an assistive action on a Chromium button presses it."""
+        self.require_chromium()
+        time.sleep(2)
+        chromium = self.atspi(r'\(Chromium\)$')
+        self.select_tab(self.gecko_tab)
+        gecko = self.atspi(r'^AxioSozo feel', root_role='document web')
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        time.sleep(1)
+        expected = [('push button', 'Increment'), ('link', 'Page 2'), ('entry', 'Type here')]
+        found = {f'{role}:{name}': {'chromium': self.has(chromium, role, name), 'gecko': self.has(gecko, role, name)}
+                 for role, name in expected}
+        before = self.page()['c']
+        pressed = self.atspi(r'\(Chromium\)$', press='push button=Increment')
+        try:
+            after = self.wait_page(lambda page: page['c'] > before, 'the AT-SPI action pressed the Chromium button', timeout=10)['c']
+        except AssertionError:
+            after = self.page()['c']
+        # Focus: a click into the Chromium text field moves AT-SPI focus to the mirrored entry.
+        self.click_at(*AT['text'])
+        self.wait_page(lambda page: page['f'] == 'text', 'text field focused')
+        time.sleep(1)
+        focused = [node for node in self.atspi(r'\(Chromium\)$').get('nodes', []) if node['focused']]
+        self.screenshot('33-a11y')
+        ok = all(item['chromium'] for item in found.values()) and after > before
+        self.gate('accessibility_atspi', 'PASS' if ok else 'FAIL', found=found, press={'before': before, 'after': after, **(pressed.get('pressed') or {})},
+                  chromium_root=chromium.get('root'), chromium_nodes=len(chromium.get('nodes', [])), gecko_nodes=len(gecko.get('nodes', [])),
+                  focused=[(node['role'], node['name']) for node in focused][:5],
+                  note='GNOME_ACCESSIBILITY=1 (test-only, as with a running screen reader); read through AT-SPI with atspi_probe.py')
+        if not ok:
+            raise AssertionError(f'AT-SPI: {found}, press {before}->{after}: {pressed.get("pressed")}')
+        return {'found': found, 'chromium': chromium, 'gecko': {'root': gecko.get('root'), 'nodes': gecko.get('nodes', [])[:80]},
+                'pressed': pressed.get('pressed'), 'focused': focused}
 
     def scenario_typing(self):
         self.require_chromium()
@@ -1507,6 +1574,7 @@ def main():
     parser.add_argument('--mode', choices=('web', 'fixture'), default='web')
     parser.add_argument('--scale', type=int, choices=(1, 2), default=1)
     parser.add_argument('--scenario', help='comma list (default: all of the mode)')
+    parser.add_argument('--a11y', action='store_true', help='web mode: the AT-SPI accessibility run (GNOME_ACCESSIBILITY=1)')
     parser.add_argument('--evidence-dir')
     parser.add_argument('--size', default=None)
     parser.add_argument('--timeout', type=float, default=30)
@@ -1514,7 +1582,8 @@ def main():
     parser.add_argument('--hold', type=int, default=0)
     parser.add_argument('--screenshot')
     args = parser.parse_args()
-    available = FIXTURE_SCENARIOS if args.mode == 'fixture' else (SCALE_SCENARIOS if args.scale == 2 else WEB_SCENARIOS)
+    available = FIXTURE_SCENARIOS if args.mode == 'fixture' else A11Y_SCENARIOS if args.a11y else (
+        SCALE_SCENARIOS if args.scale == 2 else WEB_SCENARIOS)
     scenarios = [item for item in (args.scenario or ','.join(available)).split(',') if item]
     if any(item not in available for item in scenarios):
         parser.error('--scenario takes: ' + ','.join(available))
@@ -1528,12 +1597,14 @@ def main():
     except OSError:
         workdir = None
     with FeelServer(workdir) as feel:
-        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale), evidence, feel)
+        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y), evidence, feel)
         harness.result.update(harness='axiosozo-linux-gui+cef-zen', mode=args.mode, scale=args.scale,
                               feel_fixture={'origin': feel.origin, 'lan_origin': feel.lan_origin, 'tls_origin': feel.tls_origin,
                                             'tls_note': feel.tls_note, 'sha256': feel.hashes})
         harness.result['test_only_switches'] += (['AXIOSOZO_ENGINE_SWITCHING=1 (existing developer gate)'] if args.mode == 'web'
                                                  else ['AXIOSOZO_ENGINE_PROBE=1 fixture probe'])
+        if args.a11y:
+            harness.result['test_only_switches'].append('GNOME_ACCESSIBILITY=1 (AT-SPI on, as with a screen reader)')
         if args.scale != 1:
             harness.result['test_only_switches'].append(f'profile pref layout.css.devPixelsPerPx={args.scale}')
         try:

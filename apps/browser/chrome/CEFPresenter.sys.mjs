@@ -747,10 +747,13 @@ export class CEFPresenter {
   /**
    * Accessibility (docs/design/engine-accessibility.md): surface mode only, where the
    * engine-view a11y component exposes Chromium's tree under this canvas. Without the
-   * component (pipe fallback) the canvas keeps its "not available" label.
+   * component (pipe fallback) the canvas keeps its "not available" label. On Linux the
+   * tree is mirrored into chrome DOM that Gecko exposes to AT-SPI (LinuxAccessibilityMirror).
    */
   #attachAccessibility(record, target) {
-    if (!record.surfaceMode) return;
+    let linux = false;
+    try { linux = this.window.Services?.appinfo?.OS === "Linux"; } catch {}
+    if (!record.surfaceMode && !linux) return;
     let a11y = null, targetId;
     try { a11y = sharedChromiumAccessibility(); targetId = surfaceTargetId(target); } catch { return; }
     const adapter = record.adapter;
