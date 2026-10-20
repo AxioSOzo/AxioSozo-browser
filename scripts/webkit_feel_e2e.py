@@ -129,7 +129,17 @@ if (!item) return null;
 const buttons = [...(item.buttonContainer?.querySelectorAll?.('button') ?? item.querySelectorAll?.('button') ?? [])]
   .map(b => ({label: b.label ?? b.textContent, box: (r => ({x: mozInnerScreenX + r.left + r.width / 2, y: mozInnerScreenY + r.top + r.height / 2,
     w: r.width}))(b.getBoundingClientRect())}));
-return {label: String(item.messageText?.textContent ?? item.label ?? ''), buttons, scale: devicePixelRatio};
+// What a pointer at each button's centre would hit (the bar may be covered or unpainted).
+for (const b of buttons) {
+  const hit = document.elementFromPoint(b.box.x - mozInnerScreenX, b.box.y - mozInnerScreenY);
+  b.hit = hit ? (hit.id || hit.localName) : null;
+  b.hitNotice = !!hit && (item === hit || item.contains(hit) || hit.getRootNode?.()?.host === item);
+}
+const ir = item.getBoundingClientRect();
+const cs = getComputedStyle(item);
+return {label: String(item.messageText?.textContent ?? item.label ?? ''), buttons, scale: devicePixelRatio,
+  rect: {x: ir.left, y: ir.top, w: ir.width, h: ir.height}, visibility: cs.visibility, opacity: cs.opacity, zIndex: cs.zIndex,
+  parent: item.parentNode?.id || item.parentNode?.localName || null};
 """
 DOORHANGER = """
 const panel = document.getElementById('notification-popup');
@@ -1048,6 +1058,7 @@ class FeelHarness(gui_test.Harness):
             return second if a and b and b['box']['w'] > 0 and a['box'] == b['box'] else None
         notice = self.wait(settled, 'the notice and its retry button in place', timeout=15)
         self.screenshot('22-crash-notice')
+        self.result.setdefault('crash_notice_layout', notice)
         retry = next(b for b in notice['buttons'] if 'Try again' in str(b['label']))
         self.click_screen(retry['box'], notice['scale'])
         try:
