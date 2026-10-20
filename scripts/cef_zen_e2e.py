@@ -123,7 +123,9 @@ const list = overlay?.style.display === 'block' ? overlay.querySelector('.axioso
 const popup = document.getElementById('PopupAutoComplete');
 return {zen: list && !list.hidden ? {rows: [...list.children].map(row => row.firstChild?.textContent ?? ''),
                                      box: (r => [r.left, r.top, r.width, r.height])(list.getBoundingClientRect())} : null,
-        firefox: popup ? {state: popup.state, rows: popup.view?.matchCount ?? null} : null};
+        firefox: popup ? {state: popup.state, rows: (() => { try { return popup.view?.matchCount ?? null; } catch (e) { return null; } })(),
+                          labels: [...(popup.richlistbox?.children ?? [])].filter(n => !n.collapsed && !n.hidden)
+                                    .map(n => n.getAttribute('ac-value') ?? n.getAttribute('ac-label') ?? '').slice(0, 8)} : null};
 """
 CONTEXT_MENU = """
 const popup = document.getElementById('axiosozo-chromium-context-menu');
@@ -1597,8 +1599,13 @@ class CEFZenHarness(gui_test.Harness):
 
     def permission_in(self, engine):
         self.click_at(*AT['perm'])
-        shown = self.wait(lambda: (lambda p: p if p['open'] else None)(self.chrome_script(self.PERMISSION_PANEL)),
-                          f'{engine}: Zen\'s permission prompt', timeout=15)
+        try:
+            shown = self.wait(lambda: (lambda p: p if p['open'] else None)(self.chrome_script(self.PERMISSION_PANEL)),
+                              f'{engine}: Zen\'s permission prompt', timeout=15)
+        except AssertionError as error:
+            state = self.web()
+            raise AssertionError(f'{error}; page perm {(self.page(state) or {}).get("perm")!r}, '
+                                 f'notice {state.get("notice")!r}, panel {state.get("panel")!r}') from None
         time.sleep(0.8)
         self.screenshot(f'35-permission-{engine}', settle=False)
         # "Block", clicked for real (the default: nothing is granted unless the user allows it).
@@ -1701,7 +1708,11 @@ class CEFZenHarness(gui_test.Harness):
         self.screenshot('37-cert-error-gecko')
         self.chrome_script('BrowserCommands.back(); return true;')
         self.wait_page(lambda page: page['p'] == '1', 'Gecko tab back on the feel page', timeout=20)
-        self.ensure_chromium('37-to-chromium')
+        # Back to the Chromium tab, which still (correctly) shows the certificate error panel
+        # rather than a feel page, so ensure_chromium() would wait for nothing.
+        self.select_tab(self.cef_tab)
+        self.wait(lambda: self.web()['engine'] == 'chromium' and self.chrome_script(self.CERT_PANEL),
+                  'the Chromium tab with its certificate error panel', timeout=20)
         # "Go back (Recommended)", clicked for real.
         point = self.chrome_script("""
             const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
