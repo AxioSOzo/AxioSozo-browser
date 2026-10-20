@@ -206,15 +206,20 @@ const editable = e && (e.isContentEditable || e.tagName === 'TEXTAREA' || e.tagN
 if (editable && document.activeElement !== e) e.focus();
 return editable ? 'editable' : 'none';
 )JS";
-// WPE 2.48 shows no context menu for libwpe pointer input (no `context-menu` signal). This
-// isolated-world listener notes the page's own (trusted) contextmenu event and whether the
-// page cancelled it; ContextMenuFunction then runs the DOM event itself if WebKit did not,
-// honours preventDefault, and reports what is under the pointer for Zen's menu.
+// WPE 2.48 shows no context menu for libwpe pointer input (no `context-menu` signal), yet an
+// uncancelled contextmenu event makes WebKit wait for a menu that never shows, and then drop
+// every later mouse event. This isolated-world listener (window, bubble phase, registered
+// before any page script) notes whether the page cancelled the trusted event, then cancels it
+// for WebKit; ContextMenuFunction opens Zen's menu instead unless the page cancelled it.
 constexpr const char* ContextWatchScript =
-  "addEventListener('contextmenu', e => { if (!e.isTrusted) return; const t = performance.now();"
-  " setTimeout(() => { window.__axioContextMenu = {t, prevented: e.defaultPrevented}; }, 0); }, true);";
+  "addEventListener('contextmenu', e => { if (!e.isTrusted) return; const prevented = e.defaultPrevented;"
+  " e.preventDefault(); window.__axioContextMenu = {t: performance.now(), prevented}; }, false);";
 constexpr const char* ContextMenuFunction = R"JS(
-const seen = window.__axioContextMenu;
+let seen = window.__axioContextMenu;
+for (let i = 0; i < 15 && !(seen && performance.now() - seen.t < 1500); i++) {
+  await new Promise(resolve => setTimeout(resolve, 20));
+  seen = window.__axioContextMenu;
+}
 const e = document.elementFromPoint(x, y) || document.documentElement;
 let prevented;
 if (seen && performance.now() - seen.t < 1500) prevented = seen.prevented;
@@ -732,7 +737,7 @@ void WpeView::mouse(const MouseInput& mouse) {
   // A right press opens the context menu (the engine's own signal if it fires, else the fallback).
   if (host_.browserUI() && mouse.type == "down" && button == 2) {
     double x = mouse.x, y = mouse.y;
-    later(80, [x, y](WpeView& view) { if (!view.contextSignaled_) view.contextMenuFallback(x, y); });
+    later(30, [x, y](WpeView& view) { if (!view.contextSignaled_) view.contextMenuFallback(x, y); });
   }
 }
 
