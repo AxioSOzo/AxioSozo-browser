@@ -20,7 +20,7 @@ probe = stream.probe
 UI_FIXTURE = Path(__file__).with_name('fixtures') / 'ui.html'
 # Fixed CSS-pixel centres of fixtures/ui.html (device_scale 1).
 AT = {'alert': (70, 35), 'confirm': (190, 35), 'prompt': (310, 35), 'perm': (440, 35), 't': (170, 95), 'sel': (420, 95),
-      'mv': (70, 260), 'ed': (170, 320)}
+      'mv': (70, 260), 'ed': (170, 320), 'unload': (570, 35), 'link': (520, 152)}
 P_TOP, CHAR = 152, 12.04   # "alpha beta gamma", 20px monospace at x=20
 
 
@@ -198,6 +198,31 @@ def scenario(session, origin, directory):
     click(session, *AT['t'])
     session.completed(session.command('paste_text', text='!'))
     results['input_after_context_menu'] = wait_state(session, lambda s: s.get('t', '').endswith('!'))['t']
+
+    # beforeunload: WebKit asks after its navigation policy; the generation advances only once the
+    # user leaves, so "Stay" keeps the same document (and its target) live.
+    click(session, *AT['unload'])
+    wait_state(session, lambda s: s.get('d') == 'armed')
+    before = dict(session.target)
+    click(session, *AT['link'])
+    unload = event(session, 'prompt', lambda item: item['kind'] == 'before_unload')
+    navigations = [e for e in session.events if e.get('event') == 'navigation']
+    session.completed(session.command('dialog_reply', prompt_id=unload['prompt_id'], accept=False, text=''))
+    time.sleep(1)
+    assert session.target == before and len([e for e in session.events if e.get('event') == 'navigation']) == len(navigations), \
+        'Stay changed the target'
+    click(session, *AT['t'])
+    session.completed(session.command('paste_text', text='?'))
+    stayed = wait_state(session, lambda s: s.get('t', '').endswith('?'))['t']
+    click(session, *AT['link'])
+    unload = event(session, 'prompt', lambda item: item['kind'] == 'before_unload')
+    session.completed(session.command('dialog_reply', prompt_id=unload['prompt_id'], accept=True, text=''))
+    event(session, 'navigation')
+    session.until(lambda kind, item: item.get('event') == 'load', seconds=15)
+    left = wait_state(session, lambda s: s.get('d') == '')  # page 2 is a new document
+    results['beforeunload'] = {'stayed_input': stayed, 'left_generation': session.target['document_generation'],
+                               'before_generation': before['document_generation']}
+    assert session.target['document_generation'] == before['document_generation'] + 1, results
 
     # A navigation closes an open prompt with its safe default before generations advance.
     click(session, *AT['alert'])

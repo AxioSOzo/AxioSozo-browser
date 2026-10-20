@@ -10,9 +10,10 @@ button,input,select{font:16px monospace}
 #t{left:20px;top:80px;width:300px;height:30px}#sel{left:360px;top:80px;width:120px;height:30px}
 #p{left:20px;top:140px;white-space:pre}#needle{left:20px;top:200px;white-space:pre}
 #mv{left:20px;top:240px;width:100px;height:40px;cursor:move;background:#eef}
-#ed{left:20px;top:300px;width:300px;height:40px;border:1px solid #889}#link{left:500px;top:140px}</style>
+#ed{left:20px;top:300px;width:300px;height:40px;border:1px solid #889}#link{left:500px;top:140px}
+#unload{left:520px;top:20px;width:100px;height:30px}</style>
 <button class="a" id="alert">alert</button><button class="a" id="confirm">confirm</button><button class="a" id="prompt">prompt</button>
-<button class="a" id="perm">permission</button><input class="a" id="t" autocomplete="off">
+<button class="a" id="perm">permission</button><button class="a" id="unload">unload</button><input class="a" id="t" autocomplete="off">
 <select class="a" id="sel"><option>one</option><option>two</option><option>three</option></select>
 <p class="a" id="p">alpha beta gamma</p><p class="a" id="needle">needle one needle two needle three</p>
 <div class="a" id="mv"></div><div class="a" id="ed" contenteditable="true"></div><a class="a" id="link" href="?page=2">next</a>
@@ -27,6 +28,7 @@ $('perm').onclick = () => {
   if (typeof Notification !== 'undefined') Notification.requestPermission().then(done, e => done('error:' + e.name));
   else navigator.geolocation.getCurrentPosition(() => done('granted'), e => done('geo:' + e.code));
 };
+$('unload').onclick = () => { addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; }); s.d = 'armed'; out(); };
 $('t').oninput = () => { s.t = $('t').value; out(); };
 $('ed').oninput = () => { s.e = $('ed').textContent; out(); };
 $('sel').onchange = () => { s.sel = $('sel').value; out(); };
