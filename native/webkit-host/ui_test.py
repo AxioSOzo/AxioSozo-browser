@@ -53,6 +53,11 @@ def event(session, name, check=lambda item: True, seconds=10):
     return item
 
 
+def forget(session):
+    """Only events after this point count for event()."""
+    session.__dict__.setdefault('ui_taken', set()).update(range(len(session.events)))
+
+
 def click(session, x, y, button='left', clicks=1):
     session.command('mouse', type='move', x=x, y=y, modifiers=0, button='left', click_count=1, mouse_leave=False)
     for count in range(1, clicks + 1):
@@ -195,6 +200,7 @@ def scenario(session, origin, directory):
     assert results['context_copy'] == 'alpha', results
     results['context_menu'] = {k: details[k] for k in ('x', 'y', 'type_flags', 'edit_flags', 'editable', 'media_type')}
     # Input still reaches the page after the menu (no engine-side menu state left behind).
+    forget(session)
     click(session, *AT['t'])
     event(session, 'text_input', lambda item: item['mode'] == 'text' and item['caret_y'] < 120)
     session.completed(session.command('paste_text', text='!'))
@@ -212,6 +218,7 @@ def scenario(session, origin, directory):
     time.sleep(1)
     assert session.target == before and len([e for e in session.events if e.get('event') == 'navigation']) == len(navigations), \
         'Stay changed the target'
+    forget(session)
     click(session, *AT['t'])
     event(session, 'text_input', lambda item: item['mode'] == 'text' and item['caret_y'] < 120)
     session.completed(session.command('paste_text', text='?'))
