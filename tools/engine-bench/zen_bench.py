@@ -336,7 +336,11 @@ class ZenBench(gui_test.Harness):
         usage = self.app_usage()
         start = usage.snapshot()
         t0 = time.monotonic()
+        if during:
+            self.chrome_script(SAMPLER_MARK, ['input0'])
         pacing = during() if during else time.sleep(seconds)
+        if during:
+            self.chrome_script(SAMPLER_MARK, ['input1'])
         input_wall_s = round(time.monotonic() - t0, 3)
         end = usage.snapshot(memory=True)
         data = self.chrome_script(SAMPLER_STOP)
@@ -346,13 +350,24 @@ class ZenBench(gui_test.Harness):
         frames = data['frames1'] - data['frames0']
         # Over the active part only (first to last new frame), as the in-page rAF window does.
         active = (times[-1] - times[0]) / 1000 if len(times) > 1 else 0
+        input_window = {}
+        marks = data.get('marks') or {}
+        if 'input0' in marks and 'input1' in marks:
+            # Frames while input is being delivered (+100 ms for the last event's frame): the
+            # scroll measure, unaffected by frames long before or after the input.
+            inside = [t for t in times if marks['input0'] <= t <= marks['input1'] + 100]
+            span = (inside[-1] - inside[0]) / 1000 if len(inside) > 1 else 0
+            gaps = [b - a for a, b in zip(inside, inside[1:])]
+            input_window = dict(fps_input=round((len(inside) - 1) / span, 2) if span else None,
+                                interval_p99_input_ms=bench.pct(gaps, 99), frames_input=len(inside),
+                                input_ms=round(marks['input1'] - marks['input0'], 1))
         return dict(measured_in='zen-chrome (presenter frame counter, 2 ms sampler)', frames=frames, input_wall_s=input_wall_s,
                     canvas_updates=len(times), fps=round((len(times) - 1) / active, 2) if active else None,
                     fps_whole_window=round(frames / window_s, 2) if window_s else None,
                     interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
                     long_intervals_share=round(sum(1 for v in iv if v > 25) / len(iv), 4) if iv else None,
                     multi_frame_updates=sum(1 for _, n in data['changes'] if n > 1),
-                    presenter=self.presented(), usage=self.usage_window(start, end),
+                    presenter=self.presented(), usage=self.usage_window(start, end), **input_window,
                     **({'input_pacing': pacing} if pacing else {}))
 
     def raf_window(self, seconds, during=None):
@@ -379,7 +394,11 @@ class ZenBench(gui_test.Harness):
         point = self.chrome_script('const r = gBrowser.selectedBrowser.getBoundingClientRect();'
                                    'return [Math.round((window.mozInnerScreenX + r.left + r.width / 2) * devicePixelRatio),'
                                    ' Math.round((window.mozInnerScreenY + r.top + r.height / 2) * devicePixelRatio)];')
-        self.xdotool('mousemove', '--sync', point[0], point[1])
+        # `mousemove --sync` waits for a motion event: when the pointer is already there it blocks
+        # until xdotool's timeout (the 17 s scroll windows of docs/PERFORMANCE.md bottleneck 3).
+        location = dict(line.split('=', 1) for line in self.xdotool('getmouselocation', '--shell').splitlines() if '=' in line)
+        if [int(location.get('X', -1)), int(location.get('Y', -1))] != [int(point[0]), int(point[1])]:
+            self.xdotool('mousemove', '--sync', point[0], point[1])
         if getattr(self.args, 'wheel', 'xtest') == 'xtest':
             try:
                 if getattr(self, 'xtest', None) is None:
@@ -510,6 +529,7 @@ def summarize(reps):
             'static.idle_raf.fps', 'raf.window.fps', 'raf.window.interval_ms.median', 'raf.window.interval_p99_ms',
             'raf.window.long_intervals_share', 'raf.window.usage.cpu_percent', 'raf.window.usage.parent_cpu_percent',
             'scroll.window.usage.parent_cpu_percent', 'key.keydown_to_presented_frame_ms.p99',
+            'scroll.window.fps_input', 'scroll.window.interval_p99_input_ms', 'image_scroll.window.fps_input',
             'scroll.window.fps', 'scroll.window.interval_p99_ms', 'scroll.window.long_intervals_share',
             'scroll.window.scrolled_css_px', 'scroll.window.usage.cpu_percent', 'scroll.window.input_wall_s',
             'image_scroll.window.input_wall_s', 'scroll.window.input_pacing.send_span_s',
