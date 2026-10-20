@@ -166,7 +166,17 @@ bubblewrap starts them with a clean environment. This is an install-layout issue
 image, not a WebKit or sandbox defect. Fix in `upstream/build.sh` (commit c17efbef): register the
 prefix with `ldconfig` after the install. The sandbox binds `/etc/ld.so.cache` and `/usr`, so the
 sandbox stays on and unchanged. The next `linux-webkit-upstream` run on cloud/webkit-feel
-verifies it. Until then the host suites against 2.54.1 are NOT_VERIFIED.
+verifies it.
+
+**Second re-run (Actions run 39370679848, commit c17efbef).** Build PASS (6006 s, warm ccache),
+the loader cache lists `libWPEWebKit-2.0.so.1` from the prefix, `check` PASS. Against the
+upstream 2.54.1 runtime (`ready.runtime_webkit` "2.54.1", bubblewrap sandbox on):
+`stream_test.py` PASS, `input_test.py` PASS, `stream_security_test.py` PASS, native unit tests PASS.
+`ui_test.py`, the browser-UI suite added by cloud/webkit-feel, FAILs at its double-click step. The
+pointer-up script reports WebKit's own selection (`selection via engine`), but no `text_selection`
+event reached the harness within 10 s (`runs/webkit-wpe-ui-*/`). The same step passes on 2.48.3
+(runs 39376244778, 39375996623). It is not yet diagnosed. It blocks moving the pin, not the
+2.48.3 fixture pin.
 
 **Recommendation for a maintained pin.** Move the product pin to the **2.54.x stable series**,
 built from the official wpewebkit.org tarball (sha256 from the release's `.sums`, as in
@@ -175,7 +185,9 @@ built from the official wpewebkit.org tarball (sha256 from the release's `.sums`
 on 2026-10-18. Reasons not to stay on 2.52.x: it is the previous series (fixes stop when 2.56
 ships) and it builds ~3× slower here. Keep the Debian 13 2.48.3 packages as the **fixture** pin
 (component tests, Zen E2E) until a 2.54.x build passes the full host suite and the Zen E2E;
-then switch `webkit.version` and the Zen-side identity check together. A source build must be
+then switch `webkit.version` and the Zen-side identity check together. Status 2026-10-20: 2.54.1 passes
+stream, input and security (run 39370679848). Before the switch, the `ui_test.py`
+double-click → `text_selection` step must pass, and the Zen E2E must run on 2.54.x. A source build must be
 cached (ccache in the Actions cache, ~1.5 GB for 2.54.1) or packaged as a pinned artifact;
 a cold build costs ~80 min per change of pin. Web mode stays off regardless until the
 gates in docs/CAPABILITY_MATRIX.md pass.
