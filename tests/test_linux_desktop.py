@@ -15,7 +15,8 @@ import linux_desktop  # noqa: E402
 
 class LinuxDesktop(unittest.TestCase):
     def setUp(self):
-        self.temp = Path(tempfile.mkdtemp())
+        # Resolved: render() resolves the executable, and macOS temp dirs sit behind /var -> /private/var.
+        self.temp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.temp)
         self.app = self.temp / 'my apps' / 'axiosozo-dev'
         icons = self.app / 'browser/chrome/icons/default'
