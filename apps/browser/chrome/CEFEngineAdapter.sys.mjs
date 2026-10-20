@@ -907,6 +907,8 @@ export class CEFEngineAdapter {
   get surfaceMode() { return this.#host.surfaceMode === true; }
   /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
   get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
+  get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
   /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
   get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }

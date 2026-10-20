@@ -542,7 +542,7 @@ export class WebKitPresenter {
     const record = this.active;
     if (!record) return { engine: "gecko", ownedTabIds: this.owners(), failures: [...this.failures], pending: !!this.pending };
     return { engine: "webkit", version: WEBKIT_VERSION, target: record.adapter.target, renderPath: "wpe-fdo-shm-bgra", frameTransport: record.adapter.frameTransport ?? "pipe",
-      pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
+      memfdFallback: record.adapter.memfdFallback ?? null, pipeFallback: true, frames: record.displayedFrames, damageFrames: record.damageFrames, supersededFrames: record.supersededFrames,
       uploadedPixels: record.uploadedPixels, fullPixels: record.fullPixels,
       meanDrawMilliseconds: record.displayedFrames ? record.drawMilliseconds / record.displayedFrames : 0,
       firstFrameMilliseconds: record.firstFrameAt === null ? null : record.firstFrameAt - record.startedAt,

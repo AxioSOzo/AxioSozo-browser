@@ -531,6 +531,8 @@ export class EngineStreamTarget {
   get identity() { return this.#pending.identity; }
   get host() { return this.#host; }
   get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
+  get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get ended() { return this.#ended; }
   get inputFeatures() {
     const capabilities = this.#host.capabilities ?? {};

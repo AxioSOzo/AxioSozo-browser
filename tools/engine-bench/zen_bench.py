@@ -23,6 +23,8 @@ WebKit pref); nothing else changes.
 usage: zen_bench.py --engine gecko|chromium|webkit --app fetched|PATH --out DIR [--reps 5]
 """
 import argparse
+import ctypes
+import ctypes.util
 import json
 import os
 from pathlib import Path
@@ -90,7 +92,7 @@ return {engine: n.engine ?? null, frames: n.frames ?? null, title: n.title ?? gB
         firstFrameMilliseconds: n.firstFrameMilliseconds ?? null,
         // Pipe presenters (EngineFrameSurface): frames replaced before a paint, and the render surface.
         supersededFrames: n.supersededFrames ?? null, surface: n.surface ?? null,
-        frameTransport: n.frameTransport ?? null};
+        frameTransport: n.frameTransport ?? null, memfdFallback: n.memfdFallback ?? null};
 """
 # A 2 ms chrome timer records every change of the presenter's frame counter (the canvas got
 # a new engine frame) and every chrome keydown (keys routed to the presenter canvas).
@@ -160,6 +162,49 @@ def describe_list(values):
     return bench.describe([v for v in values if v is not None])
 
 
+class XTestWheel:
+    """Wheel clicks injected with XTest at an explicit cadence (docs/PERFORMANCE.md bottleneck 3).
+
+    `xdotool click --repeat` took 1.95 s for 120 clicks in a first window and 17.03 s in later
+    ones (in Gecko too), so scroll windows were not a render measure. Here every press/release
+    pair is scheduled against the monotonic clock from the window start (no drift), flushed at
+    once, and its actual send time is recorded, so the result shows the input pacing that the
+    frames were measured under. Same X server, same pointer position as xdotool.
+    """
+
+    def __init__(self, display):
+        def load(name, soname):
+            return ctypes.CDLL(ctypes.util.find_library(name) or soname)
+        self.x11, self.xtst = load('X11', 'libX11.so.6'), load('Xtst', 'libXtst.so.6')
+        self.x11.XOpenDisplay.restype = ctypes.c_void_p
+        self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.x11.XFlush.argtypes = [ctypes.c_void_p]
+        self.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.display = self.x11.XOpenDisplay(display.encode())
+        if not self.display:
+            raise OSError('XOpenDisplay failed for ' + display)
+
+    def wheel(self, count, interval_s, button=5):
+        sent, t0 = [], time.monotonic()
+        for index in range(count):
+            delay = t0 + index * interval_s - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            self.xtst.XTestFakeButtonEvent(self.display, button, 1, 0)
+            self.xtst.XTestFakeButtonEvent(self.display, button, 0, 0)
+            self.x11.XFlush(self.display)
+            sent.append(time.monotonic() - t0)
+        self.x11.XSync(self.display, 0)
+        return sent
+
+    def close(self):
+        if self.display:
+            self.x11.XCloseDisplay(self.display)
+            self.display = None
+
+
 class ZenBench(gui_test.Harness):
     def __init__(self, args, engine, evidence):
         super().__init__(args, engine, evidence)
@@ -214,6 +259,15 @@ class ZenBench(gui_test.Harness):
 
     def app_usage(self):
         return bench.Usage(self.browser.pid)
+
+    def usage_window(self, start, end):
+        """bench.Usage.window plus the Zen parent process's own share (its process kind)."""
+        usage = bench.Usage.window(start, end)
+        if getattr(self, 'parent_kind', None) is None:
+            self.parent_kind = bench.proc_table().get(self.browser.pid, {}).get('comm')
+            self.result['bench']['parent_kind'] = self.parent_kind
+        usage['parent_cpu_percent'] = (usage.get('cpu_percent_by_kind') or {}).get(self.parent_kind)
+        return usage
 
     def load(self, server, fixture):
         # Alternate the two admitted fixture URLs (the engine hosts' fixture policy), one new document per load.
@@ -281,10 +335,7 @@ class ZenBench(gui_test.Harness):
         usage = self.app_usage()
         start = usage.snapshot()
         t0 = time.monotonic()
-        if during:
-            during()
-        else:
-            time.sleep(seconds)
+        pacing = during() if during else time.sleep(seconds)
         input_wall_s = round(time.monotonic() - t0, 3)
         end = usage.snapshot(memory=True)
         data = self.chrome_script(SAMPLER_STOP)
@@ -300,7 +351,8 @@ class ZenBench(gui_test.Harness):
                     interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
                     long_intervals_share=round(sum(1 for v in iv if v > 25) / len(iv), 4) if iv else None,
                     multi_frame_updates=sum(1 for _, n in data['changes'] if n > 1),
-                    presenter=self.presented(), usage=bench.Usage.window(start, end))
+                    presenter=self.presented(), usage=self.usage_window(start, end),
+                    **({'input_pacing': pacing} if pacing else {}))
 
     def raf_window(self, seconds, during=None):
         if self.native_engine:
@@ -309,10 +361,7 @@ class ZenBench(gui_test.Harness):
         usage = self.app_usage()
         start = usage.snapshot()
         t0 = time.monotonic()
-        if during:
-            during()
-        else:
-            time.sleep(seconds)
+        pacing = during() if during else time.sleep(seconds)
         input_wall_s = round(time.monotonic() - t0, 3)
         end = usage.snapshot(memory=True)
         data = self.content_script(RAF_STOP)
@@ -320,15 +369,30 @@ class ZenBench(gui_test.Harness):
         out = dict(frames=data['frames'], input_wall_s=input_wall_s, fps=round((data['frames'] - 1) / data['seconds'], 2) if data['seconds'] else None,
                    interval_ms=describe_list(iv), interval_p99_ms=bench.pct(iv, 99),
                    long_intervals_share=round(sum(1 for v in iv if v > 25) / len(iv), 4) if iv else None,
-                   scrolled_css_px=data['scrolled'], usage=bench.Usage.window(start, end))
+                   scrolled_css_px=data['scrolled'], usage=self.usage_window(start, end),
+                   **({'input_pacing': pacing} if pacing else {}))
         return out
 
     def wheel(self, count=120, delay_ms=16):
+        """`count` wheel-down clicks every `delay_ms` over the tab's content; returns the pacing."""
         point = self.chrome_script('const r = gBrowser.selectedBrowser.getBoundingClientRect();'
                                    'return [Math.round((window.mozInnerScreenX + r.left + r.width / 2) * devicePixelRatio),'
                                    ' Math.round((window.mozInnerScreenY + r.top + r.height / 2) * devicePixelRatio)];')
         self.xdotool('mousemove', '--sync', point[0], point[1])
+        if getattr(self.args, 'wheel', 'xtest') == 'xtest':
+            try:
+                if getattr(self, 'xtest', None) is None:
+                    self.xtest = XTestWheel(self.x_env['DISPLAY'])
+                sent = self.xtest.wheel(count, delay_ms / 1000)
+                gaps = [(b - a) * 1000 for a, b in zip(sent, sent[1:])]
+                return dict(method='xtest', events=count, target_interval_ms=delay_ms,
+                            send_span_s=round(sent[-1], 3) if sent else 0, send_interval_ms=describe_list(gaps),
+                            late_events=sum(1 for g in gaps if g > 2 * delay_ms))
+            except OSError as error:
+                self.result.setdefault('notes', []).append(f'XTest wheel unavailable ({error}); xdotool click --repeat used')
+        t0 = time.monotonic()
         self.xdotool('click', '--repeat', count, '--delay', delay_ms, '5')
+        return dict(method='xdotool', events=count, target_interval_ms=delay_ms, send_span_s=round(time.monotonic() - t0, 3))
 
     def engine_key_latency(self, samples):
         """Chrome keydown (routed to the presenter canvas) -> next presented engine frame."""
@@ -429,6 +493,8 @@ class ZenBench(gui_test.Harness):
                     self.result['bench']['memory_at_end'] = self.memory()
                     self.screenshot('zen-bench-' + self.engine.name)
                 finally:
+                    if getattr(self, 'xtest', None):
+                        self.xtest.close()
                     self.shutdown()
             self.result['cleanup'] = session.cleanup_report
         finally:
@@ -441,10 +507,12 @@ def summarize(reps):
             'image.timing.firstContentfulPaint', 'image.timing.loadEventEnd', 'image.navigate_to_title_wall_ms',
             'dom.timing.firstContentfulPaint', 'dom.timing.loadEventEnd', 'dom.navigate_to_title_wall_ms',
             'static.idle_raf.fps', 'raf.window.fps', 'raf.window.interval_ms.median', 'raf.window.interval_p99_ms',
-            'raf.window.long_intervals_share', 'raf.window.usage.cpu_percent',
+            'raf.window.long_intervals_share', 'raf.window.usage.cpu_percent', 'raf.window.usage.parent_cpu_percent',
+            'scroll.window.usage.parent_cpu_percent', 'key.keydown_to_presented_frame_ms.p99',
             'scroll.window.fps', 'scroll.window.interval_p99_ms', 'scroll.window.long_intervals_share',
             'scroll.window.scrolled_css_px', 'scroll.window.usage.cpu_percent', 'scroll.window.input_wall_s',
-            'image_scroll.window.input_wall_s',
+            'image_scroll.window.input_wall_s', 'scroll.window.input_pacing.send_span_s',
+            'scroll.window.input_pacing.send_interval_ms.p99', 'scroll.window.input_pacing.late_events',
             'image_scroll.window.fps', 'image_scroll.window.interval_p99_ms', 'image_scroll.window.usage.cpu_percent',
             'key.keydown_to_second_raf_ms.median', 'key.keydown_to_second_raf_ms.p95', 'key.event_to_handler_ms.median',
             'memory_all_processes.rss_mb', 'memory_all_processes.pss_mb', 'memory_all_processes.processes',
@@ -475,6 +543,8 @@ def main():
     parser.add_argument('--label', help='result name (default: the engine), e.g. gecko-debian')
     parser.add_argument('--samples', type=int, default=20)
     parser.add_argument('--size', default='1280x800')
+    parser.add_argument('--wheel', choices=('xtest', 'xdotool'), default='xtest',
+                        help='wheel injection: XTest at an explicit cadence (default; pacing recorded) or xdotool click --repeat')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--launch-timeout', type=float, default=240)
     parser.add_argument('--device-scale', type=float,

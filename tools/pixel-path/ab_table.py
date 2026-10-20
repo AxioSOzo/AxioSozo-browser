@@ -4,7 +4,7 @@
 usage: ab_table.py RESULTS_DIR [--out ab.md] [--json ab.json]
 
 RESULTS_DIR holds one folder per bench run, named `<variant>-r<round>-<scale>x` (variant =
-base | cand), each with a zen-bench-<label>.json (tools/engine-bench/zen_bench.py). Base and
+base, or a candidate variant: cand, pipe, memfd, worker, native, ...), each with a zen-bench-<label>.json (tools/engine-bench/zen_bench.py). Base and
 candidate ran in the same job on the same machine, alternating per round, so their ratio is
 the measurement; cross-run numbers are not (docs/PERFORMANCE.md "Machines and bias").
 """
@@ -18,16 +18,22 @@ METRICS = [
     ('raf.window.interval_p99_ms', 'rAF page: frame interval p99 (ms)', -1),
     ('raf.window.long_intervals_share', 'rAF page: intervals > 25 ms (share)', -1),
     ('raf.window.usage.cpu_percent', 'rAF page: CPU, whole browser (%)', -1),
+    ('raf.window.usage.parent_cpu_percent', 'rAF page: CPU, Zen parent process (%)', -1),
     ('raf.window.presenter.meanDrawMilliseconds', 'presenter draw per frame (ms)', -1),
     ('raf.window.presenter.uploadedPixelShare', 'presenter uploaded pixel share', -1),
-    ('scroll.window.fps', 'wheel scroll: fps (rep 1 windows valid, see PERFORMANCE.md)', +1),
+    ('scroll.window.fps', 'wheel scroll: fps (XTest-paced input)', +1),
+    ('scroll.window.interval_p99_ms', 'wheel scroll: frame interval p99 (ms)', -1),
     ('scroll.window.usage.cpu_percent', 'wheel scroll: CPU (%)', -1),
+    ('scroll.window.usage.parent_cpu_percent', 'wheel scroll: CPU, Zen parent (%)', -1),
+    ('scroll.window.input_pacing.send_span_s', 'wheel scroll: input span (s, 120 events @16 ms = 1.9)', 0),
     ('key.keydown_to_presented_frame_ms.median', 'key -> presented frame (ms)', -1),
+    ('key.keydown_to_presented_frame_ms.p95', 'key -> presented frame p95 (ms)', -1),
     ('switch.gecko_to_engine_switch_ms', 'Gecko -> engine switch (ms)', -1),
     ('static.timing.navigate_to_visible_ms', 'static page: navigate -> visible (ms)', -1),
     ('memory_all_processes.rss_mb', 'RSS, whole browser (MB)', -1),
 ]
-NAME = re.compile(r'^(base|cand|memfd)-r(\d+)-([0-9.]+)x$')
+NAME = re.compile(r'^([a-z][a-z0-9]*)-r(\d+)-([0-9.]+)x$')
+ORDER = ['cand', 'pipe', 'memfd', 'worker', 'native']
 
 
 def load(directory):
@@ -63,14 +69,15 @@ def main():
     cpu = sorted({(d.get('machine') or {}).get('cpu_model') for d in runs.values()} - {None})
     lines.append(f'# Pixel-path A/B in one job: {engine} tabs in Zen')
     lines.append('')
-    lines.append(f'CPU: {", ".join(cpu) or "?"}. base = cloud/integration chrome JS + host, cand = this branch, '
-                 f'memfd = this branch with the EXPERIMENTAL memfd frame pref (TEST-ONLY); rounds alternate. '
-                 f'Medians over repetitions; Δ = variant/base − 1.')
+    lines.append(f'CPU: {", ".join(cpu) or "?"}. base = cloud/integration chrome JS + host, cand = this branch (its defaults); '
+                 f'other variants = this branch with TEST-ONLY prefs (pipe/memfd: axiosozo.engines.linux.memfd_frames off/on; '
+                 f'worker/native: see docs/perf/pixel-path.md); rounds alternate. Medians over repetitions; Δ = variant/base − 1.')
     lines.append('')
     for scale in scales:
         lines.append(f'## {scale}×')
         lines.append('')
-        variants = [v for v in ('cand', 'memfd') if any((v, r, scale) in runs for r in rounds)]
+        names = sorted({v for v, _, _ in runs} - {'base'}, key=lambda v: (ORDER.index(v) if v in ORDER else len(ORDER), v))
+        variants = [v for v in names if any((v, r, scale) in runs for r in rounds)]
         header = '| Metric | ' + ' | '.join(f'base r{r} | ' + ' | '.join(f'{v} r{r} | Δ{v} r{r}' for v in variants) for r in rounds) + ' |'
         lines += [header, '|' + ' --- |' * (1 + (1 + 2 * len(variants)) * len(rounds))]
         for key, label, sign in METRICS:
@@ -87,7 +94,7 @@ def main():
                     row[f'r{r}'][v] = c
                     row[f'r{r}'][f'delta_{v}'] = None if delta is None else round(delta, 4)
                     mark = ''
-                    if delta is not None and abs(delta) >= 0.05:
+                    if delta is not None and abs(delta) >= 0.05 and sign:
                         mark = ' ✅' if delta * sign > 0 else ' ⚠️'
                     cells += [f'{c}' if c is not None else '—', f'{delta:+.1%}{mark}' if delta is not None else '—']
             if any(value is not None for v in row.values() for k, value in v.items() if not k.startswith('delta')):

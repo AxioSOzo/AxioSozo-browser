@@ -14,8 +14,20 @@
 set -u
 ENGINE=$1 BASE=$2 CAND=$3 OUT=$4
 REPS=${REPS:-3} ROUNDS=${ROUNDS:-2} SCALES=${SCALES:-"1 2"}
-# memfd = the candidate with the EXPERIMENTAL memfd frame transport pref on (engine-stream-v1 §6.3).
+# Variants: base = BASE_TREE as is; every other variant = CAND_TREE with TEST-ONLY prefs (prefs_for):
+# cand (its defaults), pipe / memfd (axiosozo.engines.linux.memfd_frames off / on, engine-stream-v1 §6.3),
+# worker (axiosozo.engines.linux.frame_worker on), native (axiosozo.engines.linux.native_receiver on).
 VARIANTS=${VARIANTS:-"base cand memfd"}
+prefs_for() {
+  case $1 in
+    memfd) echo "--pref axiosozo.engines.linux.memfd_frames=true" ;;
+    pipe) echo "--pref axiosozo.engines.linux.memfd_frames=false" ;;
+    worker) echo "--pref axiosozo.engines.linux.frame_worker=true" ;;
+    nativeworker) echo "--pref axiosozo.engines.linux.frame_worker=true --pref axiosozo.engines.linux.native_receiver=true" ;;
+    native) echo "--pref axiosozo.engines.linux.native_receiver=true" ;;
+    *) ;;
+  esac
+}
 SUDO=${SUDO-sudo}
 mkdir -p "$OUT"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/steps.log"; }
@@ -42,14 +54,14 @@ size_for() { if [ "$1" = 1 ]; then echo 1280x800; else echo 2304x1440; fi; }
 status=0
 for round in $(seq 1 "$ROUNDS"); do
   for variant in $VARIANTS; do
-    tree=$BASE; [ "$variant" != base ] && tree=$CAND
-    prefs=(); [ "$variant" = memfd ] && prefs=(--pref axiosozo.engines.linux.memfd_frames=true)
-    # The candidate's host and chrome serve both cand and memfd: prepare once per tree switch.
-    if [ "$variant" != memfd ] || [ "${prepared:-}" != "$CAND" ]; then
-      prepare "$tree" "$variant-r$round" || { status=1; continue; }
-      prepared=$tree
+    tree=$BASE tree_name=base; [ "$variant" != base ] && tree=$CAND tree_name=cand
+    read -r -a prefs <<< "$(prefs_for "$variant")"
+    # One host build + chrome overlay per tree switch serves every variant of that tree.
+    if [ "${prepared:-}" != "$tree-r$round" ]; then
+      prepare "$tree" "$tree_name-r$round" || { status=1; continue; }
+      prepared=$tree-r$round
     fi
-    overlay_name=$variant-r$round; [ "$variant" = memfd ] && overlay_name=cand-r$round
+    overlay_name=$tree_name-r$round
     for scale in $SCALES; do
       dir="$OUT/$variant-r$round-${scale}x"; mkdir -p "$dir"
       extra=(); [ "$scale" != 1 ] && extra=(--device-scale "$scale")

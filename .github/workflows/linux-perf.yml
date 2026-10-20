@@ -1,5 +1,6 @@
-# Pixel-path performance of Chromium and WebKit tabs on Linux (cloud/perf-pixel-path,
+# Pixel-path performance of Chromium and WebKit tabs on Linux (cloud/perf-pixel-path, cloud/perf-phase2;
 # docs/perf/pixel-path.md). Software rendering only (no GPU on runners); never E1/E2, never READY.
+# tools/pixel-path/ci/plan.json selects the jobs and variants a push runs (`plan`).
 #
 #   bench         linux-engine-bench.yml (reusable): presenter same-process A/B against
 #                 cloud/integration's CEFPresenter, component benches of both hosts built from this
@@ -8,12 +9,15 @@
 #                 (cand), alternating rounds on one runner, 1x and 2x (TEST-ONLY devPixelsPerPx),
 #                 CEF host rebuilt per variant, chrome JS overlaid per variant (TEST-ONLY, labelled).
 #   ab-webkit     the same for WebKit tabs in the pinned debian:13 image (WPE host per variant).
+#   soak          one Zen window with a WebKit, a Chromium and a Gecko tab in the debian:13 image,
+#                 cycling rAF/scroll/navigation/keys for minutes per transport (tools/pixel-path/soak.py);
+#                 its medians are also the multi-tab numbers.
 #
 # Results go to the ci-results branch (cloud sessions cannot read Actions logs/artifacts).
 name: linux-perf
 on:
   push:
-    branches: [cloud/perf-pixel-path]
+    branches: [cloud/perf-phase2]
     paths:
       - apps/browser/chrome/**
       - native/chromium-host/**
@@ -32,11 +36,38 @@ concurrency:
 env:
   BASE_REF: cloud/integration
   WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
-  AB_REPS: "3"
-  AB_ROUNDS: "2"
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      bench: ${{ steps.plan.outputs.bench }}
+      ab_chromium: ${{ steps.plan.outputs.ab_chromium }}
+      ab_webkit: ${{ steps.plan.outputs.ab_webkit }}
+      ab_variants: ${{ steps.plan.outputs.ab_variants }}
+      ab_scales: ${{ steps.plan.outputs.ab_scales }}
+      ab_reps: ${{ steps.plan.outputs.ab_reps }}
+      ab_rounds: ${{ steps.plan.outputs.ab_rounds }}
+      soak: ${{ steps.plan.outputs.soak }}
+      soaks: ${{ steps.plan.outputs.soaks }}
+      soak_scale: ${{ steps.plan.outputs.soak_scale }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          python3 -I -c 'import json,sys
+          plan = json.load(open("tools/pixel-path/ci/plan.json"))
+          for key, value in plan.items():
+              if key != "comment":
+                  print(f"{key}={str(value).lower() if isinstance(value, bool) else value}")' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   bench:
+    needs: plan
+    if: needs.plan.outputs.bench == 'true'
     permissions: { contents: write, actions: read }
     uses: ./.github/workflows/linux-engine-bench.yml
     with:
@@ -64,8 +95,8 @@ jobs:
           echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"
 
   ab-chromium:
-    needs: zen-source
-    if: needs.zen-source.outputs.run_id != ''
+    needs: [plan, zen-source]
+    if: needs.plan.outputs.ab_chromium == 'true' && needs.zen-source.outputs.run_id != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     permissions:
@@ -118,9 +149,14 @@ jobs:
         with:
           path: /home/runner/axiosozo-build/cef/*.tar.bz2
           key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-perf
-      - name: A/B (base vs cand, alternating rounds, 1x and 2x)
+      - name: A/B (base vs candidate variants, alternating rounds)
+        env:
+          VARIANTS: ${{ needs.plan.outputs.ab_variants }}
+          SCALES: ${{ needs.plan.outputs.ab_scales }}
+          REPS: ${{ needs.plan.outputs.ab_reps }}
+          ROUNDS: ${{ needs.plan.outputs.ab_rounds }}
         run: |
-          REPS="$AB_REPS" ROUNDS="$AB_ROUNDS" timeout 8000 bash tools/pixel-path/ci/zen_ab.sh chromium "$RUNNER_TEMP/base" "$PWD" "$EVIDENCE_OUT/ab"
+          timeout 8000 bash tools/pixel-path/ci/zen_ab.sh chromium "$RUNNER_TEMP/base" "$PWD" "$EVIDENCE_OUT/ab"
       - name: Save pinned CEF archive
         if: always() && hashFiles('/home/runner/axiosozo-build/cef/*.tar.bz2') != ''
         continue-on-error: true
@@ -140,8 +176,8 @@ jobs:
           name: ab-chromium
 
   ab-webkit:
-    needs: zen-source
-    if: needs.zen-source.outputs.run_id != ''
+    needs: [plan, zen-source]
+    if: needs.plan.outputs.ab_webkit == 'true' && needs.zen-source.outputs.run_id != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     permissions:
@@ -150,6 +186,10 @@ jobs:
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-ab-webkit
       ZEN_RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+      VARIANTS: ${{ needs.plan.outputs.ab_variants }}
+      SCALES: ${{ needs.plan.outputs.ab_scales }}
+      REPS: ${{ needs.plan.outputs.ab_reps }}
+      ROUNDS: ${{ needs.plan.outputs.ab_rounds }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -178,7 +218,7 @@ jobs:
         run: |
           docker pull -q "$WEBKIT_IMAGE"
           start=$(date +%s); set +e
-          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e REPS="$AB_REPS" -e ROUNDS="$AB_ROUNDS" \
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e REPS -e ROUNDS -e VARIANTS -e SCALES \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/base:/base:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
             "$WEBKIT_IMAGE" sh /src/tools/pixel-path/ci/zen_ab_webkit_container.sh
@@ -196,3 +236,58 @@ jobs:
         with:
           path: ${{ env.EVIDENCE_OUT }}
           name: ab-webkit
+
+  soak:
+    needs: [plan, zen-source]
+    if: needs.plan.outputs.soak == 'true' && needs.zen-source.outputs.run_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      actions: read
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-soak
+      ZEN_RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+      SOAKS: ${{ needs.plan.outputs.soaks }}
+      SCALE: ${{ needs.plan.outputs.soak_scale }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record trees
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          echo '{"cand":"'"$(git rev-parse --short HEAD)"'","zen_artifact":${{ toJSON(needs.zen-source.outputs.artifact) }}}' > "$EVIDENCE_OUT/trees.json"
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap, Chromium's namespace sandbox)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Soak in debian:13 (pinned)
+        run: |
+          docker pull -q "$WEBKIT_IMAGE"
+          start=$(date +%s); set +e
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e SOAKS -e SCALE \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
+            "$WEBKIT_IMAGE" sh /src/tools/pixel-path/ci/soak_container.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/job.json"
+          tail -n 60 "$EVIDENCE_OUT/container.log" 2>/dev/null
+          exit $code
+      - name: Keep evidence small
+        if: always()
+        run: |
+          for f in "$EVIDENCE_OUT"/*/soak-*.md; do [ -f "$f" ] && cat "$f" >> "$GITHUB_STEP_SUMMARY"; done
+          sudo find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; sudo find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: soak
