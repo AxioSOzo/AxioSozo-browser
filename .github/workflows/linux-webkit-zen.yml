@@ -22,7 +22,7 @@
 name: linux-webkit-zen
 on:
   push:
-    branches: [cloud/webkit-zen, cloud/perf-pixel-path]   # the PR branch; its mirror claude/webkit-zen-engine-b4zzio does not run twice
+    branches: [cloud/webkit-zen, cloud/perf-pixel-path, cloud/webkit-feel]   # PR branches only; their claude/* mirrors do not run twice
     paths:
       - apps/browser/chrome/**
       - apps/browser/tests/**
@@ -35,6 +35,8 @@ on:
       - scripts/gui_test.py
       - scripts/webkit_package.py
       - scripts/webkit_zen_e2e.py
+      - scripts/webkit_feel_e2e.py
+      - tests/fixtures/webkit-feel.html
       - scripts/webkit_zen_container.sh
       - upstreams.lock.json
       - .github/workflows/linux-webkit-zen.yml
@@ -86,7 +88,7 @@ jobs:
           set -o pipefail
           cargo test -p browser-core 2>&1 | tee "$EVIDENCE_OUT/cargo-test.log"
       - name: Python syntax of the WebKit GUI pieces
-        run: python3 -m py_compile scripts/gui_engines/webkit.py scripts/webkit_zen_e2e.py scripts/webkit_package.py && sh -n scripts/webkit_zen_container.sh
+        run: python3 -m py_compile scripts/gui_engines/webkit.py scripts/webkit_zen_e2e.py scripts/webkit_feel_e2e.py scripts/webkit_package.py && sh -n scripts/webkit_zen_container.sh
       - if: always()
         uses: ./.github/actions/publish-ci-results
         with:
@@ -183,14 +185,14 @@ jobs:
           docker pull -q "$IMAGE"
           start=$(date +%s)
           set +e
-          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e CEF=1 \
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e CEF=1 -e FEEL=1 \
             --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
             -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
             "$IMAGE" sh /src/scripts/webkit_zen_container.sh
           code=$?
           echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start )), \"zen_run_id\": \"$ZEN_RUN_ID\"}" > "$EVIDENCE_OUT/job.json"
           tail -n 40 "$EVIDENCE_OUT/steps.log" 2>/dev/null
-          for f in harness/result.json roundtrip/result.json; do
+          for f in harness/result.json roundtrip/result.json feel/result.json; do
             [ -f "$EVIDENCE_OUT/$f" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[1], d.get("status"), {k: v.get("status") for k, v in d.get("scenarios", {}).items()}, d.get("reason", ""), {k: v.get("reason") for k, v in d.get("scenarios", {}).items() if v.get("reason")})' "$EVIDENCE_OUT/$f"
           done
           exit $code

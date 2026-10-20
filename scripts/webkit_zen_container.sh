@@ -142,7 +142,17 @@ log "round trip Gecko -> WebKit -> Gecko, host failure, three engines (optional)
 as_axio python3 "$REPO/scripts/webkit_zen_e2e.py" --app fetched --evidence-dir "$OUT/roundtrip" \
   >"$OUT/roundtrip.log" 2>&1 || rstatus=$?
 log "roundtrip exit $rstatus"
+fstatus=0
+if [ "${FEEL:-0}" = 1 ]; then
+  # webkit-feel: the native-feel matrix of WebKit tabs (scripts/webkit_feel_e2e.py).
+  log "WebKit feel matrix (dialogs, menus, select, clipboard, IME, find, zoom, cursors, wheel, HiDPI, crash retry)"
+  as_axio python3 "$REPO/scripts/webkit_feel_e2e.py" --app fetched --evidence-dir "$OUT/feel" \
+    >"$OUT/feel.log" 2>&1 || fstatus=$?
+  log "feel exit $fstatus"
+  tail -n 40 "$OUT/feel.log"
+fi
 ps -eo pid,ppid,user,comm,args >"$OUT/ps-after.txt"
 chmod -R a+rX "$OUT"
 [ "$gstatus" = 0 ] || exit "$gstatus"
-exit "$rstatus"
+[ "$rstatus" = 0 ] || exit "$rstatus"
+exit "$fstatus"
