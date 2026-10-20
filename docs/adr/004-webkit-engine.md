@@ -144,7 +144,31 @@ pinned in `upstreams.lock.json` `webkit.upstream`. `linux-webkit-upstream.yml` b
 in the same pinned Debian 13 image (clang, lld, ninja, ccache in the Actions cache) and
 runs the full host suite against the result (`AXIOSOZO_WEBKIT_UPSTREAM_PREFIX`).
 
-UPSTREAM_RESULTS_PLACEHOLDER
+### Upstream build results (Actions run 39296934153, recorded by cloud/webkit-feel)
+
+| Release | Build in pinned debian:13 (4 vCPU, clang + lld, cold ccache) | Host suites against it | Evidence |
+| --- | --- | --- | --- |
+| 2.54.1 (current stable) | PASS: configure 16 s, `ninja -j4` 4756 s (≈ 79 min, 8916 steps), installed to `/usr/local/wpe-upstream` | NOT_VERIFIED: the suite stage stopped in `probe.py setup --apt` (the build-dep step had installed `xdg-dbus-proxy` 0.1.6-1+deb13u3, the pin was deb13u2, and `apt-get` refused the downgrade). Fixed since in `probe.py` (`--allow-downgrades`, pin now deb13u3); re-run from cloud/webkit-feel, see below | `ci-results:cloud_webkit-host/39296934153-1-build-upstream/` (`build-time.json`, `ninja-tail.log`, `setup-snapshot.log`) |
+| 2.52.6 (previous stable series) | PASS: configure 28 s, build 15850 s (≈ 4 h 24 min, 9288 steps; WebCoreTestSupport built too) | NOT_VERIFIED (same setup failure) | `ci-results:cloud_webkit-host/39296934153-1-build-upstream.previous_stable/` |
+
+Both builds used `-DENABLE_WPE_LEGACY_API=ON -DENABLE_BUBBLEWRAP_SANDBOX=ON` (the libwpe +
+WPEBackend-fdo path the host uses, sandbox on), Debian 13's own build dependencies plus the
+extra `-dev` packages listed in `build-extra-deps.txt`, and the sha256-pinned tarballs of
+`webkit.upstream`. ccache started empty (0 % hits), so the times are cold-build times.
+
+UPSTREAM_RERUN_PLACEHOLDER
+
+**Recommendation for a maintained pin.** Move the product pin to the **2.54.x stable series**,
+built from the official wpewebkit.org tarball (sha256 from the release's `.sums`, as in
+`webkit.upstream`), and track its point releases: WebKitGTK/WPE publish security advisories
+(WSA) against the current stable series only, and Debian 13's 2.48.3 had received none of them
+on 2026-10-18. Reasons not to stay on 2.52.x: it is the previous series (fixes stop when 2.56
+ships) and it builds ~3× slower here. Keep the Debian 13 2.48.3 packages as the **fixture** pin
+(component tests, Zen E2E) until a 2.54.x build passes the full host suite and the Zen E2E;
+then switch `webkit.version` and the Zen-side identity check together. A source build must be
+cached (ccache in the Actions cache, ~1.5 GB for 2.54.1) or packaged as a pinned artifact;
+a cold build costs ~80 min per change of pin. Web mode stays off regardless until the
+gates in docs/CAPABILITY_MATRIX.md pass.
 
 ## Verification status (2026-10-19)
 
