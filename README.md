@@ -1,22 +1,64 @@
 <img src="assets/brand/browser-logo-v1/axiosozo-browser-icon-v1-1024.png" alt="AxioSozo browser logo" width="128" align="right">
 
-# AxioSozo browser — handoff 1
+# AxioSozo browser
 
-The [26 September continuation](docs/PROVIDER_ENGINE_PROGRESS.md) adds direct
-provider conversation wiring, per-tab Chromium web-mode code, lazy process startup
-and simpler Zen defaults. Approved live checks stopped before model requests:
-Codex needs login for its separate profile and Claude authentication is unavailable
-under confinement. The CEF Keychain runtime gate also remains unresolved; this is
-a development prototype.
+AxioSozo is a Zen (Firefox/Gecko) fork. **Zen/Gecko is the application.** Two more web
+engines can render a tab, each out of process and presented inside Zen's own content area
+(no Electron, iframe, UA spoofing or external engine window):
 
-**PARTIAL_ENGINE_BLOCKED; not READY.** The custom Zen/Firefox app builds and runs
-on macOS Apple Silicon. Its experimental CEF surface has rendered real Chromium
-frames and accepted input in the same window in earlier fixture runs. The current
-runtime is blocked on a shared Keychain request; general browsing, safety and
-accessibility flows still need validation.
-See [current status](docs/SETUP_STATUS.md) for the exact scope and remaining gates.
-The raw development evidence contains machine-specific logs and stays local;
-[the evidence note](docs/evidence/README.md) explains this public-source boundary.
+| Engine | How it runs | macOS (Apple silicon) | Linux (x86_64) |
+| --- | --- | --- | --- |
+| Gecko | Zen itself | builds and runs | builds, runs, GUI harness PASS |
+| Chromium | sandboxed CEF 154 host (`native/chromium-host`) | IOSurface zero-copy view (engine-surface-v1) | AXCF frames over a pipe / sealed memfd, native frame receiver; E1/E2 + feel matrix PASS in CI (fixture and loopback web) |
+| WebKit | WPE WebKit 2.48.3 host in bubblewrap (Linux); WKWebView host (macOS) | host component PASS; **in-Zen E2E NOT_VERIFIED** | fixture page only, E2E + feel matrix PASS in CI (EXPERIMENTAL) |
+
+**Not READY.** This is a development prototype. Chromium web mode is behind a developer gate,
+WebKit is fixture-only, macOS E1/E2 for WebKit has not been run, and nothing here was verified on
+GPU machines. Exact per-engine status with run ids: [capability matrix](docs/CAPABILITY_MATRIX.md),
+[setup status](docs/SETUP_STATUS.md) and the [cloud program summary](docs/CLOUD_PROGRAM_SUMMARY.md)
+(Linux, WebKit, native feel, performance; evidence index and known gaps). Security review of the
+cloud work: [docs/SECURITY_REVIEW_CLOUD.md](docs/SECURITY_REVIEW_CLOUD.md).
+
+Earlier macOS milestones: the [26 September continuation](docs/PROVIDER_ENGINE_PROGRESS.md) adds
+direct provider conversation wiring, per-tab Chromium web-mode code, lazy process startup and
+simpler Zen defaults; live provider checks stopped before model requests, and the CEF Keychain
+runtime gate remained unresolved on the owner's Mac. The raw development evidence contains
+machine-specific logs and stays local; [the evidence note](docs/evidence/README.md) explains this
+public-source boundary.
+
+## Linux (Ubuntu 24.04 x86_64)
+
+Details: [docs/LINUX.md](docs/LINUX.md). Build output goes to `$AXIOSOZO_BUILD_ROOT` (or the
+gitignored `.build/`); there is no volume to mount.
+
+```sh
+sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py test build gui)
+export AXIOSOZO_BUILD_ROOT=$HOME/axiosozo-build      # optional
+./dev doctor
+./dev setup --only cargo,tools,provider
+./dev check && ./dev test
+AXIOSOZO_SCCACHE=1 ./dev setup --only zen             # full Zen build (cold ~1h40 on 4 cores)
+./dev gui-test --engine gecko --scenario all --screenshot out.png
+```
+
+Chromium on Linux: `python3 native/chromium-host/probe.py setup`, then
+`python3 native/chromium-host/probe.py install-sandbox` (sudo; only where unprivileged user
+namespaces are blocked, e.g. Ubuntu's AppArmor default) and `probe.py check`. The in-Zen Chromium
+runs on Linux are driven by `scripts/cef_zen_e2e.py --app fetched --mode fixture|web` (it sets the
+developer gates and a throwaway profile; "Open in → Chromium" in the tab context menu); the
+interactive `./dev engine-probe` / `./dev web-probe` launchers were not exercised on Linux by the
+cloud program (NOT_VERIFIED). WebKit on Linux needs the Debian 13 WPE pins (`native/webkit-host/probe.py setup`,
+run in the pinned debian:13 container on CI), `AXIOSOZO_WEBKIT_BINARY=$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost`
+and the profile pref `axiosozo.engines.webkit.enabled=true`; it then appears as "Open in → WebKit"
+for the local test page only (`scripts/webkit_zen_e2e.py`, `scripts/webkit_package.py`). Instead of building Zen, a CI-built app can be fetched:
+`./dev fetch-build` (docs/LINUX.md).
+
+CI (GitHub Actions, results on the `ci-results` branch): `linux-ci` (check/test), `linux-zen-build`
+/ `linux-perf-build` (the app), `linux-gui`, `linux-cef-host`, `linux-cef-zen`, `linux-webkit-host`,
+`linux-webkit-zen`, `linux-gecko-feel`, `linux-perf` (A/B + soak), `macos-ci` (macOS regression
+lane), `macos-webkit-host`. They run on pushes to `cloud/integration` and `dev` and on PRs into them.
+
+## macOS (Apple silicon, owner layout)
 
 From this project folder, the development contract is:
 
@@ -65,6 +107,13 @@ archive hashes; network-enabled setup fetches only verified upstream URLs.
 | `./dev provider-test claude-code --authorized` | Approved fixed diagnostic only; authentication is unavailable under confinement |
 | `./dev provider-test antigravity --authorized` | Reports unsupported startup isolation; no live request |
 | `./dev jev-test` | Optional synthetic decision diagnostic; key and explicit authorization required |
+
+Switching a tab's engine: right-click the tab → **Open in** → Chromium / WebKit / Firefox (with
+only Chromium configured the item reads "Open in Chromium"). On macOS, WebKit additionally needs
+the host built (`native/webkit-host/mac/build.sh <build root>/webkit`),
+`AXIOSOZO_WEBKIT_BINARY=<build root>/webkit/AxioWebKitMacHost` exported before `./dev engine-probe`,
+and `axiosozo.engines.webkit.enabled=true` in that profile (fixture page only; steps in
+[docs/CLOUD_PROGRAM_SUMMARY.md](docs/CLOUD_PROGRAM_SUMMARY.md#owner-verification-on-the-mac)).
 
 In the 23 September baseline, CEF154's signed native host passed E0 with 26 real OSR frames, input, 2× Retina
 resize, local GET navigation/back and clean shutdown. The authenticated AXCF pipe
