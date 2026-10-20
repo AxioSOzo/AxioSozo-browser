@@ -144,7 +144,53 @@ pinned in `upstreams.lock.json` `webkit.upstream`. `linux-webkit-upstream.yml` b
 in the same pinned Debian 13 image (clang, lld, ninja, ccache in the Actions cache) and
 runs the full host suite against the result (`AXIOSOZO_WEBKIT_UPSTREAM_PREFIX`).
 
-UPSTREAM_RESULTS_PLACEHOLDER
+### Upstream build results (Actions run 39296934153, recorded by cloud/webkit-feel)
+
+| Release | Build in pinned debian:13 (4 vCPU, clang + lld, cold ccache) | Host suites against it | Evidence |
+| --- | --- | --- | --- |
+| 2.54.1 (current stable) | PASS: configure 16 s, `ninja -j4` 4756 s (≈ 79 min, 8916 steps), installed to `/usr/local/wpe-upstream` | NOT_VERIFIED: the suite stage stopped in `probe.py setup --apt` (the build-dep step had installed `xdg-dbus-proxy` 0.1.6-1+deb13u3, the pin was deb13u2, and `apt-get` refused the downgrade). Fixed since in `probe.py` (`--allow-downgrades`, pin now deb13u3); re-run from cloud/webkit-feel, see below | `ci-results:cloud_webkit-host/39296934153-1-build-upstream/` (`build-time.json`, `ninja-tail.log`, `setup-snapshot.log`) |
+| 2.52.6 (previous stable series) | PASS: configure 28 s, build 15850 s (≈ 4 h 24 min, 9288 steps; WebCoreTestSupport built too) | NOT_VERIFIED (same setup failure) | `ci-results:cloud_webkit-host/39296934153-1-build-upstream.previous_stable/` |
+
+Both builds used `-DENABLE_WPE_LEGACY_API=ON -DENABLE_BUBBLEWRAP_SANDBOX=ON` (the libwpe +
+WPEBackend-fdo path the host uses, sandbox on), Debian 13's own build dependencies plus the
+extra `-dev` packages listed in `build-extra-deps.txt`, and the sha256-pinned tarballs of
+`webkit.upstream`. ccache started empty (0 % hits), so the times are cold-build times.
+
+**Re-run (Actions run 39352196059, cloud/webkit-feel, 2.54.1 only).** Build PASS again
+(`build-time.json`: configure 22 s, build 8580 s with a partly warm ccache), setup PASS with the
+deb13u3 pin, `check` PASS, the engine-free suites PASS (unit, fake-engine stream and security).
+The real-WPE suites (stream, input, security) FAIL in the first seconds: `WPEWebProcess` and
+`WPENetworkProcess` could not load `libWPEWebKit-2.0.so.1` (`runs/webkit-wpe-stream-*/stderr.log`).
+The host binary has an RPATH to the prefix, but WebKit's helper processes have none, and
+bubblewrap starts them with a clean environment. This is an install-layout issue of the test
+image, not a WebKit or sandbox defect. Fix in `upstream/build.sh` (commit c17efbef): register the
+prefix with `ldconfig` after the install. The sandbox binds `/etc/ld.so.cache` and `/usr`, so the
+sandbox stays on and unchanged. The next `linux-webkit-upstream` run on cloud/webkit-feel
+verifies it.
+
+**Second re-run (Actions run 39370679848, commit c17efbef).** Build PASS (6006 s, warm ccache),
+the loader cache lists `libWPEWebKit-2.0.so.1` from the prefix, `check` PASS. Against the
+upstream 2.54.1 runtime (`ready.runtime_webkit` "2.54.1", bubblewrap sandbox on):
+`stream_test.py` PASS, `input_test.py` PASS, `stream_security_test.py` PASS, native unit tests PASS.
+`ui_test.py`, the browser-UI suite added by cloud/webkit-feel, FAILs at its double-click step. The
+pointer-up script reports WebKit's own selection (`selection via engine`), but no `text_selection`
+event reached the harness within 10 s (`runs/webkit-wpe-ui-*/`). The same step passes on 2.48.3
+(runs 39376244778, 39375996623). It is not yet diagnosed. It blocks moving the pin, not the
+2.48.3 fixture pin.
+
+**Recommendation for a maintained pin.** Move the product pin to the **2.54.x stable series**,
+built from the official wpewebkit.org tarball (sha256 from the release's `.sums`, as in
+`webkit.upstream`), and track its point releases: WebKitGTK/WPE publish security advisories
+(WSA) against the current stable series only, and Debian 13's 2.48.3 had received none of them
+on 2026-10-18. Reasons not to stay on 2.52.x: it is the previous series (fixes stop when 2.56
+ships) and it builds ~3× slower here. Keep the Debian 13 2.48.3 packages as the **fixture** pin
+(component tests, Zen E2E) until a 2.54.x build passes the full host suite and the Zen E2E;
+then switch `webkit.version` and the Zen-side identity check together. Status 2026-10-20: 2.54.1 passes
+stream, input and security (run 39370679848). Before the switch, the `ui_test.py`
+double-click → `text_selection` step must pass, and the Zen E2E must run on 2.54.x. A source build must be
+cached (ccache in the Actions cache, ~1.5 GB for 2.54.1) or packaged as a pinned artifact;
+a cold build costs ~80 min per change of pin. Web mode stays off regardless until the
+gates in docs/CAPABILITY_MATRIX.md pass.
 
 ## Verification status (2026-10-19)
 

@@ -5,7 +5,7 @@
 name: linux-webkit-upstream
 on:
   push:
-    branches: [cloud/webkit-host]
+    branches: [cloud/webkit-host, cloud/webkit-feel]   # webkit-feel re-runs 2.54.1 only (ADR 004 results)
     paths:
       - native/webkit-host/upstream/**
       - .github/workflows/linux-webkit-upstream.yml
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        key: [upstream, upstream.previous_stable]
+        key: ${{ fromJSON(github.ref_name == 'cloud/webkit-feel' && '["upstream"]' || '["upstream", "upstream.previous_stable"]') }}
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
       CCACHE_HOST: ${{ github.workspace }}/../ccache

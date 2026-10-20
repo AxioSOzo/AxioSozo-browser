@@ -24,7 +24,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
+#include <deque>
 #include <map>
+#include <set>
+#include <sys/stat.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
@@ -54,22 +57,204 @@ constexpr int FenceTimeoutMs = 2000;  // pages where the script cannot run still
 // WebKit tells the context when an editable element gains or loses focus; Zen's text
 // (`key` char, `ime_commit_text`) is committed through the `committed` signal, the
 // same path a real input method uses. No preedit yet (capability `ime:false`).
-struct AxioIMContext { WebKitInputMethodContext parent_instance; gboolean focused; };
+// With browser UI (§8.2) Zen's IME composition arrives as preedit (ime_set_composition),
+// shown by WebKit with an underline, and the editable's caret goes back as text_input.
+class WpeView;
+void imFocusChanged(WpeView* owner, WebKitInputMethodContext* context, bool focused);
+void imCursorArea(WpeView* owner, int x, int y, int width, int height);
+struct AxioIMContext {
+  WebKitInputMethodContext parent_instance; gboolean focused;
+  WpeView* owner; std::string* preedit; guint cursor;  // owner nulled on detach
+};
 struct AxioIMContextClass { WebKitInputMethodContextClass parent_class; };
 G_DEFINE_TYPE(AxioIMContext, axio_im_context, WEBKIT_TYPE_INPUT_METHOD_CONTEXT)
-void axio_im_context_init(AxioIMContext* self) { self->focused = FALSE; }
+void axio_im_context_init(AxioIMContext* self) { self->focused = FALSE; self->owner = nullptr; self->preedit = new std::string(); self->cursor = 0; }
 void axio_im_context_class_init(AxioIMContextClass* klass) {
   auto* im = WEBKIT_INPUT_METHOD_CONTEXT_CLASS(klass);
-  im->get_preedit = [](WebKitInputMethodContext*, gchar** text, GList** underlines, guint* cursor) {
-    if (text) *text = g_strdup("");
-    if (underlines) *underlines = nullptr;
-    if (cursor) *cursor = 0;
+  G_OBJECT_CLASS(klass)->finalize = [](GObject* object) {
+    delete reinterpret_cast<AxioIMContext*>(object)->preedit;
+    G_OBJECT_CLASS(axio_im_context_parent_class)->finalize(object);
+  };
+  im->get_preedit = [](WebKitInputMethodContext* c, gchar** text, GList** underlines, guint* cursor) {
+    auto* self = reinterpret_cast<AxioIMContext*>(c);
+    if (text) *text = g_strdup(self->preedit->c_str());
+    if (underlines) {
+      glong length = g_utf8_strlen(self->preedit->c_str(), -1);
+      *underlines = length ? g_list_prepend(nullptr, webkit_input_method_underline_new(0, guint(length))) : nullptr;
+    }
+    if (cursor) *cursor = self->cursor;
   };
   im->filter_key_event = [](WebKitInputMethodContext*, gpointer) -> gboolean { return FALSE; };
-  im->notify_focus_in = [](WebKitInputMethodContext* c) { reinterpret_cast<AxioIMContext*>(c)->focused = TRUE; };
-  im->notify_focus_out = [](WebKitInputMethodContext* c) { reinterpret_cast<AxioIMContext*>(c)->focused = FALSE; };
+  im->notify_focus_in = [](WebKitInputMethodContext* c) {
+    auto* self = reinterpret_cast<AxioIMContext*>(c); self->focused = TRUE;
+    if (self->owner) imFocusChanged(self->owner, c, true);
+  };
+  im->notify_focus_out = [](WebKitInputMethodContext* c) {
+    auto* self = reinterpret_cast<AxioIMContext*>(c); self->focused = FALSE;
+    if (self->owner) imFocusChanged(self->owner, c, false);
+  };
+  im->notify_cursor_area = [](WebKitInputMethodContext* c, int x, int y, int width, int height) {
+    auto* self = reinterpret_cast<AxioIMContext*>(c);
+    if (self->owner) imCursorArea(self->owner, x, y, width, height);
+  };
   im->reset = [](WebKitInputMethodContext*) {};
 }
+
+// ---- Browser UI helpers (§8.2) ---------------------------------------------------------
+// Small functions run in an isolated script world the page cannot see (as the paint fence);
+// they read the selection, the CSS cursor and the declared icon, and never change page state
+// except the selection itself (double/triple click on hosts whose WebKit does not do it).
+constexpr const char* UiWorld = "axiosozo-browser-ui";
+constexpr const char* SelectionFunction = R"JS(
+const a = document.activeElement;
+if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) {
+  if (a.type === 'password') return JSON.stringify({text: '', editable: true, password: true});
+  let text = '';
+  try { if (typeof a.selectionStart === 'number') text = a.value.slice(a.selectionStart, a.selectionEnd); } catch {}
+  return JSON.stringify({text, editable: !a.readOnly && !a.disabled});
+}
+return JSON.stringify({text: String(getSelection()), editable: !!(a && a.isContentEditable)});
+)JS";
+constexpr const char* PointerUpFunction = R"JS(
+let via = 'engine';
+const drag = window.__axioDrag;
+window.__axioDrag = null;
+// WebCore's release puts a caret at the pointer when it saw no drag: restore the dragged selection.
+if (drag && drag.ours) { getSelection().setBaseAndExtent(drag.node, drag.offset, drag.focusNode, drag.focusOffset); via = 'drag-emulated'; }
+const s = getSelection(), a = document.activeElement;
+const field = a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && typeof a.selectionStart === 'number' ? a : null;
+const collapsed = field ? a.selectionStart === a.selectionEnd : s.isCollapsed;
+if (count >= 2 && collapsed) {
+  via = 'emulated';
+  if (field && document.elementFromPoint(x, y) === field) {
+    const v = field.value, word = /[\p{L}\p{N}_]/u;
+    let i = field.selectionStart, j = i;
+    if (count >= 3) { i = 0; j = v.length; }
+    else { while (i > 0 && word.test(v[i - 1])) i--; while (j < v.length && word.test(v[j])) j++; }
+    if (j > i) field.setSelectionRange(i, j);
+  } else if (!field) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (r) {
+      s.collapse(r.startContainer, r.startOffset);
+      if (count >= 3) { s.modify('move', 'backward', 'paragraphboundary'); s.modify('extend', 'forward', 'paragraphboundary'); }
+      else { s.modify('move', 'forward', 'word'); s.modify('extend', 'backward', 'word'); }
+    }
+  }
+}
+let text = '';
+if (field) { if (field.type !== 'password') text = field.value.slice(field.selectionStart, field.selectionEnd); }
+else text = String(getSelection());
+return JSON.stringify({via, text});
+)JS";
+// Selection by dragging: WPE's libwpe event factory gives motion events no button, so WebCore
+// never starts a selection drag. Anchored at the press, extended on each move, over page text
+// only (fields, links and controls keep WebKit's own behaviour); WebKit's own selection wins.
+constexpr const char* DragStartFunction = R"JS(
+window.__axioDrag = null;
+const e = document.elementFromPoint(x, y);
+if (!e || e.closest('input,textarea,select,button,a[href],[draggable="true"]') || e.isContentEditable) return 'skip';
+const r = document.caretRangeFromPoint(x, y);
+if (!r) return 'skip';
+// The press itself collapses the selection to a caret here (WebKit's own press may still be queued).
+getSelection().collapse(r.startContainer, r.startOffset);
+window.__axioDrag = {node: r.startContainer, offset: r.startOffset, ours: false};
+return 'armed';
+)JS";
+constexpr const char* DragMoveFunction = R"JS(
+const d = window.__axioDrag;
+if (!d) return 'none';
+const s = getSelection();
+if (!d.ours && !s.isCollapsed) { window.__axioDrag = null; return 'engine'; }
+const r = document.caretRangeFromPoint(x, y);
+if (!r) return 'none';
+s.setBaseAndExtent(d.node, d.offset, r.startContainer, r.startOffset);
+d.ours = true; d.focusNode = r.startContainer; d.focusOffset = r.startOffset;
+return 'emulated';
+)JS";
+constexpr const char* CursorFunction = R"JS(
+const e = document.elementFromPoint(x, y);
+if (!e) return 'default';
+const value = getComputedStyle(e).cursor || 'auto';
+const keyword = value.split(',').pop().trim();
+if (keyword !== 'auto') return keyword;
+if (e.closest('a[href],area[href]')) return 'pointer';
+const textual = ['', 'text', 'search', 'url', 'tel', 'email', 'password', 'number', 'date', 'time'];
+if (e.isContentEditable || e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && textual.includes(e.getAttribute('type') || ''))) return 'text';
+const r = document.caretRangeFromPoint(x, y);
+if (r && r.startContainer.nodeType === 3) {
+  const range = document.createRange(); range.selectNodeContents(r.startContainer);
+  for (const b of range.getClientRects()) if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return 'text';
+}
+return 'default';
+)JS";
+constexpr const char* FaviconFunction = R"JS(
+const link = document.querySelector('link[rel~="icon" i]');
+const href = link ? link.href : location.origin + '/favicon.ico';
+return await new Promise(resolve => {
+  const image = new Image(), done = value => resolve(value);
+  setTimeout(() => done(''), 3000);
+  image.onload = () => {
+    try { const c = document.createElement('canvas'); c.width = c.height = 32;
+      c.getContext('2d').drawImage(image, 0, 0, 32, 32); done(c.toDataURL('image/png')); } catch { done(''); }
+  };
+  image.onerror = () => done('');
+  image.src = href;
+});
+)JS";
+constexpr const char* FocusAtFunction = R"JS(
+const e = document.elementFromPoint(x, y);
+const editable = e && (e.isContentEditable || e.tagName === 'TEXTAREA' || e.tagName === 'INPUT');
+if (editable && document.activeElement !== e) e.focus();
+return editable ? 'editable' : 'none';
+)JS";
+// WPE 2.48 shows no context menu for libwpe pointer input (no `context-menu` signal), yet an
+// uncancelled contextmenu event makes WebKit wait for a menu that never shows, and then drop
+// every later mouse event. This isolated-world listener (window, bubble phase, registered
+// before any page script) notes whether the page cancelled the trusted event, then cancels it
+// for WebKit; ContextMenuFunction opens Zen's menu instead unless the page cancelled it.
+constexpr const char* ContextWatchScript =
+  "addEventListener('contextmenu', e => { if (!e.isTrusted) return; const prevented = e.defaultPrevented;"
+  " e.preventDefault(); window.__axioContextMenu = {t: performance.now(), prevented}; }, false);";
+constexpr const char* ContextMenuFunction = R"JS(
+let seen = window.__axioContextMenu;
+for (let i = 0; i < 15 && !(seen && performance.now() - seen.t < 1500); i++) {
+  await new Promise(resolve => setTimeout(resolve, 20));
+  seen = window.__axioContextMenu;
+}
+const e = document.elementFromPoint(x, y) || document.documentElement;
+let prevented;
+if (seen && performance.now() - seen.t < 1500) prevented = seen.prevented;
+else prevented = !e.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, composed: true,
+  clientX: x, clientY: y, button: 2, buttons: 2, view: window}));
+window.__axioContextMenu = null;
+if (prevented) return JSON.stringify({prevented: true});
+const link = e.closest('a[href],area[href]'), image = e.closest('img');
+const a = document.activeElement;
+let text = '', editable = !!(e.isContentEditable || e.closest('textarea,input'));
+if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) {
+  if (a.type !== 'password') try { text = a.value.slice(a.selectionStart, a.selectionEnd); } catch {}
+} else text = String(getSelection());
+return JSON.stringify({prevented: false, link: link ? link.href : '', label: link ? link.textContent.trim().slice(0, 128) : '',
+  image: image ? (image.currentSrc || image.src) : '', editable, text});
+)JS";
+const std::set<std::string>& cssCursors() {
+  static const std::set<std::string> cursors{"default", "none", "context-menu", "help", "pointer", "progress", "wait", "cell",
+    "crosshair", "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing", "e-resize",
+    "n-resize", "ne-resize", "nw-resize", "s-resize", "se-resize", "sw-resize", "w-resize", "ew-resize", "ns-resize",
+    "nesw-resize", "nwse-resize", "col-resize", "row-resize", "all-scroll", "zoom-in", "zoom-out"};
+  return cursors;
+}
+// URLs go to Zen whole or not at all (cef-v1): spaces and control characters percent-encoded.
+std::string urlText(const std::string& url) {
+  std::string out;
+  for (unsigned char c : url) {
+    if (c <= 0x20 || c == 0x7F) { char escaped[4]; snprintf(escaped, sizeof escaped, "%%%02X", c); out += escaped; }
+    else out += char(c);
+  }
+  return out;
+}
+bool webLink(const std::string& url) { return url.size() <= 2048 && (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0); }
+bool resourceLink(const std::string& url) { return webLink(url) || ((url.rfind("data:", 0) == 0 || url.rfind("blob:", 0) == 0) && url.size() <= 2048); }
 
 // cef-v1 EVENTFLAG bits carried by `modifiers`.
 constexpr uint32_t FlagShift = 1u << 1, FlagControl = 1u << 2, FlagAlt = 1u << 3, FlagLeft = 1u << 4,
@@ -135,6 +320,7 @@ public:
   void setFocus(bool focused) override {
     if (focused) wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_focused);
     else wpe_view_backend_remove_activity_state(backend_, wpe_view_activity_state_focused);
+    if (focused && host_.browserUI()) later(60, [](WpeView& view) { view.refreshInputMethod(); });
   }
   void setVisible(bool visible) override {
     if (visible) wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_visible);
@@ -144,15 +330,57 @@ public:
   void key(const KeyInput& key) override;
   void mouse(const MouseInput& mouse) override;
   void wheel(const WheelInput& wheel) override;
-  void commitText(const std::string& text) override { commit(text); }
+  void commitText(const std::string& text) override {
+    if (hold([this, text] { commitText(text); })) return;
+    commit(text);
+  }
+  // Editing commands reach the web process directly, while pointer and key events queue in
+  // WebKit's UI process: a command right after a click would overtake it (Ctrl+A selecting
+  // before the click focused the field). Within ButtonSettleUs of a button event the command
+  // waits, and the input behind it waits with it, so the page sees the user's order.
   bool edit(const std::string& action) override {
+    if (hold([this, action] { edit(action); })) return true;
+    gint64 since = g_get_monotonic_time() - lastButtonUs_;
+    if (host_.browserUI() && since >= 0 && since < ButtonSettleUs) {
+      holding_ = true;
+      heldInput_.push_back([this, action] { runEdit(action); });
+      later(int((ButtonSettleUs - since) / 1000) + 1, [](WpeView& view) { view.releaseHeld(); });
+      return true;
+    }
+    return runEdit(action);
+  }
+  bool runEdit(const std::string& action) {
+    // §8.2: WebKit's own pasteboard is private to this host; Zen's clipboard gets the text.
+    if (host_.browserUI() && (action == "copy" || action == "cut")) {
+      clipboardThen(action == "copy" ? WEBKIT_EDITING_COMMAND_COPY : WEBKIT_EDITING_COMMAND_CUT); return true;
+    }
     static const std::map<std::string, const char*> commands{
       {"copy", WEBKIT_EDITING_COMMAND_COPY}, {"cut", WEBKIT_EDITING_COMMAND_CUT}, {"paste", WEBKIT_EDITING_COMMAND_PASTE},
       {"select_all", WEBKIT_EDITING_COMMAND_SELECT_ALL}, {"undo", WEBKIT_EDITING_COMMAND_UNDO}, {"redo", WEBKIT_EDITING_COMMAND_REDO}};
     webkit_web_view_execute_editing_command(view_, commands.at(action));
+    if (host_.browserUI() && action == "select_all") selectionToPrimary(-1, -1, 0);
     return true;
   }
   void close() override { detach(); host_.viewClosed(&tab_); }
+  // §8.2 browser UI.
+  void promptReply(const std::string& id, const std::string& method, const Value& command) override;
+  void promptDefault(const std::string& id) override;
+  bool uiCommand(const std::string& method, const Value& command) override;
+  bool scriptDialog(WebKitScriptDialog* dialog);
+  void contextMenu(WebKitHitTestResult* hit);
+  void contextMenuFallback(double x, double y);
+  struct MenuInfo { std::string link, label, image, selection; bool editable = false; };
+  void openContextMenu(const MenuInfo& info, double x, double y);
+  bool optionMenu(WebKitOptionMenu* menu, WebKitRectangle* rectangle);
+  bool permission(WebKitPermissionRequest* request);
+  bool fileChooser(WebKitFileChooserRequest* request);
+  void optionMenuClosed(WebKitOptionMenu* menu);
+  void findResult(guint count, bool found);
+  void countedMatches(guint count);
+  void imFocus(WebKitInputMethodContext* context, bool focused);
+  void imCursor(int x, int y, int width, int height);
+  void hovered();
+  void dragMove();
 
   // Called by the backend box on the UI thread.
   void exported(struct wpe_fdo_shm_exported_buffer* buffer);
@@ -184,8 +412,62 @@ private:
   uint32_t buttons_ = 0;          // wpe pointer button modifier mask while pressed
   std::string downText_;          // text the last keydown already inserted
   bool loadFailed_ = false, tlsFailed_ = false, detached_ = false;
+  // §8.2 state. Async script answers reach the view only through `life_` (nulled on detach).
+  struct Life { WpeView* view; };
+  std::shared_ptr<Life> life_ = std::make_shared<Life>(Life{this});
+  struct Native {
+    std::string kind;
+    WebKitScriptDialog* dialog = nullptr; WebKitOptionMenu* menu = nullptr; gulong menuClose = 0;
+    WebKitPermissionRequest* permission = nullptr; WebKitFileChooserRequest* chooser = nullptr; bool multiple = false;
+  };
+  std::map<std::string, Native> natives_;
+  double pointerX_ = 0, pointerY_ = 0, contextX_ = 0, contextY_ = 0;  // CSS px
+  bool composing_ = false, cursorQuery_ = false, cursorDirty_ = false, contextSignaled_ = false;
+  bool dragArmed_ = false, dragQuery_ = false, dragDirty_ = false;
+  static constexpr gint64 ButtonSettleUs = 80000;
+  gint64 lastButtonUs_ = 0;
+  bool holding_ = false;
+  std::deque<std::function<void()>> heldInput_;
+  bool hold(std::function<void()> run) {
+    if (!holding_) return false;
+    heldInput_.push_back(std::move(run));
+    return true;
+  }
+  void releaseHeld() {
+    holding_ = false;
+    std::deque<std::function<void()>> runs;
+    runs.swap(heldInput_);
+    // An input that starts a new hold keeps the rest behind it, in order.
+    while (!runs.empty()) {
+      auto run = std::move(runs.front()); runs.pop_front();
+      if (holding_) heldInput_.push_back(std::move(run)); else run();
+    }
+  }
+  std::string lastSelection_;
+  std::string findText_; guint findCount_ = 0, findActive_ = 0, findIdentifier_ = 0; bool findCounted_ = false, findFound_ = false;
+  bool findPending_ = false, findForward_ = true;
+  std::string textMode_ = "none"; int caret_[4] = {0, 0, 0, 0};
+  using ScriptDone = std::function<void(WpeView&, const std::string&)>;
+  void script(const char* body, GVariant* arguments, ScriptDone done);
+  void later(int ms, std::function<void(WpeView&)> run);
+  GVariant* point(double x, double y, int count = 0);
+  void releaseNative(Native& native);
+  void emitTextInput();
+  // The page's editable can keep focus while WebKit's input-method context does not get it
+  // back (a refocused view, a click into the already focused field). Re-attaching the context
+  // makes WebKit announce its current state again: focus-in for an editable, nothing otherwise.
+  void refreshInputMethod() {
+    if (!im_ || !view_ || im_->focused) return;
+    webkit_web_view_set_input_method_context(view_, nullptr);
+    webkit_web_view_set_input_method_context(view_, WEBKIT_INPUT_METHOD_CONTEXT(im_));
+  }
+  void selectionToPrimary(double x, double y, int count);
+  void clipboardThen(const char* command);
+  void setPreedit(const std::string& text, guint cursor);
+  void finishPreedit();
 
   void detach();
+  void promptDefaultNative(Native& native);
   void scheduleFrameComplete();
   void commit(const std::string& text);
   void typeCodepoint(uint32_t codepoint, uint32_t modifiers);
@@ -233,6 +515,7 @@ public:
   }
   Object capabilities() override { return Object{}; }
   std::string engineName() override { return "webkit"; }
+  bool browserUI() override { return true; }
 
   WpeView* viewFor(WebKitWebView* view) { auto f = views_.find(view); return f == views_.end() ? nullptr : f->second; }
   void track(WebKitWebView* view, WpeView* owner) { if (owner) views_[view] = owner; else views_.erase(view); }
@@ -280,6 +563,12 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
     delete box;
   }, box_);
   content_ = engine_.newContentManager();
+  if (host_.browserUI()) {
+    WebKitUserScript* watch = webkit_user_script_new_for_world(ContextWatchScript, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                                                               WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, UiWorld, nullptr, nullptr);
+    webkit_user_content_manager_add_script(content_, watch);
+    webkit_user_script_unref(watch);
+  }
   view_ = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend, "web-context", engine_.context(),
                                        "network-session", engine_.session(), "settings", engine_.settings(),
                                        "user-content-manager", content_, nullptr));
@@ -290,6 +579,7 @@ bool WpeView::create(int width, int height, double scale, int frameRate) {
   wpe_view_backend_dispatch_set_size(backend_, uint32_t(width), uint32_t(height));
   wpe_view_backend_add_activity_state(backend_, wpe_view_activity_state_visible | wpe_view_activity_state_in_window);
   im_ = static_cast<AxioIMContext*>(g_object_new(axio_im_context_get_type(), nullptr));
+  im_->owner = this;
   webkit_web_view_set_input_method_context(view_, WEBKIT_INPUT_METHOD_CONTEXT(im_));
   engine_.track(view_, this);
   connect();
@@ -302,6 +592,10 @@ void WpeView::detach() {
   if (frameTimer_) { g_source_remove(frameTimer_); frameTimer_ = 0; }
   if (fenceTimer_) { g_source_remove(fenceTimer_); fenceTimer_ = 0; }
   if (fenceCall_) { fenceCall_->owner = nullptr; fenceCall_ = nullptr; }
+  life_->view = nullptr;
+  for (auto& item : natives_) { Native& native = item.second; promptDefaultNative(native); }
+  natives_.clear();
+  if (im_) im_->owner = nullptr;
   if (box_) box_->owner = nullptr;  // late backend callbacks only release buffers
   if (view_) {
     engine_.track(view_, nullptr);
@@ -364,6 +658,11 @@ void WpeView::fenceMessage(const std::string& href) {
 }
 
 void WpeView::finished() {
+  if (host_.browserUI() && view_) script(FaviconFunction, nullptr, [](WpeView& view, const std::string& icon) {
+    // cef-v1 favicon rule: a 32 px PNG data URL of at most 5400 bytes, else "".
+    bool png = icon.rfind("data:image/png;base64,", 0) == 0 && icon.size() <= 22 + 7200;
+    view.host_.uiEvent(&view.tab_, "favicon", Object{{"icon", png ? icon : std::string()}});
+  });
   if (fenced_ || fenceTimer_ || !view_) return;
   fenceCall_ = new FenceCall{this};
   webkit_web_view_call_async_javascript_function(view_, FenceFunction, -1, nullptr, FenceWorld, nullptr, nullptr,
@@ -415,12 +714,17 @@ void WpeView::typeCodepoint(uint32_t codepoint, uint32_t modifiers) {
 }
 
 void WpeView::commit(const std::string& text) {
-  if (im_ && im_->focused) { g_signal_emit_by_name(im_, "committed", text.c_str()); return; }
+  if (im_ && im_->focused) {
+    g_signal_emit_by_name(im_, "committed", text.c_str());
+    if (composing_) finishPreedit();  // GTK input-method order: commit, empty preedit, preedit end
+    return;
+  }
   // No focused editable: deliver the characters as key presses.
   for (uint32_t codepoint : json::codepoints(text)) typeCodepoint(codepoint, 0);
 }
 
 void WpeView::key(const KeyInput& key) {
+  if (hold([this, key] { this->key(key); })) return;
   uint32_t modifiers = keyboardModifiers(key.modifiers);
   if (key.type == "char") {
     // CEF-style down/char/up: the keydown already inserted its own printable text.
@@ -443,15 +747,20 @@ void WpeView::key(const KeyInput& key) {
     if (textual) { char utf8[8] = {}; g_unichar_to_utf8(gunichar(produced), utf8); downText_ = utf8; }
   }
   wpe_view_backend_dispatch_keyboard_event(backend_, &event);
+  if (host_.browserUI() && !event.pressed && (key.modifiers & FlagShift)) selectionToPrimary(-1, -1, 0);
 }
 
 void WpeView::mouse(const MouseInput& mouse) {
+  if (hold([this, mouse] { this->mouse(mouse); })) return;
+  if (mouse.type == "down" || mouse.type == "up") lastButtonUs_ = g_get_monotonic_time();
   // libwpe buttons follow evdev order: 1 left, 2 right, 3 middle.
   uint32_t button = mouse.button == "left" ? 1 : mouse.button == "right" ? 2 : 3;
   uint32_t mask = button == 1 ? wpe_input_pointer_modifier_button1 : button == 2 ? wpe_input_pointer_modifier_button2 : wpe_input_pointer_modifier_button3;
   struct wpe_input_pointer_event event {};
   // cef-v1 coordinates are CSS (view) pixels; WebKit divides libwpe's by the device scale.
   event.time = nowMs(); event.x = int(std::lround(mouse.x * scale_)); event.y = int(std::lround(mouse.y * scale_));
+  pointerX_ = mouse.x; pointerY_ = mouse.y;
+  if (mouse.type == "down" && button == 2) { contextX_ = mouse.x; contextY_ = mouse.y; contextSignaled_ = false; }
   if (mouse.type == "move") {
     // Buttons held per cef-v1 flags or by an earlier `down` make this a drag.
     uint32_t held = buttons_;
@@ -460,6 +769,11 @@ void WpeView::mouse(const MouseInput& mouse) {
     if (mouse.modifiers & FlagMiddle) held |= wpe_input_pointer_modifier_button3;
     event.type = wpe_input_pointer_event_type_motion;
     event.modifiers = keyboardModifiers(mouse.modifiers) | held;
+    // WPE's event factory takes the WebKit button from `button` for motion too: without it a
+    // drag is a plain move to WebCore (no text selection by dragging).
+    if (held & wpe_input_pointer_modifier_button1) event.button = 1;
+    else if (held & wpe_input_pointer_modifier_button2) event.button = 2;
+    else if (held & wpe_input_pointer_modifier_button3) event.button = 3;
   } else {
     bool pressed = mouse.type == "down";
     if (pressed) buttons_ |= mask; else buttons_ &= ~mask;
@@ -467,9 +781,30 @@ void WpeView::mouse(const MouseInput& mouse) {
     event.modifiers = keyboardModifiers(mouse.modifiers) | buttons_;
   }
   wpe_view_backend_dispatch_pointer_event(backend_, &event);
+  // WebKit reports a new hit test only when its context changes; the CSS cursor can change on any move.
+  if (host_.browserUI() && mouse.type == "move") {
+    hovered();
+    if (dragArmed_ && (buttons_ & wpe_input_pointer_modifier_button1)) dragMove();
+  }
+  if (host_.browserUI() && button == 1 && mouse.type == "down" && mouse.clickCount == 1) {
+    dragArmed_ = true;
+    script(DragStartFunction, point(mouse.x, mouse.y), [](WpeView&, const std::string& answer) { AXIO_TRACE("drag %s", answer.c_str()); });
+  }
+  if (button == 1 && mouse.type == "up") dragArmed_ = false;
+  // A finished left click or drag may have selected text: X11 PRIMARY (§8.2).
+  if (host_.browserUI() && mouse.type == "up" && button == 1) {
+    selectionToPrimary(mouse.x, mouse.y, mouse.clickCount);
+    later(120, [](WpeView& view) { view.refreshInputMethod(); });
+  }
+  // A right press opens the context menu (the engine's own signal if it fires, else the fallback).
+  if (host_.browserUI() && mouse.type == "down" && button == 2) {
+    double x = mouse.x, y = mouse.y;
+    later(30, [x, y](WpeView& view) { if (!view.contextSignaled_) view.contextMenuFallback(x, y); });
+  }
 }
 
 void WpeView::wheel(const WheelInput& wheel) {
+  if (hold([this, wheel] { this->wheel(wheel); })) return;
   // Pixel deltas as a smooth 2D axis event. cef-v1 delta_y < 0 scrolls down. WebKit's WPE
   // event factory reports DOM deltaY = -y_axis / device_scale (measured, CI run 39295936869:
   // y_axis +400 at 2x gave deltaY -200), so the cef-v1 CSS-pixel delta is sent scaled, same sign.
@@ -500,7 +835,7 @@ void WpeView::connect() {
     const char* uri = webkit_web_view_get_uri(v);
     std::string url = uri ? uri : "";
     AXIO_TRACE("load-changed %d %s", int(event), url.c_str());
-    if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; }
+    if (event == WEBKIT_LOAD_STARTED) { view->loadFailed_ = false; view->tlsFailed_ = false; view->host_.navigationStarting(&view->tab_); }
     else if (event == WEBKIT_LOAD_COMMITTED) { view->committed(); view->host_.loadCommitted(&view->tab_, url); }
     else if (event == WEBKIT_LOAD_FINISHED && !view->loadFailed_) {
       view->finished();
@@ -540,7 +875,13 @@ void WpeView::connect() {
     const char* method = webkit_uri_request_get_http_method(request);
     // WebKit reports a null method for history loads of GET entries.
     std::string verb = method ? method : "GET";
-    if (view->host_.navigationPolicy(&view->tab_, uri ? uri : "", verb)) webkit_policy_decision_use(decision);
+    // A data:/blob: main-frame "navigation" is a download link (top-level data: navigation is blocked
+    // by browsers anyway): refused as a download, so Zen says so.
+    std::string target = uri ? uri : "";
+    if (view->host_.browserUI() && (target.rfind("data:", 0) == 0 || target.rfind("blob:", 0) == 0)) {
+      view->host_.denied(&view->tab_, "download_denied"); webkit_policy_decision_ignore(decision); return TRUE;
+    }
+    if (view->host_.navigationPolicy(&view->tab_, target, verb)) webkit_policy_decision_use(decision);
     else webkit_policy_decision_ignore(decision);
     return TRUE;
   }), this);
@@ -549,28 +890,43 @@ void WpeView::connect() {
     return nullptr;  // never a native window
   }), this);
   g_signal_connect(view_, "permission-request", G_CALLBACK(+[](WebKitWebView*, WebKitPermissionRequest* request, gpointer d) -> gboolean {
+    if (self(d)->host_.browserUI()) return self(d)->permission(request);
     webkit_permission_request_deny(request);
     self(d)->host_.denied(&self(d)->tab_, "permission_denied");
     return TRUE;
   }), this);
-  g_signal_connect(view_, "script-dialog", G_CALLBACK(+[](WebKitWebView*, WebKitScriptDialog*, gpointer d) -> gboolean {
+  g_signal_connect(view_, "script-dialog", G_CALLBACK(+[](WebKitWebView*, WebKitScriptDialog* dialog, gpointer d) -> gboolean {
+    if (self(d)->host_.browserUI()) return self(d)->scriptDialog(dialog);
     self(d)->host_.denied(&self(d)->tab_, "javascript_dialog_unavailable");
     return TRUE;  // closed with its safe default (cancel / false / empty)
   }), this);
   g_signal_connect(view_, "run-file-chooser", G_CALLBACK(+[](WebKitWebView*, WebKitFileChooserRequest* request, gpointer d) -> gboolean {
+    if (self(d)->host_.browserUI()) return self(d)->fileChooser(request);
     webkit_file_chooser_request_cancel(request);
     self(d)->host_.denied(&self(d)->tab_, "file_dialog_unavailable");
     return TRUE;
   }), this);
+  g_signal_connect(view_, "show-option-menu", G_CALLBACK(+[](WebKitWebView*, WebKitOptionMenu* menu, WebKitRectangle* rectangle, gpointer d) -> gboolean {
+    return self(d)->host_.browserUI() ? self(d)->optionMenu(menu, rectangle) : FALSE;
+  }), this);
+  WebKitFindController* finder = webkit_web_view_get_find_controller(view_);
+  g_signal_connect(finder, "found-text", G_CALLBACK(+[](WebKitFindController*, guint count, gpointer d) { self(d)->findResult(count, true); }), this);
+  g_signal_connect(finder, "failed-to-find-text", G_CALLBACK(+[](WebKitFindController*, gpointer d) { self(d)->findResult(0, false); }), this);
+  g_signal_connect(finder, "counted-matches", G_CALLBACK(+[](WebKitFindController*, guint count, gpointer d) { self(d)->countedMatches(count); }), this);
   g_signal_connect(view_, "authenticate", G_CALLBACK(+[](WebKitWebView*, WebKitAuthenticationRequest* request, gpointer d) -> gboolean {
     webkit_authentication_request_cancel(request);
     self(d)->host_.denied(&self(d)->tab_, "http_auth_unavailable");
     return TRUE;
   }), this);
-  g_signal_connect(view_, "context-menu", G_CALLBACK(+[](WebKitWebView*, gpointer, gpointer, gpointer) -> gboolean { return TRUE; }), this);
+  g_signal_connect(view_, "context-menu", G_CALLBACK(+[](WebKitWebView*, WebKitContextMenu*, WebKitHitTestResult* hit, gpointer d) -> gboolean {
+    if (self(d)->host_.browserUI()) self(d)->contextMenu(hit);
+    return TRUE;  // WebKit never draws a menu; Zen does (§8.2)
+  }), this);
   g_signal_connect(view_, "show-notification", G_CALLBACK(+[](WebKitWebView*, gpointer, gpointer) -> gboolean { return TRUE; }), this);
   g_signal_connect(view_, "enter-fullscreen", G_CALLBACK(+[](WebKitWebView*, gpointer) -> gboolean { return TRUE; }), this);
   g_signal_connect(view_, "mouse-target-changed", G_CALLBACK(+[](WebKitWebView*, WebKitHitTestResult* hit, guint, gpointer d) {
+    // §8.2: the element's computed CSS cursor (full keyword set) from the isolated world.
+    if (self(d)->host_.browserUI()) { self(d)->hovered(); return; }
     // WPE has no cursor callback: derive the CSS cursor from WebKit's hit test.
     const char* cursor = webkit_hit_test_result_context_is_link(hit) ? "pointer"
                          : webkit_hit_test_result_context_is_editable(hit) ? "text" : "default";
@@ -579,6 +935,404 @@ void WpeView::connect() {
   g_signal_connect(view_, "web-process-terminated", G_CALLBACK(+[](WebKitWebView*, WebKitWebProcessTerminationReason reason, gpointer d) {
     self(d)->host_.processTerminated(&self(d)->tab_, int(reason));
   }), this);
+}
+
+
+// ---- Browser UI (§8.2) ------------------------------------------------------------------
+void imFocusChanged(WpeView* owner, WebKitInputMethodContext* context, bool focused) { owner->imFocus(context, focused); }
+void imCursorArea(WpeView* owner, int x, int y, int width, int height) { owner->imCursor(x, y, width, height); }
+
+void WpeView::script(const char* body, GVariant* arguments, ScriptDone done) {
+  if (!view_) { if (arguments) g_variant_unref(g_variant_ref_sink(arguments)); return; }
+  struct Call { std::shared_ptr<Life> life; ScriptDone done; };
+  webkit_web_view_call_async_javascript_function(view_, body, -1, arguments, UiWorld, nullptr, nullptr,
+                                                 [](GObject* source, GAsyncResult* result, gpointer data) {
+    std::unique_ptr<Call> call(static_cast<Call*>(data));
+    GError* error = nullptr;
+    JSCValue* value = webkit_web_view_call_async_javascript_function_finish(WEBKIT_WEB_VIEW(source), result, &error);
+    std::string text;
+    if (error) { AXIO_TRACE("ui script failed: %s", error->message); g_error_free(error); }
+    else if (value && jsc_value_is_string(value)) { char* raw = jsc_value_to_string(value); text = raw ? raw : ""; g_free(raw); }
+    if (value) g_object_unref(value);
+    if (WpeView* view = call->life->view) call->done(*view, text);
+  }, new Call{life_, std::move(done)});
+}
+
+GVariant* WpeView::point(double x, double y, int count) {
+  GVariantBuilder builder;
+  g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
+  g_variant_builder_add(&builder, "{sv}", "x", g_variant_new_double(x));
+  g_variant_builder_add(&builder, "{sv}", "y", g_variant_new_double(y));
+  g_variant_builder_add(&builder, "{sv}", "count", g_variant_new_int32(count));
+  return g_variant_builder_end(&builder);
+}
+
+void WpeView::selectionToPrimary(double x, double y, int count) {
+  auto done = [](WpeView& view, const std::string& answer) {
+    auto parsed = json::parse(answer);
+    const Value* text = parsed ? parsed->get("text") : nullptr;
+    if (parsed && parsed->get("via")) AXIO_TRACE("selection via %s", parsed->get("via")->string.c_str());
+    if (!text || !text->isString() || text->string.empty() || text->string == view.lastSelection_) return;
+    view.lastSelection_ = text->string;
+    view.host_.textEvent(&view.tab_, "text_selection", text->string);
+  };
+  // Input events queue in WebKit's UI process while script calls do not: ask once the
+  // release (and a double click's own selection) has reached the page.
+  later(x < 0 ? 30 : 80, [x, y, count, done](WpeView& view) {
+    if (x < 0) view.script(SelectionFunction, nullptr, done);
+    else view.script(PointerUpFunction, view.point(x, y, count), done);
+  });
+}
+
+void WpeView::later(int ms, std::function<void(WpeView&)> run) {
+  struct Later { std::shared_ptr<Life> life; std::function<void(WpeView&)> run; };
+  g_timeout_add(guint(ms), [](gpointer data) -> gboolean {
+    std::unique_ptr<Later> pending(static_cast<Later*>(data));
+    if (WpeView* view = pending->life->view) pending->run(*view);
+    return G_SOURCE_REMOVE;
+  }, new Later{life_, std::move(run)});
+}
+
+void WpeView::clipboardThen(const char* command) {
+  std::string action = command;
+  script(SelectionFunction, nullptr, [action](WpeView& view, const std::string& answer) {
+    auto parsed = json::parse(answer);
+    const Value* text = parsed ? parsed->get("text") : nullptr;
+    if (text && text->isString() && !text->string.empty()) view.host_.textEvent(&view.tab_, "clipboard_text", text->string);
+    if (view.view_) webkit_web_view_execute_editing_command(view.view_, action.c_str());
+  });
+}
+
+void WpeView::hovered() {
+  if (cursorQuery_) { cursorDirty_ = true; return; }
+  cursorQuery_ = true; cursorDirty_ = false;
+  script(CursorFunction, point(pointerX_, pointerY_), [](WpeView& view, const std::string& cursor) {
+    view.cursorQuery_ = false;
+    view.host_.cursorChanged(&view.tab_, cssCursors().count(cursor) ? cursor : "default");
+    if (view.cursorDirty_) view.hovered();
+  });
+}
+
+void WpeView::dragMove() {
+  if (dragQuery_) { dragDirty_ = true; return; }
+  dragQuery_ = true; dragDirty_ = false;
+  script(DragMoveFunction, point(pointerX_, pointerY_), [](WpeView& view, const std::string&) {
+    view.dragQuery_ = false;
+    if (view.dragDirty_ && view.dragArmed_) view.dragMove();
+  });
+}
+
+void WpeView::imFocus(WebKitInputMethodContext* context, bool focused) {
+  if (!host_.browserUI()) return;
+  if (!focused && composing_) finishPreedit();
+  textMode_ = !focused ? "none" : webkit_input_method_context_get_input_purpose(context) == WEBKIT_INPUT_PURPOSE_PASSWORD ? "password" : "text";
+  emitTextInput();
+}
+void WpeView::imCursor(int x, int y, int width, int height) {
+  int next[4] = {std::max(0, x), std::max(0, y), std::max(0, width), std::max(1, height)};
+  if (!memcmp(next, caret_, sizeof next)) return;
+  memcpy(caret_, next, sizeof next);
+  if (textMode_ != "none") emitTextInput();
+}
+void WpeView::emitTextInput() {
+  host_.uiEvent(&tab_, "text_input", Object{{"mode", textMode_}, {"caret_x", caret_[0]}, {"caret_y", caret_[1]},
+                                             {"caret_width", caret_[2]}, {"caret_height", caret_[3]}});
+}
+void WpeView::setPreedit(const std::string& text, guint cursor) {
+  if (!im_) return;
+  if (!composing_) { composing_ = true; g_signal_emit_by_name(im_, "preedit-started"); }
+  *im_->preedit = text; im_->cursor = cursor;
+  g_signal_emit_by_name(im_, "preedit-changed");
+}
+void WpeView::finishPreedit() {
+  if (!im_ || !composing_) return;
+  composing_ = false;
+  im_->preedit->clear(); im_->cursor = 0;
+  g_signal_emit_by_name(im_, "preedit-changed");
+  g_signal_emit_by_name(im_, "preedit-finished");
+}
+
+bool WpeView::uiCommand(const std::string& method, const Value& c) {
+  if (!view_) return false;
+  if (method == "find") {
+    const std::string& text = c.get("text")->string;
+    bool forward = c.get("forward")->boolean, matchCase = c.get("match_case")->boolean;
+    guint32 options = WEBKIT_FIND_OPTIONS_WRAP_AROUND | (matchCase ? 0 : WEBKIT_FIND_OPTIONS_CASE_INSENSITIVE)
+                      | (forward ? 0 : WEBKIT_FIND_OPTIONS_BACKWARDS);
+    WebKitFindController* finder = webkit_web_view_get_find_controller(view_);
+    findForward_ = forward; findPending_ = true; findFound_ = false;
+    ++findIdentifier_;
+    if (c.get("find_next")->boolean && text == findText_ && findCounted_) {
+      findFound_ = false;
+      if (forward) { webkit_find_controller_search_next(finder); if (findCount_) findActive_ = findActive_ % findCount_ + 1; }
+      else { webkit_find_controller_search_previous(finder); if (findCount_) findActive_ = findActive_ > 1 ? findActive_ - 1 : findCount_; }
+      return true;
+    }
+    findText_ = text; findCounted_ = false; findCount_ = 0; findActive_ = 0;
+    webkit_find_controller_count_matches(finder, text.c_str(), options, 1000);
+    webkit_find_controller_search(finder, text.c_str(), options, 1000);
+    return true;
+  }
+  if (method == "stop_finding") {
+    webkit_find_controller_search_finish(webkit_web_view_get_find_controller(view_));
+    findText_.clear(); findCounted_ = false; findPending_ = false;
+    return true;
+  }
+  if (method == "zoom") {
+    // cef-v1 zoom level: factor = 1.2 ^ level; Zen clamps to its own zoom values.
+    double factor = std::clamp(std::pow(1.2, c.get("level")->number), 0.25, 5.0);
+    webkit_web_view_set_zoom_level(view_, factor);
+    return true;
+  }
+  if (method == "paste_text") {
+    std::string text = c.get("text")->string;
+    auto insert = [text](WpeView& view, const std::string&) {
+      if (view.view_) webkit_web_view_execute_editing_command_with_argument(view.view_, "InsertText", text.c_str());
+    };
+    if (c.has("x")) { script(FocusAtFunction, point(c.get("x")->number, c.get("y")->number), insert); return true; }
+    if (!im_ || !im_->focused) return false;
+    insert(*this, "");
+    return true;
+  }
+  if (method == "ime_set_composition") {
+    if (!im_ || !im_->focused) return false;
+    const std::string& text = c.get("text")->string;
+    // selection_end is in UTF-16 units; WebKit's preedit cursor counts characters.
+    size_t units = size_t(c.get("selection_end")->number), counted = 0; guint cursor = 0;
+    for (uint32_t cp : json::codepoints(text)) { if (counted >= units) break; counted += cp > 0xFFFF ? 2 : 1; ++cursor; }
+    if (text.empty()) { finishPreedit(); return true; }
+    setPreedit(text, cursor);
+    return true;
+  }
+  if (method == "ime_cancel_composition") { finishPreedit(); return true; }
+  if (method == "ime_finish_composing") {
+    if (!composing_ || !im_) return true;
+    std::string text = *im_->preedit;
+    if (text.empty()) finishPreedit(); else commit(text);
+    return true;
+  }
+  return false;
+}
+
+void WpeView::findResult(guint count, bool found) {
+  if (!findPending_) return;
+  findFound_ = true;
+  if (!found) { findCount_ = 0; findActive_ = 0; findCounted_ = true; }
+  else if (!findActive_) findActive_ = findForward_ ? 1 : std::max<guint>(1, findCount_);
+  (void)count;
+  if (!findCounted_) return;  // counted-matches gives the total; both arrive for a new search
+  findPending_ = false;
+  host_.uiEvent(&tab_, "find_result", Object{{"identifier", findIdentifier_}, {"count", findCount_},
+                                             {"active", findCount_ ? std::min(findActive_, findCount_) : 0u}, {"final", true}});
+}
+void WpeView::countedMatches(guint count) {
+  findCount_ = count; findCounted_ = true;
+  if (!findActive_ && count) findActive_ = findForward_ ? 1 : count;
+  if (findPending_ && findFound_) { findFound_ = false; findResult(count, count > 0); }
+}
+
+bool WpeView::scriptDialog(WebKitScriptDialog* dialog) {
+  WebKitScriptDialogType type = webkit_script_dialog_get_dialog_type(dialog);
+  Object details;
+  std::string kind = "dialog";
+  if (type == WEBKIT_SCRIPT_DIALOG_BEFORE_UNLOAD_CONFIRM) {
+    kind = "before_unload";
+    details = Object{{"dialog_type", "beforeunload"}, {"is_reload", false}};
+  } else {
+    const char* names[] = {"alert", "confirm", "prompt"};
+    const char* uri = webkit_web_view_get_uri(view_);
+    std::string origin = uri && webLink(uri) ? uri : "";
+    const char* message = webkit_script_dialog_get_message(dialog);
+    const char* fallback = type == WEBKIT_SCRIPT_DIALOG_PROMPT ? webkit_script_dialog_prompt_get_default_text(dialog) : "";
+    details = Object{{"dialog_type", names[std::min<int>(int(type), 2)]}, {"origin_url", origin},
+                     {"message", json::utf16Prefix(message ? message : "", 3000)},
+                     {"default_text", json::utf16Prefix(fallback ? fallback : "", 1024)}};
+  }
+  std::string id = host_.openPrompt(&tab_, kind, std::move(details), 300000);
+  if (id.empty()) return TRUE;  // not shown: WebKit closes it with the safe default
+  Native native; native.kind = kind; native.dialog = webkit_script_dialog_ref(dialog);
+  natives_[id] = native;
+  return TRUE;
+}
+
+void WpeView::contextMenu(WebKitHitTestResult* hit) {
+  contextSignaled_ = true;
+  auto info = std::make_shared<MenuInfo>();
+  auto copy = [](const char* value) { return std::string(value ? value : ""); };
+  if (webkit_hit_test_result_context_is_link(hit)) { info->link = copy(webkit_hit_test_result_get_link_uri(hit)); info->label = copy(webkit_hit_test_result_get_link_label(hit)); }
+  if (webkit_hit_test_result_context_is_image(hit)) info->image = copy(webkit_hit_test_result_get_image_uri(hit));
+  info->editable = webkit_hit_test_result_context_is_editable(hit);
+  double x = contextX_, y = contextY_;
+  script(SelectionFunction, nullptr, [info, x, y](WpeView& view, const std::string& answer) {
+    auto parsed = json::parse(answer);
+    info->selection = parsed && parsed->get("text") && parsed->get("text")->isString() ? parsed->get("text")->string : "";
+    if (parsed && parsed->get("editable") && parsed->get("editable")->isBool() && parsed->get("editable")->boolean) info->editable = true;
+    view.openContextMenu(*info, x, y);
+  });
+}
+
+void WpeView::contextMenuFallback(double x, double y) {
+  AXIO_TRACE("context menu fallback at %.0f,%.0f", x, y);
+  script(ContextMenuFunction, point(x, y), [x, y](WpeView& view, const std::string& answer) {
+    AXIO_TRACE("context menu fallback answer %s", answer.c_str());
+    auto parsed = json::parse(answer);
+    if (!parsed || !parsed->isObject() || view.contextSignaled_) return;
+    const Value* prevented = parsed->get("prevented");
+    if (!prevented || !prevented->isBool() || prevented->boolean) return;  // the page handles its own menu
+    auto text = [&](const char* key) { const Value* v = parsed->get(key); return v && v->isString() ? v->string : std::string(); };
+    MenuInfo info{text("link"), text("label"), text("image"), text("text"), false};
+    if (const Value* editable = parsed->get("editable"); editable && editable->isBool()) info.editable = editable->boolean;
+    view.openContextMenu(info, x, y);
+  });
+}
+
+void WpeView::openContextMenu(const MenuInfo& source, double x, double y) {
+  MenuInfo info = source;
+  info.link = urlText(info.link); info.image = urlText(info.image);
+  const std::string& selection = info.selection;
+  bool editable = info.editable;
+  bool link = !info.link.empty(), image = !info.image.empty() && resourceLink(info.image);
+  int type = 1 | (link ? 4 : 0) | (image ? 8 : 0) | (!selection.empty() ? 16 : 0) | (editable ? 32 : 0);
+  int flags = 64 | (!selection.empty() ? 8 : 0);
+  if (editable) flags |= 1 | 2 | 16 | (!selection.empty() ? 4 | 32 : 0);
+  const char* uri = view_ ? webkit_web_view_get_uri(view_) : nullptr;
+  std::string frame = uri && webLink(uri) && strlen(uri) <= 1024 ? uri : "";
+  Object details{{"x", int(std::clamp(x, 0.0, 16384.0))}, {"y", int(std::clamp(y, 0.0, 16384.0))}, {"type_flags", type},
+    {"link_url", link && webLink(info.link) ? info.link : ""}, {"source_url", image ? info.image : ""}, {"frame_url", frame},
+    {"selection_text", json::utf16Prefix(selection, 256)}, {"link_text", json::utf16Prefix(info.label, 128)},
+    {"editable", editable}, {"edit_flags", flags}, {"media_type", image ? "image" : "none"}, {"media_flags", 0},
+    {"misspelled_word", ""}, {"suggestions", json::Array{}}, {"spellcheck", false}};
+  std::string id = host_.openPrompt(&tab_, "context_menu", std::move(details), 120000);
+  if (!id.empty()) { Native native; native.kind = "context_menu"; natives_[id] = native; }
+}
+
+bool WpeView::optionMenu(WebKitOptionMenu* menu, WebKitRectangle* rectangle) {
+  guint count = webkit_option_menu_get_n_items(menu);
+  if (count > 512) return FALSE;
+  json::Array items;
+  for (guint i = 0; i < count; ++i) {
+    WebKitOptionMenuItem* item = webkit_option_menu_get_item(menu, i);
+    const char* label = webkit_option_menu_item_get_label(item);
+    items.push_back(Value(Object{{"label", json::utf16Prefix(label ? label : "", 256)},
+      {"group", bool(webkit_option_menu_item_is_group_label(item))}, {"child", bool(webkit_option_menu_item_is_group_child(item))},
+      {"enabled", bool(webkit_option_menu_item_is_enabled(item))}, {"selected", bool(webkit_option_menu_item_is_selected(item))}}));
+  }
+  Object details{{"x", std::max(0, rectangle ? rectangle->x : 0)}, {"y", std::max(0, rectangle ? rectangle->y : 0)},
+                 {"width", std::max(0, rectangle ? rectangle->width : 0)}, {"height", std::max(0, rectangle ? rectangle->height : 0)},
+                 {"items", Value(std::move(items))}};
+  std::string id = host_.openPrompt(&tab_, "option_menu", std::move(details), 120000);
+  if (id.empty()) { webkit_option_menu_close(menu); return TRUE; }
+  Native native; native.kind = "option_menu"; native.menu = WEBKIT_OPTION_MENU(g_object_ref(menu));
+  native.menuClose = g_signal_connect(menu, "close", G_CALLBACK(+[](WebKitOptionMenu* closed, gpointer d) { self(d)->optionMenuClosed(closed); }), this);
+  natives_[id] = native;
+  return TRUE;
+}
+void WpeView::optionMenuClosed(WebKitOptionMenu* menu) {
+  for (auto it = natives_.begin(); it != natives_.end(); ++it) if (it->second.menu == menu) {
+    std::string id = it->first; Native native = it->second; natives_.erase(it);
+    releaseNative(native);
+    host_.withdrawPrompt(&tab_, id);
+    return;
+  }
+}
+
+bool WpeView::permission(WebKitPermissionRequest* request) {
+  std::string name;
+  if (WEBKIT_IS_GEOLOCATION_PERMISSION_REQUEST(request)) name = "geolocation";
+  else if (WEBKIT_IS_NOTIFICATION_PERMISSION_REQUEST(request)) name = "notifications";
+  else if (WEBKIT_IS_WEBSITE_DATA_ACCESS_PERMISSION_REQUEST(request)) name = "storage_access";
+  if (name.empty()) {
+    webkit_permission_request_deny(request);
+    host_.denied(&tab_, WEBKIT_IS_USER_MEDIA_PERMISSION_REQUEST(request) ? "media_capture_unavailable" : "permission_denied");
+    return TRUE;
+  }
+  std::string id = host_.openPrompt(&tab_, "permission", Object{{"origin", host_.fixtureOrigin()}, {"permissions", json::Array{Value(name)}}}, 300000);
+  if (id.empty()) { webkit_permission_request_deny(request); return TRUE; }
+  Native native; native.kind = "permission"; native.permission = WEBKIT_PERMISSION_REQUEST(g_object_ref(request));
+  natives_[id] = native;
+  return TRUE;
+}
+
+bool WpeView::fileChooser(WebKitFileChooserRequest* request) {
+  json::Array filters;
+  if (const gchar* const* types = webkit_file_chooser_request_get_mime_types(request))
+    for (size_t i = 0; types[i] && filters.size() < 16; ++i)
+      if (strlen(types[i]) <= 64 && *types[i])
+        filters.push_back(Value(Object{{"filter", std::string(types[i])}, {"extensions", json::Array{}}, {"description", ""}}));
+  bool multiple = webkit_file_chooser_request_get_select_multiple(request);
+  std::string id = host_.openPrompt(&tab_, "file_dialog", Object{{"mode", multiple ? "open_multiple" : "open"}, {"title", ""},
+                                                             {"default_name", ""}, {"filters", Value(std::move(filters))}}, 600000);
+  if (id.empty()) { webkit_file_chooser_request_cancel(request); return TRUE; }
+  Native native; native.kind = "file_dialog"; native.chooser = WEBKIT_FILE_CHOOSER_REQUEST(g_object_ref(request)); native.multiple = multiple;
+  natives_[id] = native;
+  return TRUE;
+}
+
+void WpeView::releaseNative(Native& native) {
+  if (native.menu) { if (native.menuClose) g_signal_handler_disconnect(native.menu, native.menuClose); g_object_unref(native.menu); }
+  if (native.dialog) webkit_script_dialog_unref(native.dialog);
+  if (native.permission) g_object_unref(native.permission);
+  if (native.chooser) g_object_unref(native.chooser);
+  native = Native{};
+}
+void WpeView::promptDefaultNative(Native& native) {
+  if (native.dialog) webkit_script_dialog_close(native.dialog);  // cancel / false / null / stay
+  if (native.menu) { g_signal_handler_disconnect(native.menu, native.menuClose); native.menuClose = 0; webkit_option_menu_close(native.menu); }
+  if (native.permission) webkit_permission_request_deny(native.permission);
+  if (native.chooser) webkit_file_chooser_request_cancel(native.chooser);
+  releaseNative(native);
+}
+void WpeView::promptDefault(const std::string& id) {
+  auto found = natives_.find(id);
+  if (found == natives_.end()) return;
+  Native native = found->second; natives_.erase(found);
+  promptDefaultNative(native);
+}
+
+void WpeView::promptReply(const std::string& id, const std::string& method, const Value& c) {
+  auto found = natives_.find(id);
+  if (found == natives_.end()) return;
+  Native native = found->second; natives_.erase(found);
+  if (method == "dialog_reply" && native.dialog) {
+    bool accept = c.get("accept")->boolean;
+    WebKitScriptDialogType type = webkit_script_dialog_get_dialog_type(native.dialog);
+    if (type == WEBKIT_SCRIPT_DIALOG_CONFIRM || type == WEBKIT_SCRIPT_DIALOG_BEFORE_UNLOAD_CONFIRM) webkit_script_dialog_confirm_set_confirmed(native.dialog, accept);
+    else if (type == WEBKIT_SCRIPT_DIALOG_PROMPT && accept) webkit_script_dialog_prompt_set_text(native.dialog, c.get("text")->string.c_str());
+    webkit_script_dialog_close(native.dialog);
+  } else if (method == "option_menu_reply" && native.menu) {
+    int index = int(c.get("index")->number);
+    g_signal_handler_disconnect(native.menu, native.menuClose); native.menuClose = 0;
+    if (index >= 0 && guint(index) < webkit_option_menu_get_n_items(native.menu)) webkit_option_menu_activate_item(native.menu, guint(index));
+    else webkit_option_menu_close(native.menu);
+  } else if (method == "permission_reply" && native.permission) {
+    if (c.get("decision")->string == "allow") webkit_permission_request_allow(native.permission);
+    else webkit_permission_request_deny(native.permission);
+  } else if (method == "file_dialog_reply" && native.chooser) {
+    // Only existing regular files the user picked in Zen's own picker; no "..".
+    std::vector<std::string> paths;
+    for (auto& path : *c.get("paths")->array) {
+      struct stat info {};
+      if (path.string.find("/../") != std::string::npos || path.string.find("/./") != std::string::npos
+          || stat(path.string.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) { paths.clear(); break; }
+      paths.push_back(path.string);
+      if (!native.multiple) break;
+    }
+    if (paths.empty()) webkit_file_chooser_request_cancel(native.chooser);
+    else {
+      std::vector<const gchar*> raw;
+      for (auto& path : paths) raw.push_back(path.c_str());
+      raw.push_back(nullptr);
+      webkit_file_chooser_request_select_files(native.chooser, raw.data());
+    }
+  } else if (method == "context_menu_command") {
+    const std::string& command = c.get("command")->string;
+    static const std::map<std::string, std::string> edits{{"copy", "copy"}, {"cut", "cut"}, {"paste", "paste"},
+      {"select_all", "select_all"}, {"undo", "undo"}, {"redo", "redo"}};
+    if (edits.count(command)) edit(edits.at(command));
+    else if (command == "save_image" || command == "save_link") host_.denied(&tab_, "download_denied");
+    else if (command != "dismiss") host_.denied(&tab_, "action_unavailable");
+  }
+  releaseNative(native);
 }
 
 // ---- Engine -----------------------------------------------------------------------

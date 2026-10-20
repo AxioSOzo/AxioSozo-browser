@@ -12,6 +12,7 @@ import { launchWebKit, WEBKIT_VERSION } from "./WebKitEngineAdapter.sys.mjs";
 import { allowedFixtureURL, validFixtureOrigin, fitStreamSurface } from "./EngineStreamClient.sys.mjs";
 import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
   nativeFallbackFrame, nativeFramePNG } from "./EngineFrameSurface.sys.mjs";
+import { WebKitBrowserUI } from "./WebKitBrowserUI.sys.mjs";
 
 const XHTML = "http://www.w3.org/1999/xhtml";
 const MAX_WEBKIT_TABS = 8;
@@ -60,6 +61,47 @@ export function linuxKeyboardRoute(event) {
   if (Object.hasOwn(XKB_KEYS, event.code)) return "page";
   return event.key?.length === 1 ? "text" : "unsupported";
 }
+/**
+ * With browser UI (§8.2) Zen owns exactly the chords its own window binds, as Gecko
+ * reserves them for the browser: a <key> in the window's keysets (accel = Ctrl on Linux)
+ * or an F-key Zen binds. Every other chord and F-key goes to the page, like in a Gecko tab.
+ */
+export function zenOwnsShortcut(event, keys) {
+  const key = String(event.key ?? "");
+  for (const entry of keys) {
+    if (entry.key ? entry.key.toLowerCase() !== key.toLowerCase() : entry.keyCode !== event.keyCode) continue;
+    const want = new Set(entry.modifiers);
+    const accel = want.has("accel") || want.has("control");
+    if (want.has("any")) return true;
+    // A key element without "shift" still matches shifted symbols the layout needs (Ctrl++).
+    const shiftOk = want.has("shift") === !!event.shiftKey || (!want.has("shift") && entry.key && entry.key.toUpperCase() === entry.key.toLowerCase());
+    if (accel === !!event.ctrlKey && want.has("alt") === !!event.altKey && (want.has("meta") || want.has("os")) === !!event.metaKey && shiftOk) return true;
+  }
+  return false;
+}
+/** The window's key elements, read once per window (keysets do not change while a tab is open). */
+export function windowShortcuts(document) {
+  const keys = [];
+  for (const element of document?.querySelectorAll?.("keyset key") ?? []) {
+    if (element.getAttribute("disabled") === "true") continue;
+    const key = element.getAttribute("key") || "", code = element.getAttribute("keycode") || "";
+    const keyCode = code ? (globalThis.KeyboardEvent?.["DOM_" + code] ?? null) : null;
+    if (!key && !keyCode) continue;
+    keys.push({ key, keyCode, modifiers: (element.getAttribute("modifiers") || "").split(/[\s,]+/u).filter(Boolean) });
+  }
+  return keys;
+}
+// Gecko's own feel for a mouse-wheel notch (smooth scroll on): pixels per line, animation length.
+export const WHEEL_LINE_PIXELS = 19;
+export const WHEEL_SMOOTH_MS = 150;
+/** Splits a notch delta over the animation: the cumulative distance after `t` ms (ease-out). */
+export function smoothWheelProgress(total, t, duration = WHEEL_SMOOTH_MS) {
+  const x = Math.min(1, Math.max(0, t / duration));
+  return Math.round(total * (1 - (1 - x) ** 3)) || 0;
+}
+const PROXY_STYLE = "position:absolute;left:0;top:0;width:2px;height:1em;margin:0;padding:0;border:0;"
+  + "opacity:0;pointer-events:none;resize:none;overflow:hidden;background:transparent;color:transparent;"
+  + "caret-color:transparent;outline:none;white-space:pre";
 export function editAction(event) {
   const key = String(event.key).toLowerCase();
   if (key === "z") return event.shiftKey ? "redo" : "undo";
@@ -91,10 +133,10 @@ const NOTICES = {
 
 export class WebKitPresenter {
   constructor(win, geckoAdapter, { launch = launchWebKit, onEngineChange = () => {}, onFailure = () => {},
-    onSwitchStart = () => {}, onTargetEvent = () => {} } = {}) {
+    onSwitchStart = () => {}, onTargetEvent = () => {}, onRetry = null, BrowserUI = WebKitBrowserUI } = {}) {
     this.window = win; this.gecko = geckoAdapter; this.launch = launch;
     this.onEngineChange = onEngineChange; this.onFailure = onFailure; this.onSwitchStart = onSwitchStart;
-    this.onTargetEvent = onTargetEvent;
+    this.onTargetEvent = onTargetEvent; this.onRetry = onRetry; this.BrowserUI = BrowserUI; this.ui = null;
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = []; this.failures = [];
     const container = win.gBrowser.tabContainer;
     this.onTabClose = event => {
@@ -138,7 +180,43 @@ export class WebKitPresenter {
     await this.#action(record, target => record.adapter.navigate(target, url));
     return true;
   }
-  focus() { if (!this.active) return false; this.active.canvas.focus(); return true; }
+  focus() { if (!this.active) return false; this.#focusContent(this.active); return true; }
+  /** Page focus: the IME proxy editor while the page's editable is focused, else the engine view. */
+  #focusContent(record) { (record.ime?.active ?? record.canvas)?.focus?.(); }
+  /** Diagnostics: the last browser-UI events and replies of a tab, with chrome-relative milliseconds. */
+  #uiLog(record, name, detail) {
+    (record.uiLog ??= []).push([name, detail, Math.round(this.window.performance?.now?.() ?? 0)]);
+    if (record.uiLog.length > 24) record.uiLog.shift();
+  }
+  /** §8.2 browser UI, created with the first WebKit record whose host offers it. */
+  #browserUI() {
+    if (this.ui || this.disposed) return this.ui;
+    this.ui = new this.BrowserUI(this.window, {
+      send: (record, method, fields, target) => {
+        this.#uiLog(record, method, fields?.accept ?? fields?.decision ?? fields?.index ?? null);
+        return record.adapter.reply(target, method, fields);
+      },
+      target: record => record.adapter?.target ?? null,
+      records: () => this.records.values(),
+      hooks: {
+        openTab: (record, url, background) => this.window.openTrustedLinkIn(url, background ? "tabshifted" : "tab", { relatedToCurrent: true }),
+        openInFirefox: record => this.switchToGecko(record.tab).catch(error => this.onFailure(error)),
+        openInFirefoxTab: (url, postData) => this.window.openTrustedLinkIn(url, "tab", { postData, relatedToCurrent: true }),
+        navigate: (record, action) => this.#action(record, target => record.adapter[action](target)),
+        focusContent: record => this.#focusContent(record),
+        contentElement: record => record.overlay,
+        currentURL: record => record.latestURL,
+        notice: (record, message) => this.#notice(record, message),
+        paste: record => this.#paste(record),
+        failure: error => {
+          this.uiFailures = [...(this.uiFailures ?? []), String(error?.message ?? error).slice(0, 120)].slice(-8);
+          this.onFailure(error);
+        },
+      },
+    });
+    this.restoreHooks.push(() => { this.ui?.dispose(); this.ui = null; });
+    return this.ui;
+  }
 
   // ---- Switching ----------------------------------------------------------------
   /** Gecko → WebKit for the selected fixture tab. Resolves with the WebKit target once a frame is shown. */
@@ -164,7 +242,8 @@ export class WebKitPresenter {
     canvas.setAttribute("aria-label", "WebKit page (experimental, local test page only). Accessibility and IME are not available yet.");
     canvas.style.cssText = "display:block;width:100%;height:100%;outline:none";
     overlay.appendChild(canvas);
-    const record = { tab, browser, stack, overlay, canvas, originalTarget, committed: false, adapter: null,
+    this.#clearStoppedNotice(browser);
+    const record = { tab, browser, stack, overlay, canvas, originalTarget, committed: false, adapter: null, priorIcon: this.#currentIcon(tab),
       priorVisibility: browser.style.visibility, priorPosition: stack.style.position,
       priorDocShellIsActive: browser.docShellIsActive, latestURL: url, title: "", loading: null, listeners: [],
       displayedFrames: 0, damageFrames: 0, supersededFrames: 0, frames: null, uploadedPixels: 0, fullPixels: 0, drawMilliseconds: 0,
@@ -180,6 +259,8 @@ export class WebKitPresenter {
         onFrame: (metadata, pixels) => this.#draw(record, metadata, pixels),
         onEvent: event => this.#event(record, event), onFailure: error => this.#revert(record, error) });
       if (this.disposed || this.pending !== record) throw new Error("ENGINE_SWITCH_CANCELLED");
+      // §8.2: events of the first load (favicon, text_input) already use the browser-UI path.
+      record.browserUI = record.adapter.browserUI === true;
       const target = await record.adapter.create(url, this.#surface(record));
       this.gecko.resolve(originalTarget); // the Gecko tab did not navigate while WebKit started
       if (this.disposed || this.pending !== record || this.window.gBrowser.selectedTab !== tab) throw new Error("ENGINE_SWITCH_CANCELLED");
@@ -187,12 +268,14 @@ export class WebKitPresenter {
       browser.style.visibility = "hidden"; overlay.style.display = "block";
       if (typeof browser.docShellIsActive === "boolean") browser.docShellIsActive = false;
       tab.setAttribute?.(ENGINE_ATTRIBUTE, "webkit");
+      if (record.browserUI) { this.#browserUI(); this.#redirectBrowserFocus(record); }
       this.#input(record);
       record.observer = new this.window.ResizeObserver(() => this.#resize(record));
       record.observer.observe(stack);
       this.#visibility(record);
       canvas.focus();
       this.#indicator(); this.#syncChrome(record);
+      this.#applyIcon(record); // a favicon that arrived with the first load
       return target;
     } catch (error) {
       await this.#remove(record);
@@ -234,6 +317,30 @@ export class WebKitPresenter {
     await this.#remove(record);
     this.#failure(error);
     this.#indicator("WebKit stopped; Firefox tab preserved");
+    this.#stoppedNotice(record, error);
+  }
+  /** Zen's notification bar on the preserved Firefox tab, with a way back into WebKit. */
+  #stoppedNotice(record, error) {
+    let box = null;
+    try { box = this.window.gBrowser.getNotificationBox?.(record.browser); } catch {}
+    if (!box?.appendNotification || record.tab.isConnected === false) return;
+    const crashed = /^ENGINE_EXIT_|ENGINE_HOST_UNRESPONSIVE|ENGINE_UNEXPECTED_EXIT|ENGINE_PROTOCOL_OR_EOF|render_process/u.test(error?.message ?? "");
+    const label = crashed ? "WebKit stopped working in this tab. The Firefox version of the page is shown instead."
+      : "This page couldn't continue in WebKit. The Firefox version of the page is shown instead.";
+    const buttons = this.onRetry ? [{ label: "Try again in WebKit", accessKey: "T",
+      callback: () => { Promise.resolve(this.onRetry(record.tab)).catch(failure => this.onFailure(failure)); } }] : [];
+    try {
+      this.#clearStoppedNotice(record.browser);
+      Promise.resolve(box.appendNotification("axiosozo-webkit-stopped",
+        { label, priority: box.PRIORITY_WARNING_MEDIUM, image: "chrome://global/skin/icons/warning.svg" }, buttons)).catch(() => {});
+    } catch {}
+  }
+  #clearStoppedNotice(browser) {
+    try {
+      const box = this.window.gBrowser.getNotificationBox?.(browser);
+      const existing = box?.getNotificationWithValue?.("axiosozo-webkit-stopped");
+      if (existing) box.removeNotification(existing);
+    } catch {}
   }
   async #remove(record) {
     record.removing ??= this.#removeOnce(record);
@@ -246,6 +353,10 @@ export class WebKitPresenter {
     record.committed = false;
     record.observer?.disconnect();
     for (const remove of record.listeners.splice(0)) remove();
+    this.ui?.forget(record);
+    this.#restoreBrowserFocus(record);
+    record.wheelAnimation = null;
+    if (record.iconApplied) { try { this.window.gBrowser.setIcon?.(record.tab, record.priorIcon ?? ""); } catch {} }
     this.window.clearTimeout?.(record.noticeTimer);
     record.browser.style.visibility = record.priorVisibility;
     if (typeof record.priorDocShellIsActive === "boolean") {
@@ -303,6 +414,14 @@ export class WebKitPresenter {
     record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
+    // Diagnostics: the last browser-UI events (names and kinds or codes only, never contents).
+    if (!["heartbeat", "title", "url", "loading", "cursor"].includes(event.event)) {
+      this.#uiLog(record, event.event, event.kind ?? event.code ?? event.reason ?? event.mode ?? null);
+    }
+    if (record.browserUI && event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); return; }
+    if (record.browserUI && event.event === "text_input") { this.#textInput(record, event); return; }
+    if (record.browserUI && this.ui?.handle(record, event)) return;
+    if (event.event === "navigation" && record.ime) { record.ime.active = null; record.composing = false; }
     if (event.event === "url") record.latestURL = event.url || record.latestURL;
     if (event.event === "title") record.title = event.title;
     if (event.event === "loading") { record.loading = event; record.tab.toggleAttribute?.("busy", record.committed && event.loading); }
@@ -327,6 +446,31 @@ export class WebKitPresenter {
     record.notice.textContent = message; record.notice.hidden = false;
     this.window.clearTimeout?.(record.noticeTimer);
     record.noticeTimer = this.window.setTimeout?.(() => { if (record.notice) record.notice.hidden = true; }, 4000);
+  }
+  #currentIcon(tab) { try { return this.window.gBrowser.getIcon?.(tab) || null; } catch { return null; } }
+  /** The page's own icon (cef-v1 favicon rule) through Zen's setIcon, as for Gecko tabs. */
+  #applyIcon(record) {
+    const gBrowser = this.window.gBrowser;
+    if (!record.committed || typeof gBrowser.setIcon !== "function" || record.tab.isConnected === false) return;
+    const icon = record.icon ?? record.priorIcon ?? "";
+    if ((this.#currentIcon(record.tab) ?? "") === icon) return;
+    try { gBrowser.setIcon(record.tab, icon); record.iconApplied = true; } catch (error) { this.onFailure(error); }
+  }
+  /**
+   * Zen returns focus to the page with gBrowser.selectedBrowser.focus() (address bar
+   * Escape, tab switch). The hidden Gecko browser of a WebKit tab cannot take it.
+   */
+  #redirectBrowserFocus(record) {
+    const browser = record.browser, presenter = this;
+    record.priorBrowserFocus = Object.getOwnPropertyDescriptor(browser, "focus") ?? null;
+    record.browserFocus = function focus() { presenter.#focusContent(record); };
+    try { browser.focus = record.browserFocus; } catch { record.browserFocus = null; }
+  }
+  #restoreBrowserFocus(record) {
+    if (!record.browserFocus || record.browser.focus !== record.browserFocus) return;
+    if (record.priorBrowserFocus) Object.defineProperty(record.browser, "focus", record.priorBrowserFocus);
+    else delete record.browser.focus;
+    record.browserFocus = null;
   }
   #syncChrome(record) {
     if (this.active !== record) return;
@@ -396,9 +540,10 @@ export class WebKitPresenter {
   }
 
   // ---- Input -----------------------------------------------------------------------
-  #listen(record, type, handler, options) {
-    record.canvas.addEventListener(type, handler, options);
-    record.listeners.push(() => record.canvas.removeEventListener(type, handler, options));
+  #listen(record, type, handler, options) { this.#listenOn(record, record.canvas, type, handler, options); }
+  #listenOn(record, element, type, handler, options) {
+    element.addEventListener(type, handler, options);
+    record.listeners.push(() => element.removeEventListener(type, handler, options));
   }
   #send(record, method, fields) { return this.#action(record, target => record.adapter.input(target, method, fields)); }
   #point(record, event) {
@@ -413,10 +558,63 @@ export class WebKitPresenter {
     Object.assign(clicks, { time: now, x: position.x, y: position.y });
     return clicks.count;
   }
+  #contentElement(record, node) { return !!node && (node === record.canvas || node === record.ime?.text || node === record.ime?.password); }
+  /** Zen's clipboard text into the page's focused editable (`at`: middle-click point, PRIMARY). */
+  #paste(record, { primary = false, at = null } = {}) {
+    if (!record.committed || !this.ui) return;
+    let text = this.ui.readText({ primary });
+    if (!text) return;
+    text = text.replace(/\r\n?/gu, "\n");
+    // ≤ 4096 UTF-16 units per command, in order (the input queue keeps them with keys).
+    for (let offset = 0, first = true; offset < text.length && offset < 65536; offset += 4096, first = false) {
+      let end = Math.min(text.length, offset + 4096);
+      if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1])) end--;
+      this.#send(record, "paste_text", { text: text.slice(offset, end), ...(first && at ? at : {}) });
+      offset = end - 4096;
+    }
+  }
+  #keyHandler(record, type) {
+    return event => {
+      if (!event.isTrusted || !record.committed) return;
+      // Keys the input method owns (composition, dead keys) reach the proxy editor untouched.
+      if (record.browserUI && (event.isComposing || event.key === "Process" || event.key === "Dead") && event.target !== record.canvas) return;
+      let route = linuxKeyboardRoute(event);
+      if (record.browserUI && route === "chrome") {
+        record.shortcuts ??= windowShortcuts(this.window.document);
+        // tabbrowser's own chords (no <key> elements) and Alt+letter menu access stay Zen's.
+        const tabChord = event.ctrlKey && ["Tab", "PageUp", "PageDown"].includes(event.key);
+        if (!tabChord && !zenOwnsShortcut(event, record.shortcuts) && !(event.altKey && !event.ctrlKey && !event.metaKey && event.key.length === 1)) {
+          route = Object.hasOwn(XKB_KEYS, event.code) ? "page" : "chrome";
+        }
+      }
+      if (route === "chrome") return; // Zen's shortcuts work over WebKit exactly as over Firefox
+      // A lone modifier reaches the page and Zen alike (as in a Gecko tab: Alt still toggles Zen's menus).
+      const modifierOnly = record.browserUI && ["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock"].includes(event.key);
+      if (!modifierOnly) { event.preventDefault(); event.stopPropagation(); }
+      if (route === "edit") {
+        if (type !== "down") return;
+        const action = editAction(event);
+        if (record.browserUI && action === "paste") { this.#paste(record); return; }
+        this.#action(record, target => record.adapter.edit(target, action));
+        return;
+      }
+      if (route === "text") {
+        if (type === "down" && record.adapter.inputFeatures.imeCommit) this.#send(record, "ime_commit_text", { text: event.key });
+        return;
+      }
+      if (route === "unsupported") { if (!record.browserUI) this.#indicator("This experimental engine has no IME bridge yet"); return; }
+      const fields = streamKey(event, type);
+      this.#send(record, "key", fields);
+      if (type === "down" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        if (event.key.length <= 2) this.#send(record, "key", { ...fields, type: "char" });
+        else if (event.key === "Enter") this.#send(record, "key", { ...fields, type: "char", text: "\r" });
+      }
+    };
+  }
   #input(record) {
     for (const type of ["pointerdown", "pointerup", "pointermove"]) this.#listen(record, type, event => {
       if (!event.isTrusted || !record.committed || record.resizePending) return;
-      if (type === "pointerdown") { record.canvas.focus(); record.canvas.setPointerCapture?.(event.pointerId); }
+      if (type === "pointerdown") { this.#focusContent(record); record.canvas.setPointerCapture?.(event.pointerId); }
       if (type === "pointerup" && record.canvas.hasPointerCapture?.(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
       event.preventDefault();
       const position = this.#point(record, event);
@@ -438,14 +636,31 @@ export class WebKitPresenter {
         this.#flushWheel(record);
         if (record.nextPointer) { this.#send(record, "mouse", record.nextPointer); record.nextPointer = null; }
         this.#send(record, "mouse", fields);
+        // Linux middle-click paste of the PRIMARY selection into an editable, as in a Gecko tab.
+        if (record.browserUI && type === "pointerup" && fields.button === "middle" && record.cursor === "text"
+            && this.window.Services?.prefs?.getBoolPref?.("middlemouse.paste", true) !== false) {
+          this.#paste(record, { primary: true, at: { x: position.x, y: position.y } });
+        }
       }
     });
     this.#listen(record, "wheel", event => {
       if (!event.isTrusted) return;
       event.preventDefault(); // never scroll Zen or start a history swipe over the view
       if (!record.committed || record.resizePending) return;
-      const scale = event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? record.adapter.surface.height : 1);
+      // Ctrl+wheel zooms the page, as Gecko's mousewheel.with_control.action does.
+      if (record.browserUI && event.ctrlKey && !event.altKey && !event.metaKey && event.deltaY) {
+        const zoom = this.window.FullZoom;
+        if (event.deltaY < 0) zoom?.enlarge?.(); else zoom?.reduce?.();
+        return;
+      }
       const position = this.#point(record, event);
+      // Notches (line/page deltas) scroll smoothly like Gecko; precise (pixel) deltas follow the hand.
+      if (record.browserUI && event.deltaMode !== 0) {
+        const unit = event.deltaMode === 1 ? WHEEL_LINE_PIXELS : record.adapter.surface.height;
+        this.#smoothWheel(record, position, -event.deltaX * unit, -event.deltaY * unit);
+        return;
+      }
+      const scale = event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? record.adapter.surface.height : 1);
       // engine-stream-v1 wheel sign (cef-v1): negative delta_y scrolls down.
       if (record.wheel && record.wheel.fields.modifiers !== position.modifiers) this.#flushWheel(record);
       record.wheel ??= { fields: position, x: 0, y: 0 };
@@ -455,28 +670,104 @@ export class WebKitPresenter {
         this.window.requestAnimationFrame(() => { record.wheelScheduled = false; this.#flushWheel(record); });
       }
     }, { passive: false });
-    for (const [name, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, name, event => {
-      if (!event.isTrusted || !record.committed) return;
-      const route = linuxKeyboardRoute(event);
-      if (route === "chrome") return; // Zen's shortcuts work over WebKit exactly as over Firefox
-      event.preventDefault(); event.stopPropagation();
-      if (route === "edit") { if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event))); return; }
-      if (route === "text") {
-        if (type === "down" && record.adapter.inputFeatures.imeCommit) this.#send(record, "ime_commit_text", { text: event.key });
-        return;
-      }
-      if (route === "unsupported") { this.#indicator("This experimental engine has no IME bridge yet"); return; }
-      const fields = streamKey(event, type);
-      this.#send(record, "key", fields);
-      if (type === "down" && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        if (event.key.length <= 2) this.#send(record, "key", { ...fields, type: "char" });
-        else if (event.key === "Enter") this.#send(record, "key", { ...fields, type: "char", text: "\r" });
-      }
-    });
-    this.#listen(record, "focus", () => { record.contentFocused = true; this.#action(record, target => record.adapter.focus(target, true)); });
-    this.#listen(record, "blur", () => { record.contentFocused = false; this.#action(record, target => record.adapter.focus(target, false)); });
-    this.#listen(record, "compositionstart", event => { event.preventDefault(); this.#indicator("IME composition is unsupported in WebKit tabs yet"); });
+    this.#keyTargets(record, record.canvas);
+    if (record.browserUI) {
+      // Page focus follows chrome focus of the engine view or its proxy editor, not moves between them.
+      this.#listenOn(record, record.overlay, "focusin", event => {
+        if (!this.#contentElement(record, event.target) || record.contentFocused) return;
+        record.contentFocused = true; this.#action(record, target => record.adapter.focus(target, true));
+      });
+      this.#listenOn(record, record.overlay, "focusout", event => {
+        if (!this.#contentElement(record, event.target) || this.#contentElement(record, event.relatedTarget)) return;
+        record.contentFocused = false;
+        if (record.composing) { record.composing = false; this.#send(record, "ime_finish_composing", {}); }
+        this.#action(record, target => record.adapter.focus(target, false));
+      });
+    } else {
+      this.#listen(record, "focus", () => { record.contentFocused = true; this.#action(record, target => record.adapter.focus(target, true)); });
+      this.#listen(record, "blur", () => { record.contentFocused = false; this.#action(record, target => record.adapter.focus(target, false)); });
+    }
+    this.#listen(record, "compositionstart", event => { event.preventDefault(); if (!record.browserUI) this.#indicator("IME composition is unsupported in WebKit tabs yet"); });
     this.#listen(record, "contextmenu", event => event.preventDefault());
+  }
+  #keyTargets(record, element) {
+    for (const [name, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listenOn(record, element, name, this.#keyHandler(record, type));
+  }
+  /** A notch: Gecko-like smooth scroll, cumulative distance eased over WHEEL_SMOOTH_MS, one wheel per frame. */
+  #smoothWheel(record, position, dx, dy) {
+    const now = this.window.performance.now();
+    const running = record.wheelAnimation;
+    // A new notch during an animation adds its distance to what is still left.
+    const left = running ? { x: running.dx - running.sentX, y: running.dy - running.sentY } : { x: 0, y: 0 };
+    const animation = record.wheelAnimation = { fields: position, start: now, dx: dx + left.x, dy: dy + left.y, sentX: 0, sentY: 0 };
+    const step = () => {
+      if (record.wheelAnimation !== animation || !record.committed) return;
+      const t = this.window.performance.now() - animation.start;
+      const x = smoothWheelProgress(animation.dx, t), y = smoothWheelProgress(animation.dy, t);
+      const clamp = value => Math.max(-4096, Math.min(4096, value)) || 0;
+      const delta_x = clamp(x - animation.sentX), delta_y = clamp(y - animation.sentY);
+      animation.sentX += delta_x; animation.sentY += delta_y;
+      if (delta_x || delta_y) this.#send(record, "wheel", { ...animation.fields, delta_x, delta_y });
+      if (t < WHEEL_SMOOTH_MS) this.window.requestAnimationFrame(step);
+      else if (record.wheelAnimation === animation) record.wheelAnimation = null;
+    };
+    this.window.requestAnimationFrame(step);
+  }
+  /**
+   * IME (§8.2, `text_input`): while the page's editable has focus, a transparent proxy editor
+   * at its caret takes chrome focus, so Gecko drives the system input method against it and
+   * its composition goes to WebKit as preedit (shown underlined by WebKit), then committed.
+   */
+  #textInput(record, event) {
+    const ime = record.ime ??= this.#createIME(record);
+    const focused = this.window.document.activeElement;
+    const hadFocus = this.#contentElement(record, focused);
+    if (event.mode === "none") {
+      ime.active = null;
+      if (hadFocus && focused !== record.canvas) record.canvas.focus();
+      return;
+    }
+    const element = event.mode === "password" ? ime.password : ime.text;
+    const height = Math.max(1, Math.round(event.caret_height));
+    Object.assign(element.style, { left: `${Math.round(event.caret_x)}px`, top: `${Math.round(event.caret_y)}px`,
+      height: `${height}px`, fontSize: `${height}px`, lineHeight: `${height}px` });
+    ime.active = element;
+    if (hadFocus && focused !== element) element.focus();
+  }
+  #createIME(record) {
+    const document = this.window.document;
+    const make = (tag, type) => {
+      const element = document.createElementNS(XHTML, tag);
+      if (type) element.setAttribute("type", type);
+      element.setAttribute("aria-hidden", "true"); element.setAttribute("tabindex", "-1");
+      element.setAttribute("autocomplete", "off"); element.setAttribute("spellcheck", "false");
+      element.style.cssText = PROXY_STYLE;
+      record.overlay.appendChild(element);
+      const clear = () => { element.value = ""; };
+      this.#listenOn(record, element, "compositionstart", () => { record.composing = true; });
+      this.#listenOn(record, element, "compositionupdate", event => {
+        const text = String(event.data ?? "").slice(0, 1024);
+        this.#send(record, "ime_set_composition", { text, selection_start: text.length, selection_end: text.length });
+      });
+      this.#listenOn(record, element, "compositionend", event => {
+        record.composing = false;
+        const text = String(event.data ?? "").slice(0, 1024);
+        if (text) this.#send(record, "ime_commit_text", { text });
+        else this.#send(record, "ime_cancel_composition", {});
+        clear();
+      });
+      // Text that arrives without keys (emoji picker, on-screen keyboards).
+      this.#listenOn(record, element, "input", event => {
+        if (event.isComposing) return;
+        const text = String(event.data ?? "").slice(0, 1024);
+        if (!record.composing && text && ["insertText", "insertReplacementText"].includes(event.inputType)) this.#send(record, "ime_commit_text", { text });
+        clear();
+      });
+      this.#keyTargets(record, element);
+      return element;
+    };
+    record.listeners.push(() => { record.ime?.text.remove(); record.ime?.password.remove(); record.ime = null; });
+    return { text: make("textarea"), password: make("input", "password"), active: null };
   }
   #flushWheel(record) {
     const pending = record.wheel;
@@ -562,6 +853,9 @@ export class WebKitPresenter {
         canGoForward: record.loading.can_go_forward } : null,
       cursor: record.cursor, inputFeatures: record.adapter.inputFeatures, ready: record.adapter.host?.ready ?? null,
       renderScaleLimited: !!record.renderScaleLimited, fixtureOnly: true, ownedTabIds: this.owners(),
+      browserUI: !!record.browserUI, uiLog: [...(record.uiLog ?? [])], uiFailures: [...(this.uiFailures ?? [])],
+      focus: (active => active === record.canvas ? "canvas" : (record.overlay.contains?.(active) ? "proxy-" + active.localName : null))(
+        this.window.document.activeElement),
       failures: [...this.failures], pending: !!this.pending };
   }
   /** Explicit diagnostic call in privileged chrome only: the presented WebKit pixels as PNG. */

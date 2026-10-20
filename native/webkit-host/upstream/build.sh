@@ -55,6 +55,12 @@ printf '{"version":"%s","configure_s":%s,"build_s":%s,"nproc":%s,"ok":%s}\n' "$V
 cat "$OUT/build-time.json"
 [ "${status:-0}" = 0 ] || exit 1
 ninja -C /work/build install >"$OUT/install.log" 2>&1
+# The host has an RPATH; WebKit's helper processes (WPEWebProcess, WPENetworkProcess) do not, and
+# bubblewrap starts them with a clean environment. Register the prefix with the loader cache
+# (the sandbox binds /etc/ld.so.cache and /usr), as a distribution install would.
+printf '%s\n' /usr/local/wpe-upstream/lib/x86_64-linux-gnu /usr/local/wpe-upstream/lib >/etc/ld.so.conf.d/axiosozo-wpe-upstream.conf
+ldconfig
+ldconfig -p | grep -E 'libWPEWebKit-2\.0' | tee -a "$OUT/build-steps.log"
 log "installed $VERSION to /usr/local/wpe-upstream; running host suites against it"
 export AXIOSOZO_WEBKIT_UPSTREAM_PREFIX=/usr/local/wpe-upstream
 sh /src/native/webkit-host/ci/container_test.sh
