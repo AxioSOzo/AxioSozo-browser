@@ -964,6 +964,12 @@ export class CEFPresenter {
     if (this.#labelTitle(record)) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
+    // Firefox disables reloading for the blank Gecko document a web-mode Chromium tab keeps
+    // hidden, which made F5, Ctrl+R and the reload button dead over Chromium pages. The tab's
+    // page is Chromium's; Firefox recomputes these for its own tabs on their next location change.
+    for (const id of ["Browser:Reload", "Browser:ReloadSkipCache", "Browser:ReloadOrDuplicate"]) {
+      this.window.document.getElementById?.(id)?.removeAttribute("disabled");
+    }
     // The explicit nsIURI updates address text; Gecko security UI is masked.
     const shown = record.latestURL === "about:blank" ? null : record.latestURL;
     if (!this.window.gURLBar.focused) {

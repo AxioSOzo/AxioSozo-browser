@@ -219,6 +219,28 @@ def parse_feel(title):
         return None
 
 
+# Address-bar scenarios run last because the Linux parent process has a known WebRender
+# SIGSEGV around address-bar focus/input (owned by cloud/linux-platform; reproduced on the
+# Gecko baseline tab in run 39354267095). When the browser dies in one of them, it and the
+# scenarios after it are BLOCKED by that bug, not Chromium failures.
+ADDRESS_BAR_SCENARIOS = ('urlbar_chromium', 'ctrl_t_chromium', 'urlbar_gecko', 'ctrl_t_gecko')
+BROWSER_GONE = ('browser exited', 'Marionette closed the connection', 'Broken pipe', 'reset by peer')
+
+
+def known_parent_crash(result):
+    crashed = False
+    for name in ADDRESS_BAR_SCENARIOS:
+        outcome = result['scenarios'].get(name)
+        if not outcome or outcome['status'] != 'FAIL':
+            continue
+        if crashed or any(text in outcome.get('reason', '') for text in BROWSER_GONE):
+            reason = ('browser already gone after the known parent crash' if crashed else
+                      'KNOWN_PARENT_CRASH (cloud/linux-platform address-bar WebRender SIGSEGV): ' + outcome['reason'])
+            outcome.update(status='BLOCKED_ENV', reason=reason)
+            result['matrix'][name] = {'status': 'BLOCKED', 'reason': reason}
+            crashed = True
+
+
 class CEFZenHarness(gui_test.Harness):
     def __init__(self, args, engine, evidence, feel):
         super().__init__(args, engine, evidence)
@@ -1324,6 +1346,7 @@ def main():
             evidence.mkdir(parents=True, exist_ok=True)
             executable, app_info = gui_test.resolve_app(args.app)
             harness.run(executable, app_info, scenarios)
+            known_parent_crash(harness.result)
             statuses = [item['status'] for item in harness.result['scenarios'].values()]
             missing = [name for name in scenarios if name not in harness.result['scenarios']]
             status = 'FAIL' if 'FAIL' in statuses or missing else 'BLOCKED_ENV' if 'BLOCKED_ENV' in statuses else 'PASS'

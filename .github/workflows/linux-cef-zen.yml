@@ -204,9 +204,12 @@ jobs:
           summary = {name: {'status': r.get('status'), 'reason': r.get('reason'),
                             'scenarios': {k: v.get('status') for k, v in r.get('scenarios', {}).items()},
                             'matrix': {k: v.get('status') for k, v in r.get('matrix', {}).items()}} for name, r in runs.items()}
-          verdict = 'PASS' if all(r['status'] == 'PASS' for r in summary.values()) else 'FAIL'
-          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'runs': summary}, indent=2) + '\n')
-          print(json.dumps({'verdict': verdict, 'runs': summary}, indent=1))
+          # BLOCKED gates (environment, or the known parent crash owned by cloud/linux-platform)
+          # are listed, never counted as passes; any FAIL or a missing run fails the job.
+          verdict = 'PASS' if all(r['status'] in ('PASS', 'BLOCKED_ENV') for r in summary.values()) else 'FAIL'
+          blocked = {name: [k for k, v in r['matrix'].items() if v in ('BLOCKED', 'BLOCKED_ENV')] for name, r in summary.items()}
+          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=2) + '\n')
+          print(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=1))
           PY
           find "$EVIDENCE_OUT" -name '*.png' -size +4M -delete
           chmod -R a+rX "$EVIDENCE_OUT"

@@ -437,6 +437,19 @@ test('Linux: a selection made by the user in a Chromium tab becomes the desktop 
   await presenter.dispose();
 });
 
+test("reloading works over a Chromium page although Firefox disabled it for the hidden blank Gecko browser", async () => {
+  const z = zenWindow();
+  const commands = new Map(['Browser:Reload', 'Browser:ReloadSkipCache', 'Browser:ReloadOrDuplicate'].map(id => {
+    const attrs = new Map([['disabled', 'true']]);
+    return [id, { removeAttribute: key => attrs.delete(key), getAttribute: key => attrs.get(key) ?? null }];
+  }));
+  z.win.document.getElementById = id => commands.get(id) ?? null;
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  for (const [id, command] of commands) assert.equal(command.getAttribute('disabled'), null, id);
+  await presenter.dispose();
+});
+
 test('links that open a new tab open a new Chromium tab; background tabs start when shown', async () => {
   const z = zenWindow();
   const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web' });
