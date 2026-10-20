@@ -305,7 +305,12 @@ inserted text is correct.
 **Frame damage.** Linux pipe hellos negotiate `frame_damage`. Each frame then names
 the one rectangle that changed. The presenter converts and uploads only that
 rectangle (`diagnostics().uploadedPixelShare`). `damage_test.py` rebuilds every frame
-from damage alone and compares it with the full payload byte for byte.
+from damage alone and compares it with the full payload byte for byte. With
+`damage_payload` the pipe carries only the rectangle's rows; with `frame_transport:"memfd"`
+(engine-stream-v1 §6.3) the pixels sit in a sealed memfd ring Zen reads through
+`/proc/<pid>/fd`, and a `frame_ack` with `frame_transport:"pipe"` falls back to the pipe
+(pending frames whole, every view repainted); `damage_test.py` also runs that fallback
+against the real host (`memfd_fallback` in its result).
 
 **CI.** `.github/workflows/linux-cef-host.yml` (`ubuntu-24.04`) runs everything above
 under Xvfb with the SUID sandbox. It publishes logs, result JSON and frame PNGs to

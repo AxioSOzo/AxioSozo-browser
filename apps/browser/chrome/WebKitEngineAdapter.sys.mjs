@@ -6,7 +6,7 @@
 // engine-neutral EngineStreamClient. Fixture mode only: the host loads nothing but
 // the loopback GET fixture, and general web mode is not offered (docs/CAPABILITY_MATRIX.md).
 import { EngineStreamHost, EngineStreamTarget, validFixtureOrigin } from "./EngineStreamClient.sys.mjs";
-import { MEMFD_FRAMES_PREF } from "./EngineFrameSurface.sys.mjs";
+import { memfdFramesWanted, memfdProcReadable, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 
 // upstreams.lock.json `webkit` (Debian 13 packages); a test keeps these equal to the lockfile.
 export const WEBKIT_VERSION = "2.48.3";
@@ -171,11 +171,14 @@ export async function launchWebKit(win, { tabId, origin, onEvent, onFrame, onFai
   }
   const cleanup = () => IOUtils.remove(profile, { recursive: true });
   process.wait().then(cleanup, cleanup).catch(() => {});
+  const transport = frameTransport ?? (memfdFramesWanted() && await memfdProcReadable(process.pid) ? "memfd" : "pipe");
+  if (transport === "memfd" && frameWorkerWanted()) await frameWorkersUsable();
   const host = new EngineStreamHost(process, { profile: webkitProfile({ platform }), token, instance, identity: origin,
     // Rectangle-only payloads (engine-stream-v1 §6.2): the pipe carries the damage, not the frame.
     timers, frameDamage, damagePayload, requestPrefix: "wk",
-    // engine-stream-v1 §6.3 memfd frames: EXPERIMENTAL, off unless the pref is set (Linux only here).
-    frameTransport: frameTransport ?? (Services.prefs.getBoolPref(MEMFD_FRAMES_PREF, false) ? "memfd" : "pipe") });
+    // engine-stream-v1 §6.3 memfd frames (Linux only here): pref/default, and only when this child's
+    // /proc/<pid>/fd is readable; otherwise the pipe.
+    frameTransport: transport });
   try { await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
   return new WebKitEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: instance, identity: origin,

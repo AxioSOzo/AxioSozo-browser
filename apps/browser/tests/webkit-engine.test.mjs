@@ -502,6 +502,43 @@ test("the tab glyph installs for the three-engine controls and cycles through sw
   tabs.dispose();
 });
 
+test("memfd frames (§6.3): an unreadable slot drops the frame; its ack asks for the pipe, whole frames follow", async () => {
+  const { resetMemfdFrames, memfdFramesDisabled } = await import("../chrome/EngineFrameSurface.sys.mjs");
+  resetMemfdFrames();
+  const memfd = { fd: 9, slot_bytes: 64, slots: 2 };
+  const fake = fakeHost({ ready: readyEvent({}, { frame_transport: "memfd", memfd, damage_payload: true }), memfdFrames: true });
+  let failNext = false;
+  const host = new EngineStreamHost(fake.process, { profile: webkitProfile(), token, instance, identity: origin, timers,
+    frameDamage: true, damagePayload: true, frameTransport: "memfd", requestPrefix: "wk",
+    readSlot: async (ring, slot, bytes) => {
+      if (failNext) { failNext = false; throw new Error("MEMFD_READ_FAILED"); }
+      return new Uint8Array(bytes).fill(0x11).buffer;
+    } });
+  await host.connect();
+  const frames = [], failures = [];
+  const adapter = new WebKitEngineAdapter(host, { pendingTarget: pending, onFrame: (m, p) => frames.push({ m, p: new Uint8Array(p.slice(0)) }),
+    onEvent: () => {}, onFailure: error => failures.push(error.message) });
+  await adapter.create(origin + "/engine.html", { width: 2, height: 2, device_scale: 1 }); await tick();
+  const presented = frames.length;
+  failNext = true;
+  fake.pipe.push(packet(2, { version: 1, target: fake.current, frame_id: 50, width: 2, height: 2, stride: 8, device_scale: 1,
+    format: "BGRA8", damage: [[1, 1, 1, 1]], slot: 1, payload_bytes: 4 }));
+  await tick(); await tick();
+  assert.equal(frames.length, presented, "the dropped frame is not presented");
+  const ack = fake.writes.filter(w => w.method === "frame_ack").at(-1);
+  assert.deepEqual([ack.frame_id, ack.frame_transport], [50, "pipe"]);
+  assert.equal(host.memfd, null); assert.equal(host.frameTransport, "pipe");
+  assert.equal(memfdFramesDisabled().reason, "slot_read_failed");
+  // The host re-sends the target whole through the pipe.
+  fake.pipe.push(packet(2, { version: 1, target: fake.current, frame_id: 51, width: 2, height: 2, stride: 8, device_scale: 1,
+    format: "BGRA8", damage: [[0, 0, 2, 2]] }, new Uint8Array(16).fill(0x33)));
+  await tick(); await tick();
+  assert.deepEqual([...frames.at(-1).p], new Array(16).fill(0x33));
+  assert.equal(fake.writes.filter(w => w.method === "frame_ack").at(-1).frame_transport, undefined);
+  assert.deepEqual(failures, []);
+  resetMemfdFrames();
+});
+
 test("memfd frames (§6.3): the pipe carries no pixels, the slot is read before the frame is acknowledged", async () => {
   const memfd = { fd: 9, slot_bytes: 64, slots: 2 };
   const fake = fakeHost({ ready: readyEvent({}, { frame_transport: "memfd", memfd, damage_payload: true }), memfdFrames: true });
