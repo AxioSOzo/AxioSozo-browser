@@ -1,0 +1,356 @@
+{
+  "harness": "axiosozo-linux-gui+cef-zen",
+  "version": 1,
+  "engine": "chromium",
+  "started_utc": "2026-10-20T09:21:00+00:00",
+  "host": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile",
+    "AXIOSOZO_ENGINE_PROBE=1 fixture probe",
+    "profile pref axiosozo.engines.linux.memfd_frames=false",
+    "Marionette unhandledPromptBehavior=ignore"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "2097155",
+          "xwininfo": {
+            "Width": "1152",
+            "Height": "720",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo \u2014 AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.06
+    },
+    "chrome": {
+      "status": "PASS",
+      "details": {
+        "title": "AxioSozo \u2014 AxioSozo Dev",
+        "windowtype": "navigator:browser",
+        "axiosozo": true,
+        "version": 5,
+        "engineAdapter": "GeckoEngineAdapter",
+        "toolsEntry": true,
+        "spaceSwitcher": true,
+        "zenWorkspaces": true,
+        "tabs": 2,
+        "foundationPref": true,
+        "engineSurfaceService": false,
+        "appName": "AxioSozo",
+        "appVersion": "0.1a1",
+        "platformVersion": "156.0",
+        "os": "Linux",
+        "widget": "gtk",
+        "contentSandboxLevel": 6,
+        "compositor": "WebRender (Software)",
+        "webrenderNativeCompositorPref": true,
+        "gfx": {
+          "adapterDescription": "llvmpipe (LLVM 20.1.2, 256 bits)",
+          "adapterVendorID": "Mesa",
+          "adapterDriver": "",
+          "adapterDriverVersion": "25.2.8.0",
+          "windowProtocol": "x11",
+          "desktopEnvironment": null
+        },
+        "engine_view": "absent (AXCF pipe fallback)"
+      },
+      "seconds": 1.91
+    },
+    "fixture_roundtrip": {
+      "status": "PASS",
+      "details": {
+        "probe_button": {
+          "button": "axiosozo-engine-probe",
+          "pointer": [
+            205,
+            60
+          ]
+        },
+        "typed": "AxioSozo fixture | count=0 | input=cef | page=1",
+        "clicked": "AxioSozo fixture | count=1 | input=cef | page=1",
+        "page2": "AxioSozo fixture | count=0 | input= | page=2",
+        "back": {
+          "button": "back-button",
+          "pointer": [
+            111,
+            20
+          ]
+        },
+        "page1": "AxioSozo fixture | count=0 | input= | page=1"
+      },
+      "seconds": 36.11
+    },
+    "fixture_host_kill": {
+      "status": "PASS",
+      "details": {
+        "killed": 6983,
+        "before": {
+          "url": "http://127.0.0.1:44781/engine.html",
+          "title": "AxioSozo fixture | count=0 | input= | page=1",
+          "pid": 6844
+        },
+        "after": {
+          "url": "http://127.0.0.1:44781/engine.html",
+          "title": "AxioSozo fixture | count=0 | input= | page=1",
+          "pid": 6844
+        },
+        "failure": "CEF_CRASH_OUTCOME_UNCERTAIN",
+        "typed": "AxioSozo fixture | count=0 | input=gecko | page=1"
+      },
+      "seconds": 2.23
+    }
+  },
+  "screenshots": [
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/chrome.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/f01-gecko.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/f02-chromium.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/f03-typed.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/f04-page2.png",
+    "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture/f05-gecko-after-kill.png"
+  ],
+  "matrix": {
+    "fixture_e1": {
+      "status": "PASS",
+      "screenshots": [
+        "f02-chromium.png",
+        "f03-typed.png",
+        "f04-page2.png"
+      ],
+      "native": {
+        "renderPath": "native-osr-bgra",
+        "surface": {
+          "width": 953,
+          "height": 678,
+          "device_scale": 1
+        },
+        "frames": 3,
+        "firstFrameMilliseconds": 492.66606800000045
+      }
+    },
+    "probe_chip_never_covers_content": {
+      "status": "PASS",
+      "screenshot": "f02-chromium.png",
+      "covering": [],
+      "geometry": {
+        "content": {
+          "id": "",
+          "x": 191,
+          "y": 34,
+          "w": 953,
+          "h": 678,
+          "flex": "0 1 auto",
+          "parents": [
+            {
+              "id": "stack",
+              "x": 191,
+              "w": 953,
+              "display": "grid",
+              "overflow": "visible"
+            },
+            {
+              "id": "box",
+              "x": 191,
+              "w": 953,
+              "display": "grid",
+              "overflow": "visible"
+            },
+            {
+              "id": "panel-1-3",
+              "x": 191,
+              "w": 953,
+              "display": "flex",
+              "overflow": "clip"
+            },
+            {
+              "id": "tabbrowser-tabpanels",
+              "x": 191,
+              "w": 953,
+              "display": "flex",
+              "overflow": "visible"
+            }
+          ],
+          "shown": true
+        },
+        "urlbar": {
+          "id": "urlbar",
+          "x": 6,
+          "y": 28.5,
+          "w": 179,
+          "h": 38,
+          "flex": "1 1 0%",
+          "parents": [
+            {
+              "id": "urlbar-container",
+              "x": 6,
+              "w": 179,
+              "display": "flex",
+              "overflow": "visible"
+            },
+            {
+              "id": "nav-bar-customization-target",
+              "x": 5,
+              "w": 181,
+              "display": "flex",
+              "overflow": "visible"
+            },
+            {
+              "id": "nav-bar",
+              "x": 5,
+              "w": 181,
+              "display": "flex",
+              "overflow": "visible"
+            },
+            {
+              "id": "navigator-toolbox",
+              "x": 0,
+              "w": 186,
+              "display": "flex",
+              "overflow": "visible"
+            }
+          ],
+          "shown": true
+        },
+        "chips": [
+          {
+            "id": "axiosozo-engine-probe",
+            "x": 7,
+            "y": 70.5,
+            "w": 112.61666870117188,
+            "h": 24,
+            "flex": "0 0 auto",
+            "parents": [
+              {
+                "id": "nav-bar-customization-target",
+                "x": 5,
+                "w": 181,
+                "display": "flex",
+                "overflow": "visible"
+              },
+              {
+                "id": "nav-bar",
+                "x": 5,
+                "w": 181,
+                "display": "flex",
+                "overflow": "visible"
+              },
+              {
+                "id": "navigator-toolbox",
+                "x": 0,
+                "w": 186,
+                "display": "flex",
+                "overflow": "visible"
+              },
+              {
+                "id": "browser",
+                "x": 0,
+                "w": 1152,
+                "display": "flex",
+                "overflow": "visible"
+              }
+            ],
+            "shown": true
+          }
+        ]
+      }
+    },
+    "fixture_e2_host_kill": {
+      "status": "PASS",
+      "screenshot": "f05-gecko-after-kill.png",
+      "before": {
+        "url": "http://127.0.0.1:44781/engine.html",
+        "title": "AxioSozo fixture | count=0 | input= | page=1",
+        "pid": 6844
+      },
+      "after": {
+        "url": "http://127.0.0.1:44781/engine.html",
+        "title": "AxioSozo fixture | count=0 | input= | page=1",
+        "pid": 6844
+      },
+      "failure": "CEF_CRASH_OUTCOME_UNCERTAIN"
+    }
+  },
+  "mode": "fixture",
+  "scale": 1,
+  "feel_fixture": {
+    "origin": "http://127.0.0.1:41479",
+    "lan_origin": "http://10.1.0.226:39819",
+    "tls_origin": "https://127.0.0.1:44361",
+    "tls_note": null,
+    "sha256": {
+      "/feel.html": "dcf063819066f329268a1bf13cca0703bfdcc5f91a996bb0a7e809beef67558e",
+      "/engine.html": "bf3f50ec47827d4889b4a24665607599e1a796950a9291d190a9e23dad062c69"
+    }
+  },
+  "frame_prefs": {
+    "axiosozo.engines.linux.memfd_frames": false
+  },
+  "app": {
+    "executable": "/home/runner/axiosozo-build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39362552105",
+    "repository_commit": "35782ef55f54f726e3d2730072026ced386d110d",
+    "fingerprint": "f3c8116e5f2df142c693e5200d79e18f6e60a1dfef76b2159be7ed7eb9c8f4b7",
+    "fingerprint_matches_checkout": false
+  },
+  "session": "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-e344a4fb90d2500a",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "dbus": "private session bus",
+  "command": [
+    "/home/runner/axiosozo-build/linux-app/39362552105/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/gui-e344a4fb90d2500a/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 6593,
+    "marionette_port": 41313,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 3.04,
+    "exit_code": 0
+  },
+  "prompt_handler": {
+    "default": "ignore",
+    "beforeUnload": "ignore"
+  },
+  "cef_check": "{\"component\": \"cef\", \"status\": \"PASS\", \"action\": \"native_build_check\", \"version\": \"154.0.23+g062ebe4+chromium-154.0.8037.17\", \"platform\": \"linux64\", \"sandbox\": {\"suid_helper_installed\": true, \"apparmor_restrict_unprivileged_userns\": 1, \"unprivileged_userns_clone\": 1, \"max_user_namespaces\": 63838, \"unprivileged_userns\": false, \"expected\": \"suid\", \"usable\": true}}",
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "status": "PASS",
+  "evidence_dir": "/home/runner/work/AxioSozo-browser/evidence-e2e/fixture"
+}
