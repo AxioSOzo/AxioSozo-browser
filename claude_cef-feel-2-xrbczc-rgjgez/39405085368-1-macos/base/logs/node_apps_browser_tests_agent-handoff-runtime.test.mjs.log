@@ -1,0 +1,46 @@
+✔ one trusted shortcut opens the doorhanger after a privacy precheck; untrusted commands do nothing (7.820666ms)
+✔ Copy: the trusted click sends one exact request through the core; the clipboard gets the bounded context; the return target is native (6.042333ms)
+✔ an untrusted Copy click copies nothing and ends the session (2.056291ms)
+✔ an unticked selection (the default): no selected text is read and none is copied; no selection means the opt-in is disabled (5.381333ms)
+✔ a page with a password field is refused at the precheck: no doorhanger, nothing read, nothing copied (0.648417ms)
+✔ sensitive sites, non-web pages, Chromium tabs and private windows are refused before any content query (1.469ms)
+✔ navigation, including a same-document one, ends the session; the old doorhanger cannot copy (2.645791ms)
+✔ navigation while capturing discards the capture; nothing is copied and the change is said calmly (3.847458ms)
+✔ a process swap (new frameLoader), another principal, container or space while copying discards everything (8.018791ms)
+✔ while the capture awaits, another selected tab or browser without any TabSelect delivery discards everything (4.130666ms)
+✔ the final copy boundary itself rechecks the selected tab, selected browser and frameLoader synchronously (7.927458ms)
+✔ only a known live tab with its native permanentKey and frameLoader is offered; unknown state reads nothing (0.889625ms)
+✔ the tab's own window is its native Node.documentGlobal: foreign, missing or ownerGlobal-only tabs are never offered (1.155833ms)
+✔ the final clipboard guard checks project authority synchronously: a change just before the write copies nothing (0.753542ms)
+✔ a project write while copying ends it at once; unknown authority at open is read again, and a different project is refused (3.029916ms)
+✔ an unprojected page copies with project null; never an invented one (1.051916ms)
+✔ Cancel, Escape-equivalent removal, tab switch and tab close end the session without a copy (1.196708ms)
+✔ the context menu reads nothing on opening, shows only for eligible pages, and its trusted command opens the doorhanger (0.575459ms)
+✔ teardown removes the shortcut, the menu item, the doorhanger template and every listener; a pending session ends (0.368084ms)
+✔ synthetic agent: an ordinary browser shows no test action and never asks the factory; Copy stays the default (1.492709ms)
+✔ synthetic agent: one fresh trusted click asks the factory once; only its own adapter and configuration reach the core (3.30325ms)
+✔ synthetic agent: absent or invalid admission is said as unavailable; nothing launches, copies or falls back (1.374ms)
+✔ synthetic agent: a navigation, swap without an event, frameLoader or project change during the factory await closes it unused (6.796167ms)
+✔ synthetic agent: the same changes while the native dispatch awaits make isActive false before dispatch (3.903167ms)
+✔ synthetic agent: Cancel, dismissal, tab close and teardown close the fixture; a late factory answer is closed unused (9.887458ms)
+✔ synthetic agent: an uncertain launch is said as uncertain and never copied; unavailable and cancelled stay distinct (3.133291ms)
+✔ synthetic agent: early clicks, a background window and an unprojected page request nothing (5.007833ms)
+✔ synthetic agent with the actual root factory and terminal adapter: the session's isActive guards the real dispatch (28.256959ms)
+✔ synthetic agent: refused before anything for private, stale or password pages; the copy guards are unchanged (0.793833ms)
+✔ superseded: a cancelled old factory answering after a newer copy or hand-off never replaces that newer result (1.915333ms)
+✔ superseded: an old uncertain launch settling while a new composer is open leaves it alone, then is said once nothing newer shows (0.94525ms)
+✔ superseded: an old uncertain launch waits behind a newer result and never clears it (1.245333ms)
+✔ current session: a late cancellation and a late uncertainty are still said for the newest request (0.978833ms)
+✔ with the console owner: console errors are offered unticked; unticked copies none and reads none (1.559875ms)
+✔ ticked at the trusted Copy: the owner's records of exactly this tab and document, sanitized and bounded, under both authorities (2.197958ms)
+✔ ticked console errors: nothing is copied when the native console authority changes (0.61875ms)
+✔ ticked console errors: nothing is copied when the owner refuses the read (1.402959ms)
+✔ with the console owner, a page of no project cannot tick console errors, and a navigation still ends the session (0.652459ms)
+ℹ tests 38
+ℹ suites 0
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 231.907958

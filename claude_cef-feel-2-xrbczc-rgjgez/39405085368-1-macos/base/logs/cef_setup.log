@@ -1,0 +1,31 @@
++ /usr/bin/true
+signing: ad hoc (no AXIOSOZO_CODESIGN_IDENTITY); macOS Keychain will ask about "Chromium Safe Storage" again after every rebuild. See README, "Stable local signing identity".
++ curl --fail --location --max-time 180 --speed-time 20 --speed-limit 1024 --continue-at - https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_macosarm64_minimal.tar.bz2 --output /Users/runner/axiosozo-build/cef/cef-minimal.tar.bz2
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0 11  126M   11 14.7M    0     0  15.3M      0  0:00:08 --:--:--  0:00:08 15.3M 45  126M   45 58.0M    0     0  29.5M      0  0:00:04  0:00:01  0:00:03 29.5M 79  126M   79  100M    0     0  34.0M      0  0:00:03  0:00:02  0:00:01 34.0M100  126M  100  126M    0     0  34.6M      0  0:00:03  0:00:03 --:--:-- 34.6M
++ /usr/bin/env tar -xjf /Users/runner/axiosozo-build/cef/cef-minimal.tar.bz2 -C /Users/runner/axiosozo-build/cef
++ cp -cR /Users/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosarm64_minimal/Release/Chromium Embedded Framework.framework /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework
++ /usr/bin/env env TMPDIR=/Users/runner/axiosozo-build/cef/tmp CLANG_MODULE_CACHE_PATH=/Users/runner/axiosozo-build/cef/clang-cache xcrun clang++ -std=c++20 -fobjc-arc -arch arm64 -mmacosx-version-min=14.5 -DCEF_USE_SANDBOX=1 -DCEF_API_VERSION=15400 -I /Users/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosarm64_minimal -framework Cocoa /Users/runner/work/_temp/base/native/chromium-host/host.mm /Users/runner/work/_temp/base/native/chromium-host/surface_transport.mm -framework Metal -framework IOSurface -lbsm -o /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe
++ /usr/bin/env env TMPDIR=/Users/runner/axiosozo-build/cef/tmp CLANG_MODULE_CACHE_PATH=/Users/runner/axiosozo-build/cef/clang-cache xcrun clang++ -std=c++20 -fobjc-arc -arch arm64 -mmacosx-version-min=14.5 -DCEF_USE_SANDBOX=1 -DCEF_API_VERSION=15400 -I /Users/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosarm64_minimal -framework Cocoa /Users/runner/work/_temp/base/native/chromium-host/host.mm -DAXIO_CEF_HELPER=1 /Users/runner/axiosozo-build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_macosarm64_minimal/libcef_dll/wrapper/cef_scoped_sandbox_context_mac.mm -o /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper.app/Contents/MacOS/AxioCEFProbe Helper
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libvulkan.dylib
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libvulkan.dylib: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libcef_sandbox.dylib
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libcef_sandbox.dylib: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/Chromium Embedded Framework.framework: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Alerts).app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Alerts).app: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (GPU).app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (GPU).app: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Plugin).app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Plugin).app: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Renderer).app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper (Renderer).app: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper.app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/Frameworks/AxioCEFProbe Helper.app: replacing existing signature
++ codesign --force --sign - /Users/runner/axiosozo-build/cef/AxioCEFProbe.app
+/Users/runner/axiosozo-build/cef/AxioCEFProbe.app: replacing existing signature
+{"component": "cef", "status": "PASS", "action": "native_build", "binary": "/Users/runner/axiosozo-build/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe", "signing": "adhoc"}

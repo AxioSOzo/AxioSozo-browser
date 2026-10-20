@@ -1,0 +1,28 @@
+✔ a toast is Zen's own markup in Zen's container: hbox.zen-toast > vbox > label (+ .description) and a primary footer button (4.880041ms)
+✔ text is plain: markup stays literal, whitespace collapses and long text is cut (0.625292ms)
+✔ a new toast is filled a frame after it is added, so it is announced as a live-region change (0.170708ms)
+✔ it closes after its timeout; hover and keyboard focus keep it; ui.popup.disable_autohide keeps it (3.016083ms)
+✔ the same key updates the shown toast in place instead of stacking another (0.805209ms)
+AxioSozo: toast not shown Error: broken document
+    at throwing.document.createXULElement (file:///Users/runner/work/_temp/base/apps/browser/tests/axiosozo-toast.test.mjs:181:54)
+    at createToast (file:///Users/runner/work/_temp/base/apps/browser/chrome/AxioSozoToast.sys.mjs:74:38)
+    at showAxioSozoToast (file:///Users/runner/work/_temp/base/apps/browser/chrome/AxioSozoToast.sys.mjs:134:26)
+    at file:///Users/runner/work/_temp/base/apps/browser/tests/axiosozo-toast.test.mjs:182:29
+    at getActual (node:assert:611:5)
+    at strict.doesNotThrow (node:assert:779:32)
+    at TestContext.<anonymous> (file:///Users/runner/work/_temp/base/apps/browser/tests/axiosozo-toast.test.mjs:182:10)
+    at Test.runInAsyncScope (node:async_hooks:228:14)
+    at Test.run (node:internal/test_runner/test:1118:25)
+    at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+✔ motion: Zen's spring in and quick fade out through gZenUIManager.motion; none at all under reduced motion (1.436459ms)
+✔ no container, no window or no text: nothing is shown and nothing throws (0.783709ms)
+﹣ Zen's toast container, markup and styles still exist in the pinned Zen source (0.066208ms) # pinned Zen source absent
+✔ the runtime stylesheet lets an AxioSozo toast button show its text, scoped to AxioSozo toasts (1.07525ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 78.92
