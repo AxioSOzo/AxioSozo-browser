@@ -1,0 +1,485 @@
+gui-test webkit/launch: PASS
+gui-test webkit/chrome: PASS
+gui-test webkit/roundtrip: PASS
+gui-test webkit/host_failure: FAIL (AssertionError: browser exited (-11) while waiting for the Gecko tab shown again after the host died)
+gui-test webkit/three_engines: FAIL (BrokenPipeError: [Errno 32] Broken pipe)
+{
+  "harness": "axiosozo-linux-gui+webkit-roundtrip",
+  "version": 1,
+  "engine": "webkit",
+  "started_utc": "2026-10-20T01:39:57+00:00",
+  "host": {
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.41",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile",
+    "profile pref axiosozo.engines.webkit.enabled=true"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "2097155",
+          "xwininfo": {
+            "Width": "1152",
+            "Height": "720",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo \u2014 AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.04
+    },
+    "chrome": {
+      "status": "PASS",
+      "details": {
+        "title": "AxioSozo \u2014 AxioSozo Dev",
+        "windowtype": "navigator:browser",
+        "axiosozo": true,
+        "version": 5,
+        "engineAdapter": "GeckoEngineAdapter",
+        "toolsEntry": true,
+        "spaceSwitcher": true,
+        "zenWorkspaces": true,
+        "tabs": 2,
+        "foundationPref": true,
+        "engineSurfaceService": false,
+        "appName": "AxioSozo",
+        "appVersion": "0.1a1",
+        "platformVersion": "156.0",
+        "os": "Linux",
+        "widget": "gtk",
+        "contentSandboxLevel": 6,
+        "compositor": "WebRender (Software)",
+        "webrenderNativeCompositorPref": true,
+        "gfx": {
+          "adapterDescription": "llvmpipe (LLVM 19.1.7, 256 bits)",
+          "adapterVendorID": "Mesa",
+          "adapterDriver": "",
+          "adapterDriverVersion": "25.0.7.0",
+          "windowProtocol": "x11",
+          "desktopEnvironment": null
+        },
+        "engine_view": "absent (AXCF pipe fallback)"
+      },
+      "seconds": 1.44
+    },
+    "roundtrip": {
+      "status": "PASS",
+      "details": {
+        "gecko": {
+          "title": "AxioSozo fixture | count=0 | input= | page=1",
+          "tab": {
+            "remote": true,
+            "remoteType": "webIsolated=http://127.0.0.1",
+            "url": "http://127.0.0.1:44039/engine.html",
+            "documentURI": "http://127.0.0.1:44039/engine.html",
+            "contentTitle": "AxioSozo fixture | count=0 | input= | page=1",
+            "contentPid": 8268,
+            "hidden": false,
+            "selected": true
+          },
+          "page": {
+            "title": "AxioSozo fixture | count=0 | input= | page=1",
+            "readyState": "complete",
+            "url": "http://127.0.0.1:44039/engine.html",
+            "width": 953,
+            "height": 1385,
+            "text": "SYNTHETIC LOCAL ENGINE FIXTURE \u00b7 NO ACCOUNTS\n\nLive rendering and input\nInput \nIncrement GET navigation\nReady \u00b7 count=0 \u00b7 input=\n\nSelect this text to check selec"
+          },
+          "engine": "gecko"
+        },
+        "to_webkit": {
+          "menu": {
+            "item": null,
+            "submenu": [
+              {
+                "label": "Firefox",
+                "disabled": true
+              },
+              {
+                "label": "Chromium",
+                "disabled": false
+              },
+              {
+                "label": "WebKit",
+                "disabled": false
+              }
+            ]
+          },
+          "picked": "submenu",
+          "seconds": 3.53
+        },
+        "webkit": {
+          "geckoVisibility": "hidden",
+          "overlay": {
+            "display": "block",
+            "inBrowserStack": true,
+            "canvas": {
+              "width": 953,
+              "height": 678
+            }
+          },
+          "tabEngineAttribute": "webkit",
+          "indicator": {
+            "hidden": false,
+            "label": "WebKit"
+          },
+          "canvas_png": "/out/roundtrip/webkit-canvas.png",
+          "native": {
+            "engine": "webkit",
+            "version": "2.48.3",
+            "target": {
+              "document_generation": 2,
+              "engine": "webkit",
+              "engine_instance": "webkit-84f0353a-7451-4255-a58f-457c8353b8f5",
+              "identity": "http://127.0.0.1:44039",
+              "native_target_id": "10",
+              "navigation_generation": 2,
+              "private_mode": false,
+              "tab_id": "c0ba3478-f048-4608-bdd3-d4b4344c66b7"
+            },
+            "renderPath": "wpe-fdo-shm-bgra",
+            "frameTransport": "pipe",
+            "pipeFallback": true,
+            "frames": 2,
+            "damageFrames": 0,
+            "supersededFrames": 1,
+            "uploadedPixels": 1292268,
+            "fullPixels": 1292268,
+            "meanDrawMilliseconds": 5.915569500000856,
+            "firstFrameMilliseconds": 504.1445380000014,
+            "lastFrameId": 3,
+            "surface": {
+              "width": 953,
+              "height": 678,
+              "device_scale": 1
+            },
+            "url": "http://127.0.0.1:44039/engine.html",
+            "title": "AxioSozo fixture | count=0 | input= | page=1",
+            "loading": {
+              "loading": false,
+              "canGoBack": false,
+              "canGoForward": false
+            },
+            "cursor": "default",
+            "inputFeatures": {
+              "keyVerdict": false,
+              "wheelPhases": true,
+              "imeCommit": true,
+              "ime": true,
+              "edit": true
+            },
+            "ready": {
+              "engine": "webkit",
+              "engine_instance": "webkit-84f0353a-7451-4255-a58f-457c8353b8f5",
+              "event": "ready",
+              "libwpe": "1.16.2",
+              "platform": "linux-x86_64",
+              "process_model": "multi-process",
+              "render_path": "wpe-fdo-shm-bgra",
+              "runtime_webkit": "2.48.3",
+              "sandbox": "bubblewrap",
+              "sandbox_configured": true,
+              "webkit": "2.48.3",
+              "webkit_port": "wpe",
+              "wpebackend_fdo": "1.16.0"
+            },
+            "renderScaleLimited": false,
+            "fixtureOnly": true,
+            "ownedTabIds": [
+              "c0ba3478-f048-4608-bdd3-d4b4344c66b7"
+            ],
+            "failures": [],
+            "pending": false
+          }
+        },
+        "typed": {
+          "title": "AxioSozo fixture | count=0 | input=webkit | page=1",
+          "x11_title": "AxioSozo fixture | count=0 | input=webkit | page=1 \u2014 AxioSozo Dev",
+          "pointer": [
+            441,
+            219
+          ]
+        },
+        "clicked": {
+          "title": "AxioSozo fixture | count=1 | input=webkit | page=1",
+          "pointer": [
+            296,
+            291
+          ]
+        },
+        "page2": {
+          "via": "link click",
+          "pointer": [
+            443,
+            291
+          ],
+          "url": "http://127.0.0.1:44039/engine.html?page=2",
+          "title": "AxioSozo fixture | count=0 | input= | page=2",
+          "generation_before": 2,
+          "generation_after": 3,
+          "urlbar": "http://127.0.0.1:44039/engine.html?page=2"
+        },
+        "back_button": {
+          "button": "back-button",
+          "pointer": [
+            111,
+            20
+          ],
+          "size": [
+            30,
+            28
+          ]
+        },
+        "back": {
+          "url": "http://127.0.0.1:44039/engine.html",
+          "title": "AxioSozo fixture | count=1 | input=webkit | page=1",
+          "generation": 4,
+          "can_go_forward": true,
+          "urlbar": "http://127.0.0.1:44039/engine.html"
+        },
+        "scrolled": {
+          "changed_fraction": 0.758,
+          "frames_before": 687,
+          "frames_after": 735
+        },
+        "to_gecko": {
+          "menu": {
+            "item": null,
+            "submenu": [
+              {
+                "label": "Firefox",
+                "disabled": false
+              },
+              {
+                "label": "Chromium",
+                "disabled": false
+              },
+              {
+                "label": "WebKit",
+                "disabled": true
+              }
+            ]
+          },
+          "picked": "submenu"
+        },
+        "gecko_again": {
+          "state": {
+            "engineOf": "gecko",
+            "geckoVisibility": "",
+            "overlay": null,
+            "geckoURL": "http://127.0.0.1:44039/engine.html",
+            "tabEngineAttribute": null
+          },
+          "rendered": {
+            "title": "AxioSozo fixture | count=0 | input= | page=1",
+            "tab": {
+              "remote": true,
+              "remoteType": "webIsolated=http://127.0.0.1",
+              "url": "http://127.0.0.1:44039/engine.html",
+              "documentURI": "http://127.0.0.1:44039/engine.html",
+              "contentTitle": "AxioSozo fixture | count=0 | input= | page=1",
+              "contentPid": 8268,
+              "hidden": false,
+              "selected": true
+            },
+            "page": {
+              "title": "AxioSozo fixture | count=0 | input= | page=1",
+              "readyState": "complete",
+              "url": "http://127.0.0.1:44039/engine.html",
+              "width": 953,
+              "height": 1385,
+              "text": "SYNTHETIC LOCAL ENGINE FIXTURE \u00b7 NO ACCOUNTS\n\nLive rendering and input\nInput \nIncrement GET navigation\nReady \u00b7 count=0 \u00b7 input=\n\nSelect this text to check selec"
+            },
+            "engine": "gecko"
+          }
+        },
+        "host_processes_after_return": 0,
+        "failures": []
+      },
+      "seconds": 273.91
+    },
+    "host_failure": {
+      "status": "FAIL",
+      "reason": "AssertionError: browser exited (-11) while waiting for the Gecko tab shown again after the host died",
+      "seconds": 9.62
+    },
+    "three_engines": {
+      "status": "FAIL",
+      "reason": "BrokenPipeError: [Errno 32] Broken pipe",
+      "seconds": 0.02
+    }
+  },
+  "screenshots": [
+    "/out/roundtrip/chrome.png",
+    "/out/roundtrip/01-gecko.png",
+    "/out/roundtrip/02-to-webkit-menu.png",
+    "/out/roundtrip/02-to-webkit-submenu.png",
+    "/out/roundtrip/webkit-canvas.png",
+    "/out/roundtrip/02-webkit.png",
+    "/out/roundtrip/03-typed.png",
+    "/out/roundtrip/03-typed-canvas.png",
+    "/out/roundtrip/04-clicked.png",
+    "/out/roundtrip/05-page2.png",
+    "/out/roundtrip/06-back.png",
+    "/out/roundtrip/07-scrolled.png",
+    "/out/roundtrip/07-scrolled-canvas.png",
+    "/out/roundtrip/08-to-gecko-menu.png",
+    "/out/roundtrip/08-to-gecko-submenu.png",
+    "/out/roundtrip/09-gecko-again.png",
+    "/out/roundtrip/10-failure-to-webkit-menu.png",
+    "/out/roundtrip/10-failure-to-webkit-submenu.png",
+    "/out/roundtrip/webkit-canvas.png",
+    "/out/roundtrip/10-webkit-before-kill.png",
+    "/out/roundtrip/failure-host_failure.png",
+    "/out/roundtrip/failure-three_engines.png"
+  ],
+  "app": {
+    "executable": "/home/axio/build/linux-app/39346931130/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39346931130",
+    "repository_commit": "6ea1bde5261e3f4aeb909ee888866c840237fba4",
+    "fingerprint": "90512f08d9b721720817b7b9a0730235b23e7856cda7c2c0ea893bcbb0bb507a",
+    "fingerprint_matches_checkout": false
+  },
+  "session": "/home/axio/build/runtime/4810cb4f5d4c2d30/gui-3575dbff0adac05c",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "dbus": "private session bus",
+  "command": [
+    "/home/axio/build/linux-app/39346931130/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/axio/build/runtime/4810cb4f5d4c2d30/gui-3575dbff0adac05c/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 8017,
+    "marionette_port": 33227,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 2.42,
+    "exit_code": -11
+  },
+  "webkit_prepare": {
+    "facade": true,
+    "state": {
+      "version": 1,
+      "enabled": true,
+      "tabSwitch": true,
+      "pending": false,
+      "disposed": false,
+      "failure": null,
+      "browsingMode": "fixture",
+      "activeEngine": "gecko",
+      "engines": [
+        {
+          "id": "gecko",
+          "label": "Firefox",
+          "available": true,
+          "reason": null
+        },
+        {
+          "id": "chromium",
+          "label": "Chromium",
+          "available": true,
+          "reason": null,
+          "fixtureOnly": true
+        },
+        {
+          "id": "webkit",
+          "label": "WebKit",
+          "available": true,
+          "reason": null,
+          "fixtureOnly": true
+        }
+      ],
+      "webkit": {
+        "available": true,
+        "reason": null,
+        "fixtureOnly": true,
+        "webModeRequested": false,
+        "webMode": "unavailable",
+        "native": {
+          "engine": "gecko"
+        }
+      },
+      "webkitOwnedTabIds": [],
+      "enginePreferences": {
+        "enabled": false,
+        "last": null
+      },
+      "chromium": {
+        "version": 1,
+        "enabled": true,
+        "pending": false,
+        "disposed": false,
+        "failure": null,
+        "targetEvents": 0,
+        "activeEngine": "gecko",
+        "fixtureOrigin": "http://127.0.0.1:44039",
+        "browsingMode": "fixture",
+        "restrictions": "Local GET fixture only. Experimental: automatic Chromium control, IME, clipboard, native accessibility, downloads and permissions are unavailable.",
+        "automatedChromiumControl": "unsupported",
+        "cefOwnedTabIds": [],
+        "enginePreferences": {
+          "enabled": false,
+          "last": null
+        },
+        "native": {
+          "engine": "gecko"
+        }
+      },
+      "native": {
+        "engine": "gecko"
+      }
+    },
+    "engineOf": "gecko",
+    "geckoVisibility": "",
+    "geckoURL": "about:axiosozo#projects",
+    "overlay": null,
+    "tabEngineAttribute": null,
+    "tabLabel": "AxioSozo",
+    "urlbar": "about:axiosozo#projects",
+    "indicator": {
+      "hidden": true,
+      "label": "WebKit"
+    }
+  },
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "optional_scenarios": {
+    "three_engines": "FAIL"
+  },
+  "status": "FAIL",
+  "evidence_dir": "/out/roundtrip"
+}
