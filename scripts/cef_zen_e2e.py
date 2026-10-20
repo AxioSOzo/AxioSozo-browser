@@ -233,7 +233,14 @@ class CEFZenHarness(gui_test.Harness):
         # Zen's dialogs over a Chromium page must stay open for the user (and for this test):
         # Marionette's default user-prompt handler ("dismiss and notify") would answer them first.
         self.marionette.call('WebDriver:DeleteSession')
-        self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
+        # WebDriver accepts beforeunload prompts by itself unless the handler map says otherwise.
+        try:
+            self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True,
+                                                          'unhandledPromptBehavior': {'default': 'ignore', 'beforeUnload': 'ignore'}})
+            self.result['prompt_handler'] = {'default': 'ignore', 'beforeUnload': 'ignore'}
+        except gui_test.MarionetteError as error:
+            self.marionette.call('WebDriver:NewSession', {'strictFileInteractability': True, 'unhandledPromptBehavior': 'ignore'})
+            self.result['prompt_handler'] = 'ignore (handler map refused: %s)' % str(error)[:200]
         self.marionette.call('WebDriver:SetTimeouts', {'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.result['test_only_switches'].append('Marionette unhandledPromptBehavior=ignore')
 
@@ -700,6 +707,8 @@ class CEFZenHarness(gui_test.Harness):
         self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
         self.gate('context_menu', 'PASS', screenshots=['10-context-menu.png', '10-context-menu-hover.png', '10-page-menu.png',
                                                        '10-gecko-context-menu.png'], geometry=geometry,
+                  note='under Xvfb + software WebRender, xwd captures context-menu popups black for Firefox\'s own menu too '
+                       '(10-gecko-context-menu.png); items and placement are asserted from the open menupopup',
                   selection_items=[i['label'] for i in menu['items']], page_items=[i['label'] for i in page_menu['items']])
         return {'selection_menu': menu, 'copied': copied, 'page_menu': page_menu, 'page_contextmenu_events': self.page()['cm']}
 
@@ -768,8 +777,24 @@ class CEFZenHarness(gui_test.Harness):
           modifiers: k.getAttribute('modifiers'), command: k.getAttribute('command'), oncommand: k.getAttribute('oncommand'),
           disabled: k.getAttribute('disabled')}));"""
 
+    ZOOM_PROBE = """
+        if (!window.__feelZoom) {
+          const log = window.__feelZoom = {keys: [], resets: 0};
+          for (const type of ['keydown', 'keypress'])
+            window.addEventListener(type, e => { if (e.ctrlKey && e.key === '0') log.keys.push({type, target: e.target?.localName,
+              prevented: e.defaultPrevented, code: e.code, charCode: e.charCode, keyCode: e.keyCode, phase: e.eventPhase}); },
+              {capture: true, mozSystemGroup: true});
+          const reset = FullZoom.reset;
+          FullZoom.reset = function(...args) { log.resets++; return reset.apply(this, args); };
+        }
+        const log = window.__feelZoom; const out = JSON.parse(JSON.stringify(log)); log.keys = []; log.resets = 0;
+        out.command = document.getElementById('cmd_fullZoomReset')?.getAttribute('oncommand') ?? null;
+        out.commandDisabled = document.getElementById('cmd_fullZoomReset')?.getAttribute('disabled') ?? null;
+        return out;"""
+
     def zoom_cycle(self):
         """Ctrl+=, Ctrl+0, Ctrl+-, then Zen's reset command, on the selected tab: page zoom factors."""
+        self.chrome_script(self.ZOOM_PROBE)
         self.click_at(*AT['blank'])
         base = self.page()['z'][0]
         out = {'base': base}
@@ -781,6 +806,7 @@ class CEFZenHarness(gui_test.Harness):
             out['ctrl_0'] = self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, 'Ctrl+0 resets', timeout=6)['z'][0]
         except AssertionError:
             out['ctrl_0'] = self.page()['z'][0]
+        out['ctrl_0_events'] = self.chrome_script(self.ZOOM_PROBE)
         self.chrome_script('FullZoom.reset(); return true;')
         out['zen_reset'] = self.wait_page(lambda page: abs(page['z'][0] - base) < 0.01, "Zen's FullZoom.reset", timeout=10)['z'][0]
         self.key('ctrl+minus')
@@ -822,12 +848,32 @@ class CEFZenHarness(gui_test.Harness):
         self.click_at(*AT['blank'])
         key_before = self.page()['k']
         tabs = self.web()['tabs']
+        # Zen's Ctrl+T opens its floating new-tab address bar (a tab exists once something is chosen).
         self.key('ctrl+t')
-        out['ctrl_t'] = self.wait(lambda: (lambda s: s['tabs'] if s['tabs'] == tabs + 1 else None)(self.web()), 'Ctrl+T opens a tab', timeout=10)
-        time.sleep(0.8)
+        out['ctrl_t'] = self.wait(lambda: (lambda s: {'tabs': s['tabs'], 'urlbar_focused': s['urlbarFocused']}
+                                           if s['tabs'] == tabs + 1 or s['urlbarFocused'] else None)(self.web()),
+                                  'Ctrl+T opens a new tab / Zen\'s new-tab address bar', timeout=10)
+        time.sleep(0.6)
+        self.screenshot('20-ctrl-t', settle=False)
+        self.key('Escape')
+        time.sleep(0.4)
+        self.key('Escape')
+        time.sleep(0.6)
+        if self.web()['tabs'] != tabs:
+            self.chrome_script('gBrowser.removeTab(gBrowser.selectedTab); return true;')
+        # Ctrl+W with the focus in a Chromium page closes that Chromium tab.
+        self.open_tab(self.feel.url)
+        self.wait_page(lambda page: page['p'] == '1', 'extra feel tab in Gecko')
+        extra = self.web()['tabId']
+        self.focus_window()
+        self.tab_menu('Open in Chromium', '20-extra-to-chromium')
+        self.wait(lambda: self.chromium_ready(), 'extra tab in Chromium', timeout=60)
+        self.click_at(*AT['text'])
+        self.wait_page(lambda page: page['f'] == 'text', 'focus in the extra Chromium page')
+        before = self.web()['tabs']
         self.key('ctrl+w')
-        out['ctrl_w'] = self.wait(lambda: (lambda s: s['tabs'] if s['tabs'] == tabs else None)(self.web()), 'Ctrl+W closes it', timeout=10)
-        out['selected_after_ctrl_w'] = self.web()['tabId'] == self.cef_tab
+        out['ctrl_w'] = self.wait(lambda: (lambda s: s['tabs'] if s['tabs'] == before - 1 and s['tabId'] != extra else None)(self.web()),
+                                  'Ctrl+W closes the focused Chromium tab', timeout=10)
         self.ensure_chromium('20-to-chromium')
         self.click_at(*AT['blank'])
         self.key('ctrl+Tab')
@@ -977,7 +1023,26 @@ class CEFZenHarness(gui_test.Harness):
                 out[engine] = {'pasted': None}
             page = self.page()
             out[engine].update({'middle_event': page['mb'], 'y': page['y']})
+        # Which half is missing: does Chromium set PRIMARY, and does it paste Gecko's PRIMARY?
+        def primary():
+            if not shutil.which('xclip'):
+                return None
+            done = subprocess.run(['xclip', '-o', '-selection', 'primary'], env=self.x_env, capture_output=True, text=True, timeout=10)
+            return done.stdout if done.returncode == 0 else None
+        out['primary_after_gecko_selection'] = primary()
         self.select_tab(self.cef_tab)
+        self.wait(lambda: self.chromium_ready(), 'Chromium tab presented', timeout=15)
+        self.click_at(*AT['area'])
+        self.key('ctrl+a')
+        self.key('BackSpace')
+        self.wait_page(lambda page: page['a'] == '', 'chromium textarea cleared')
+        self.click_at(*AT['area'], button=2)
+        time.sleep(1.5)
+        out['chromium_pastes_gecko_primary'] = self.page()['a']
+        self.click_at(self.char_x(1), SEL_TOP, repeat=2)
+        self.wait_page(lambda page: page['s'].strip() == 'alpha', 'chromium: "alpha" selected')
+        time.sleep(0.5)
+        out['primary_after_chromium_selection'] = primary()
         same = bool(out['chromium']['pasted']) == bool(out['gecko']['pasted'])
         self.gate('middle_click_paste_autoscroll', 'PASS' if same and out['chromium']['pasted'] else 'EXPERIMENTAL', **out,
                   autoscroll='general.autoScroll is off by default on Linux in Firefox; Chromium-on-Linux scroll after middle click recorded as y')
