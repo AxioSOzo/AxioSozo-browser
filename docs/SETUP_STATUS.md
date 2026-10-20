@@ -1,4 +1,15 @@
-# Setup status — 23 September 2026
+# Setup status — 23 September 2026 (with the 20 October cloud program on top)
+
+> **20 October 2026, cloud program (cloud/integration):** Linux support (the Zen app builds, runs
+> and is GUI-tested on Ubuntu 24.04 in CI), WebKit as a third engine (WPE on Linux, WKWebView host
+> component on macOS), native-feel matrices for Chromium and WebKit inside Zen on Linux, and three
+> rounds of engine-frame performance work. Consolidated status per engine × platform with run ids:
+> [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md); per-goal summary, known gaps and the owner's Mac
+> verification steps: [CLOUD_PROGRAM_SUMMARY.md](CLOUD_PROGRAM_SUMMARY.md); security review:
+> [SECURITY_REVIEW_CLOUD.md](SECURITY_REVIEW_CLOUD.md). The macOS owner-machine paths below are
+> unchanged (the macOS regression lane compares every PR with `dev`). Still **not READY**: macOS
+> in-Zen E2E for WebKit, GPU machines and general web browsing in WebKit are not verified.
+
 
 > Historical note (13 October 2026): this page records the September state. The
 > "project APFS image" / "project image" below is now the `AxioSozoBuild` volume
