@@ -1490,7 +1490,8 @@ export class CEFPresenter {
     }
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
-    record.canvas.width = 1; record.canvas.height = 1;
+    // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
+    try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
     record.tab.toggleAttribute?.("busy", false); record.tab.toggleAttribute?.("progress", false);
     // Back in Firefox, Firefox's page sets its own icon. A kept engine keeps the
     // icon so Zen's session (and a closing window) remembers it.

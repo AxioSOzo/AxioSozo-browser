@@ -254,7 +254,8 @@ export class WebKitPresenter {
     }
     record.stack.style.position = record.priorPosition;
     record.overlay.remove();
-    record.canvas.width = 1; record.canvas.height = 1;
+    // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
+    try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
     record.tab.removeAttribute?.(ENGINE_ATTRIBUTE);
     record.tab.toggleAttribute?.("busy", false);
     if (wasCommitted && record.tab.isConnected !== false) {

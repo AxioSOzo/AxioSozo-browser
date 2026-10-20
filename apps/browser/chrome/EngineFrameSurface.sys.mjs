@@ -463,8 +463,9 @@ export function presentNativeFrame(win, record, metadata, frame, paintable) {
   const started = win.performance.now();
   const upload = frame.sink.kind ?? "native";
   const canvas = record.canvas;
-  // The canvas's intrinsic size is the frame's (CSS scales it to the box, as on the 2D path).
-  if (canvas.width !== metadata.width || canvas.height !== metadata.height) {
+  // The canvas's intrinsic size is the frame's (CSS scales it to the box, as on the 2D path). A
+  // worker sizes its OffscreenCanvas itself (the placeholder refuses width/height).
+  if (upload === "native" && (canvas.width !== metadata.width || canvas.height !== metadata.height)) {
     canvas.width = metadata.width; canvas.height = metadata.height;
   }
   frame.sink.present(metadata.frame_id);
