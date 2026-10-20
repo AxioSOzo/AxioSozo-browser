@@ -842,15 +842,19 @@ def cleanup_group(process):
             return True
         except ProcessLookupError:
             return False
+        except PermissionError:
+            # Darwin answers EPERM for a group whose remaining members are all zombies (exited,
+            # not yet reaped by launchd): nothing of it can run or be signalled any more.
+            return False
     remained = exists()
     if remained:
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGTERM)
         deadline = time.monotonic() + 2
         while exists() and time.monotonic() < deadline:
             time.sleep(.1)
         if exists():
-            with contextlib.suppress(ProcessLookupError):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGKILL)
     if process.poll() is None:
         process.wait(timeout=4)
@@ -868,7 +872,7 @@ def remove_created_profile(profile, process, prefix='cef-profile-'):
         while True:
             try:
                 os.killpg(process.pid, 0)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):  # EPERM: only zombies left (Darwin)
                 break
             if time.monotonic() >= deadline:
                 return False
