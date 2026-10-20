@@ -114,7 +114,8 @@ return {open: !bar.hidden, value: bar._findField?.value ?? null, fieldFocused: d
           || bar._findField?.matches?.(':focus-within') || false,
         matches: matches?.textContent || matches?.value || null, matchesArgs: matches?.getAttribute('data-l10n-args') ?? null,
         status: bar._findStatusDesc?.textContent ?? null,
-        highlightAll: bar.getElement?.('highlight')?.checked ?? null};
+        highlightAll: bar.getElement?.('highlight')?.checked ?? null,
+        chromiumResults: Object.getOwnPropertyDescriptor(gBrowser.selectedBrowser, 'finder')?.get?.()?.events ?? null};
 """
 DATALIST_STATE = """
 const overlay = gBrowser.selectedBrowser.parentNode.querySelector('[data-axiosozo-cef]');
@@ -247,11 +248,16 @@ class ChromiumWeb(ChromiumEngine):
     name = 'chromium'
     owner = 'cloud/cef-zen-feel'
 
-    def __init__(self, mode, scale, a11y=False):
-        self.mode, self.scale, self.a11y = mode, scale, a11y
+    def __init__(self, mode, scale, a11y=False, native_receiver='default'):
+        self.mode, self.scale, self.a11y, self.native_receiver = mode, scale, a11y, native_receiver
 
     def browser_environment(self, harness):
         env = super().browser_environment(harness)
+        if self.native_receiver == 'off':
+            # TEST-ONLY: the frame path's JS/worker presenter instead of the native Linux receiver
+            # (engine-view/linux), whose Chromium frames capture black in this environment.
+            with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
+                prefs.write('user_pref("axiosozo.engines.linux.native_receiver", false);\n')
         if self.scale != 1:
             with open(os.path.join(harness.result['session'], 'gecko', 'user.js'), 'a') as prefs:
                 prefs.write(f'user_pref("layout.css.devPixelsPerPx", "{self.scale}");\n')
@@ -284,6 +290,38 @@ class ChromiumWeb(ChromiumEngine):
         state = harness.wait(lambda: harness.chrome_script(ENGINE_STATE), 'window.AxioSozo.engineProbe (web mode)', timeout=30)
         if state['browsingMode'] != 'web':
             raise EngineUnavailable('engine probe is not in web mode: ' + repr(state))
+
+
+def black_fraction(png, box, step=4):
+    """Share of (near-)black pixels inside box [x, y, w, h] (device pixels) of a harness PNG
+    (gui_test.xwd_to_png: 8-bit RGB, filter 0 on every row)."""
+    import struct
+    import zlib
+    data = Path(png).read_bytes()
+    width = height = 0
+    idat = b''
+    at = 8
+    while at < len(data):
+        size, = struct.unpack('>I', data[at:at + 4])
+        kind = data[at + 4:at + 8]
+        body = data[at + 8:at + 8 + size]
+        if kind == b'IHDR':
+            width, height = struct.unpack('>II', body[:8])
+        elif kind == b'IDAT':
+            idat += body
+        at += 12 + size
+    raw = zlib.decompress(idat)
+    stride = width * 3 + 1
+    x0, y0 = max(0, int(box[0])), max(0, int(box[1]))
+    x1, y1 = min(width, int(box[0] + box[2])), min(height, int(box[1] + box[3]))
+    total = black = 0
+    for y in range(y0, y1, step):
+        row = raw[y * stride + 1:(y + 1) * stride]
+        for x in range(x0, x1, step):
+            r, g, b = row[x * 3:x * 3 + 3]
+            total += 1
+            black += r + g + b < 24
+    return round(black / total, 3) if total else None
 
 
 def parse_feel(title):
@@ -504,14 +542,18 @@ class CEFZenHarness(gui_test.Harness):
         except AssertionError as error:
             raise AssertionError(f'{error}; X11 title is {self.window_title()!r}') from None
         time.sleep(1)
-        self.screenshot('02-chromium')
+        shot = self.screenshot('02-chromium')
+        black = self.view_black(shot, state)
         self.gate('window_title', 'PASS', x11_title=self.window_title())
-        self.gate('e1_render_in_content_area', 'PASS', screenshot='02-chromium.png', seconds=seconds,
-                  surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'))
+        self.gate('e1_render_in_content_area', 'PASS' if black is not None and black < 0.5 else 'FAIL', screenshot='02-chromium.png',
+                  seconds=seconds, surface=native.get('surface'), first_frame_ms=native.get('firstFrameMilliseconds'),
+                  black_fraction=black, frame_path={k: native.get(k) for k in ('frameUpload', 'nativeReceiver', 'memfdFallback',
+                                                                              'frameTransport', 'frameWorker')})
+        if black is None or black >= 0.5:
+            raise AssertionError(f'the Chromium view is {black} black in 02-chromium.png; frame path {native}')
         return {'menu': menu, 'seconds': seconds, 'gecko_page': gecko, 'state': {k: state[k] for k in
                 ('engine', 'mode', 'view', 'geckoHidden', 'geckoURL', 'overlay', 'label', 'tabs', 'focus')},
-                'native': {k: native.get(k) for k in ('renderPath', 'frames', 'surface', 'firstFrameMilliseconds',
-                                                      'meanDrawMilliseconds', 'uploadedPixelShare', 'inputFeatures')}}
+                'native': native}
 
     def scenario_fonts(self):
         """The same text in each CSS generic family has the same width in Chromium as in the Gecko tab
@@ -655,21 +697,42 @@ class CEFZenHarness(gui_test.Harness):
             after = self.wait_page(lambda page: page['c'] > before, 'the AT-SPI action pressed the Chromium button', timeout=10)['c']
         except AssertionError:
             after = self.page()['c']
-        # Focus: a click into the Chromium text field moves AT-SPI focus to the mirrored entry.
+        # Focus: Chromium's focused node is AT-SPI's focused accessible (button: the canvas keeps
+        # Zen's focus; text field: Zen's IME proxy editor has it).
+        def focused_nodes():
+            return [(node['role'], node['name']) for node in self.atspi(r'\(Chromium\)$').get('nodes', []) if node['focused']]
         self.click_at(*AT['text'])
         self.wait_page(lambda page: page['f'] == 'text', 'text field focused')
-        time.sleep(1)
-        focused = [node for node in self.atspi(r'\(Chromium\)$').get('nodes', []) if node['focused']]
+        self.key('Tab')
+        self.wait_page(lambda page: page['f'] == 'count', 'Tab to the button')
+        try:
+            focused_button = self.wait(lambda: (lambda f: f if ('push button', 'Increment') in f else None)(focused_nodes()),
+                                       'AT-SPI focus on the Chromium button', timeout=10)
+        except AssertionError:
+            focused_button = focused_nodes()
+        self.key('shift+Tab')
+        self.wait_page(lambda page: page['f'] == 'text', 'Shift+Tab to the text field')
+        time.sleep(1.5)
+        focused = {'button': focused_button, 'text_field': focused_nodes(), 'chrome_focus': self.web()['focus']}
         self.screenshot('33-a11y')
         ok = all(item['chromium'] for item in found.values()) and after > before
         self.gate('accessibility_atspi', 'PASS' if ok else 'FAIL', found=found, press={'before': before, 'after': after, **(pressed.get('pressed') or {})},
                   chromium_root=chromium.get('root'), chromium_nodes=len(chromium.get('nodes', [])), gecko_nodes=len(gecko.get('nodes', [])),
-                  focused=[(node['role'], node['name']) for node in focused][:5],
+                  focused=focused,
                   note='GNOME_ACCESSIBILITY=1 (test-only, as with a running screen reader); read through AT-SPI with atspi_probe.py')
         if not ok:
             raise AssertionError(f'AT-SPI: {found}, press {before}->{after}: {pressed.get("pressed")}')
         return {'found': found, 'chromium': chromium, 'gecko': {'root': gecko.get('root'), 'nodes': gecko.get('nodes', [])[:80]},
                 'pressed': pressed.get('pressed'), 'focused': focused}
+
+    def view_black(self, shot, state=None):
+        view = (state or self.web())['view']
+        scale = self.chrome_script('return window.devicePixelRatio;')
+        try:
+            return black_fraction(shot, [view['x'] * scale, view['y'] * scale, view['w'] * scale, view['h'] * scale])
+        except (OSError, ValueError, KeyError) as error:
+            self.result.setdefault('notes', []).append(f'black_fraction: {error}')
+            return None
 
     def scenario_typing(self):
         self.require_chromium()
@@ -1079,6 +1142,7 @@ class CEFZenHarness(gui_test.Harness):
         same = (found['matches'], again['matches']) == (gecko['matches'], gecko_again['matches'])
         self.gate('find_in_page', 'PASS' if same else 'FAIL', screenshots=['12-find.png', '12-find-next.png', '12-find-gecko.png'],
                   chromium=[found['matches'], again['matches']], gecko=[gecko['matches'], gecko_again['matches']],
+                  chromium_results=again.get('chromiumResults'),
                   highlight_all={'chromium': found.get('highlightAll'), 'gecko': gecko.get('highlightAll'),
                                  'toggled': [highlight_on, highlight_off]},
                   note='12-find*.png: without Highlight All only the active match is marked (selection), with it every match')
@@ -1826,6 +1890,8 @@ def main():
     parser.add_argument('--mode', choices=('web', 'fixture'), default='web')
     parser.add_argument('--scale', type=int, choices=(1, 2), default=1)
     parser.add_argument('--scenario', help='comma list (default: all of the mode)')
+    parser.add_argument('--native-receiver', choices=('default', 'off'), default='default',
+                        help='off: TEST-ONLY pref axiosozo.engines.linux.native_receiver=false')
     parser.add_argument('--a11y', action='store_true', help='web mode: the AT-SPI accessibility run (GNOME_ACCESSIBILITY=1)')
     parser.add_argument('--evidence-dir')
     parser.add_argument('--size', default=None)
@@ -1849,12 +1915,14 @@ def main():
     except OSError:
         workdir = None
     with FeelServer(workdir) as feel:
-        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y), evidence, feel)
+        harness = CEFZenHarness(args, ChromiumWeb(args.mode, args.scale, args.a11y, args.native_receiver), evidence, feel)
         harness.result.update(harness='axiosozo-linux-gui+cef-zen', mode=args.mode, scale=args.scale,
                               feel_fixture={'origin': feel.origin, 'lan_origin': feel.lan_origin, 'tls_origin': feel.tls_origin,
                                             'tls_note': feel.tls_note, 'sha256': feel.hashes})
         harness.result['test_only_switches'] += (['AXIOSOZO_ENGINE_SWITCHING=1 (existing developer gate)'] if args.mode == 'web'
                                                  else ['AXIOSOZO_ENGINE_PROBE=1 fixture probe'])
+        if args.native_receiver == 'off':
+            harness.result['test_only_switches'].append('profile pref axiosozo.engines.linux.native_receiver=false')
         if args.a11y:
             harness.result['test_only_switches'].append('GNOME_ACCESSIBILITY=1 (AT-SPI on, as with a screen reader)')
         if args.scale != 1:

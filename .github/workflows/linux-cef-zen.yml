@@ -189,29 +189,36 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode fixture --native-receiver off --evidence-dir "$EVIDENCE_OUT/fixture" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/fixture.log"
       - name: 3. Web mode E1/E2 + native-feel matrix (1x)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
+          timeout 1800 python3 scripts/cef_zen_e2e.py --app fetched --mode web --native-receiver off --evidence-dir "$EVIDENCE_OUT/web" 2>&1 \
             | tail -n 80 | tee "$EVIDENCE_OUT/web.log"
       - name: 4. Web mode at 2x (HiDPI subset)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
+          timeout 900 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scale 2 --native-receiver off --evidence-dir "$EVIDENCE_OUT/web-2x" 2>&1 \
             | tail -n 60 | tee "$EVIDENCE_OUT/web-2x.log"
       - name: 5. Web mode, AT-SPI accessibility (GNOME_ACCESSIBILITY=1)
         if: steps.zen.outputs.run_id != ''
         continue-on-error: true
         run: |
           set -o pipefail
-          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
+          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --a11y --native-receiver off --evidence-dir "$EVIDENCE_OUT/a11y" 2>&1 \
             | tail -n 40 | tee "$EVIDENCE_OUT/a11y.log"
+      - name: 6. Product default frame path (native Linux receiver), E1 pixels only
+        if: steps.zen.outputs.run_id != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          timeout 600 python3 scripts/cef_zen_e2e.py --app fetched --mode web --scenario launch,chrome,switch,typing \
+            --evidence-dir "$EVIDENCE_OUT/native-receiver" 2>&1 | tail -n 30 | tee "$EVIDENCE_OUT/native-receiver.log"
       - name: Leftover processes
         if: always()
         run: ps -eo pid,ppid,stat,etime,args | grep -E "AxioCEFProbe|chrome-sandbox|axiosozo-dev" | grep -v grep | tee "$EVIDENCE_OUT/leftover-processes.txt" || true
@@ -232,8 +239,14 @@ jobs:
           # BLOCKED gates (environment, or the known parent crash owned by cloud/linux-platform)
           # are listed, never counted as passes; any FAIL or a missing run fails the job.
           verdict = 'PASS' if all(r['status'] in ('PASS', 'BLOCKED_ENV') for r in summary.values()) else 'FAIL'
+          # Informational: the product-default native receiver (frame path, cloud/perf-phase2) is
+          # reported, not part of this verdict; runs 3-5 use the TEST-ONLY worker path for pixels.
+          path = out / 'native-receiver' / 'result.json'
+          native = json.loads(path.read_text()) if path.exists() else {'status': 'MISSING'}
+          summary_native = {'status': native.get('status'), 'e1': native.get('matrix', {}).get('e1_render_in_content_area')}
           blocked = {name: [k for k, v in r['matrix'].items() if v in ('BLOCKED', 'BLOCKED_ENV')] for name, r in summary.items()}
-          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=2) + '\n')
+          (out / 'verdict.json').write_text(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary,
+                                                        'native_receiver_informational': summary_native}, indent=2) + '\n')
           print(json.dumps({'verdict': verdict, 'blocked': blocked, 'runs': summary}, indent=1))
           PY
           find "$EVIDENCE_OUT" -name '*.png' -size +4M -delete

@@ -241,7 +241,7 @@ class ChromiumFinder {
     this.ui = ui; this.record = record; this.listeners = new Set();
     this.searchString = ""; this.caseSensitive = false; this.entireWord = false; this.matchDiacritics = false;
     this.pending = null; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
-    this.highlightAll = !!highlightAll(); this.stopped = false;
+    this.highlightAll = !!highlightAll(); this.stopped = false; this.events = [];
   }
   addResultListener(listener) { this.listeners.add(listener); }
   removeResultListener(listener) { this.listeners.delete(listener); }
@@ -268,6 +268,9 @@ class ChromiumFinder {
   fastFind(searchString) { this.#find(searchString, true, false); }
   findAgain(searchString, findBackwards) { this.#find(searchString || this.searchString, !findBackwards, true); }
   onResult(event) {
+    // The last raw results (diagnostics for the findbar gate; counts and ordinals only).
+    this.events.push([event.identifier, event.count, event.active, event.final]);
+    if (this.events.length > 24) this.events.shift();
     if (!this.pending) return;
     // Chromium reports the active match ordinal in an intermediate update and may
     // leave it unset (0 here) in the final count update: keep the last one seen.
@@ -275,7 +278,13 @@ class ChromiumFinder {
     if (!event.final) return;
     const pending = this.pending;
     const { searchString, forward, findNext } = pending;
-    if (!event.active && event.count) event = { ...event, active: Math.min(pending.active || 1, event.count) };
+    if (!event.active && event.count) {
+      // No ordinal at all: a new search is on its first match; find-next moved one on.
+      const previous = pending.want ? 0 : this.lastActive;
+      const guess = pending.active || (findNext && previous && this.lastCount === event.count
+        ? (forward ? previous % event.count + 1 : (previous + event.count - 2) % event.count + 1) : 1);
+      event = { ...event, active: Math.min(guess, event.count) };
+    }
     if (pending.want && event.count && event.active !== pending.want) {
       // The restarted session found the kept match again: one step on.
       pending.want = 0; pending.active = 0;

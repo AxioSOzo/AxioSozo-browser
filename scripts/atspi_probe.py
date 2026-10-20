@@ -144,6 +144,9 @@ def main():
             except Exception:  # noqa: BLE001
                 return None
         node = walk(root, target)
+        while node is None and time.monotonic() < deadline + args.timeout:
+            time.sleep(0.5)   # the tree may still be (re)building, e.g. right after a tab switch
+            node = walk(root, target)
         if node is None:
             out['pressed'] = {'error': f'no {role} named {name!r}'}
         else:
