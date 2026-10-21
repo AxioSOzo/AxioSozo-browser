@@ -42,14 +42,14 @@ jobs:
         key: [upstream]
     env:
       EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
-      CCACHE_HOST: ${{ github.workspace }}/../ccache
+      CCACHE_HOST: /home/runner/wpe-ccache   # absolute, outside the checkout: the ../ path restored nothing (run 39389167585)
     steps:
       - uses: actions/checkout@v4
       - name: Free runner disk
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/cache/restore@v4
         with:
-          path: ${{ env.CCACHE_HOST }}
+          path: /home/runner/wpe-ccache
           key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
           restore-keys: |
             wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-
@@ -71,7 +71,7 @@ jobs:
       - if: always()
         uses: actions/cache/save@v4
         with:
-          path: ${{ env.CCACHE_HOST }}
+          path: /home/runner/wpe-ccache
           key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
       - if: always()
         uses: ./.github/actions/publish-ci-results

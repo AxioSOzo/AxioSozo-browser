@@ -149,18 +149,26 @@ docs, introspection, MiniBrowser, API tests and WebDriver off; bubblewrap sandbo
 
 | Release | Tarball sha256 matches official `.sums` | Configure | Cold build (no ccache hits) | Runs |
 | --- | --- | --- | --- | --- |
-| 2.54.1 | yes | 16-19 s | 79 min; 123 min on a busier runner | 39296934153, 39319667952 |
+| 2.54.1 | yes | 16-22 s | 79, 123 and 139 min (runner variance) | 39296934153, 39319667952, 39389167585 |
 | 2.52.6 | yes | 22-28 s | 128 min; 264 min | 39319667952, 39296934153 |
 
 Both builds installed and the host linked against them; `ready` reported
 `runtime_webkit` 2.54.1 / 2.52.6, i.e. the host's API use (legacy libwpe + fdo SHM) still
 compiles and initializes on current upstream. 2.54 also installs `wpe-platform-2.0`
 (headless/DRM/Wayland), the path to native damage and DMA-BUF later.
-UPSTREAM_SUITE_PLACEHOLDER
+**Full host suite PASS on upstream WPE 2.54.1** (run 39389167585; curated in
+[upstream-2.54.1-run-39389167585](../evidence/linux/webkit/upstream-2.54.1-run-39389167585/)):
+stream (frames, typed text, resize, page 2 without old-document pixels, bfcache back,
+exact generations), input (buttons, cursor, drag, XKB keys, wheel 400 CSS px, dpr 2/1),
+damage (0 violations), 13 security cases, no orphans, `WPEWebProcess` under bubblewrap.
+First frame 1.33 s cold, navigate 0.27 s, back 0.20 s. No host source change was needed
+between 2.48.3 and 2.54.1.
 
 Findings while wiring it: Debian 13's `wpewebkit` build-deps lack libhyphen (2.52+
 requires it by default); WebKit's installed helpers need an install RPATH under a custom
-prefix; ccache gave 0 % hits across runs so far (being diagnosed, `ccache-before.txt`).
+prefix; ccache gave 0 % hits because the `../ccache` cache path restored an empty
+directory (`ccache-before.txt`: 4 KB); the workflow now uses an absolute path. A warm
+(ccache) build time is NOT_VERIFIED yet.
 
 **Recommendation.** Keep the Debian 2.48.3 pin for the loopback fixture profile (fast:
 the whole Linux job is ~1.5 min). Before any web mode, move the product pin to the current
