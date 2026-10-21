@@ -1,0 +1,51 @@
+{
+ "schema": "axiosozo-engine-bench-v1",
+ "engine": "chromium",
+ "status": "BLOCKED_ENV",
+ "E1": "NOT_TESTED",
+ "E2": "NOT_TESTED",
+ "started_at": 1792609970.9820244,
+ "machine": {
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "nproc": 4,
+  "python": "3.12.3",
+  "cpu_model": "AMD EPYC 7763 64-Core Processor",
+  "mem_total_mb": 15989,
+  "os": "Ubuntu 24.04.5 LTS",
+  "gpu_dri": [
+   "card1"
+  ],
+  "pipe_max_size": 1048576,
+  "loadavg_start": [
+   "1.38",
+   "0.46",
+   "0.17"
+  ],
+  "loadavg_end": [
+   "1.38",
+   "0.46",
+   "0.17"
+  ]
+ },
+ "args": {
+  "engine": "chromium",
+  "binary": null,
+  "webkit_root": null,
+  "cef_root": ".",
+  "out": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/evidence-chromium/bench",
+  "reps": 5,
+  "scales": [
+   1.0,
+   2.0
+  ],
+  "frame_damage": true,
+  "damage_payload": true,
+  "pipe_experiment": false,
+  "quick": false
+ },
+ "note": "Component benchmark over the AXCF pipe; client acks each frame immediately (presenter cost excluded).",
+ "subreaper": true,
+ "error": "RuntimeError: BLOCKED_ENV: no usable Chromium sandbox (unprivileged user namespaces are unavailable and chrome-sandbox is not root:root 4755). Run `python3 native/chromium-host/probe.py install-sandbox` (sudo). The host never runs without its sandbox.",
+ "finished_at": 1792609971.0134184
+}
