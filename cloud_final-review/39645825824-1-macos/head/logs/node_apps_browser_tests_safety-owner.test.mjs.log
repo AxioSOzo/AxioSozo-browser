@@ -1,0 +1,45 @@
+✔ construction is inert and requires explicit storage ACK and exclusive-writer contracts (3.914125ms)
+✔ confirmation is required before any store or native access (0.977833ms)
+✔ durable intent precedes native preferences and terminal ACK precedes the result (9.790334ms)
+✔ failed pre-intent ACK causes zero native preference writes and blocks later choices (0.984292ms)
+✔ native recovery is retained synchronously and persisted before returning a partial result (4.481333ms)
+✔ terminal persistence failure blocks without reapplying native writes (3.098792ms)
+✔ persisted partial recovery rehydrates and cannot mutate before exact-sequence resolution (5.543958ms)
+✔ resolution intent ACK precedes native clear and terminal ACK precedes owner unblock (4.635958ms)
+✔ successful operations preserve high-water sequences before a later native failure (3.91725ms)
+✔ user setting drift while intent is awaited prevents native writes and releases stale ownership (0.884ms)
+✔ state/result is checked against actual preferences after terminal persistence await (2.384958ms)
+✔ newer settings during resolution await reject stale RESTORED without overwriting them (5.563667ms)
+✔ failed resolution-intent ACK never clears native recovery (3.015792ms)
+✔ failed terminal resolution ACK keeps owner blocked even after native clear (4.840208ms)
+✔ callback failure still leaves the already-acknowledged intent and actual changes visible (2.401791ms)
+✔ corrupt/unavailable storage is never overwritten and never permits native mutation (0.821417ms)
+✔ credential/OHTTP presence and policy locks block changes without persisting protected values (1.148208ms)
+✔ schema rejects malformed journals, unknown fields, getters and mismatched safety plans (5.662291ms)
+✔ sole-writer loss during awaited intent blocks all native preference writes (0.634708ms)
+✔ declining an unowned first-run offer persists only state and accesses no preferences (0.3645ms)
+✔ busy barrier holds queued choices until the current terminal ACK (5.779042ms)
+✔ crash before native call leaves durable INTENT uncertain even when prefs match the old snapshot (4.433875ms)
+✔ crash after partial native writes before recovery save leaves INTENT uncertain without adopting ownership (6.168541ms)
+✔ caller request mutation across awaited load cannot change the captured choice (2.605125ms)
+✔ caller resolution mutation across awaited save cannot change the recorded outcome (6.315125ms)
+✔ unchanged MODE drift during a URI-only write is detected after the terminal ACK (1.519625ms)
+✔ clear-only restore drift during terminal save is detected without adopting user settings (4.572584ms)
+✔ custom array prototypes cannot execute inherited validation or serialization hooks (3.716125ms)
+✔ repeated observer removal failures retain one shared handle and block new adapters (3.784291ms)
+✔ own-data snapshots ignore proxy value hooks when capturing a request (1.132292ms)
+✔ zero-mutation confirmation refreshes actual status after terminal save drift (0.322208ms)
+✔ RESTORED resolution releases original ownership if settings drift during its terminal save (4.737333ms)
+✔ bounded storage can retain the largest plausible Unicode recovery and resolution records (19.698625ms)
+✔ observed Settings drift permanently releases ownership before a later same-value choice (3.866292ms)
+✔ startup Settings drift disowns only metadata and never restores user preferences (2.794625ms)
+✔ status disown-save failure refreshes actual metadata and blocks further writes (2.862417ms)
+✔ untrusted request/lease failures expose only fixed error codes (0.350375ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 235.593917

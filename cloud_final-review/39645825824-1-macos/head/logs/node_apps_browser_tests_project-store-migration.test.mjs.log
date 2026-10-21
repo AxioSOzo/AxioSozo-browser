@@ -1,0 +1,19 @@
+✔ v1 source requires persistence after context links migrate to project records (9.806125ms)
+✔ v2 source and legacy empty stores require persistence (0.65175ms)
+✔ v3 source with v2 records and default document do not require persistence (0.468625ms)
+✔ mixed v3/v1 source requires persistence even though migrated document is v3 (1.058375ms)
+✔ migration never changes timestamps in contexts, v1 records or v2 records (2.735708ms)
+✔ existing v2 profile metadata survives mixed-record migration (1.84825ms)
+✔ valid frozen input stays untouched and migration output remains deeply frozen (4.917625ms)
+✔ invalid stores throw before a caller can mark persistence and preserve raw input (2.492417ms)
+✔ null and undefined are invalid inputs rather than missing-file defaults (0.22375ms)
+✔ core migration runs before provenance inspection; its output is returned unchanged (0.762209ms)
+✔ normalization in current-version records does not mark persistence (0.932416ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 205.897583

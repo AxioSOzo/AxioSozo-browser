@@ -1,0 +1,26 @@
+✔ listLab takes no parameters; setLabEnabled exactly { id, enabled }; getLabClients an optional boolean check (4.007291ms)
+✔ a bad request reaches no Lab module at all (0.376167ms)
+✔ listLab reads the Lab with the browser's prefs only and answers through labReply (0.42475ms)
+✔ setLabEnabled turns a switch through the Lab with the browser's prefs and answers through labReply (0.261084ms)
+✔ setLabEnabled refuses a private, unknown or other window and a page that is gone, before the Lab is asked (0.373042ms)
+✔ getLabClients: finding the clients works from any page; checking them needs a normal window (1.615084ms)
+✔ getLabClients maps a missing or failing client check to LAB_UNAVAILABLE and passes the actor's own refusals (0.527834ms)
+✔ Lab errors map to fixed codes: UNKNOWN_EXPERIMENT, INVALID_PARAMS and UNAVAILABLE pass, anything else is LAB_UNAVAILABLE (0.823708ms)
+✔ a Lab module that is missing, fails to load or lacks its functions is LAB_UNAVAILABLE for every method (0.928083ms)
+✔ labReply rebuilds the Lab state from closed primitives only (0.441708ms)
+✔ labReply keeps at most 16 groups and looks at the first 64 experiments only (0.620958ms)
+✔ labReply carries every code the Lab can produce: needs, problems and the real list unchanged (0.767166ms)
+✔ labClientsReply always answers the three clients in order, unknown ones as broken (0.437625ms)
+✔ labClientsReply drops paths, raw output, unknown capabilities, odd versions and long or control-character text (1.536375ms)
+✔ through the actor: the real Lab registry, the browser's prefs and the window's privacy decide (1.639917ms)
+✔ through the actor: a Lab module that cannot load is LAB_UNAVAILABLE, and the actor keeps answering (0.387125ms)
+✔ getProviderStatus: refresh is an optional boolean, passed through; a refresh (it runs the offline check) needs a normal window (0.590375ms)
+✔ AI & keys: the capability-check states have tones and the summary says how the cards were read (0.333292ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 110.933167
