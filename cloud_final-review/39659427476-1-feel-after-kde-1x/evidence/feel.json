@@ -1,0 +1,229 @@
+{
+  "harness": "axiosozo-linux-gecko-feel",
+  "version": 1,
+  "engine": "gecko",
+  "started_utc": "2026-10-21T19:12:19+00:00",
+  "host": {
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpus": 4
+  },
+  "test_only_switches": [
+    "-marionette",
+    "--remote-allow-system-access",
+    "loopback Marionette port",
+    "throwaway owned profile"
+  ],
+  "scenarios": {
+    "launch": {
+      "status": "PASS",
+      "details": {
+        "window": {
+          "window_id": "4194326",
+          "xwininfo": {
+            "Width": "1280",
+            "Height": "800",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo — AxioSozo Dev"
+        },
+        "app": {
+          "appName": "AxioSozo",
+          "appVersion": "0.1a1",
+          "platformVersion": "156.0",
+          "os": "Linux",
+          "widget": "gtk"
+        }
+      },
+      "seconds": 0.06
+    },
+    "window": {
+      "status": "PASS",
+      "details": {
+        "windowState": 1,
+        "maximized": true,
+        "fullscreen": false,
+        "sizemode": "maximized",
+        "outer": [
+          1280,
+          800
+        ],
+        "inner": [
+          1280,
+          800
+        ],
+        "screen": {
+          "width": 1280,
+          "height": 800,
+          "availWidth": 1280,
+          "availHeight": 800
+        },
+        "devicePixelRatio": 1,
+        "customTitlebar": true,
+        "chromemargin": null,
+        "windowControls": {
+          "containers": 1,
+          "visible": 1,
+          "buttons": [
+            "titlebar-button titlebar-min",
+            "titlebar-button titlebar-restore",
+            "titlebar-button titlebar-close"
+          ]
+        },
+        "gtkCsd": true,
+        "reversedButtons": null,
+        "title": "AxioSozo — AxioSozo Dev",
+        "x11": {
+          "window_id": "4194326",
+          "xwininfo": {
+            "Width": "1280",
+            "Height": "800",
+            "Map State": "IsViewable",
+            "Absolute upper-left X": "0",
+            "Absolute upper-left Y": "0"
+          },
+          "title": "AxioSozo — AxioSozo Dev"
+        },
+        "wm_class": "WM_CLASS(STRING) = \"Navigator\", \"AxioSozoDev\"",
+        "net_wm_state": "_NET_WM_STATE(ATOM) = _NET_WM_STATE_MAXIMIZED_HORZ, _NET_WM_STATE_MAXIMIZED_VERT, _NET_WM_STATE_FOCUSED",
+        "gtk_application_id": "_GTK_APPLICATION_ID:  no such atom on any window.",
+        "display_geometry": [
+          "1280",
+          "800"
+        ],
+        "frame_extents": [],
+        "controls_owner": "zen"
+      },
+      "seconds": 0.75
+    },
+    "strings": {
+      "status": "PASS",
+      "details": {
+        "mac_words": {},
+        "characters": {
+          "projects": 1480,
+          "rules": 818,
+          "ai": 4237,
+          "lab": 6768
+        }
+      },
+      "seconds": 4.93
+    }
+  },
+  "screenshots": [
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/window.png",
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/about-projects.png",
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/about-rules.png",
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/about-ai.png",
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/about-lab.png",
+    "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/final.png"
+  ],
+  "label": "after",
+  "mode": {
+    "wm": "metacity",
+    "desktop": "KDE",
+    "compositor": "none",
+    "theme": "light",
+    "scale": 1,
+    "first_run": false
+  },
+  "checks": {
+    "window.maximized_under_wm": {
+      "ok": true,
+      "observed": {
+        "windowState": 1,
+        "outer": [
+          1280,
+          800
+        ],
+        "display": [
+          "1280",
+          "800"
+        ]
+      },
+      "expected": "maximized, fills the screen"
+    },
+    "window.wm_class": {
+      "ok": true,
+      "observed": "WM_CLASS(STRING) = \"Navigator\", \"AxioSozoDev\"",
+      "expected": "WM_CLASS contains \"AxioSozoDev\" (StartupWMClass of the .desktop file)"
+    },
+    "window.controls_visible": {
+      "ok": true,
+      "observed": {
+        "containers": 1,
+        "visible": 1,
+        "buttons": [
+          "titlebar-button titlebar-min",
+          "titlebar-button titlebar-restore",
+          "titlebar-button titlebar-close"
+        ],
+        "owner": "zen",
+        "frame_extents": [],
+        "gtk_csd": true,
+        "zen.view.hide-window-controls": false
+      },
+      "expected": "close/minimize/maximize visible (GNOME/KDE)"
+    },
+    "strings.no_mac_wording": {
+      "ok": true,
+      "observed": "none",
+      "expected": "no \"this Mac\", Keychain, ⌘ or Finder on Linux"
+    }
+  },
+  "browser_environment": {
+    "GSETTINGS_BACKEND": "memory",
+    "XDG_CURRENT_DESKTOP": "KDE",
+    "GTK_THEME": "Adwaita"
+  },
+  "app": {
+    "executable": "/home/runner/axiosozo-build/linux-app/39430325744/axiosozo-dev/axiosozo-dev",
+    "source": "fetched-artifact",
+    "run_id": "39430325744",
+    "repository_commit": "286ce7041ea77e3b69920d709b15fe5b2813448f",
+    "fingerprint": "3d41eb74ee6d73a6cfb625a900afb7ed6f530bdfb3f92204e7588c1ad794362b",
+    "fingerprint_matches_checkout": true
+  },
+  "session": "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/feel-5f7fed63823a39ec",
+  "display": {
+    "server": "Xvfb",
+    "display": ":90",
+    "size": "1280x800",
+    "xauth": true,
+    "geometry": "1280 800"
+  },
+  "wm": "metacity",
+  "compositor": "none",
+  "dbus": "private session bus",
+  "command": [
+    "/home/runner/axiosozo-build/linux-app/39430325744/axiosozo-dev/axiosozo-dev",
+    "-no-remote",
+    "-profile",
+    "/home/runner/axiosozo-build/runtime/b969bb8a1619a966/feel-5f7fed63823a39ec/gecko",
+    "-marionette",
+    "--remote-allow-system-access",
+    "about:blank"
+  ],
+  "browser": {
+    "pid": 3522,
+    "marionette_port": 37069,
+    "capabilities": {
+      "browserName": "axiosozo",
+      "browserVersion": "0.1a1",
+      "platformName": "linux"
+    },
+    "seconds_to_marionette": 4.22,
+    "exit_code": 0
+  },
+  "final_screenshot": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence/final.png",
+  "cleanup": {
+    "state": "DIRECT_CHILDREN_REAPED",
+    "direct_children_reaped": true,
+    "groups": "NOT_VERIFIED"
+  },
+  "failed_checks": [],
+  "status": "PASS",
+  "evidence_dir": "/home/runner/work/AxioSozo-browser/AxioSozo-browser/feel/evidence"
+}
