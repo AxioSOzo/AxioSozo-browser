@@ -37,7 +37,7 @@ app's own packaged chrome. Results: `ci-results:cloud_final-review/<run>-1-<job>
 | macos-ci (compare with dev) | 39599306865 | PASS: 0 REGRESSION, 0 NEW_GATE_NOT_PASSING, 198 OK, 24 FIXED_OR_NEW_PASS, 10 PRE_EXISTING (fail on dev too) |
 | macos-webkit-host | 39599306368 | PASS |
 | Linux source probe, linux-webkit-feel-api | 39599306323, 39599306507 | PASS |
-| linux-engine-bench | 39599306536 | all bench jobs PASS; the summary step crashed in `summarize.py` (a variable-shadowing bug that dates from perf-pixel-path; the standalone run used to be cancelled, so it never surfaced). Fixed after ac9cefc; re-run listed in the handoff |
+| linux-engine-bench | 39599306536 | all bench jobs PASS; the summary step crashed in `summarize.py` (a variable-shadowing bug that dates from perf-pixel-path; the standalone run used to be cancelled, so it never surfaced). Fixed in d1783bb, whose full round is green too (39645825889 and the rest in the handoff) |
 
 ## 1. Linux
 

@@ -82,14 +82,20 @@ re-fetched and merged at the end, no newer commits) + this workstream. Mirror: `
 | macos-ci | 39599306865 | PASS: 0 REGRESSION, 0 NEW_GATE_NOT_PASSING, 10 PRE_EXISTING (fail on dev too) |
 | macos-webkit-host | 39599306368 | PASS |
 | source probe, webkit-feel-api | 39599306323, 39599306507 | PASS |
-| linux-engine-bench | 39599306536 | bench jobs PASS; summary step crashed (summarize.py bug, fixed after ac9cefc; re-run below) |
+| linux-engine-bench | 39599306536 | bench jobs PASS; summary step crashed (summarize.py bug, fixed in d1783bb: 39645825889 PASS) |
 
 Earlier rounds: 28fe484 (39430325xxx, all green except the frame_selftest stat seam, fixed); diagnostic runs
 39426481907, 39427858985 (session branch).
 
-Commit after ac9cefc: `summarize.py` fix + docs (this file, summary, matrix, security review). PR re-run of
-that head: see `gh api 'repos/AxioSOzo/AxioSozo-browser/actions/runs?branch=cloud/final-review'`. Only
-linux-engine-bench needed it; any other run of that head duplicates ac9cefc and may be cancelled.
+**Final head d1783bb** (= ac9cefc + the `summarize.py` fix + docs), full PR round, all green:
+check/test 39645825752, perf-build 39645825825, cef-host 39645825718, webkit-host 39645825637,
+webkit-zen 39645825580, cef-zen 39645825738, linux-perf 39645825930, gecko-feel 39645825914
+(attempt 2; attempt 1 lost the baseline-app `before ssd-1x` cell before it published anything, an
+infrastructure failure, and the same cell passed on ac9cefc and 28fe484), engine-profile
+39645825604, engine-bench 39645825889 (summary fixed), bench-gate 39645825846, macos-ci
+39645825824 (0 REGRESSION, 0 NEW_GATE_NOT_PASSING), macos-webkit-host 39645825667, source probe
+39645825602, webkit-feel-api 39645825558. The handoff commit after d1783bb only changes this file;
+the runs it triggered were cancelled as duplicates.
 
 Screenshots inspected (ci-results `cloud_final-review/`):
 - Chromium web 1× / 2× (`39430325702-1-cef-zen-e2e/web*/02-chromium.png`): full page, fonts, controls.
