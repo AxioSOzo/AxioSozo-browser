@@ -1,0 +1,24 @@
+﹣ the native target is the pinned Firefox Tools menu: main-menubar > tools-menu > menu_ToolsPopup, before devToolsSeparator (1.432959ms) # generated Zen source not present (/Volumes/AxioSozoBuild/zen/source/engine/browser/base/content/browser-menubar.inc.xhtml)
+✔ ordinary window: one Ask AI… item before the native devToolsSeparator; a trusted command opens the panel, built on first use (2.112291ms)
+✔ untrusted, retargeted and native sibling command events are ignored (0.411042ms)
+✔ private or unknown-privacy windows: Ask AI is shown disabled, with no listener, sheet or panel (1.809041ms)
+✔ a missing or different native menu, an untrusted document or an existing entry or panel: null and nothing changes (1.638ms)
+✔ idempotent per window; dispose removes exactly its own item, listener, sheet and panel; a later install starts fresh (1.629708ms)
+✔ a sheet the document already loads (the fixture probe's) is reused, never duplicated and never removed (0.460125ms)
+✔ a failed installation leaves the document unchanged (1.497125ms)
+✔ installing, opening a failing panel and disposing a failing panel never throw into the window (1.5715ms)
+✔ the installer source takes no shortcut, intercepts no command and authors no style (0.646791ms)
+✔ every selector of the loaded sheet is scoped to an AxioSozo id; Zen tokens are only read (22.556584ms)
+✔ with the real provider panel: Ask AI opens a focused dialog and Settings opens its window; nothing is spawned, discovered or stored (1.741084ms)
+✔ startup source: Ask AI is installed once, right after Zen's startup, and disposed at unload; BrowserExperience is never loaded (0.2345ms)
+✔ startup: Ask AI appears only after Zen's startup, enabled in a normal window and disabled in a private one; unload removes exactly it (8.382083ms)
+✔ startup: a window closed during Zen's startup installs and publishes nothing (1.113583ms)
+✔ startup in the fixture probe: its browser-experience sheet is reused; one sheet, removed once at unload (0.477083ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 117.499166

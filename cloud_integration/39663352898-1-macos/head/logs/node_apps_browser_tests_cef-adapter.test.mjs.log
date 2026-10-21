@@ -1,0 +1,131 @@
+✔ fast conversion is byte-identical to the per-byte reference, whole and per rectangle (4.372708ms)
+✔ frames paint once per refresh tick; superseded frames cost no conversion; damage unites (0.61425ms)
+✔ damage payloads rebuild the whole frame per target and reject a partial frame without one (0.381125ms)
+✔ videoframe upload: the damaged rows are wrapped as BGRX (a view, no copy) and drawn in place (0.580375ms)
+✔ videoframe upload failure switches the surface to imagedata, whole (0.229ms)
+✔ the VideoFrame probe accepts an engine that honours the view offset, refuses one that does not (0.307833ms)
+✔ native receiver: sinks apply every frame per target, presenters bind once and present, fallbacks copy (1.748875ms)
+✔ direct compositing: the panel's rounded clip is lifted while the view fills it, corners are capped, restore undoes it (0.897584ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_AXCF_HEADER","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_PROTOCOL_OR_EOF","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_PROTOCOL_OR_EOF","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_FRAME_PRESENTATION_FAILED","phase":"frame_present","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ frame worker: slots are read into a persistent buffer, frames patched, presents drawn into the offscreen canvas (12.700042ms)
+✔ frame workers are probed once (ChromeWorker, sync reads, OffscreenCanvas) before a ring is offered (1.049792ms)
+✔ a source that is not a whole BGRA frame is refused, never painted black (0.259ms)
+✔ AXCF is big endian, rejects dangerous lengths before metadata/pixel allocation (0.46925ms)
+✔ AXCF accepts genuine cross-realm header, metadata and pixel ArrayBuffers (5.541833ms)
+✔ AXCF rejects forged buffers at every boundary and non-ArrayBuffer header storage (1.136292ms)
+✔ adapter completes its full controlled lifecycle with cross-realm pipe buffers (18.752667ms)
+✔ reader diagnostics preserve only fixed parser codes and redact arbitrary exceptions (2.53125ms)
+✔ a presenter exception is classified without leaking its message or masking Gecko fallback (1.338541ms)
+✔ native request errors expose only the exact stale mapping or a generic code (1.808125ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_INPUT_BACKPRESSURE","phase":"frame_ack","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":8,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a 40-key burst is serialized to eight in-flight commands while preserving every input (16.80375ms)
+✔ saturated bounded input fails closed instead of dropping a key release (2.411375ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ queued input bound to an old document is rejected before first native dispatch (3.175ms)
+✔ invalid geometry, target or UTF8 is rejected before reading binary payload (0.86325ms)
+✔ fixture restrictions reject lookalike hosts, credentials, schemes and arbitrary methods (0.410791ms)
+✔ web mode is explicitly negotiated and permits only web URLs or the inert start page (1.131291ms)
+✔ web loads accept HTTP error documents and exact blank while requiring full negotiated safeguards (1.185959ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_LOAD","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ web same-document loads revoke old targets and accept only a committed same origin (3.872458ms)
+✔ engine switch carries the visible web address of a GET page, never POST results or non-web pages (0.570958ms)
+✔ fullscreen scale selection keeps logical geometry and the bounded BGRA frame (0.493375ms)
+✔ CEF runtime must be the owned session of the actual Gecko profile (0.262625ms)
+✔ a sub build root shares the volume-root CEF host only (0.12775ms)
+✔ unsupported native resize restores the previous authorized geometry (0.747ms)
+✔ input cannot override auth/envelope or use stale coordinates (0.211292ms)
+✔ header version alone cannot establish actual runtime identity (0.2485ms)
+✔ create acceptance and load cannot commit presentation before a live frame arrives (3.607375ms)
+✔ stale frames release their exact credit without rendering or authorizing action (2.403875ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HISTORY_RESTORE","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HISTORY_RESTORE","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":1,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"FOREIGN_CEF_FRAME","phase":"frame_validate","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ HTTP0 renders only for an explicit history request to a known committed fixture URL (2.22325ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"FUTURE_CEF_FRAME","phase":"frame_validate","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ foreign and future frame targets fail closed, never migrate or retry (0.974458ms)
+✔ native BGRA conversion handles premultiplied alpha; browser shortcuts stay in chrome (1.510334ms)
+✔ presenter initialization restores all wrappers/listeners when an audited API is absent (1.407375ms)
+✔ failed candidate or a changed Gecko document cannot hide/delete the original tab (5.746042ms)
+✔ controlled presenter fixture commits only after adapter proof, then restores Gecko ownership (3.82ms)
+✔ presenter survives fullscreen-sized resize and restores Retina on window shrink (3.200292ms)
+✔ input during a pending resize cannot use mismatched native coordinates; pointer-up is released later (2.571334ms)
+✔ stale native keyup racing history back preserves the live CEF presentation without replay (3.570625ms)
+✔ daily Chromium is lazy, retains per-tab surfaces, suspends hidden painting, and restores each Gecko owner (2.219875ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ active media or capture cannot hide behind Chromium, including capture that starts after commit (1.233416ms)
+✔ IME commands admit the optional cef-v1 fields only by name and within UTF-16 bounds (0.676375ms)
+✔ ready must announce accessibility as a boolean, and its action list when true (0.79775ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ accessibility events are validated, delivered, and credited against their exact target (4.336208ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a malformed or unannounced accessibility event ends the tab with a fixed code (2.044208ms)
+✔ the expected host platform follows Gecko OS and XPCOM ABI; macOS stays macosarm64 (0.286875ms)
+✔ Linux build roots are absolute normalized directories; the macOS volume rules are unchanged (0.361459ms)
+✔ host environment: macOS exactly PATH/TMPDIR; Linux adds HOME=profile and only a well-formed X display (0.55775ms)
+✔ a Linux host must announce its own platform label; surface mode is macOS only (3.364834ms)
+✔ Linux keys carry XKB keycodes, layout keyCodes with a US fallback, and Linux modifier flags (2.009667ms)
+✔ Linux shortcut routing: Ctrl is the accelerator, word editing stays with the page, Alt+arrows are history (0.349458ms)
+✔ Linux presenter pipe: XKB key events, no clicks for back/forward buttons, precise pixel wheel (2.594583ms)
+✔ Linux presenter with host IME: keys and composition run through the proxy editor (1.263166ms)
+✔ Linux frame damage: validated, delivered to the presenter, dropped after a gap (0.941417ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ Linux damage_payload: rectangle-only payloads are rebuilt into whole frames per target (1.136208ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_MEMFD_FALLBACK {"engine":"chromium","frameId":2}
+✔ Linux memfd frames: the slot is read and rebuilt, the pipe carries none; a host without the ring is refused (1.065208ms)
+AXIOSOZO_MEMFD_FALLBACK {"engine":"chromium","frameId":2}
+✔ Linux memfd frames: an unreadable slot drops the frame and its ack moves the host to the pipe (1.256417ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_DAMAGE_PAYLOAD","phase":"packet","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ Linux memfd frames: a partial frame after the fallback without a whole one is a protocol error (1.24475ms)
+✔ memfd slot reader reads only a regular ring of the announced size (0.408167ms)
+✔ memfd slot reader retries once and probes /proc/<pid>/fd before the hello (0.286167ms)
+✔ presenter uploads only the damaged rectangle once its canvas is current (1.903584ms)
+✔ datalist events: geometry, value and page-defined options within bounds (0.370584ms)
+ℹ tests 67
+ℹ suites 0
+ℹ pass 67
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2110.605
