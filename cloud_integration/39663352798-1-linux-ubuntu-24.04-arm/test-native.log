@@ -1,0 +1,30 @@
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/test_transport.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-test
+PASS: AXCF network byte order, native copied pixels, stale exact acknowledgement, duplicate rejection, latest frame replacement per target, round-robin targets, bounded allocation, owned worker shutdown
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/transport_damage_test.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-damage-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-damage-test
+PASS: frame damage is appended on write, merged into a replacing frame, full after a dropped frame, bounded, and absent from plain frames
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/transport_damage_payload_test.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-damage-payload-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-damage-payload-test
+PASS: damage_payload frames carry only the (merged) rectangle's rows from the newest pixels, plain frames stay whole, and the Linux stdout pipe is enlarged
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/transport_memfd_test.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-memfd-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/transport-memfd-test
+PASS: memfd frames carry no pipe payload, name alternating slots the parent reads through /proc/<pid>/fd, compose with damage_payload, and an oversized frame fails closed
+PASS: memfd fallback: later frames travel in the pipe and the pending damaged frame is sent whole
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/a11y_core_test.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/a11y-core-test
+/home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/a11y_core_test.cc:3:1: warning: multi-line comment [-Wcomment]
+    3 | //   clang++ -std=c++17 -Wall -Wextra -I native/chromium-host \
+      | ^
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/a11y-core-test
+a11y_core_test: PASS
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/core_test.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/core-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/core-test
+PASS: strict JSON (UTF-8, surrogates, duplicates, depth), canonical sorted writer, URL splitter and path helpers
++ /usr/bin/g++ -std=c++20 -Wall -Wextra -pthread -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host -I /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linuxarm64_minimal -DCEF_API_VERSION=15400 /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/tests/exit_watchdog_test.cc /home/runner/work/AxioSozo-browser/AxioSozo-browser/native/chromium-host/linux/platform_linux.cc -o /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/exit-watchdog-test
++ /home/runner/work/AxioSozo-browser/AxioSozo-browser/.local/build/cef/tests/exit-watchdog-test
+AXIO_CEF_EXIT_WATCHDOG reason=test after=0.5s killed_descendants=2
+PASS: stuck host exited 76 after 0.50s and SIGKILLed its child and grandchild (killDescendants via /proc)
+PASS: reapHelpers reaped a helper that exited and killed 2 lingering ones after 0.31s
+PASS: reapHelpers ended a zygote without waiting (0.003s)
+{"component": "cef", "status": "SKIPPED", "test": "crash_guard_test", "reason": "macOS only: inherited Mach exception ports (Breakpad); the Linux bounded exit is covered by exit_watchdog_test"}
+{"component": "cef", "status": "PASS", "action": "native_tests", "platform": "linuxarm64", "tests": ["transport-test", "transport-damage-test", "transport-damage-payload-test", "transport-memfd-test", "a11y-core-test", "core-test", "exit-watchdog-test"]}
