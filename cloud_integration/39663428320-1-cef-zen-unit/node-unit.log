@@ -1,0 +1,338 @@
+✔ fast conversion is byte-identical to the per-byte reference, whole and per rectangle (9.647981ms)
+✔ frames paint once per refresh tick; superseded frames cost no conversion; damage unites (1.004457ms)
+✔ damage payloads rebuild the whole frame per target and reject a partial frame without one (0.664023ms)
+✔ videoframe upload: the damaged rows are wrapped as BGRX (a view, no copy) and drawn in place (1.252198ms)
+✔ videoframe upload failure switches the surface to imagedata, whole (0.536071ms)
+✔ the VideoFrame probe accepts an engine that honours the view offset, refuses one that does not (0.675696ms)
+✔ native receiver: sinks apply every frame per target, presenters bind once and present, fallbacks copy (3.126389ms)
+✔ direct compositing: the panel's rounded clip is lifted while the view fills it, corners are capped, restore undoes it (1.519578ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_AXCF_HEADER","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_PROTOCOL_OR_EOF","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_PROTOCOL_OR_EOF","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_FRAME_PRESENTATION_FAILED","phase":"frame_present","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ frame worker: slots are read into a persistent buffer, frames patched, presents drawn into the offscreen canvas (17.305621ms)
+✔ frame workers are probed once (ChromeWorker, sync reads, OffscreenCanvas) before a ring is offered (1.197727ms)
+✔ a source that is not a whole BGRA frame is refused, never painted black (0.592667ms)
+✔ AXCF is big endian, rejects dangerous lengths before metadata/pixel allocation (0.896665ms)
+✔ AXCF accepts genuine cross-realm header, metadata and pixel ArrayBuffers (3.803894ms)
+✔ AXCF rejects forged buffers at every boundary and non-ArrayBuffer header storage (0.903691ms)
+✔ adapter completes its full controlled lifecycle with cross-realm pipe buffers (25.567848ms)
+✔ reader diagnostics preserve only fixed parser codes and redact arbitrary exceptions (2.420094ms)
+✔ a presenter exception is classified without leaking its message or masking Gecko fallback (2.22229ms)
+✔ native request errors expose only the exact stale mapping or a generic code (5.59033ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_INPUT_BACKPRESSURE","phase":"frame_ack","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":8,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a 40-key burst is serialized to eight in-flight commands while preserving every input (20.224745ms)
+✔ saturated bounded input fails closed instead of dropping a key release (5.430173ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ queued input bound to an old document is rejected before first native dispatch (8.377891ms)
+✔ invalid geometry, target or UTF8 is rejected before reading binary payload (1.241766ms)
+✔ fixture restrictions reject lookalike hosts, credentials, schemes and arbitrary methods (0.427842ms)
+✔ web mode is explicitly negotiated and permits only web URLs or the inert start page (3.168347ms)
+✔ web loads accept HTTP error documents and exact blank while requiring full negotiated safeguards (2.57222ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_LOAD","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ web same-document loads revoke old targets and accept only a committed same origin (4.182806ms)
+✔ engine switch carries the visible web address of a GET page, never POST results or non-web pages (0.402274ms)
+✔ fullscreen scale selection keeps logical geometry and the bounded BGRA frame (0.538744ms)
+✔ CEF runtime must be the owned session of the actual Gecko profile (0.476029ms)
+✔ a sub build root shares the volume-root CEF host only (0.32479ms)
+✔ unsupported native resize restores the previous authorized geometry (1.983425ms)
+✔ input cannot override auth/envelope or use stale coordinates (0.370545ms)
+✔ header version alone cannot establish actual runtime identity (0.77617ms)
+✔ create acceptance and load cannot commit presentation before a live frame arrives (4.919895ms)
+✔ stale frames release their exact credit without rendering or authorizing action (2.390688ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HISTORY_RESTORE","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HISTORY_RESTORE","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":1,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"FOREIGN_CEF_FRAME","phase":"frame_validate","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ HTTP0 renders only for an explicit history request to a known committed fixture URL (7.337795ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"FUTURE_CEF_FRAME","phase":"frame_validate","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ foreign and future frame targets fail closed, never migrate or retry (1.818692ms)
+✔ native BGRA conversion handles premultiplied alpha; browser shortcuts stay in chrome (1.427521ms)
+✔ presenter initialization restores all wrappers/listeners when an audited API is absent (2.503837ms)
+✔ failed candidate or a changed Gecko document cannot hide/delete the original tab (5.27567ms)
+✔ controlled presenter fixture commits only after adapter proof, then restores Gecko ownership (2.40748ms)
+✔ presenter survives fullscreen-sized resize and restores Retina on window shrink (1.706374ms)
+✔ input during a pending resize cannot use mismatched native coordinates; pointer-up is released later (1.48996ms)
+✔ stale native keyup racing history back preserves the live CEF presentation without replay (3.6961ms)
+✔ daily Chromium is lazy, retains per-tab surfaces, suspends hidden painting, and restores each Gecko owner (2.83376ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ active media or capture cannot hide behind Chromium, including capture that starts after commit (1.636653ms)
+✔ IME commands admit the optional cef-v1 fields only by name and within UTF-16 bounds (0.836916ms)
+✔ ready must announce accessibility as a boolean, and its action list when true (1.028857ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ accessibility events are validated, delivered, and credited against their exact target (4.997162ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_ACCESSIBILITY","phase":"event_callback","lastFrameId":1,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a malformed or unannounced accessibility event ends the tab with a fixed code (6.629094ms)
+✔ the expected host platform follows Gecko OS and XPCOM ABI; macOS stays macosarm64 (0.239244ms)
+✔ Linux build roots are absolute normalized directories; the macOS volume rules are unchanged (0.42938ms)
+✔ host environment: macOS exactly PATH/TMPDIR; Linux adds HOME=profile and only a well-formed X display (0.481187ms)
+✔ a Linux host must announce its own platform label; surface mode is macOS only (1.796507ms)
+✔ Linux keys carry XKB keycodes, layout keyCodes with a US fallback, and Linux modifier flags (0.786762ms)
+✔ Linux shortcut routing: Ctrl is the accelerator, word editing stays with the page, Alt+arrows are history (0.330363ms)
+✔ Linux presenter pipe: XKB key events, no clicks for back/forward buttons, precise pixel wheel (2.986411ms)
+✔ Linux presenter with host IME: keys and composition run through the proxy editor (1.019793ms)
+✔ Linux frame damage: validated, delivered to the presenter, dropped after a gap (1.4402ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ Linux damage_payload: rectangle-only payloads are rebuilt into whole frames per target (1.485233ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_MEMFD_FALLBACK {"engine":"chromium","frameId":2}
+✔ Linux memfd frames: the slot is read and rebuilt, the pipe carries none; a host without the ring is refused (2.444083ms)
+AXIOSOZO_MEMFD_FALLBACK {"engine":"chromium","frameId":2}
+✔ Linux memfd frames: an unreadable slot drops the frame and its ack moves the host to the pipe (1.705635ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_DAMAGE_PAYLOAD","phase":"packet","lastFrameId":2,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ Linux memfd frames: a partial frame after the fallback without a whole one is a protocol error (1.304987ms)
+✔ memfd slot reader reads only a regular ring of the announced size (0.66361ms)
+✔ memfd slot reader retries once and probes /proc/<pid>/fd before the hello (0.657869ms)
+✔ presenter uploads only the damaged rectangle once its canvas is current (1.745173ms)
+✔ datalist events: geometry, value and page-defined options within bounds (0.500005ms)
+✔ Linux mirror: requested on attach while AT-SPI is active, a sibling owned by the canvas (2.443486ms)
+✔ Linux mirror: Chromium roles, names, values and focus become ARIA in chrome DOM (4.690802ms)
+✔ Linux mirror: assistive clicks become press actions and never reach the page (2.19362ms)
+✔ Linux mirror: a hidden tab keeps its tree (Chromium does not resend it after off/on); detach removes it (0.851301ms)
+✔ strict event schema: accepts host output, rejects anything else (4.941425ms)
+✔ batches are staged until final, then committed; reset replaces the model (5.326276ms)
+✔ deletions and reparenting follow reachability from the root (1.234163ms)
+✔ ignored nodes are flattened into their exposed ancestor (0.557916ms)
+✔ bounds resolve like AXTree::RelativeToTreeBounds and map to canvas pixels at device scale (1.309621ms)
+✔ password fields never expose a value, selection or descendants, even if a host sent them (0.511614ms)
+✔ size caps: node count, children, continuation lengths (2.744323ms)
+✔ continuation records join name text and children across chunks (0.373986ms)
+✔ notifications: focus, value, title, selection, live regions, load (1.4198ms)
+✔ native records map roles, values and settable attributes (0.494785ms)
+✔ accessibility commands are exact (1.044967ms)
+✔ controller: enabled only for an active assistive client that asked for the canvas (1.794382ms)
+✔ controller: assistive actions are validated and focus the canvas first (0.563984ms)
+✔ shared controller without the native component stays inert (0.493241ms)
+✔ context menu is a Zen menupopup at the pointer; page actions stay in Chromium, the reply is single use (10.850151ms)
+✔ local menu actions close the native menu with dismiss; Open Link in New Tab opens Chromium; hiding dismisses (4.209195ms)
+✔ host timeout or navigation closes the menu without a reply; a replayed prompt_id opens nothing (0.987893ms)
+✔ local backstop timer closes a prompt when the host cannot report its timeout (1.746194ms)
+✔ alert/confirm/prompt use Firefox content-modal prompts with the Chromium origin; results reply once (1.334176ms)
+✔ Firefox's abuse protection: rapid dialogs offer to block; once blocked they are refused unseen until navigation (2.740478ms)
+✔ beforeunload uses Firefox strings; Leave accepts, Stay or abort keeps the page (1.491523ms)
+✔ production tab dialog path: Firefox PromptUtils contract (propBagToObject(bag, obj) returns nothing) (2.543066ms)
+✔ a dialog for a navigated-away document is aborted and its late result is never sent (0.997563ms)
+✔ a reply rejected as stale by the adapter leaves no UI behind (1.449993ms)
+✔ permissions: Firefox doorhanger for the Chromium origin, decisions remembered in a Chromium-only store (2.99242ms)
+✔ camera/microphone are refused natively with a clear notice (0.210357ms)
+✔ file picker: nsIFilePicker in the Zen window; only picked paths return; late results are discarded (1.988792ms)
+✔ downloads: saved under Firefox download settings, shown in the downloads panel, controlled by target (1.811696ms)
+✔ a small download that finishes before Firefox registers it still completes (run 39393555837) (1.783234ms)
+✔ Firefox Download integration: pause keeps the native download, resume continues it, cancel removes it (1.650471ms)
+✔ HTTP auth uses Firefox’s tab-modal login prompt; credentials go only to the prompt that asked (1.533563ms)
+✔ certificate errors show Firefox’s certerror content without any bypass; the follow-up load failure is absorbed (0.768087ms)
+✔ blocked pop-ups use Firefox's notification bar; allowing the site opens them as Chromium tabs (1.934308ms)
+✔ findbar without Highlight All keeps only the active Chromium match and still advances 1, 2, 3, 1 (2.247105ms)
+✔ Linux CEF reports no active match for a new session: one find-next step gives Firefox's 1 of 3, 2 of 3 (run 39387935674) (2.633537ms)
+✔ Zen's findbar drives Chromium find through the tab's browser.finder and restores Firefox's finder (0.942642ms)
+✔ the zoom commands follow the Chromium page, so Ctrl+0 is enabled while it is zoomed (1.218111ms)
+✔ Firefox zoom commands zoom a Chromium tab and its URL-bar indicator; Gecko tabs keep Firefox's zoom (1.10319ms)
+✔ event schema rejects malformed, oversized and unexpected delegation payloads (1.297677ms)
+✔ adapter: delegated capabilities are accepted; a prompt reply is bound to its target and single use (9.548496ms)
+✔ adapter: after navigation a reply for the old document never reaches native; invalid replies are refused locally (3.612287ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"MISSING_CEF_TARGET","phase":"event_validate","lastFrameId":1,"lastFrameBytes":16,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ adapter: a malformed prompt ends only that tab; delegation events without a target end the host (4.861992ms)
+✔ adapter: fixture sessions never accept delegation traffic (0.530215ms)
+✔ one web host serves several tabs, routing each event and frame to its own target (24.628916ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"FOREIGN_CEF_TARGET","phase":"frame_validate","lastFrameId":3,"lastFrameBytes":16,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a document-level violation ends only that tab; framing or identity errors end the host (13.387133ms)
+✔ a shared host requires native multi-target isolation and a persistent separate profile (1.987176ms)
+✔ navigation waits for slow sites (or a first Keychain approval) without timing out the engine (1307.289005ms)
+✔ Zen shortcuts stay with the browser over Chromium; text chords reach the page (0.540356ms)
+✔ a tab switched to Chromium releases its Firefox page, carries its address and is remembered (8.560616ms)
+✔ Zen's address bar, bookmarks and history load in the Chromium tab; Firefox-only pages return to Firefox (2.064951ms)
+✔ toolbar commands drive Chromium; the Firefox history menu is withheld (1.376971ms)
+✔ page errors stay inside the Chromium tab instead of switching engines (5.732179ms)
+✔ error pages label the tab like Firefox's own error pages and the real title returns on the next good load (2.172142ms)
+✔ the Not secure badge shows only while the address bar describes the active Chromium tab’s own http page (2.172654ms)
+✔ loopback pages are potentially trustworthy: no Not secure badge, as in Firefox and Chromium (1.284502ms)
+✔ a Chromium page title is a content title, so Zen puts it in the window title like a Firefox page (1.450995ms)
+✔ Linux: a selection made by the user in a Chromium tab becomes the desktop PRIMARY selection; script selections do not (1.756711ms)
+✔ datalist: Zen draws the suggestions Chromium cannot, filtered by the value; Down/Enter commit a choice as text (183.879024ms)
+✔ reloading works over a Chromium page although Firefox disabled it for the hidden blank Gecko browser (1.296973ms)
+✔ links that open a new tab open a new Chromium tab; background tabs start when shown (5.373081ms)
+✔ Chromium tabs restore as Chromium tabs from Zen session data (0.864495ms)
+✔ a background tab can be moved to Chromium from the tab menu without starting it (0.292025ms)
+✔ closing a tab while its page loads ends only that tab, even when native answers the load afterwards (13.861993ms)
+✔ tabs created at the same moment (for example two restored windows) are queued, not refused (17.002399ms)
+✔ a tab that fails while being created leaves no native target and can start again (27.126932ms)
+✔ switching back while Chromium is still launching releases the late engine target (1.061186ms)
+✔ Chromium prompts reach ChromiumBrowserUI through the presenter; UI that cannot be shown answers with the safe default (1.871797ms)
+✔ a page that closes itself leaves a reloadable Chromium tab, not a frozen one (0.856199ms)
+✔ an engine preference moves a tab through the per-tab switch and back, starting Chromium only then (2.338264ms)
+✔ an engine preference that cannot start Chromium keeps the Firefox tab; the gate stays off by default (1.083809ms)
+✔ the host may send only a small PNG data URL it encoded as the page icon (13.069306ms)
+✔ a Chromium tab shows its page's icon and Firefox's throbber, which the hidden Firefox browser cannot clear (1.414151ms)
+✔ a Chromium tab without a title is labelled with its address, as Firefox does (0.851123ms)
+✔ a restored Chromium tab is labelled with its page title before its engine starts (0.84531ms)
+✔ Linux: developer-tools shortcuts over a Chromium tab explain instead of inspecting the hidden Firefox document (0.434526ms)
+✔ normal startup and invalid fixture origins expose no engine action or process (2.821328ms)
+✔ enabling the probe is inert until explicit trusted chrome action (0.747096ms)
+✔ private tabs and unexpected URLs are rejected before command hooks or native launch (1.638972ms)
+✔ explicit switch exposes presenter identity and switching back preserves the Gecko tab (0.881568ms)
+✔ bounded fullscreen render cap appears with limitations without hiding failures or identity (0.963503ms)
+✔ missing native component never claims Chromium success or removes the original tab (0.451039ms)
+✔ a pending native switch cannot create duplicate engine owners (0.39238ms)
+✔ web mode uses Zen's own tab controls and starts Chromium only on a user switch (0.594482ms)
+✔ F6 hook is gated by axiosozo.engine.preferences.enabled (default false) and never touches the engine when off (1.167669ms)
+✔ F6 hook switches a web tab to Chromium through the per-tab switch and back to Firefox (0.79896ms)
+✔ F6 hook refuses private windows, private tabs, unknown tabs and invalid engines before any switch (0.575075ms)
+✔ F6 hook keeps privileged, non-HTTP(S), credential and POST pages in Firefox (0.70826ms)
+✔ F6 hook refuses while a switch is pending and cannot create duplicate engine owners (0.368251ms)
+✔ F6 hook failure keeps the Firefox tab, records the native code and never rejects (0.586276ms)
+✔ F6 hook is unavailable in the fixture probe and after dispose, without constructing a presenter (0.260529ms)
+✔ the registry lists gecko, chromium and webkit with technical ids and separate labels (1.967872ms)
+✔ gecko is always available; chromium follows the web-mode flag; webkit says why it is unavailable here (0.695803ms)
+✔ webkit is hidden from menus unless the developer pref is set, then shown disabled with its reason (0.276511ms)
+✔ ids normalize: contract `firefox` reads as gecko, legacy values still restore, unknown ids are rejected (0.171036ms)
+✔ context-v1 mapping: gecko is the contract spelling, firefox a deprecated read alias, webkit cannot be stored yet (0.255779ms)
+✔ presenter factories are registered by the owning workstream, never built by the registry (0.22015ms)
+✔ with two available engines the tab menu is the single toggle item, as today (0.466053ms)
+✔ with more than two available engines the menu becomes an Open in submenu with the current engine checked (0.250061ms)
+✔ the developer pref lists webkit disabled in a submenu; it is never a selectable target (0.22301ms)
+✔ the tab menu installs one toggle item next to Reload and switches through setTabEngine (1.048695ms)
+✔ the tab menu hides without a second engine and in private windows (0.299284ms)
+✔ with the developer pref the tab menu is an Open in submenu; the disabled engine and the current one do nothing (0.410741ms)
+✔ a failed switch from the menu is reported, not thrown (8.330063ms)
+✔ no tab menu, no installer (0.159331ms)
+✔ webkit availability names the reason: macOS, other platforms, pref, host, fixture page (0.792504ms)
+✔ three available engines: the tab menu is an Open in submenu and the glyph cycles gecko → chromium → webkit → gecko (0.528399ms)
+✔ a later tab-menu installer takes the menu over until it disposes; the earlier one is then in charge again (0.320744ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ surface hello: endpoint, pid before token, single-use token, begin frames and display frame rate (4.616758ms)
+✔ surface ready must match the negotiated render path, begin frames and frame rate (6.144053ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNEXPECTED_CEF_FRAME","phase":"frame_validate","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ surface mode never reads pipe frames nor sends frame_ack; a pipe frame ends the host (8.786149ms)
+✔ a target binds its canvas at creation; create waits for a presented frame of the loaded page (1.862821ms)
+✔ newer generations are confirmed only after chrome processed the navigation and its load (2.560528ms)
+✔ visibility gates begin frames; closing a tab unbinds only its target (3.456753ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_CRASH_OUTCOME_UNCERTAIN","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":-9}
+AXIOSOZO_CEF_EXIT {"exitCode":-9}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_SURFACE_CLOSED","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a host crash or an endpoint failure tears down the endpoint and every Chromium target (2.51905ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_SURFACE_CLOSED","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":1,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_CRASH_OUTCOME_UNCERTAIN","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":1,"pendingRequests":1,"nativeExitCode":139}
+AXIOSOZO_CEF_EXIT {"exitCode":139}
+✔ host death is immediate: dead-name or exit fails in-flight work at once, even if the process never exits (3.342611ms)
+✔ frame_rate: 60 or 120 for the resolved target, sent only when the host announces frame_rate_command (2.801992ms)
+✔ surface mode drops the 32 MiB pipe cap but keeps the 4096 px IOSurface bound (1.751523ms)
+✔ surface-mode input extensions are only sent when the host announces them (0.763738ms)
+✔ host cursors are CSS keywords only; text_input needs the ime capability (3.045352ms)
+✔ the presenter binds a context-less canvas, sizes it logically and never draws pixels (5.325956ms)
+✔ resize follows the window without the pipe cap; a host that still caps is handled once (1.739657ms)
+✔ the visible Chromium tab follows its display refresh class; unchanged or hidden tabs send nothing (1.5274ms)
+✔ keys follow the remote-tab model: reserved keys stay with Zen, unconsumed keys return to Zen (8.466906ms)
+✔ without host key verdicts the fixed heuristic keeps Zen shortcuts in chrome; edit chords map to edit commands (1.60824ms)
+✔ focus returns to the page when Zen focuses the tab browser (urlbar close, tab switch) (1.631416ms)
+✔ page focus is restated for each new document (a focus that crossed the navigation was stale) (2.521318ms)
+✔ IME: a focused page editable moves focus to the proxy editor and composition reaches the host (2.659827ms)
+✔ wheel deltas are summed per frame; native precise deltas, phases and pinch are used when available (2.441059ms)
+✔ native click counts and host cursors use the component; a button flushes pending scroll first (1.26274ms)
+✔ heartbeats keep a host alive well past the 5 s rule (2.467991ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_HOST_UNRESPONSIVE","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":2,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a host that stops heartbeating is failed as CEF_HOST_UNRESPONSIVE after 5 s and killed (2.520831ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_HOST_UNRESPONSIVE","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a missed beat inside the window is tolerated, and a late beat restarts it (1.234141ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_EVENT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ heartbeat sequence must strictly increase; the fixed protocol code is preserved (3.618901ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"UNVERIFIED_CEF_RUNTIME","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"INVALID_CEF_HEARTBEAT","phase":"event_validate","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ without the capability there is no watchdog and a heartbeat is a protocol error (1.86942ms)
+✔ a heartbeat before ready is a protocol error (0.362768ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_HOST_UNRESPONSIVE","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ system wake resets the window instead of killing the host (1.342084ms)
+AXIOSOZO_CEF_DIAGNOSTIC {"code":"CEF_HOST_UNRESPONSIVE","phase":"packet","lastFrameId":0,"lastFrameBytes":0,"targets":0,"pendingRequests":0,"nativeExitCode":null}
+AXIOSOZO_CEF_EXIT {"exitCode":0}
+✔ a watchdog that itself ran late (sleep without a wake observer) resets rather than kills (0.941162ms)
+✔ heartbeats are not demanded once the host is closing (1.497965ms)
+✔ resting on a tab turns its favicon into the engine glyph, after a short delay (8.384987ms)
+✔ only the selected tab's glyph switches; other favicons keep selecting their tab (2.616321ms)
+✔ a Chromium tab switches back to Firefox; a failed switch keeps Firefox and says so briefly (2.982331ms)
+✔ essentials never peek; without the web switch nothing is installed; dispose cleans up (0.678561ms)
+✔ the glyph never covers Zen's own icon states (0.653657ms)
+ℹ tests 214
+ℹ suites 0
+ℹ pass 214
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2138.102941
