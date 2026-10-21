@@ -1,0 +1,34 @@
++ apt-get update
+Hit:1 http://deb.debian.org/debian trixie InRelease
+Hit:2 http://deb.debian.org/debian trixie-updates InRelease
+Hit:3 http://deb.debian.org/debian-security trixie-security InRelease
+Reading package lists...
++ apt-get install -y --no-install-recommends --allow-downgrades --download-only pkg-config=1.8.1-4
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  pkg-config
+0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+Need to get 14.0 kB of archives.
+After this operation, 29.7 kB of additional disk space will be used.
+Get:1 http://deb.debian.org/debian trixie/main amd64 pkg-config amd64 1.8.1-4 [14.0 kB]
+Fetched 14.0 kB in 0s (346 kB/s)
+Download complete and in download only mode
++ apt-get install -y --no-install-recommends --allow-downgrades pkg-config=1.8.1-4
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  pkg-config
+0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+Need to get 0 B/14.0 kB of archives.
+After this operation, 29.7 kB of additional disk space will be used.
+Selecting previously unselected package pkg-config:amd64.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 51466 files and directories currently installed.)
+Preparing to unpack .../pkg-config_1.8.1-4_amd64.deb ...
+Unpacking pkg-config:amd64 (1.8.1-4) ...
+Setting up pkg-config:amd64 (1.8.1-4) ...
+{"component": "webkit-host", "status": "PASS", "action": "pinned_debs_verified", "sha256": {"pkg-config": "385209ba52e5c97808bbdc2fc4da22aea9020f96fbab6fbfb144921c4a31d400"}}
++ g++ -std=c++20 -O2 -g -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now /home/axio/repo/native/webkit-host/host_wpe.cpp -o /home/axio/repo/.local/build/webkit/AxioWebKitHost -I/usr/local/wpe-upstream/include/wpe-webkit-2.0 -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/sysprof-6 -I/usr/include/libsoup-3.0 -I/usr/include/libmount -I/usr/include/blkid -pthread -isystem /usr/include/mit-krb5 -I/usr/include/wpe-1.0 -I/usr/include/wpe-fdo-1.0 -DWPE_ENABLE_XKB=1 -L/usr/local/wpe-upstream/lib -lWPEWebKit-2.0 -lsoup-3.0 -lgmodule-2.0 -pthread -lglib-2.0 -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lWPEBackend-fdo-1.0 -lwpe-1.0 -lwayland-server -Wl,-rpath,/usr/local/wpe-upstream/lib/x86_64-linux-gnu -Wl,-rpath,/usr/local/wpe-upstream/lib -pthread
+{"component": "webkit-host", "status": "PASS", "action": "native_build", "binary": "/home/axio/repo/.local/build/webkit/AxioWebKitHost", "build_seconds": 9.23}
