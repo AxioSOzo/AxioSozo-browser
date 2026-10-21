@@ -71,6 +71,7 @@ class Soak(zen_bench.ZenBench):
         super().__init__(args, engine, evidence)
         self.result.update(harness='axiosozo-pixel-path-soak', soak={})
         self.handles = {}
+        self.cycle_index = 0
 
     def assign(self, server, fixture):
         self.loads = getattr(self, 'loads', 0) + 1
@@ -116,10 +117,12 @@ class Soak(zen_bench.ZenBench):
         out['scroll'] = self.engine_window(0, during=self.wheel)
         out['static_load'] = self.engine_load(self.assign(server, 'static'), 'static')
         # Pixel content of the engine view on screen (the static page: dark text on a light page),
-        # so a path that delivers frames but shows black (cef-feel-2's memfd regression) fails.
-        box = self.chrome_script(self.ENGINE_VIEW_BOX)
-        shot = self.screenshot(f'soak-{engine}-static')
-        out['pixels'] = {**gui_test.view_pixels(shot, [box['x'], box['y'], box['w'], box['h']]), 'view_engine': box['engine']}
+        # so a path that delivers frames but shows black (cef-feel-2's black frames) fails. On cycle
+        # 1 and every 10th: a root screenshot costs ~1 min per engine in the container (run 39430325742).
+        if self.cycle_index == 1 or self.cycle_index % 10 == 0:
+            box = self.chrome_script(self.ENGINE_VIEW_BOX)
+            shot = self.screenshot(f'soak-{engine}-static', settle=False)
+            out['pixels'] = {**gui_test.view_pixels(shot, [box['x'], box['y'], box['w'], box['h']]), 'view_engine': box['engine']}
         out['key_load'] = self.engine_load(self.assign(server, 'text'), 'text')
         out['key'] = self.engine_key_latency(self.args.samples)
         out['diagnostics'] = self.chrome_script(DIAGNOSTICS)
@@ -147,8 +150,8 @@ class Soak(zen_bench.ZenBench):
             problems.append(f'cycle {cycle} {engine}: transport {d.get("frameTransport")} != {self.args.expect_transport}')
         if d.get('memfdFallback'):
             problems.append(f'cycle {cycle} {engine}: memfd fallback {d["memfdFallback"]}')
-        pixels = record.get('pixels') or {}
-        if not pixels.get('content') or pixels.get('view_engine') != engine:
+        pixels = record.get('pixels')
+        if pixels is not None and (not pixels.get('content') or pixels.get('view_engine') != engine):
             problems.append(f'cycle {cycle} {engine}: no page content on screen {pixels}')
         if record['key']['keys_without_frame']:
             problems.append(f'cycle {cycle} {engine}: {record["key"]["keys_without_frame"]} keys without a frame')
@@ -183,6 +186,7 @@ class Soak(zen_bench.ZenBench):
                         index = len(cycles) + 1
                         print(f'soak cycle {index} at {round(time.monotonic() - started)} s', flush=True)
                         cycle = dict(index=index, t=round(time.monotonic() - started, 1))
+                        self.cycle_index = index
                         try:
                             for engine in engines:
                                 cycle[engine] = self.engine_cycle(server, engine)
@@ -221,6 +225,9 @@ class Soak(zen_bench.ZenBench):
                     self.result['soak'].setdefault('host_fds', {})[engine] = dict(min=min(counts), max=max(counts), last=counts[-1])
                     if max(counts) - min(counts) > self.args.max_fd_growth:
                         problems.append(f'{engine} host descriptors {min(counts)} -> {max(counts)}')
+        for engine in engines:
+            if not any('pixels' in c.get(engine, {}) for c in cycles):
+                problems.append(f'{engine}: no on-screen pixel check ran')
         self.result['soak']['problems'] = problems
         self.result['soak']['summary'] = summarize(cycles, engines, self.result['soak'].get('parent_kind'))
         return not problems and len(cycles) >= 2

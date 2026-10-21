@@ -107,7 +107,8 @@ return (async () => {
   const raw = await IOUtils.read(path, { offset: slot, maxBytes: slot });
   out.read = { tag: Object.prototype.toString.call(raw), byteOffset: raw.byteOffset, byteLength: raw.byteLength,
     bufferTag: Object.prototype.toString.call(raw.buffer), bufferBytes: raw.buffer.byteLength, first: [...raw.subarray(0, 4)] };
-  const reader = m.memfdSlotReader(4242, { fd: 9, slot_bytes: slot, slots: 2 }, (p, o) => IOUtils.read(path, o));
+  const reader = m.memfdSlotReader(4242, { fd: 9, slot_bytes: slot, slots: 2 }, (p, o) => IOUtils.read(path, o),
+    () => IOUtils.stat(path));  // the ring check runs against the real file (2 slots)
   const pixels = await reader(1, slot);
   out.slot = { tag: Object.prototype.toString.call(pixels), isView: ArrayBuffer.isView(pixels),
     byteLength: pixels.byteLength, first: [...new Uint8Array(pixels).subarray(0, 4)] };
