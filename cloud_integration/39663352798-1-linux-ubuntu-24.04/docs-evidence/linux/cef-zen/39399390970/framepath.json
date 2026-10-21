@@ -1,0 +1,64 @@
+{
+  "chosen": "memfd-off",
+  "variants": {
+    "default": {
+      "prefs": [],
+      "e1": "FAIL",
+      "black_fraction": 1.0,
+      "frame_path": {
+        "frameUpload": "imagedata",
+        "nativeReceiver": null,
+        "memfdFallback": null,
+        "frameTransport": "memfd",
+        "frameWorker": null
+      },
+      "typing": "PASS"
+    },
+    "worker-off": {
+      "prefs": [
+        "axiosozo.engines.linux.frame_worker=false"
+      ],
+      "e1": "FAIL",
+      "black_fraction": 1.0,
+      "frame_path": {
+        "frameUpload": "imagedata",
+        "nativeReceiver": null,
+        "memfdFallback": null,
+        "frameTransport": "memfd",
+        "frameWorker": null
+      },
+      "typing": "PASS"
+    },
+    "memfd-off": {
+      "prefs": [
+        "axiosozo.engines.linux.memfd_frames=false"
+      ],
+      "e1": "PASS",
+      "black_fraction": 0.001,
+      "frame_path": {
+        "frameUpload": "videoframe",
+        "nativeReceiver": null,
+        "memfdFallback": null,
+        "frameTransport": "pipe",
+        "frameWorker": null
+      },
+      "typing": "PASS"
+    },
+    "memfd-off-receiver-off": {
+      "prefs": [
+        "axiosozo.engines.linux.memfd_frames=false",
+        "axiosozo.engines.linux.native_receiver=false"
+      ],
+      "e1": "PASS",
+      "black_fraction": 0.001,
+      "frame_path": {
+        "frameUpload": "videoframe",
+        "nativeReceiver": null,
+        "memfdFallback": null,
+        "frameTransport": "pipe",
+        "frameWorker": null
+      },
+      "typing": "PASS"
+    }
+  }
+}
