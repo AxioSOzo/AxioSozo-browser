@@ -1,0 +1,46 @@
+✔ run targets: one per declared service with a name, keyed by app and name, in manifest order (1.5295ms)
+✔ kinds: declared kind wins; mobile, desktop, API, worker and web from names and commands (0.440042ms)
+✔ display state: our process, then the port answer, decides what the user sees (0.176375ms)
+✔ folders stay inside the project; commands are one printable line (0.472667ms)
+✔ the environment is a terminal's, never the browser's own variables (0.28975ms)
+✔ output: colours and controls are removed; the first printed local address is kept (0.319667ms)
+✔ a start needs the user's approval of that exact command in that folder, once (1.832334ms)
+✔ output is kept clean and bounded; the printed address is remembered; exit codes decide the end state (6.825625ms)
+✔ stop closes the supervisor's stdin, then kills it after the deadline; close stops everything and refuses new runs (2.692667ms)
+✔ a spawn failure ends as failed with its reason in the output (0.694083ms)
+✔ profile approvals: validated, bounded, newest last (1.487791ms)
+✖ real supervisor: output and exit code come back; stop ends the whole process group (12972.52175ms)
+✖ apps/browser/tests/project-runner.test.mjs (300096.308833ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 1
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 300098.131667
+
+✖ failing tests:
+
+test at apps/browser/tests/project-runner.test.mjs:258:1
+✖ real supervisor: output and exit code come back; stop ends the whole process group (12972.52175ms)
+  AssertionError [ERR_ASSERTION]: no process of the group survives the stop
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///Users/runner/work/AxioSozo-browser/AxioSozo-browser/apps/browser/tests/project-runner.test.mjs:278:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at apps/browser/tests/project-runner.test.mjs:1:1
+✖ apps/browser/tests/project-runner.test.mjs (300096.308833ms)
+  'Promise resolution is still pending but the event loop has already resolved'
+
+LANE: timeout after 300 s; process group stopped

@@ -1,0 +1,19 @@
+✔ fast conversion is byte-identical to the per-byte reference, whole and per rectangle (3.761542ms)
+✔ frames paint once per refresh tick; superseded frames cost no conversion; damage unites (0.79425ms)
+✔ damage payloads rebuild the whole frame per target and reject a partial frame without one (0.45325ms)
+✔ videoframe upload: the damaged rows are wrapped as BGRX (a view, no copy) and drawn in place (0.628042ms)
+✔ videoframe upload failure switches the surface to imagedata, whole (0.272041ms)
+✔ the VideoFrame probe accepts an engine that honours the view offset, refuses one that does not (0.351917ms)
+✔ native receiver: sinks apply every frame per target, presenters bind once and present, fallbacks copy (3.089459ms)
+✔ direct compositing: the panel's rounded clip is lifted while the view fills it, corners are capped, restore undoes it (1.619709ms)
+✔ frame worker: slots are read into a persistent buffer, frames patched, presents drawn into the offscreen canvas (8.586292ms)
+✔ frame workers are probed once (ChromeWorker, sync reads, OffscreenCanvas) before a ring is offered (0.594833ms)
+✔ a source that is not a whole BGRA frame is refused, never painted black (0.19075ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2075.165833
