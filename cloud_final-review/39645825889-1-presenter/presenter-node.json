@@ -1,0 +1,111 @@
+{
+ "schema": "axiosozo-presenter-node-v1",
+ "engine": "v8 v22.23.3",
+ "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+ "nproc": 4,
+ "iterations": 30,
+ "source": "apps/browser/chrome/CEFPresenter.sys.mjs bgraToRGBA (imported)",
+ "baseline_presenter": null,
+ "results": [
+  {
+   "width": 900,
+   "height": 650,
+   "translucent_share": 0,
+   "bytes": 2340000,
+   "copy_ms": {
+    "n": 30,
+    "median": 0.377,
+    "p95": 1.065,
+    "min": 0.24
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 1.56,
+    "p95": 1.593,
+    "min": 1.543
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 1.472,
+    "p95": 1.524,
+    "min": 1.366
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 900,
+   "height": 650,
+   "translucent_share": 0.1,
+   "bytes": 2340000,
+   "copy_ms": {
+    "n": 30,
+    "median": 0.334,
+    "p95": 1.063,
+    "min": 0.268
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 1.368,
+    "p95": 1.397,
+    "min": 1.349
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 1.183,
+    "p95": 1.217,
+    "min": 1.18
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 1800,
+   "height": 1300,
+   "translucent_share": 0,
+   "bytes": 9360000,
+   "copy_ms": {
+    "n": 30,
+    "median": 1.579,
+    "p95": 4.059,
+    "min": 1.04
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 3.783,
+    "p95": 3.904,
+    "min": 3.74
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 3.466,
+    "p95": 3.572,
+    "min": 3.396
+   },
+   "candidate_identical_output": true
+  },
+  {
+   "width": 1800,
+   "height": 1300,
+   "translucent_share": 0.1,
+   "bytes": 9360000,
+   "copy_ms": {
+    "n": 30,
+    "median": 1.586,
+    "p95": 4.378,
+    "min": 1.117
+   },
+   "presenter_bgraToRGBA_ms": {
+    "n": 30,
+    "median": 5.471,
+    "p95": 5.551,
+    "min": 5.423
+   },
+   "candidate_u32_opaque_fast_path_ms": {
+    "n": 30,
+    "median": 4.805,
+    "p95": 4.857,
+    "min": 4.76
+   },
+   "candidate_identical_output": true
+  }
+ ]
+}
