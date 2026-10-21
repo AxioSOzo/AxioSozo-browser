@@ -78,9 +78,9 @@ def main():
         except (ValueError, OSError):
             continue
         if data.get('schema') == 'axiosozo-engine-bench-v1':
-            args = data.get('args', {})
-            key = data['engine'] + ('+damage' if args.get('frame_damage') else '') + \
-                ('+payload' if args.get('frame_damage') and args.get('damage_payload') else '')
+            bench_args = data.get('args', {})  # not `args`: that is the command line
+            key = data['engine'] + ('+damage' if bench_args.get('frame_damage') else '') + \
+                ('+payload' if bench_args.get('frame_damage') and bench_args.get('damage_payload') else '')
             benches[key] = data
         elif str(data.get('schema', '')).startswith('axiosozo-presenter-'):
             presenters.append(data)

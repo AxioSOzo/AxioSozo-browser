@@ -17,9 +17,27 @@ something; never counted as a pass), NOT_VERIFIED (not run). **Nothing is READY.
 
 ## Final matrix on one integration head
 
-Head: see [docs/handoff/final-review.md](handoff/final-review.md) for the head sha and every run id
-of the final round (product defaults; no TEST-ONLY frame-path prefs; the TEST-ONLY chrome overlay
-only where the app artifact predates the head's chrome JS, recorded as `chrome-overlay.json`).
+Head **ac9cefc** (cloud/final-review = cloud/integration 2065355 + the final-review changes), PR #21,
+product defaults (no TEST-ONLY frame-path prefs). The Linux app is linux-perf-build **39430325744**,
+built from this branch; the chrome-overlay step replaced 0 files, so every in-Zen run used the
+app's own packaged chrome. Results: `ci-results:cloud_final-review/<run>-1-<job>/`.
+
+| workflow | run | result |
+| --- | --- | --- |
+| Linux check and test | 39599306352 | PASS |
+| linux-perf-build (app + Gecko GUI harness launch/chrome/about/fixture/input, pixel gate) | 39599306383 | PASS |
+| linux-cef-host (x86_64 + arm64 host gates, macOS compile, zen-gui-chromium) | 39599306391 | PASS |
+| linux-webkit-host (WPE 2.48.3, debian:13, sandbox probe) | 39599306522 | PASS |
+| linux-webkit-zen (round trip, host kill, three engines, 23 feel scenarios, pixel gates) | 39599306504 | PASS |
+| linux-cef-zen (frame paths default/worker/JS-memfd/pipe, fixture E1/E2, web 1× matrix, web 2×, AT-SPI) | 39599306421 | PASS (only `ime_dead_keys_compose` BLOCKED_ENV) |
+| linux-perf (same-job A/B base = cloud/integration vs this tree, Chromium + WebKit, 1×/2×; soak 30 cycles / 10 min) | 39599306618 | PASS |
+| linux-gecko-feel (7 before / 7 after cells) | 39599306558 | PASS |
+| linux-engine-profile | 39599306580 | PASS |
+| linux-engine-bench-gate | 39599306440 | PASS |
+| macos-ci (compare with dev) | 39599306865 | PASS: 0 REGRESSION, 0 NEW_GATE_NOT_PASSING, 198 OK, 24 FIXED_OR_NEW_PASS, 10 PRE_EXISTING (fail on dev too) |
+| macos-webkit-host | 39599306368 | PASS |
+| Linux source probe, linux-webkit-feel-api | 39599306323, 39599306507 | PASS |
+| linux-engine-bench | 39599306536 | all bench jobs PASS; the summary step crashed in `summarize.py` (a variable-shadowing bug that dates from perf-pixel-path; the standalone run used to be cancelled, so it never surfaced). Fixed after ac9cefc; re-run listed in the handoff |
 
 ## 1. Linux
 
@@ -95,7 +113,11 @@ Software WebRender on 4 vCPU runners; same-job A/B where stated.
 | direct compositing + warm spare hosts (perf-phase3) | Zen parent (rAF) Chromium 1× 24.5 → 16.6 %, 2× 36.0 → 18.7 %; WebKit 1× 27.2 → 18.6 %, 2× 55.8 → 33.1 %; Gecko → engine switch Chromium 425 → 122 ms, WebKit 500 → 227 ms | 39396635363 (app 39383407870) |
 | soak (30 cycles / 10 min, three engines) | PASS; RSS plateaus ≈ 3.55 GB after cycle 7, host descriptors flat | 39396878697, 39396635366 (attempt 2) |
 
-The final round of this head re-runs the A/B and soak; numbers are in the handoff.
+Final round (head ac9cefc, run 39599306618, same job, alternating rounds): this tree vs cloud/integration
+is within noise — Chromium 1× rAF 60 fps, parent CPU 21–22 % both, key→frame 12.5–12.8 ms both;
+WebKit 1× 58 fps, key→frame 16.5–17.2 ms both; flagged deltas flip sign between rounds. Soak:
+30 cycles, RSS growth 44 MB, host descriptors flat, Chromium 59.9 fps / key→frame 12.9 ms, WebKit
+57.3 fps / 18.8 ms, memfd frames + native receiver, on-screen pixel checks PASS.
 Not measured: GPU compositors (the blend costs removed here are smaller there), macOS in-Zen.
 
 ## Evidence index

@@ -8,9 +8,9 @@ Final-round run ids on one integration head: docs/handoff/final-review.md.
 
 | Engine | macOS (Apple silicon) | Linux x86_64 (Xvfb, software WebRender) |
 | --- | --- | --- |
-| Gecko (Zen) | Builds and runs on the owner's Mac (September baseline); macos-ci regression lane vs dev on every PR (no Zen build in CI) | PASS: app build + GUI harness launch/chrome/about/fixture/input (39337785340), native feel (39346931130), pixel-content gate in the harness fixture shot |
-| Chromium (CEF 154) | IOSurface engine view; E0 PASS (September), live E1/E2 blocked by the Keychain gate; macOS compile check on every linux-cef-host run | PASS, EXPERIMENTAL: host E0/stream/security/input/web/damage x86_64 + aarch64 (39303367159); in Zen E1/E2 fixture + loopback web, 1× and 2×, feel matrix (39399390970), now on product defaults with pixel gates (final-review) |
-| WebKit | WKWebView host component suites PASS (39345979318, 39346635281); **in-Zen E2E NOT_VERIFIED** | PASS, EXPERIMENTAL, fixture page only: WPE 2.48.3 host (bubblewrap), in-Zen round trip + host kill (39325934205), three engines on one tab (39337226571), 21-scenario feel matrix (39384321863) |
+| Gecko (Zen) | Builds and runs on the owner's Mac (September baseline); macos-ci regression lane vs dev on every PR, final round 0 REGRESSION (39599306865; no Zen build in CI) | PASS: app build + GUI harness launch/chrome/about/fixture/input (39337785340; final round 39599306383 with the pixel-content gate), native feel (39346931130, 39599306558) |
+| Chromium (CEF 154) | IOSurface engine view; E0 PASS (September), live E1/E2 blocked by the Keychain gate; macOS compile check on every linux-cef-host run | PASS, EXPERIMENTAL: host E0/stream/security/input/web/damage x86_64 + aarch64 (39303367159); in Zen E1/E2 fixture + loopback web, 1× and 2×, feel matrix (39399390970); final round on product defaults with pixel gates: 39599306421 (all frame paths, web 1×/2×, AT-SPI), host 39599306391 |
+| WebKit | WKWebView host component suites PASS (39345979318, 39346635281, final round 39599306368); **in-Zen E2E NOT_VERIFIED** | PASS, EXPERIMENTAL, fixture page only: WPE 2.48.3 host (bubblewrap), in-Zen round trip + host kill (39325934205), three engines on one tab (39337226571), 21-scenario feel matrix (39384321863); final round 39599306504 (round trip, host kill, three engines, 23 feel scenarios, pixel gates) |
 
 
 | Capability | Gecko | Chromium/CEF | WebKit (WPE, Linux) | Provider agent | Jev |

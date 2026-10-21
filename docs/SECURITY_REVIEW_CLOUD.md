@@ -158,4 +158,5 @@ output only proposes new pins, and the tarballs are sha256-checked when built.
 ## Evidence
 
 The fixes are verified by the node suites (`apps/browser/tests`), `tests/test_gui_view_pixels.py`,
-and the Actions matrix on this branch's PR (run ids in docs/handoff/final-review.md).
+and the Actions matrix on this branch's PR, head ac9cefc (run ids in docs/CLOUD_PROGRAM_SUMMARY.md and
+docs/handoff/final-review.md).
