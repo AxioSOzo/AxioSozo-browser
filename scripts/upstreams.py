@@ -23,7 +23,11 @@ def ensure(name):
         # touched base files. No reset/clean is used, even after interrupted setup.
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
-    git("clone", "--filter=blob:none", "--depth=1", "--no-checkout", pin["repository"], destination)
+    # zen.py clones upstream/zen again with --no-local for its build stage; a
+    # blob-less partial clone cannot serve that (missing promisor objects), so
+    # Zen is fetched with blobs (depth 1, ~75 MB). t3code stays sparse/partial.
+    partial = [] if name == "zen" else ["--filter=blob:none"]
+    git("clone", *partial, "--depth=1", "--no-checkout", pin["repository"], destination)
     git("fetch", "--depth=1", "origin", pin["revision"], cwd=destination)
     if name == "t3code":
         git("sparse-checkout", "init", "--cone", cwd=destination)

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:static</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). Served only from 127.0.0.1 at /engine.html. -->
+<style>html{color-scheme:light}body{font:20px system-ui,sans-serif;margin:40px;background:#edf2f5;color:#163247}
+main{max-width:760px}h1{font-size:34px}p{line-height:1.5}.card{background:#fff;border:2px solid #257d65;padding:20px;margin:16px 0}
+.badge{font:14px ui-monospace,monospace;color:#596772}</style>
+<main><p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · STATIC · NO ACCOUNTS</p><h1 id="h">Static page</h1>
+<div class="card"><p>A plain document with text, a border and a background. Nothing on this page changes after load, so an
+engine host should send no frames while it is idle.</p></div>
+<div class="card"><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore
+magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p></div></main>
+<script>const page=new URLSearchParams(location.search).get('page')||'1';
+if(page==='2'){document.body.style.background='#f5ede7';document.getElementById('h').textContent='Static page (second document)';}
+document.title='bench:static|page='+page;</script></html>

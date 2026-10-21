@@ -5,6 +5,8 @@ import { launchCEF, allowedFixtureURL, allowedWebURL, fitCEFRenderSurface, CHROM
   RENDER_PATH_PIPE, WHEEL_PHASES, surfaceTargetId } from "./CEFEngineAdapter.sys.mjs";
 import { ChromiumBrowserUI } from "./ChromiumBrowserUI.sys.mjs";
 import { sharedChromiumAccessibility } from "./ChromiumAccessibility.sys.mjs";
+import { EngineFrameSurface, convertBGRAInPlace, convertBGRARect, NativeFrame, presentNativeFrame,
+  nativeFallbackFrame, nativeFramePNG, representNativeFrame, isNativeFrame } from "./EngineFrameSurface.sys.mjs";
 
 const MAX_CEF_TABS = 24;
 // Window changes after which the display refresh class is re-checked.
@@ -19,6 +21,17 @@ const TITLE_VALUE = "axiosozo-chromium-title";
 const ERROR_ICONS = { certificate_error: "chrome://global/skin/icons/warning.svg", load_failed: "chrome://global/skin/icons/info.svg" };
 // Tab state Gecko's hidden about:blank browser would otherwise overwrite.
 const TAB_STATE = ["image", "busy", "progress"];
+
+/**
+ * Loopback hosts are potentially trustworthy origins (W3C Secure Contexts §3.2): neither
+ * Firefox nor Chromium marks them "Not secure", so a Chromium tab does not either.
+ */
+export function loopbackURL(value) {
+  let host;
+  try { host = new URL(value).hostname; } catch { return false; }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]"
+    || /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/u.test(host);
+}
 
 /** Firefox's tab label for a page without a title: its address without the scheme. */
 export function addressLabel(url) {
@@ -66,12 +79,70 @@ const MAC_KEYS = {
   Home:0x73, PageUp:0x74, Delete:0x75, End:0x77, PageDown:0x79,
   ArrowLeft:0x7b, ArrowRight:0x7c, ArrowDown:0x7d, ArrowUp:0x7e,
 };
+// Linux: XKB keycodes (evdev KEY_* of linux/input-event-codes.h + 8). CEF's Linux
+// translator turns native_key_code into the DOM `code` (KeycodeConverter) and
+// windows_key_code into the keydown `key`; text always arrives as a char event.
+const LINUX_KEYS = {
+  Escape:9, Digit1:10, Digit2:11, Digit3:12, Digit4:13, Digit5:14, Digit6:15, Digit7:16, Digit8:17,
+  Digit9:18, Digit0:19, Minus:20, Equal:21, Backspace:22, Tab:23, KeyQ:24, KeyW:25, KeyE:26, KeyR:27,
+  KeyT:28, KeyY:29, KeyU:30, KeyI:31, KeyO:32, KeyP:33, BracketLeft:34, BracketRight:35, Enter:36,
+  ControlLeft:37, KeyA:38, KeyS:39, KeyD:40, KeyF:41, KeyG:42, KeyH:43, KeyJ:44, KeyK:45, KeyL:46,
+  Semicolon:47, Quote:48, Backquote:49, ShiftLeft:50, Backslash:51, KeyZ:52, KeyX:53, KeyC:54, KeyV:55,
+  KeyB:56, KeyN:57, KeyM:58, Comma:59, Period:60, Slash:61, ShiftRight:62, NumpadMultiply:63, AltLeft:64,
+  Space:65, CapsLock:66, F1:67, F2:68, F3:69, F4:70, F5:71, F6:72, F7:73, F8:74, F9:75, F10:76,
+  NumLock:77, ScrollLock:78, Numpad7:79, Numpad8:80, Numpad9:81, NumpadSubtract:82, Numpad4:83,
+  Numpad5:84, Numpad6:85, NumpadAdd:86, Numpad1:87, Numpad2:88, Numpad3:89, Numpad0:90, NumpadDecimal:91,
+  IntlBackslash:94, F11:95, F12:96, IntlRo:97, Convert:100, KanaMode:101, NonConvert:102, NumpadEnter:104,
+  ControlRight:105, NumpadDivide:106, PrintScreen:107, AltRight:108, Home:110, ArrowUp:111, PageUp:112,
+  ArrowLeft:113, ArrowRight:114, End:115, ArrowDown:116, PageDown:117, Insert:118, Delete:119,
+  NumpadEqual:125, Pause:127, NumpadComma:129, Lang1:130, Lang2:131, IntlYen:132, MetaLeft:133,
+  MetaRight:134, ContextMenu:135, F13:191, F14:192, F15:193, F16:194, F17:195, F18:196, F19:197,
+  F20:198, F21:199, F22:200, F23:201, F24:202,
+};
+// Windows/DOM virtual key codes of the US layout by physical key, for the keys Gecko
+// reports with keyCode 0 (characters its layout tables have no ASCII key for).
+const LINUX_VKEY_FALLBACK = { Semicolon:186, Equal:187, Comma:188, Minus:189, Period:190, Slash:191,
+  Backquote:192, BracketLeft:219, Backslash:220, BracketRight:221, Quote:222, IntlBackslash:226 };
+export function linuxWindowsKeyCode(event) {
+  if (event.keyCode) return Math.min(255, event.keyCode);
+  const code = String(event.code ?? "");
+  if (/^Key[A-Z]$/u.test(code)) return code.charCodeAt(3);
+  if (/^Digit[0-9]$/u.test(code)) return code.charCodeAt(5);
+  return LINUX_VKEY_FALLBACK[code] ?? 0;
+}
+/** Keyboard conventions of this Zen build: "linux", or "mac" (also the default without Services). */
+export function keyboardPlatform(win = globalThis) {
+  try { return win?.Services?.appinfo?.OS === "Linux" ? "linux" : "mac"; } catch { return "mac"; }
+}
 // Command chords that edit or move within page text stay with the page.
 const PAGE_CHORDS = new Set(["arrowleft", "arrowright", "arrowup", "arrowdown", "backspace", "delete", "home", "end"]);
-export function cefModifiers(event) {
-  return (event.getModifierState?.("CapsLock") ? 1 : 0) | (event.shiftKey ? 2 : 0)
+const MODIFIER_KEYS = new Set(["control", "shift", "alt", "altgraph", "meta", "capslock", "numlock"]);
+export function cefModifiers(event, platform = "mac") {
+  const flags = (event.getModifierState?.("CapsLock") ? 1 : 0) | (event.shiftKey ? 2 : 0)
     | (event.ctrlKey ? 4 : 0) | (event.altKey ? 8 : 0) | (event.metaKey ? 128 : 0)
     | ((event.buttons & 1) ? 16 : 0) | ((event.buttons & 4) ? 32 : 0) | ((event.buttons & 2) ? 64 : 0);
+  if (platform !== "linux") return flags;
+  // EVENTFLAG_NUM_LOCK_ON, IS_KEY_PAD, IS_LEFT, IS_RIGHT, ALTGR_DOWN, IS_REPEAT.
+  return flags | (event.getModifierState?.("NumLock") ? 256 : 0) | (event.location === 3 ? 512 : 0)
+    | (event.location === 1 ? 1024 : 0) | (event.location === 2 ? 2048 : 0)
+    | (event.getModifierState?.("AltGraph") ? 4096 : 0) | (event.repeat === true ? 8192 : 0);
+}
+/**
+ * Linux shortcut heuristic (pipe mode has no key verdicts): Ctrl is the accelerator
+ * (Ctrl+T/W/L/Tab/PageUp… stay with Zen; word movement and deletion stay with the
+ * page), Alt+Left/Right/Home are history and home, Super chords belong to the
+ * desktop. Modifier presses alone and AltGr characters reach the page.
+ */
+function linuxKeyboardRoute(event, editing) {
+  if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
+  const key = event.key.toLowerCase();
+  if (MODIFIER_KEYS.has(key)) return Object.hasOwn(LINUX_KEYS, event.code) ? "cef" : "unsupported";
+  const accel = event.ctrlKey && !event.altKey && !event.metaKey;
+  if (accel && ((["c", "v", "x", "a"].includes(key) && !event.shiftKey) || key === "z")) return editing ? "edit" : "unsupported";
+  if (event.metaKey || (event.ctrlKey && !PAGE_CHORDS.has(key))
+      || (event.altKey && !event.ctrlKey && ["arrowleft", "arrowright", "home"].includes(key))
+      || /^F\d{1,2}$/u.test(event.key)) return "chrome";
+  return Object.hasOwn(LINUX_KEYS, event.code) ? "cef" : "unsupported";
 }
 /**
  * The fixed shortcut heuristic. With a host that reports key verdicts, surface
@@ -79,7 +150,8 @@ export function cefModifiers(event) {
  * unconsumed ones to Zen (the remote-tab reply model); `native` marks a key
  * whose macOS keyCode the engine-view component supplied.
  */
-export function keyboardRoute(event, { editing = false, native = false } = {}) {
+export function keyboardRoute(event, { editing = false, native = false, platform = "mac" } = {}) {
+  if (platform === "linux") return linuxKeyboardRoute(event, editing);
   if (event.isComposing || event.key === "Dead" || event.key === "Process") return "unsupported";
   const key = event.key.toLowerCase();
   if (event.metaKey && ["c", "v", "x", "a", "z"].includes(key)) return editing ? "edit" : "unsupported";
@@ -89,25 +161,41 @@ export function keyboardRoute(event, { editing = false, native = false } = {}) {
       || /^F\d{1,2}$/u.test(event.key)) return "chrome";
   return Object.hasOwn(MAC_KEYS, event.code) || native ? "cef" : "unsupported";
 }
-export function cefKey(event, type) {
-  if (keyboardRoute(event) !== "cef") throw new Error("UNSUPPORTED_KEY");
+// Firefox's developer-tools shortcuts on Linux (toolbox, inspector, consoles, network,
+// responsive design, debugger, style editor, profiler, view source). Over a Chromium tab
+// they would inspect the hidden blank Firefox document, so the tab explains instead.
+const DEVTOOLS_CHORDS = new Set(["i", "c", "k", "e", "m", "z"]);
+export const DEVTOOLS_NOTICE = "Developer tools aren't available for Chromium tabs yet. Open this tab in Firefox to inspect it.";
+export function developerToolsKey(event, platform = "linux") {
+  if (platform !== "linux" || event.metaKey || event.altKey) return false;
+  const key = String(event.key ?? "").toLowerCase();
+  if (event.key === "F12" && !event.ctrlKey) return true;
+  if (event.shiftKey && !event.ctrlKey && ["F5", "F7"].includes(event.key)) return true;
+  if (event.ctrlKey && event.shiftKey && DEVTOOLS_CHORDS.has(key)) return true;
+  return event.ctrlKey && !event.shiftKey && key === "u";
+}
+export function cefKey(event, type, platform = "mac") {
+  if (keyboardRoute(event, { platform }) !== "cef") throw new Error("UNSUPPORTED_KEY");
+  if (platform === "linux") {
+    return { type, native_key_code: LINUX_KEYS[event.code], windows_key_code: linuxWindowsKeyCode(event),
+      modifiers: cefModifiers(event, platform), text: event.key.length <= 2 ? event.key : "" };
+  }
   return { type, native_key_code: MAC_KEYS[event.code], windows_key_code: Math.min(255, event.keyCode || 0),
     modifiers: cefModifiers(event), text: event.key.length <= 2 ? event.key : "" };
 }
 /** Pipe fallback only: surface mode never touches pixels in JS. */
 export function bgraToRGBA(buffer) {
-  // AXCF read() gives this presenter its own ArrayBuffer. Convert that buffer
-  // in place: a 5K capped frame is ~33 MiB, so allocating a second pixel copy
-  // for every paint needlessly amplifies main-thread memory pressure.
-  const rgba = new Uint8ClampedArray(buffer);
-  for (let i = 0; i < rgba.length; i += 4) {
-    const blue = rgba[i], green = rgba[i + 1], red = rgba[i + 2], alpha = rgba[i + 3];
-    // CEF paints premultiplied BGRA; canvas ImageData takes unpremultiplied RGBA.
-    const scale = alpha && alpha !== 255 ? 255 / alpha : 1;
-    rgba[i] = red * scale; rgba[i + 1] = green * scale;
-    rgba[i + 2] = blue * scale; rgba[i + 3] = alpha;
-  }
-  return rgba;
+  // In place (no second pixel copy of a frame of up to ~33 MiB); EngineFrameSurface
+  // holds the fast path and the identical-output rule.
+  return convertBGRAInPlace(buffer, new Uint8Array(buffer).length / 4);
+}
+
+/**
+ * One damaged rectangle of a BGRA frame as a new unpremultiplied RGBA array (the
+ * frame buffer is left untouched): the work is proportional to the damage, not the frame.
+ */
+export function bgraRegionToRGBA(buffer, frameWidth, x, y, width, height) {
+  return convertBGRARect(buffer, frameWidth, x, y, new Uint8ClampedArray(width * height * 4), width, 0, 0, width, height);
 }
 
 // Component phase names (NSEventPhase) as cef-v1 wheel/pinch phase values.
@@ -163,6 +251,8 @@ export class CEFPresenter {
     this.onEngineChange = onEngineChange; this.onTargetEvent = onTargetEvent; this.onFailure = onFailure;
     this.onSwitchStart = onSwitchStart;
     this.browsingMode = browsingMode;
+    // Keyboard conventions and native key codes of this build ("linux" or "mac").
+    this.keyPlatform = keyboardPlatform(win);
     this.records = new Map(); this.pending = null; this.disposed = false; this.restoreHooks = [];
     this.restoreURLs = new WeakMap(); this.restoreTitles = new WeakMap();
     this.onTabClose = event => {
@@ -388,6 +478,8 @@ export class CEFPresenter {
     if (!root) return;
     const style = this.window.document.createElementNS(XHTML, "style");
     style.textContent = `
+      /* The fixture probe chip wraps under the address bar, never onto the page. */
+      #nav-bar-customization-target:has(> #axiosozo-engine-probe) { flex-wrap:wrap; }
       /* Chromium permission doorhangers (ChromiumBrowserUI) anchor in #notification-popup-box. */
       [axiosozo-cef-active] #identity-box:not(:has(> #notification-popup-box:not([hidden]))),
       [axiosozo-cef-active] #identity-box > :not(#notification-popup-box),
@@ -490,7 +582,7 @@ export class CEFPresenter {
   }
   #updateBadge(record = this.active) {
     if (!this.badge || !record || this.active !== record) return;
-    const insecure = record.latestURL?.startsWith("http:") && this.#urlbarShowsPage();
+    const insecure = record.latestURL?.startsWith("http:") && !loopbackURL(record.latestURL) && this.#urlbarShowsPage();
     this.badge.toggleAttribute("insecure", !!insecure);
   }
 
@@ -499,6 +591,8 @@ export class CEFPresenter {
     if (typeof record.browser.docShellIsActive === "boolean") record.browser.docShellIsActive = false;
     if (record.visible !== visible) {
       record.visible = visible;
+      if (visible) representNativeFrame(record); // a frame applied while hidden
+      if (!visible) this.#closeDatalist(record);
       record.a11y?.setVisible(record.a11yTarget, visible);
       // Surface mode also gates the endpoint's begin frames, fixture sessions included.
       if ((this.browsingMode === "web" || record.surfaceMode) && record.adapter?.target) {
@@ -589,6 +683,7 @@ export class CEFPresenter {
       priorVisibility:browser.style.visibility, priorPosition:stack.style.position, originalLabel:tab.label,
       priorDocShellIsActive:browser.docShellIsActive, pendingURL:this.browsingMode === "web" ? url : null,
       latestURL:this.browsingMode === "web" ? (url || "about:blank") : url, listeners:[], displayedFrames:0, drawMilliseconds:0,
+      framePixels:0, uploadedPixels:0, frames:null,
       firstFrameAt:null, startedAt:this.window.performance.now(), clicks:{ time:0, x:0, y:0, count:1 },
       surfaceMode:false, native:null, hostByteCap:false, keyVerdicts:new Map(), keyDowns:new Map(),
       wheelRemainder:{ x:0, y:0 }, ime:null, title:this.browsingMode === "web" ? this.restoreTitles.get(tab) ?? "" : "",
@@ -669,10 +764,13 @@ export class CEFPresenter {
   /**
    * Accessibility (docs/design/engine-accessibility.md): surface mode only, where the
    * engine-view a11y component exposes Chromium's tree under this canvas. Without the
-   * component (pipe fallback) the canvas keeps its "not available" label.
+   * component (pipe fallback) the canvas keeps its "not available" label. On Linux the
+   * tree is mirrored into chrome DOM that Gecko exposes to AT-SPI (LinuxAccessibilityMirror).
    */
   #attachAccessibility(record, target) {
-    if (!record.surfaceMode) return;
+    let linux = false;
+    try { linux = this.window.Services?.appinfo?.OS === "Linux"; } catch {}
+    if (!record.surfaceMode && !linux) return;
     let a11y = null, targetId;
     try { a11y = sharedChromiumAccessibility(); targetId = surfaceTargetId(target); } catch { return; }
     const adapter = record.adapter;
@@ -704,19 +802,31 @@ export class CEFPresenter {
     record.firstFrameAt ??= this.window.performance.now();
     this.#a11yViewport(record);
   }
-  /** Pipe fallback only (no engine-view component): CPU BGRA frames drawn with putImageData. */
+  /**
+   * Pipe fallback only (no engine-view component): CPU BGRA frames. EngineFrameSurface
+   * converts and uploads the damage at the next refresh tick (once per tick).
+   */
   #draw(record, metadata, pixels) {
-    if (this.disposed || (this.pending !== record && (this.active !== record || this.window.document.hidden))) return;
-    const started = this.window.performance.now();
-    if (record.canvas.width !== metadata.width) record.canvas.width = metadata.width;
-    if (record.canvas.height !== metadata.height) record.canvas.height = metadata.height;
-    const context = record.canvas.getContext("2d", { alpha:false });
-    if (!context) throw new Error("CEF_CANVAS_UNAVAILABLE");
-    context.putImageData(new this.window.ImageData(bgraToRGBA(pixels), metadata.width, metadata.height), 0, 0);
-    record.displayedFrames++;
-    record.drawMilliseconds += this.window.performance.now() - started;
-    record.firstFrameAt ??= this.window.performance.now();
-    record.lastFrameId = metadata.frame_id;
+    if (this.disposed) return;
+    const isPaintable = () => !this.disposed && (this.pending === record || (this.active === record && !this.window.document.hidden));
+    const onPaint = paint => {
+      record.uploadedPixels += paint.uploadedPixels; record.framePixels += paint.framePixels;
+      record.supersededFrames = (record.supersededFrames ?? 0) + paint.superseded;
+      record.displayedFrames++; record.drawMilliseconds += paint.milliseconds;
+      record.firstFrameAt ??= this.window.performance.now();
+      record.lastFrameId = paint.frameId; record.frameUpload = paint.upload;
+    };
+    if (isNativeFrame(pixels)) {
+      // Native receiver: the component presents the frame; nothing to convert here.
+      const paint = presentNativeFrame(this.window, record, metadata, pixels, isPaintable(), onPaint);
+      if (paint) { if (paint !== true) onPaint(paint); return; }
+      const fallback = nativeFallbackFrame(metadata, pixels);
+      if (!fallback) return;
+      ({ metadata, pixels } = fallback);
+    }
+    // A frame that is not painted (hidden window, inactive tab) makes the next paint whole.
+    record.frames ??= new EngineFrameSurface(this.window, record.canvas, { isPaintable, onPaint });
+    record.frames.accept(metadata, pixels);
   }
   #event(record, event) {
     if (event.event === "ax_tree_update" || event.event === "ax_location") {
@@ -750,6 +860,8 @@ export class CEFPresenter {
     if (event.event === "favicon") { record.icon = event.icon || null; this.#applyIcon(record); }
     if (event.event === "cursor") this.#cursor(record, event.cursor);
     if (event.event === "text_input") this.#textInput(record, event);
+    if (event.event === "text_selection") this.#primarySelection(record, event.text);
+    if (event.event === "datalist") this.#datalist(record, event);
     // The page closed itself (window.close()); the tab explains and can reload.
     if (event.event === "closed" && record.committed && !record.removing && this.browsingMode === "web") this.#panel(record, "engine_failed");
     if (event.event === "open_url") this.#openInNewTab(record, event.url, event.background);
@@ -767,6 +879,7 @@ export class CEFPresenter {
       }
     }
     this.onTargetEvent(event);
+    if (event.event === "navigation") this.#closeDatalist(record, true);
     if (record.committed && event.event === "navigation") { record.visible = undefined; this.#visibility(record); }
     // Page focus must be restated for each new document: a focus command that
     // crossed the navigation was rejected as stale (the first focus of a new tab
@@ -777,6 +890,24 @@ export class CEFPresenter {
       this.#action(record, target => record.adapter.focus(target, true));
     }
     if (record.committed) this.#syncChrome(record);
+  }
+  /**
+   * Linux: the desktop PRIMARY selection follows a Chromium tab's selection as it follows a
+   * Firefox page's, so middle-click paste works across tabs and applications. Like Gecko's
+   * auto-copy (mouse, keyboard or select-all reasons only), only a selection made by the
+   * user's own input in this view is published; script selections are not.
+   */
+  #primarySelection(record, text) {
+    if (this.keyPlatform !== "linux" || !record.committed || typeof text !== "string" || !text) return;
+    const input = record.userInputAt ?? -Infinity;
+    if (this.window.performance.now() - input > 1000) return;
+    try {
+      const { Cc, Ci } = this.window;
+      const clipboard = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+      if (!clipboard.isClipboardTypeSupported(Ci.nsIClipboard.kSelectionClipboard)) return;
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper)
+        .copyStringToClipboard(text, Ci.nsIClipboard.kSelectionClipboard);
+    } catch (error) { this.onFailure(error); }
   }
   #openInNewTab(record, url, background) {
     const gBrowser = this.window.gBrowser;
@@ -835,6 +966,12 @@ export class CEFPresenter {
     if (this.#labelTitle(record)) this.#setLabel(record);
     this.window.gBrowser.updateTitlebar();
     this.window.UpdateBackForwardCommands(record.browser);
+    // Firefox disables reloading for the blank Gecko document a web-mode Chromium tab keeps
+    // hidden, which made F5, Ctrl+R and the reload button dead over Chromium pages. The tab's
+    // page is Chromium's; Firefox recomputes these for its own tabs on their next location change.
+    for (const id of ["Browser:Reload", "Browser:ReloadSkipCache", "Browser:ReloadOrDuplicate"]) {
+      this.window.document.getElementById?.(id)?.removeAttribute("disabled");
+    }
     // The explicit nsIURI updates address text; Gecko security UI is masked.
     const shown = record.latestURL === "about:blank" ? null : record.latestURL;
     if (!this.window.gURLBar.focused) {
@@ -844,10 +981,14 @@ export class CEFPresenter {
   }
   /** The tab label: Firefox's error-page title while an error page shows, else the page title, else its address. */
   #labelTitle(record) { return record.errorTitle || record.title || addressLabel(record.latestURL); }
-  #setLabel(record) { this.#setTabLabel(record.tab, this.#labelTitle(record)); }
-  #setTabLabel(tab, title) {
+  #setLabel(record) {
+    // Firefox puts a tab's label in the window title only when it is a document title
+    // (an error page's title counts); an address-only label leaves just the brand.
+    this.#setTabLabel(record.tab, this.#labelTitle(record), !!(record.errorTitle || record.title));
+  }
+  #setTabLabel(tab, title, isContentTitle = true) {
     const gBrowser = this.window.gBrowser;
-    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title);
+    if (typeof gBrowser._setTabLabel === "function") gBrowser._setTabLabel(tab, title, { isContentTitle });
     else tab.label = title;
   }
   // ---- Tab icon and throbber ---------------------------------------------------
@@ -993,6 +1134,7 @@ export class CEFPresenter {
     // the component adds only what DOM events lose (docs/design/engine-view-gecko.md §7).
     this.#pointerInput(record);
     if (record.native) { this.#surfaceKeyboard(record); this.#surfaceFocus(record); }
+    else if (this.#pipeIME(record)) { this.#pipeKeyboard(record, record.overlay); this.#surfaceFocus(record); }
     else this.#pipeKeyboard(record);
     // Chromium asks for its menu natively (run_context_menu); Zen draws it via ChromiumBrowserUI.
     this.#listen(record, "contextmenu", event => { event.preventDefault(); });
@@ -1002,8 +1144,14 @@ export class CEFPresenter {
     const point = event => this.#point(record, event);
     for (const type of ["pointerdown", "pointerup", "pointermove"]) this.#listen(record, type, event => {
       if (!event.isTrusted || !record.committed) return;
+      // Linux back/forward buttons (X11 buttons 8/9) are Gecko app commands that the
+      // wrapped BrowserCommands.back/forward already route to this tab; never a click.
+      if (this.keyPlatform === "linux" && event.button > 2) return;
       if (type === "pointerdown" && !record.resizePending) { this.#focusContent(record); record.canvas.setPointerCapture(event.pointerId); }
+      if (type === "pointerdown") this.#closeDatalist(record);
+      if (type === "pointerup" && event.button === 0) this.#datalistClick(record, event);
       if (type === "pointerup" && record.canvas.hasPointerCapture(event.pointerId)) record.canvas.releasePointerCapture(event.pointerId);
+      if (type !== "pointermove" || event.buttons) record.userInputAt = this.window.performance.now();
       event.preventDefault();
       const position = point(event);
       let count = record.clicks.count;
@@ -1066,13 +1214,17 @@ export class CEFPresenter {
       const scale = event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? record.adapter.surface.height : 1);
       dx = -event.deltaX * scale; dy = -event.deltaY * scale;
     }
+    // Linux (no native description): Gecko reports touchpad scrolling in pixels and
+    // wheel notches in lines, so pixel deltas are the precise ones.
+    const precise = this.keyPlatform === "linux" && !native ? event.deltaMode === 0 : !!native?.precise;
     const phases = features.wheelPhases ? { phase:wheelPhase(native?.phase), momentum_phase:wheelPhase(native?.momentumPhase),
-      precise:!!native?.precise } : {};
+      precise } : {};
     this.#coalesce(record, "wheel", { ...position, ...phases }, { delta_x:dx, delta_y:dy });
   }
   /** Sum wheel (or pinch) deltas per frame; a phase or modifier change flushes first. */
   #coalesce(record, method, fields, sums) {
-    const key = JSON.stringify([method, fields.modifiers, fields.phase ?? null, fields.momentum_phase ?? null, fields.precise ?? null]);
+    // Per wheel event: a plain string key (no JSON array per event).
+    const key = `${method}|${fields.modifiers}|${fields.phase ?? ""}|${fields.momentum_phase ?? ""}|${fields.precise ?? ""}`;
     if (record.pendingWheel && record.pendingWheel.key !== key) this.#flushWheel(record);
     if (record.pendingWheel) {
       record.pendingWheel.fields = fields; // the latest position
@@ -1099,25 +1251,52 @@ export class CEFPresenter {
     if (!delta_x && !delta_y && !phased) return;
     this.#send(record, "wheel", { ...pending.fields, delta_x, delta_y });
   }
-  /** BGRA pipe fallback: default-group listeners and the fixed shortcut heuristic. */
-  #pipeKeyboard(record) {
+  /**
+   * Linux has no engine-view component, so Chromium tabs always use the pipe. With a
+   * host that announces `ime`, the transparent proxy editor of surface mode is used
+   * there too: GTK input methods, compose and dead keys then work as in a Gecko field.
+   */
+  #pipeIME(record) {
+    return !record.native && this.keyPlatform === "linux" && record.adapter.inputFeatures?.ime === true;
+  }
+  /**
+   * BGRA pipe fallback: default-group listeners and the fixed shortcut heuristic.
+   * `element` is the canvas, or on Linux with IME the overlay that also holds the proxy editor.
+   */
+  #pipeKeyboard(record, element = record.canvas) {
     const send = (method, fields) => this.#send(record, method, fields);
-    for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listen(record, eventName, event => {
+    const platform = this.keyPlatform, ime = element !== record.canvas;
+    for (const [eventName, type] of [["keydown", "down"], ["keyup", "up"]]) this.#listenOn(record, element, eventName, event => {
       if (!event.isTrusted) return;
-      const route = keyboardRoute(event, { editing:this.browsingMode === "web" });
+      if (ime) {
+        if (!this.#contentElement(record, event.target)) return;
+        // Keys the input method owns (composition, dead keys) reach it untouched.
+        if (event.isComposing || event.keyCode === 229 || event.key === "Process" || event.key === "Dead") return;
+      }
+      if (this.#datalistKey(record, event, type)) { event.preventDefault(); event.stopPropagation(); return; }
+      if (this.browsingMode === "web" && developerToolsKey(event, platform)) {
+        event.preventDefault(); event.stopPropagation();
+        if (type === "down") this.#notice(record, DEVTOOLS_NOTICE);
+        return;
+      }
+      const route = keyboardRoute(event, { editing:this.browsingMode === "web", platform });
       if (route === "chrome") return; // Zen's shortcuts work over Chromium exactly as over Firefox
       event.preventDefault(); event.stopPropagation();
       if (route === "edit") {
+        record.userInputAt = this.window.performance.now(); // Ctrl+A selects: Gecko auto-copies select-all too
         if (type === "down") this.#action(record, target => record.adapter.edit(target, editAction(event)));
         return;
       }
       if (route === "unsupported") { this.#indicator(record, "This experimental engine has no IME or clipboard bridge"); return; }
-      const fields = cefKey(event, type); send("key", fields);
+      record.userInputAt = this.window.performance.now();
+      const fields = cefKey(event, type, platform); send("key", fields);
+      if (type === "down") this.#datalistTyped(record, event);
       if (type === "down" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (event.key.length <= 2) send("key", { ...fields, type:"char" });
         else if (event.key === "Enter") send("key", { ...fields, type:"char", text:"\r" }); // newline in text areas
       }
     });
+    if (ime) return; // focus follows the content elements (#surfaceFocus); the proxy runs the IME
     this.#listen(record, "focus", () => this.#action(record, target => record.adapter.focus(target, true)));
     this.#listen(record, "blur", () => this.#action(record, target => record.adapter.focus(target, false)));
     this.#listen(record, "compositionstart", event => { event.preventDefault(); this.#indicator(record, "IME is unsupported in the experimental Chromium surface"); });
@@ -1193,6 +1372,136 @@ export class CEFPresenter {
     // A consumed key is only released; an unconsumed one is replayed after the current dispatch.
     if (consumed) finish(); else this.window.setTimeout(finish, 0);
   }
+  // ---- <datalist> (Linux web sessions) ------------------------------------------------
+  // Windowless Chromium draws no datalist suggestions. The host reports the focused
+  // field's options (`datalist`); Zen draws them under the field like Firefox's own
+  // autocomplete list, filters them by the field's value, and commits a choice as
+  // text input replacing the field's value. Keys go to the list only while it is open.
+  #datalist(record, event) {
+    if (!event.options.length) { record.datalist = null; this.#closeDatalist(record); return; }
+    const wanted = record.datalistWanted;
+    record.datalist = event;
+    record.datalistWanted = null;
+    if (!wanted || !record.contentFocused && this.window.document.activeElement !== record.canvas
+        && !this.#contentElement(record, this.window.document.activeElement)) {
+      if (record.datalistPopup && !record.datalistPopup.hidden) this.#renderDatalist(record, "filter");
+      return;
+    }
+    this.#renderDatalist(record, wanted);
+  }
+  #renderDatalist(record, mode) {
+    const list = record.datalist;
+    if (!list) return;
+    const typed = list.value.toLowerCase();
+    const options = list.options.filter(option => mode === "all" || !typed
+      || option.value.toLowerCase().includes(typed) || option.label.toLowerCase().includes(typed));
+    if (!options.length || (options.length === 1 && options[0].value === list.value && mode !== "all")) { this.#closeDatalist(record); return; }
+    let popup = record.datalistPopup;
+    if (!popup) {
+      popup = record.datalistPopup = this.#element(record.overlay, "div", "axiosozo-cef-datalist");
+      popup.setAttribute("role", "listbox");
+      popup.style.cssText = "position:absolute;z-index:3;box-sizing:border-box;min-width:120px;max-height:240px;overflow-y:auto;"
+        + "margin:0;padding:2px 0;background:Field;color:FieldText;border:1px solid color-mix(in srgb, currentColor 25%, transparent);"
+        + "border-radius:4px;box-shadow:0 2px 8px rgb(0 0 0 / .25);font:menu;user-select:none";
+      // Pointer input on the list never reaches the page underneath.
+      for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "wheel"]) {
+        this.#listenOn(record, popup, type, event => event.stopPropagation());
+      }
+      this.#listenOn(record, popup, "pointerdown", event => {
+        if (!event.isTrusted || event.button !== 0) return;
+        event.preventDefault();
+        const row = event.target?.closest?.("[data-index]");
+        if (row) this.#chooseDatalist(record, Number(row.dataset.index));
+      });
+    }
+    popup.replaceChildren();
+    record.datalistShown = options;
+    options.forEach((option, index) => {
+      const row = this.#element(popup, "div");
+      row.setAttribute("role", "option"); row.dataset.index = String(index);
+      row.style.cssText = "display:flex;gap:12px;justify-content:space-between;padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      this.#element(row, "span", null, option.value);
+      if (option.label && option.label !== option.value) {
+        const label = this.#element(row, "span", null, option.label);
+        label.style.opacity = "0.7";
+      }
+    });
+    Object.assign(popup.style, { left:`${Math.round(list.x)}px`, top:`${Math.round(list.y + list.height)}px`,
+      width:`${Math.max(120, Math.round(list.width))}px` });
+    popup.hidden = false;
+    record.datalistIndex = -1;
+    this.#highlightDatalist(record);
+  }
+  #highlightDatalist(record) {
+    const popup = record.datalistPopup;
+    if (!popup) return;
+    for (const row of popup.children) {
+      const selected = Number(row.dataset.index) === record.datalistIndex;
+      row.setAttribute("aria-selected", String(selected));
+      row.style.background = selected ? "SelectedItem" : "";
+      row.style.color = selected ? "SelectedItemText" : "";
+      if (selected) row.scrollIntoView?.({ block:"nearest" });
+    }
+  }
+  #closeDatalist(record, forget = false) {
+    if (forget) record.datalist = null;
+    record.datalistIndex = -1;
+    if (record.datalistPopup) record.datalistPopup.hidden = true;
+  }
+  #datalistOpen(record) { return !!record.datalistPopup && !record.datalistPopup.hidden; }
+  #queryDatalist(record, wanted) {
+    record.datalistWanted = wanted;
+    this.window.clearTimeout(record.datalistTimer);
+    // After Chromium applied the key: one query per typing burst.
+    record.datalistTimer = this.window.setTimeout(() => {
+      if (record.adapter?.datalistQuery) this.#action(record, target => record.adapter.datalistQuery(target));
+    }, 40);
+  }
+  #chooseDatalist(record, index) {
+    const option = record.datalistShown?.[index], list = record.datalist;
+    this.#closeDatalist(record);
+    if (!option || !list) return;
+    record.userInputAt = this.window.performance.now();
+    // The chosen value replaces the field's text, as typing it would (input events fire in the page).
+    this.#send(record, "ime_commit_text", { text:option.value.slice(0, 256),
+      replacement_range:{ start:0, end:list.value.length } });
+    list.value = option.value;
+  }
+  /** Keys while the list is open (or Down on a datalist field): true when the list took the key. */
+  #datalistKey(record, event, type) {
+    if (this.browsingMode !== "web" || event.ctrlKey || event.altKey || event.metaKey) return false;
+    const open = this.#datalistOpen(record);
+    if (type === "up") return record.datalistKeys?.delete(event.code) ?? false;
+    let taken = true;
+    if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      const count = record.datalistShown?.length ?? 0;
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      // Positions -1 (the typed text) .. count-1, wrapping like Firefox's autocomplete list.
+      record.datalistIndex = record.datalistIndex < 0 ? (step > 0 ? 0 : count - 1)
+        : (record.datalistIndex + 1 + step + count + 1) % (count + 1) - 1;
+      this.#highlightDatalist(record);
+    } else if (open && event.key === "Enter" && record.datalistIndex >= 0) this.#chooseDatalist(record, record.datalistIndex);
+    else if (open && event.key === "Escape") this.#closeDatalist(record);
+    else if (!open && event.key === "ArrowDown" && record.datalist && !event.shiftKey) this.#queryDatalist(record, "all");
+    else taken = false;
+    if (taken) (record.datalistKeys ??= new Set()).add(event.code);
+    return taken;
+  }
+  /** After a typed key on a datalist field: refresh the suggestions for the new value. */
+  #datalistTyped(record, event) {
+    if (!record.datalist || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.key.length <= 2 || event.key === "Backspace" || event.key === "Delete") this.#queryDatalist(record, "filter");
+    else if (event.key === "Tab" || event.key === "Enter") this.#closeDatalist(record);
+  }
+  /** A click into the focused datalist field opens the whole list (as in Firefox). */
+  #datalistClick(record, event) {
+    const list = record.datalist;
+    if (!list || this.#datalistOpen(record)) return;
+    const bounds = record.canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+    if (x >= list.x && x <= list.x + list.width && y >= list.y && y <= list.y + list.height) this.#queryDatalist(record, "all");
+  }
+
   #contentElement(record, node) {
     return !!node && (node === record.canvas || node === record.ime?.text || node === record.ime?.password);
   }
@@ -1217,7 +1526,7 @@ export class CEFPresenter {
    * <input type=password> so secure event input turns on as for a Gecko field.
    */
   #textInput(record, event) {
-    if (!record.native || !record.adapter.inputFeatures?.ime) return;
+    if ((!record.native && !this.#pipeIME(record)) || !record.adapter.inputFeatures?.ime) return;
     const ime = record.ime ??= this.#createIME(record);
     const focused = this.window.document.activeElement;
     const hadFocus = this.#contentElement(record, focused);
@@ -1385,8 +1694,10 @@ export class CEFPresenter {
         ?? (this.window.gBrowser.selectedTab === record.tab && record.priorDocShellIsActive);
     }
     record.stack.style.position = record.priorPosition;
+    record.directComposite?.restore(); // perf: the panel's rounded clip comes back with Gecko
     record.overlay.remove();
-    record.canvas.width = 1; record.canvas.height = 1;
+    // A canvas whose control moved to a frame worker refuses a resize (and goes with the overlay).
+    try { record.canvas.width = 1; record.canvas.height = 1; } catch {}
     record.tab.toggleAttribute?.("busy", false); record.tab.toggleAttribute?.("progress", false);
     // Back in Firefox, Firefox's page sets its own icon. A kept engine keeps the
     // icon so Zen's session (and a closing window) remembers it.
@@ -1426,8 +1737,23 @@ export class CEFPresenter {
     const stats = record.surfaceMode ? record.adapter.surfaceStats?.() ?? null : null;
     return { engine:"chromium", version:CHROMIUM_VERSION, target:record.adapter.target,
       renderPath:record.adapter.renderPath ?? RENDER_PATH_PIPE, pipeFallback:!record.surfaceMode,
+      frameTransport:record.surfaceMode ? null : record.adapter.frameTransport ?? "pipe",
+      memfdFallback:record.surfaceMode ? null : record.adapter.memfdFallback ?? null,
+      // Pipe mode: how frames reach the canvas ("videoframe" BGRX drawImage or "imagedata").
+      frameUpload:record.surfaceMode ? null : record.frameUpload ?? null,
+      frameUploadError:record.frames?.uploadError ?? null,
+      // memfd frames: "native" (engine-view receiver) or "worker" ring, null on the main-thread JS path.
+      frameRing:record.surfaceMode ? null : record.adapter.frameRingKind ?? null,
+      nativeSinkKind:record.nativeSink === null ? "refused" : record.nativeSink?.kind ?? (record.nativeSink ? "native" : null),
+      // JS frame path only: centre pixel of the last source frame and of the canvas.
+      framePixels:record.frames?.pixelProbe?.() ?? null,
+      nativeReceiver:record.nativeSink ? JSON.parse(record.nativeSink.statsJSON) : null,
       frames:record.surfaceMode ? (Number.isFinite(stats?.presented) ? stats.presented : (record.firstFrameAt === null ? 0 : 1)) : record.displayedFrames,
       meanDrawMilliseconds:record.surfaceMode ? 0 : record.drawMilliseconds / record.displayedFrames,
+      // Pipe mode: share of frame pixels converted and uploaded (below 1 with frame damage).
+      uploadedPixelShare:record.surfaceMode || !record.framePixels ? null : record.uploadedPixels / record.framePixels,
+      // Pipe mode: frames a newer one replaced before the refresh tick (never converted).
+      supersededFrames:record.surfaceMode ? null : record.supersededFrames ?? 0,
       firstFrameMilliseconds:record.firstFrameAt - record.startedAt, lastFrameId:record.lastFrameId,
       surface:record.adapter.surface, surfaceGeometry:record.surfaceGeometry ?? null, surfaceStats:stats,
       renderScaleLimited:!!record.renderScaleLimited, inputFeatures:record.adapter.inputFeatures ?? null,
@@ -1442,7 +1768,8 @@ export class CEFPresenter {
     }
     // Explicit diagnostic call in privileged chrome only, never a content API or
     // continuous page capture. The outer Zen window must be evidenced separately.
-    return { png:record.canvas.toDataURL("image/png"), diagnostics:this.diagnostics() };
+    return { png:(record.nativeSink && nativeFramePNG(this.window, record.nativeSink)) || record.canvas.toDataURL("image/png"),
+      diagnostics:this.diagnostics() };
   }
   async dispose() {
     this.disposed = true;

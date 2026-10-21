@@ -95,7 +95,7 @@ function harness({ sendFails = false, permissions = new Map() } = {}) {
   const prompt = (kind, details, id = 'prompt-1', target = record.target) =>
     ui.handle(record, validateDelegationEvent({ event: 'prompt', version: 1, target, prompt_id: id, kind, details, timeout_ms: 120000 }));
   return { ui, win, record, other, sent, timers, dialogs, shown, opened, notices, firefox, navigations, pickers, store, downloads,
-    zoomCalls, notifications, popupSet, zoomButton, prompt, originalFullZoom };
+    zoomCalls, notifications, popupSet, zoomButton, prompt, originalFullZoom, doc };
 }
 harness.now = 1_000_000;
 
@@ -334,6 +334,35 @@ test('downloads: saved under Firefox download settings, shown in the downloads p
   h.ui.forget(h.record); assert.equal(saver.detached, true);
 });
 
+test('a small download that finishes before Firefox registers it still completes (run 39393555837)', async () => {
+  const h = harness();
+  const controls = [], added = [];
+  function DownloadSaver() {}
+  class DownloadError extends Error { constructor(properties) { super(properties?.message); } }
+  function Download() {}
+  Download.prototype.start = function() { this.attempt = this.saver.execute((current, total, partial) => { this.progress = [current, total, partial]; }); return this.attempt; };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const modules = {
+    'resource://gre/modules/Downloads.sys.mjs': { Downloads: { PUBLIC: 'public', getList: async () => { await gate; return { add: async download => added.push(download) }; } } },
+    'resource://gre/modules/DownloadCore.sys.mjs': { Download, DownloadSaver, DownloadError,
+      DownloadSource: { fromSerializable: value => ({ ...value }) }, DownloadTarget: { fromSerializable: value => ({ ...value }) } },
+  };
+  const ui = new ChromiumBrowserUI(h.win, { send: (_record, method, fields) => { controls.push([method, fields]); return Promise.resolve({ status: 'success' }); },
+    target: record => record.target, services: { Ci, importModule: url => modules[url], downloadTarget: async () => '/tmp-not-used/x.txt',
+      Services: { prefs: { getBoolPref: (_n, f) => f, getIntPref: (_n, f) => f } } } });
+  ui.handle(h.record, { event: 'prompt', target: TARGET, prompt_id: 'prompt-9', kind: 'download', timeout_ms: 600000,
+    details: { download_id: 7, suggested_name: 'x.txt', url: 'https://files.example/x.txt', mime_type: 'text/plain', total_bytes: 63 } });
+  await settle();
+  assert.deepEqual(controls[0], ['download_reply', { prompt_id: 'prompt-9', path: '/tmp-not-used/x.txt' }], 'answered: the host downloads now');
+  ui.handle(h.record, { event: 'download_updated', download_id: 7, state: 'in_progress', received_bytes: 0, total_bytes: 63, speed: 0, paused: false });
+  ui.handle(h.record, { event: 'download_updated', download_id: 7, state: 'complete', received_bytes: 63, total_bytes: 63, speed: 0, paused: false });
+  release(); await settle(); await settle();
+  await added[0].attempt;
+  assert.deepEqual(added[0].progress, [63, 63, false]);
+  ui.dispose();
+});
+
 test('Firefox Download integration: pause keeps the native download, resume continues it, cancel removes it', async () => {
   const h = harness();
   const controls = [], added = [];
@@ -415,6 +444,80 @@ test("blocked pop-ups use Firefox's notification bar; allowing the site opens th
   assert.equal(h.notifications.length, 0);
 });
 
+test('findbar without Highlight All keeps only the active Chromium match and still advances 1, 2, 3, 1', async () => {
+  const h = harness();
+  const findbar = { counts: [], results: [], onFindResult(data) { this.results.push(data.result); }, onMatchesCountResult(data) { this.counts.push(data.current); } };
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  const finder = h.record.browser.finder;
+  finder.addResultListener(findbar);
+  const sent = () => h.sent.map(item => [item.method, item.fields.find_next ?? item.fields.clear_selection]);
+  finder.fastFind('needle'); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 1, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]], 'other matches cleared, the active one kept selected');
+  // Find again: Chromium restarts from the kept selection; if it finds the same match, one more step.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 2, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 3, active: 2, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 2]);
+  // Chromium moving on by itself needs no extra step.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 3, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]]);
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 2, 3, 1]);
+  assert.equal(findbar.results.at(-1), 2, 'wrapped');
+  // Highlight All on: a new session highlights every match and is not stopped.
+  h.sent.length = 0;
+  finder.onHighlightAllChange(true); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 6, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false]], 'no stop while Highlight All is on');
+  finder.highlight(false); await settle();
+  assert.deepEqual(sent(), [['find', false], ['stop_finding', false]]);
+});
+
+test('Linux CEF reports no active match for a new session: one find-next step gives Firefox\'s 1 of 3, 2 of 3 (run 39387935674)', async () => {
+  const h = harness();
+  const findbar = { counts: [], results: [], onFindResult(data) { this.results.push(data.result); }, onMatchesCountResult(data) { this.counts.push(data.current); } };
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  const finder = h.record.browser.finder;
+  finder.addResultListener(findbar);
+  const sent = () => h.sent.filter(item => item.method === 'find' || item.method === 'stop_finding')
+    .map(item => [item.method, item.fields.find_next ?? item.fields.clear_selection]);
+  // Typing: one request in flight, the newest search queued in place of older ones.
+  finder.fastFind('n'); finder.fastFind('ne'); finder.fastFind('needle'); await settle();
+  assert.deepEqual(sent(), [['find', false]]);
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 9, active: 0, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true]], "'n': no active match, one step");
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 9, active: 1, final: true }); await settle();
+  assert.equal(h.sent.at(-1).fields.text, 'needle', 'then the queued newest search');
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 3, active: 0, final: true }); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 6, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(findbar.counts, [1, 1]);
+  assert.deepEqual(sent().slice(-1), [['stop_finding', false]], 'only the active match stays selected');
+  // Find again: a session restarts from the kept selection (no ordinal), then one step on.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 3, active: 1, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false]], 'a stale identifier is ignored');
+  h.ui.handle(h.record, { event: 'find_result', identifier: 7, count: 3, active: 0, final: true }); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 8, count: 3, active: 2, final: true }); await settle();
+  assert.deepEqual(sent(), [['find', false], ['find', true], ['stop_finding', false]]);
+  assert.deepEqual(findbar.counts, [1, 1, 2]);
+  assert.equal(findbar.results.at(-1), 0);
+  // No result at all (a lost reply): the finder does not stay blocked.
+  h.sent.length = 0;
+  finder.findAgain('needle', false); await settle();
+  h.timers.filter(item => item.ms === 2500).at(-1).fn();
+  finder.findAgain('needle', false); await settle();
+  assert.equal(sent().filter(item => item[0] === 'find').length, 2);
+});
+
 test("Zen's findbar drives Chromium find through the tab's browser.finder and restores Firefox's finder", async () => {
   const h = harness();
   const findbar = { results: [], counts: [], onFindResult(data) { this.results.push(data); }, onMatchesCountResult(data) { this.counts.push(data); } };
@@ -430,13 +533,37 @@ test("Zen's findbar drives Chromium find through the tab's browser.finder and re
   h.ui.handle(h.record, { event: 'find_result', identifier: 2, count: 3, active: 1, final: true });
   assert.deepEqual(findbar.results.map(item => item.result), [0, 2], 'found, then wrapped');
   assert.deepEqual(findbar.counts.at(-1), { total: 3, current: 1, limit: 1000 });
+  // The final count update may carry no active ordinal: the findbar still says "1 of 3".
+  finder.fastFind('needle'); await settle();
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 1, final: false });
+  h.ui.handle(h.record, { event: 'find_result', identifier: 4, count: 3, active: 0, final: true });
+  assert.deepEqual(findbar.counts.at(-1), { total: 3, current: 1, limit: 1000 });
+  assert.equal(findbar.results.at(-1).result, 0);
   finder.fastFind('missing'); await settle();
-  h.ui.handle(h.record, { event: 'find_result', identifier: 3, count: 0, active: 0, final: true });
+  h.ui.handle(h.record, { event: 'find_result', identifier: 5, count: 0, active: 0, final: true });
   assert.equal(findbar.results.at(-1).result, 1);
   finder.onFindbarClose(); await settle();
   assert.deepEqual(h.sent.at(-1).fields, { clear_selection: false });
   h.ui.forget(h.record);
   assert.equal(Object.hasOwn(h.record.browser, 'finder'), false, "Firefox's own finder is back");
+});
+
+test('the zoom commands follow the Chromium page, so Ctrl+0 is enabled while it is zoomed', async () => {
+  const h = harness();
+  const reset = new Element('command'), reduce = new Element('command'), enlarge = new Element('command');
+  // Firefox disabled reset for the hidden blank Gecko browser at 100% (run 39348385457).
+  reset.setAttribute('disabled', 'true');
+  h.doc.elements.set('cmd_fullZoomReset', reset); h.doc.elements.set('cmd_fullZoomReduce', reduce); h.doc.elements.set('cmd_fullZoomEnlarge', enlarge);
+  h.ui.handle(h.record, { event: 'title', title: 'x', target: TARGET });
+  h.win.FullZoom.enlarge(h.record.browser); await settle();
+  assert.equal(reset.getAttribute('disabled'), null, 'reset enabled at 110%');
+  h.win.FullZoom.reset(h.record.browser); await settle();
+  assert.equal(reset.getAttribute('disabled'), 'true', 'reset disabled again at 100%');
+  for (let i = 0; i < 8; i++) h.win.FullZoom.enlarge(h.record.browser);
+  await settle();
+  assert.equal(enlarge.getAttribute('disabled'), 'true', 'enlarge disabled at the largest zoom');
+  assert.equal(reduce.getAttribute('disabled'), null);
+  h.ui.dispose();
 });
 
 test("Firefox zoom commands zoom a Chromium tab and its URL-bar indicator; Gecko tabs keep Firefox's zoom", async () => {

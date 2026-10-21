@@ -2,13 +2,15 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 
 // The single list of engines a tab can run in (docs/ideas/multi-engine-lineup.md).
-// Internal ids are technical engine names (`gecko`, `chromium`, later `webkit`);
-// UI labels are separate and friendly ("Firefox", "Chromium", "Safari"). Menus,
+// Internal ids are technical engine names (`gecko`, `chromium`, `webkit`);
+// UI labels are separate and friendly ("Firefox", "Chromium", "WebKit"). Menus,
 // tab markers and preference validation read this list instead of comparing
 // against "chromium", so adding an engine is one entry plus its presenter.
 //
 // This module only describes engines. It renders nothing and never starts an
 // engine: rendering, input and process code stay in the presenters.
+
+import { webkitAvailabilityFor } from "./WebKitEngineAdapter.sys.mjs";
 
 /** Pref that lists engines that are not available yet (disabled, with a reason) in menus. Developer use. */
 export const SHOW_UNAVAILABLE_PREF = "axiosozo.engines.showUnavailable";
@@ -30,6 +32,22 @@ export function chromiumWebModeEnabled(window) {
   return envValue(window, "AXIOSOZO_ENGINE_PROBE") !== "1" && envValue(window, "AXIOSOZO_ENGINE_SWITCHING") === "1";
 }
 
+/**
+ * Set on a window (true) by the three-engine controls (WebKitEngineControls: Linux,
+ * WebKit host configured) while they sit over the fixture-mode Chromium probe. Chromium
+ * then joins the tab menu for the local test page only, beside fixture-only WebKit.
+ * The Chromium fixture probe on its own (no WebKit) stays a toolbar-only probe.
+ */
+export const CHROMIUM_FIXTURE_LINEUP = Symbol.for("axiosozo.engines.chromium-fixture-lineup");
+const fixtureOnlyYes = Object.freeze({ available: true, reason: null, fixtureOnly: true });
+
+/** {available, reason} for Chromium: web mode, or the fixture page inside the three-engine lineup. */
+export function chromiumAvailability(window) {
+  if (chromiumWebModeEnabled(window)) return yes;
+  if (window?.[CHROMIUM_FIXTURE_LINEUP] === true && envValue(window, "AXIOSOZO_ENGINE_PROBE") === "1") return fixtureOnlyYes;
+  return no("Chromium is not enabled in this browser");
+}
+
 const ENGINES = Object.freeze([
   Object.freeze({
     id: "gecko", label: "Firefox", devLabel: "Firefox (Gecko)", icon: `${ICON_BASE}engine-gecko.svg`,
@@ -41,12 +59,17 @@ const ENGINES = Object.freeze([
   Object.freeze({
     id: "chromium", label: "Chromium", devLabel: "Chromium (Blink)", icon: `${ICON_BASE}engine-chromium.svg`,
     experimental: true, contractValue: "chromium",
-    available: window => (chromiumWebModeEnabled(window) ? yes : no("Chromium is not enabled in this browser")),
+    // Web mode (AXIOSOZO_ENGINE_SWITCHING=1), or the fixture page inside the three-engine lineup.
+    available: window => chromiumAvailability(window),
   }),
   Object.freeze({
-    id: "webkit", label: "Safari", devLabel: "WebKit", icon: `${ICON_BASE}engine-webkit.svg`,
-    experimental: true, contractValue: null, // not in context-v1 yet
-    available: () => no("not yet available"),
+    // "WebKit", not "Safari": on Linux this is WPE WebKit, which is not Safari.
+    id: "webkit", label: "WebKit", devLabel: "WebKit (WPE)", icon: `${ICON_BASE}engine-webkit.svg`,
+    // Not in context-v1 (its readers reject unknown engines): storing it needs a contract version.
+    experimental: true, contractValue: null,
+    // Linux x86_64, `axiosozo.engines.webkit.enabled`, the pinned host installed, fixture page only.
+    // Platforms without a WebKit host say why it is unavailable (WebKitEngineAdapter.webkitAvailability).
+    available: window => webkitAvailabilityFor(window),
   }),
 ]);
 
@@ -169,14 +192,23 @@ export function nextEngine(current, window) {
  */
 export function tabMenuModel(current, window, engines = ENGINES) {
   const from = normalizeEngineId(current) ?? DEFAULT_ENGINE;
-  const entries = menuEngines(window, engines);
+  const entries = menuEngines(window, engines).map(entry => ({ ...entry, note: engineNote(entry, window) }));
   const available = entries.filter(entry => !entry.disabled);
   if (available.length > 2 || (available.length > 1 && entries.length > available.length)) {
-    return { mode: "submenu", label: "Open in", items: entries.map(({ engine, disabled, reason }) => ({
-      id: engine.id, label: engine.label, checked: engine.id === from, disabled: disabled || engine.id === from, reason })) };
+    return { mode: "submenu", label: "Open in", items: entries.map(({ engine, disabled, reason, note }) => ({
+      id: engine.id, label: engine.label, checked: engine.id === from, disabled: disabled || engine.id === from, reason, note })) };
   }
   const other = available.find(entry => entry.engine.id !== from);
   if (!other) return { mode: "hidden", label: "", items: [] };
   return { mode: "toggle", label: `Open in ${other.engine.label}`,
-    items: [{ id: other.engine.id, label: other.engine.label, checked: false, disabled: false, reason: null }] };
+    items: [{ id: other.engine.id, label: other.engine.label, checked: false, disabled: false, reason: null, note: other.note }] };
+}
+
+/** Short menu note beside an engine: why it is unavailable, else "Experimental" / "test page only". */
+export function engineNote({ engine, disabled, reason }, window) {
+  if (disabled) return reason ?? "Unavailable";
+  if (!engine.experimental) return "";
+  let fixtureOnly = false;
+  try { fixtureOnly = engine.available(window)?.fixtureOnly === true; } catch {}
+  return fixtureOnly ? "Experimental · test page only" : "Experimental";
 }

@@ -10,9 +10,13 @@ import { UnderstandRunner } from "../../../packages/provider-host/src/understand
 import { createUnderstand, makeBriefRecord } from "../chrome/Understand.sys.mjs";
 
 const fixture = name => fileURLToPath(new URL(`../../../packages/provider-host/fixtures/understand/${name}.mjs`, import.meta.url));
+// macOS: the workstation build root. Linux: the Linux build root, whose tmp/
+// scripts/storage.py exec gives every command as TMPDIR.
+const EXTERNAL = process.platform === "linux" && process.env.AXIOSOZO_BUILD_ROOT
+  ? `${realpathSync(process.env.AXIOSOZO_BUILD_ROOT)}/tmp/` : "/Volumes/AxioSozoBuild/workstation/";
 function setup(name, fake) {
   const base = realpathSync(tmpdir());
-  assert(base.startsWith("/Volumes/AxioSozoBuild/workstation/"), `Fixture temp must stay external: ${base}`);
+  assert(base.startsWith(EXTERNAL), `Fixture temp must stay external: ${base}`);
   const root = mkdtempSync(path.join(base, "plan4-understand-browser-"));
   const runner = new UnderstandRunner({ testOnlyLaunch: { "claude-code": { command: process.execPath, prefix: [fixture(name)] } } });
   let calls = 0;

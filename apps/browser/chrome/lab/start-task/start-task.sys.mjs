@@ -28,6 +28,7 @@ import { registerCaptureExtension } from "../../RegionCapture.sys.mjs";
 import { CLIENT_CAUTIONS, CLIENT_LABELS } from "../clients.sys.mjs";
 import { TARGET_LABELS } from "../handover.sys.mjs";
 import { el, floatingCard, thinking, useStylesheet } from "../kit.sys.mjs";
+import { words } from "../../overview/platform-words.mjs";
 
 export const EXTENSION_ID = "start-task";
 /** After capture-ai's section, so its proposals read first. */
@@ -109,7 +110,7 @@ export function refusalText(error, name) {
   if (typeof error?.reason === "string" && error.reason) return error.reason;
   switch (error?.code) {
     case "BUSY": return `${name} is already working in this project.`;
-    case "CLIENT_UNAVAILABLE": return `${name} is not available on this Mac right now. Nothing was sent.`;
+    case "CLIENT_UNAVAILABLE": return words(`${name} is not available on this Mac right now. Nothing was sent.`);
     case "UNKNOWN_PROJECT": return "Agents only start in a project you added to AxioSozo.";
     case "SENSITIVE_PAGE": return "AxioSozo does not hand sensitive sites to agents.";
     case "PRIVATE_WINDOW": return "Agents are never used from private windows.";
@@ -255,13 +256,13 @@ function installHere(window, ctx) {
       if (busy || !event?.isTrusted) return true;
       const task = String(text ?? bar.note).trim();
       if (!task) {
-        say(`Say what ${name()} should change, then press Return.`);
+        say(words(`Say what ${name()} should change, then press Return.`));
         bar.focusNote();
         return true;
       }
       if (!bar.stillValid()) return true;
       const status = statusOf(client);
-      if (statuses && !usable(status)) { say(status?.reason ?? `${name()} is not available on this Mac right now.`); return true; }
+      if (statuses && !usable(status)) { say(status?.reason ?? words(`${name()} is not available on this Mac right now.`)); return true; }
       busy = true;
       say(null);
       picker.setBusy("Starting…");
@@ -314,7 +315,7 @@ function installHere(window, ctx) {
         picker.disable();
         releaseDefault();
         releaseChoose();
-        consent.textContent = "No coding agent is ready on this Mac, so nothing can start here. Copy for agent still works.";
+        consent.textContent = words("No coding agent is ready on this Mac, so nothing can start here. Copy for agent still works.");
         bar.reposition();
         return;
       }
@@ -470,14 +471,14 @@ function installInApp(window, ctx) {
 
     function describe() {
       consent.replaceChildren(`Opens ${APP_NAMES[target]} in `, el(document, "span", { class: "axiosozo-region-caption-path", text: root }),
-        ", with your note filled in. Nothing is sent until you press Return there. The image goes to the clipboard.");
+        words(", with your note filled in. Nothing is sent until you press Return there. The image goes to the clipboard."));
       picker?.setLabel(TARGET_LABELS[target]);
       bar.reposition();
     }
 
     async function openIn(event, text = null) {
       if (busy || !event?.isTrusted) return true;
-      if (available && available[target] === false) { say(`${APP_MENU_LABELS[target]} is not installed on this Mac.`); return true; }
+      if (available && available[target] === false) { say(words(`${APP_MENU_LABELS[target]} is not installed on this Mac.`)); return true; }
       if (!bar.stillValid()) return true;
       busy = true;
       say(null);
@@ -497,7 +498,7 @@ function installInApp(window, ctx) {
       remember(TARGET_PREF, target);
       bar.finish();
       ctx.toast({ title: `Opened in ${APP_NAMES[target]}`,
-        description: result?.imageCopied ? "Your note is filled in there. Paste the image with ⌘V, then press Return there to start."
+        description: result?.imageCopied ? words("Your note is filled in there. Paste the image with ⌘V, then press Return there to start.")
           : "Your note is filled in there. Press Return there to start." });
       return true;
     }
@@ -523,7 +524,7 @@ function installInApp(window, ctx) {
         picker.disable();
         releaseDefault();
         releaseChoose();
-        consent.textContent = "Neither Claude Code, the Claude app nor Codex can be opened from here on this Mac. Copy for agent still works.";
+        consent.textContent = words("Neither Claude Code, the Claude app nor Codex can be opened from here on this Mac. Copy for agent still works.");
         bar.reposition();
         return;
       }

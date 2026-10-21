@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CEFEngineAdapter, CEFHostConnection, CEF_VERSION, CHROMIUM_VERSION, BLANK_IDENTITY } from '../chrome/CEFEngineAdapter.sys.mjs';
-import { CEFPresenter, keyboardRoute, addressLabel } from '../chrome/CEFPresenter.sys.mjs';
+import { CEFPresenter, keyboardRoute, addressLabel, loopbackURL } from '../chrome/CEFPresenter.sys.mjs';
 import { validFavicon, MAX_FAVICON_LENGTH } from '../chrome/CEFEngineAdapter.sys.mjs';
 import { installEngineProbeControls } from '../chrome/EngineProbeControls.sys.mjs';
 
@@ -185,7 +185,8 @@ function zenWindow() {
     setAttribute(key, value) { this.attributes.set(key, value); }, removeAttribute(key) { this.attributes.delete(key); },
     getAttribute(key) { return this.attributes.get(key) ?? null; }, hasAttribute(key) { return this.attributes.has(key); },
     toggleAttribute(key, value) { if (value) this.attributes.set(key, ''); else this.attributes.delete(key); },
-    appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
+    appendChild(child) { this.children.push(child); child.parentNode = this; return child; }, dataset: {},
+    replaceChildren(...nodes) { this.children = []; nodes.forEach(node => this.appendChild(node)); },
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this); },
     addEventListener(type, handler) { this.handlers.set(type, handler); }, removeEventListener(type) { this.handlers.delete(type); },
     focus() {}, hasPointerCapture: () => false, setPointerCapture() {}, releasePointerCapture() {},
@@ -382,6 +383,126 @@ test('the Not secure badge shows only while the address bar describes the active
     off(); callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
     assert.equal(shown(), true, `back after ${name}`);
   }
+  await presenter.dispose();
+});
+
+test('loopback pages are potentially trustworthy: no Not secure badge, as in Firefox and Chromium', async () => {
+  for (const url of ['http://127.0.0.1:8080/a', 'http://127.255.0.9/', 'http://localhost:3000/', 'http://app.localhost/', 'http://[::1]:9/'])
+    assert.equal(loopbackURL(url), true, url);
+  for (const url of ['http://127.0.0.1.example/', 'http://128.0.0.1/', 'http://localhost.example/', 'http://10.0.0.1/', 'not a url'])
+    assert.equal(loopbackURL(url), false, url);
+  const z = zenWindow();
+  const identity = { before(node) { this.badge = node; } };
+  z.win.document.getElementById = id => (id === 'identity-box' ? identity : null);
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  callbacks.onEvent({ event: 'url', url: 'http://127.0.0.1:4321/feel.html' });
+  assert.equal(identity.badge.hasAttribute('insecure'), false, 'loopback');
+  callbacks.onEvent({ event: 'url', url: 'http://plain.example/' });
+  assert.equal(identity.badge.hasAttribute('insecure'), true, 'a remote http page');
+  await presenter.dispose();
+});
+
+test('a Chromium page title is a content title, so Zen puts it in the window title like a Firefox page', async () => {
+  const z = zenWindow();
+  const labels = [];
+  z.win.gBrowser._setTabLabel = (tab, label, options) => { labels.push([label, options?.isContentTitle]); tab.label = label; };
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  assert.deepEqual(labels.at(-1), ['example.com/start', false], 'an address-only label is not a content title');
+  callbacks.onEvent({ event: 'title', title: 'Page title' });
+  assert.deepEqual(labels.at(-1), ['Page title', true]);
+  callbacks.onEvent({ event: 'error', code: 'load_failed', native_code: -105 });
+  assert.equal(labels.at(-1)[1], true, "a Firefox-style error page title is the document's title too");
+  await presenter.dispose();
+});
+
+test('Linux: a selection made by the user in a Chromium tab becomes the desktop PRIMARY selection; script selections do not', async () => {
+  const z = zenWindow();
+  const primary = [];
+  z.win.Services.appinfo = { OS: 'Linux' };
+  z.win.Ci = { nsIClipboard: { kSelectionClipboard: 1 }, nsIClipboardHelper: {} };
+  z.win.Cc = { '@mozilla.org/widget/clipboard;1': { getService: () => ({ isClipboardTypeSupported: type => type === 1 }) },
+    '@mozilla.org/widget/clipboardhelper;1': { getService: () => ({ copyStringToClipboard: (text, type) => primary.push([text, type]) }) } };
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks } = z.launched[0];
+  const canvas = z.first.linkedBrowser.parentNode.children.find(node => node !== z.first.linkedBrowser).children[0];
+  callbacks.onEvent({ event: 'text_selection', text: 'by script' });
+  assert.deepEqual(primary, [], 'no user input: the page selected text by itself');
+  canvas.handlers.get('pointerup')({ isTrusted: true, button: 0, buttons: 0, pointerId: 1, clientX: 1, clientY: 1, timeStamp: 1, preventDefault() {} });
+  callbacks.onEvent({ event: 'text_selection', text: 'by the user' });
+  assert.deepEqual(primary, [['by the user', 1]]);
+  await presenter.dispose();
+});
+
+test('datalist: Zen draws the suggestions Chromium cannot, filtered by the value; Down/Enter commit a choice as text', async () => {
+  const z = zenWindow();
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  const { callbacks, adapter } = z.launched[0];
+  const inputs = [], queries = [];
+  adapter.input = async (_target, method, fields) => { inputs.push([method, fields]); return { status: 'success' }; };
+  adapter.datalistQuery = async () => { queries.push(1); return { status: 'success' }; };
+  const overlay = z.first.linkedBrowser.parentNode.children.find(node => node !== z.first.linkedBrowser);
+  const canvas = overlay.children[0];
+  z.win.document.activeElement = canvas;
+  const key = (keyName, code = keyName) => {
+    const event = { isTrusted: true, key: keyName, code, keyCode: 0, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
+      prevented: false, preventDefault() { this.prevented = true; }, stopPropagation() {} };
+    canvas.handlers.get('keydown')(event);
+    return event;
+  };
+  const options = [{ value: 'apple', label: '' }, { value: 'apricot', label: '' }, { value: 'banana', label: 'fruit' }];
+  // Focus report: remembered, nothing drawn.
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  const popup = () => overlay.children.find(node => node.className === 'axiosozo-cef-datalist');
+  assert.equal(popup(), undefined);
+  // Typing asks for the new value; the answer is filtered and drawn under the field.
+  key('a', 'KeyA'); key('p', 'KeyP');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(queries.length, 1, 'one query per typing burst');
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: 'ap', options });
+  assert.equal(popup().hidden, false);
+  assert.deepEqual(popup().children.map(row => row.children[0].textContent), ['apple', 'apricot']);
+  assert.equal(popup().style.top, '50px');
+  // Down/Enter belong to the list; the page gets the chosen value as text replacing 'ap'.
+  const before = inputs.length;
+  assert.equal(key('ArrowDown').prevented, true);
+  assert.equal(popup().children[0].getAttribute('aria-selected'), 'true');
+  key('Enter');
+  assert.equal(popup().hidden, true);
+  await settle();
+  assert.deepEqual(inputs.slice(before), [['ime_commit_text', { text: 'apple', replacement_range: { start: 0, end: 2 } }]]);
+  // Escape closes the list without reaching the page; leaving the field forgets it.
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  key('ArrowDown');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  callbacks.onEvent({ event: 'datalist', x: 10, y: 20, width: 100, height: 30, value: '', options });
+  assert.equal(popup().children.length, 3, 'Down on the field opens the whole list');
+  const sent = inputs.length;
+  key('Escape');
+  assert.equal(popup().hidden, true);
+  assert.equal(inputs.length, sent);
+  callbacks.onEvent({ event: 'datalist', x: 0, y: 0, width: 0, height: 0, value: '', options: [] });
+  key('ArrowDown');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(queries.length, 2, 'no datalist field, no query');
+  await presenter.dispose();
+});
+
+test("reloading works over a Chromium page although Firefox disabled it for the hidden blank Gecko browser", async () => {
+  const z = zenWindow();
+  const commands = new Map(['Browser:Reload', 'Browser:ReloadSkipCache', 'Browser:ReloadOrDuplicate'].map(id => {
+    const attrs = new Map([['disabled', 'true']]);
+    return [id, { removeAttribute: key => attrs.delete(key), getAttribute: key => attrs.get(key) ?? null }];
+  }));
+  z.win.document.getElementById = id => commands.get(id) ?? null;
+  const presenter = new CEFPresenter(z.win, z.gecko, { launch: z.launch, browsingMode: 'web', onFailure() {} });
+  await presenter.switchToChromium(z.first); await settle();
+  for (const [id, command] of commands) assert.equal(command.getAttribute('disabled'), null, id);
   await presenter.dispose();
 });
 
@@ -635,4 +756,17 @@ test('a restored Chromium tab is labelled with its page title before its engine 
   z.select(background); await settle();
   assert.equal(z.launched.length, 1); assert.equal(background.label, 'Later page');
   await presenter.dispose();
+});
+
+test('Linux: developer-tools shortcuts over a Chromium tab explain instead of inspecting the hidden Firefox document', async () => {
+  const { developerToolsKey, DEVTOOLS_NOTICE } = await import('../chrome/CEFPresenter.sys.mjs');
+  const k = (key, mods = {}) => ({ key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods });
+  for (const event of [k('F12'), k('I', { ctrlKey: true, shiftKey: true }), k('C', { ctrlKey: true, shiftKey: true }),
+    k('K', { ctrlKey: true, shiftKey: true }), k('u', { ctrlKey: true }), k('F7', { shiftKey: true })]) {
+    assert.equal(developerToolsKey(event), true, JSON.stringify(event));
+  }
+  for (const event of [k('J', { ctrlKey: true, shiftKey: true }), k('c', { ctrlKey: true }), k('i'), k('F5'),
+    k('I', { metaKey: true, altKey: true })]) assert.equal(developerToolsKey(event), false, JSON.stringify(event));
+  assert.equal(developerToolsKey(k('F12'), 'mac'), false, 'macOS keeps its own routing');
+  assert.match(DEVTOOLS_NOTICE, /Open this tab in Firefox/u);
 });

@@ -1,0 +1,716 @@
+// Standalone Zen-side stand-in for contracts/engine-surface-v1.md, WebKit host edition.
+// Adapted from native/chromium-host/tests/surface_receiver.mm (cloud/integration 5f8b1d0):
+// the CEF <select> popup case is dropped (WebKit's popup menus are native, never
+// composited), and navigation with exact generations, stale-target rejection, hidden
+// targets and host + WebKit helper CPU are added. Not Zen, not E1/E2 evidence: it checks
+// in a Mach service, spawns the real WKWebView host in stream mode, receives IOSurface
+// (or AXCF pipe) frames from a synthetic fixture page, validates them and measures fps,
+// latency and CPU.
+#import <Foundation/Foundation.h>
+#import <CoreGraphics/CoreGraphics.h>
+#import <ImageIO/ImageIO.h>
+#import <IOSurface/IOSurface.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <bsm/libbsm.h>
+#include <fcntl.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <poll.h>
+#include <servers/bootstrap.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <sys/resource.h>
+#include <mach-o/dyld.h>
+#include <algorithm>
+#include <atomic>
+#include <deque>
+#include <set>
+#include <condition_variable>
+#include <functional>
+#include <map>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include "../../../chromium-host/engine_surface_v1.h"
+#include <libproc.h>
+#include <dlfcn.h>
+
+extern char** environ;
+
+namespace {
+mach_timebase_info_data_t timebase;
+double ms(uint64_t ticks) { return double(ticks) * timebase.numer / timebase.denom / 1e6; }
+uint64_t now() { return mach_absolute_time(); }
+
+struct Options {
+  std::string host, profile, evidence, origin, mode = "surface", beginFrames = "internal", negative;
+  int rate = 60;
+  // Zero-copy stand-in: keep an IOSurface use count on every frame until this
+  // long after its RELEASE (Gecko's compositor / CALayer / WindowServer still
+  // reading it). 0 = drop immediately (previous behaviour).
+  int holdUseMs = 0;
+  double seconds = 5;
+} options;
+
+std::mutex lock;
+std::condition_variable changed;
+NSMutableDictionary* result;
+NSMutableArray* failures;
+void failCheck(NSString* text) { std::lock_guard guard(lock); [failures addObject:text]; }
+
+// Stream state (main thread only, except where noted).
+pid_t child = -1;
+int toHost = -1, fromHost = -1;
+NSString* token;
+NSDictionary* target;
+uint64_t requestCounter = 0;
+NSMutableArray* events;
+
+// Frame state shared with the Mach / pipe consumers (guarded by `lock`).
+struct Sample { uint64_t arrival, paint, send, sequence; uint32_t width, height; double scale; uint32_t flags; uint64_t document = 0, navigation = 0; };
+std::vector<Sample> samples;
+uint64_t framesTotal = 0, lastFrameId = 0;
+int probeColor = 0;      // 1 red, 2 blue, 0 other
+uint64_t probeChanged = 0;
+std::string capturePath;  // non-empty: save next frame there
+std::map<uint64_t, uint64_t> tickSent;  // BEGIN_FRAME sequence -> send time
+uint64_t targetId = 0;
+std::atomic<bool> ticking{false}, running{true};
+mach_port_t service = MACH_PORT_NULL, hostReply = MACH_PORT_NULL;
+bool connected = false;
+uint32_t popupFrames = 0, dirtyFrames = 0, logicalMismatch = 0;
+// Zero-copy contract checks (guarded by `lock`).
+uint64_t globalFlagFrames = 0, overwriteInUse = 0, maxPinned = 0;
+std::set<uint32_t> surfaceIds;
+std::vector<int> crossProcessLookups;  // exit codes of `--lookup ID` children (0 = found)
+
+// A process that does not hold the surface resolves it by global ID, exactly
+// like Gecko's GPU process (IOSurfaceLookup). Returns the child's exit code.
+int lookupInOtherProcess(uint32_t id) {
+  char self[PATH_MAX]; uint32_t size = sizeof(self);
+  if (_NSGetExecutablePath(self, &size)) return -1;
+  std::string text = std::to_string(id);
+  const char* args[] = {self, "--lookup", text.c_str(), nullptr};
+  pid_t pid = -1; int status = 0;
+  if (posix_spawn(&pid, self, nullptr, nullptr, (char* const*)args, environ)) return -1;
+  waitpid(pid, &status, 0);
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+double nonEmptyFraction = -1; int distinctColors = -1;
+
+std::string hex(const uint8_t* bytes, size_t size) {
+  static const char* digits = "0123456789abcdef";
+  std::string out;
+  for (size_t i = 0; i < size; ++i) { out += digits[bytes[i] >> 4]; out += digits[bytes[i] & 15]; }
+  return out;
+}
+
+bool writePNG(const std::string& path, const uint8_t* bgra, size_t stride, int width, int height) {
+  CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+  CGContextRef context = CGBitmapContextCreate((void*)bgra, width, height, 8, stride, space,
+                                               uint32_t(kCGImageAlphaPremultipliedFirst) | uint32_t(kCGBitmapByteOrder32Little));
+  CGImageRef image = context ? CGBitmapContextCreateImage(context) : nullptr;
+  bool ok = false;
+  if (image) {
+    NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
+    CGImageDestinationRef destination = CGImageDestinationCreateWithURL((__bridge CFURLRef)url,
+        (__bridge CFStringRef)UTTypePNG.identifier, 1, nullptr);
+    if (destination) { CGImageDestinationAddImage(destination, image, nullptr); ok = CGImageDestinationFinalize(destination); CFRelease(destination); }
+    CGImageRelease(image);
+  }
+  if (context) CGContextRelease(context);
+  CGColorSpaceRelease(space);
+  return ok;
+}
+
+// Pixel checks shared by both transports. Caller holds `lock`.
+void inspect(const uint8_t* bgra, size_t stride, int width, int height, double scale, uint64_t arrival) {
+  int x = int(100 * scale), y = int(100 * scale);
+  if (x < width && y < height) {
+    const uint8_t* p = bgra + size_t(y) * stride + size_t(x) * 4;
+    int color = (p[2] > 200 && p[0] < 60) ? 1 : (p[0] > 200 && p[2] < 60) ? 2 : 0;
+    if (color != probeColor) { probeColor = color; probeChanged = arrival; }
+  }
+  if (nonEmptyFraction < 0 && framesTotal >= 5) {
+    size_t nonZero = 0, total = 0; std::map<uint32_t, int> colors;
+    for (int yy = 0; yy < height; yy += 16) for (int xx = 0; xx < width; xx += 16) {
+      uint32_t value; memcpy(&value, bgra + size_t(yy) * stride + size_t(xx) * 4, 4);
+      total++; nonZero += value != 0; if (colors.size() < 4096) colors[value]++;
+    }
+    nonEmptyFraction = total ? double(nonZero) / total : 0; distinctColors = int(colors.size());
+  }
+  if (!capturePath.empty()) {
+    if (!writePNG(capturePath, bgra, stride, width, height)) [failures addObject:@"png_write_failed"];
+    capturePath.clear();
+  }
+}
+
+// ---------- Mach side (Zen stand-in) ----------
+struct Received {
+  union { mach_msg_header_t header; axio_surface_connect_msg_t connect; axio_surface_frame_msg_t frame; uint8_t bytes[1024]; };
+  mach_msg_audit_trailer_t trailer;
+};
+pid_t senderPid(const Received& buffer) {
+  auto* trailer = reinterpret_cast<const mach_msg_audit_trailer_t*>(
+      reinterpret_cast<const uint8_t*>(&buffer.header) + round_msg(buffer.header.msgh_size));
+  return trailer->msgh_trailer_size >= sizeof(mach_msg_audit_trailer_t) ? audit_token_to_pid(trailer->msgh_audit) : -1;
+}
+bool sendSimple(mach_msg_header_t* header, mach_msg_size_t size, int id) {
+  header->msgh_bits = MACH_MSGH_BITS_SET(MACH_MSG_TYPE_COPY_SEND, 0, 0, 0);
+  header->msgh_size = size; header->msgh_remote_port = hostReply; header->msgh_local_port = MACH_PORT_NULL; header->msgh_id = id;
+  return mach_msg(header, MACH_SEND_MSG | MACH_SEND_TIMEOUT, size, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL) == MACH_MSG_SUCCESS;
+}
+bool sendRelease(uint64_t targetValue, uint64_t frame) {
+  axio_surface_release_msg_t message{};
+  message.magic = AXIO_SURFACE_MAGIC; message.version = AXIO_SURFACE_VERSION;
+  message.native_target_id = targetValue; message.frame_id = frame;
+  return sendSimple(&message.header, sizeof(message), AXIO_SURFACE_MSG_RELEASE);
+}
+
+void machLoop(const uint8_t* expectedToken) {
+  struct Held { IOSurfaceRef surface = nullptr; uint64_t target = 0, frame = 0; } displayed;
+  // Released frames whose use count we still hold (zero-copy compositor stand-in).
+  struct Pinned { IOSurfaceRef surface; uint64_t until; };
+  std::deque<Pinned> pinned;
+  uint64_t holdTicks = uint64_t(options.holdUseMs) * 1000000 * timebase.denom / timebase.numer;
+  auto unpin = [&](bool all) {
+    while (!pinned.empty() && (all || pinned.front().until <= now())) {
+      IOSurfaceDecrementUseCount(pinned.front().surface);
+      CFRelease(pinned.front().surface);
+      pinned.pop_front();
+    }
+  };
+  while (running) {
+    unpin(false);
+    Received buffer{};
+    mach_msg_return_t status = mach_msg(&buffer.header,
+        MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) |
+        MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT), 0, sizeof(buffer), service, pinned.empty() ? 100 : 1,
+        MACH_PORT_NULL);
+    if (status == MACH_RCV_TIMED_OUT) continue;
+    if (status != MACH_MSG_SUCCESS) { failCheck(@"mach_receive_failed"); break; }
+    uint64_t arrival = now();
+    pid_t sender = senderPid(buffer);
+    bool complex = buffer.header.msgh_bits & MACH_MSGH_BITS_COMPLEX;
+    if (sender != child) { failCheck(@"message_from_unexpected_pid"); if (complex) mach_msg_destroy(&buffer.header); continue; }
+    if (buffer.header.msgh_id == AXIO_SURFACE_MSG_CONNECT && !connected) {
+      auto& m = buffer.connect;
+      bool ok = complex && m.header.msgh_size == sizeof(m) && m.body.msgh_descriptor_count == 1 &&
+                m.reply_port.type == MACH_MSG_PORT_DESCRIPTOR && m.reply_port.disposition == MACH_MSG_TYPE_PORT_SEND &&
+                m.data.magic == AXIO_SURFACE_MAGIC && m.data.version == AXIO_SURFACE_VERSION && m.data.host_pid == uint32_t(child);
+      unsigned difference = 0;
+      for (unsigned i = 0; i < AXIO_SURFACE_TOKEN_BYTES; ++i) difference |= m.data.token[i] ^ expectedToken[i];
+      if (!ok || difference) { failCheck(@"connect_rejected"); mach_msg_destroy(&buffer.header); continue; }
+      hostReply = m.reply_port.name;
+      if (options.negative == "no_connected") { std::lock_guard guard(lock); connected = true; changed.notify_all(); continue; }
+      axio_surface_connected_msg_t reply{};
+      reply.magic = AXIO_SURFACE_MAGIC; reply.version = AXIO_SURFACE_VERSION;
+      if (!sendSimple(&reply.header, sizeof(reply), AXIO_SURFACE_MSG_CONNECTED)) failCheck(@"connected_send_failed");
+      std::lock_guard guard(lock); connected = true; changed.notify_all(); continue;
+    }
+    if (buffer.header.msgh_id != AXIO_SURFACE_MSG_FRAME || !complex || buffer.header.msgh_size != sizeof(axio_surface_frame_msg_t)) {
+      failCheck(@"unexpected_message"); if (complex) mach_msg_destroy(&buffer.header); continue;
+    }
+    auto& m = buffer.frame;
+    if (m.body.msgh_descriptor_count != 1 || m.surface.type != MACH_MSG_PORT_DESCRIPTOR ||
+        m.surface.disposition != MACH_MSG_TYPE_PORT_SEND || m.data.magic != AXIO_SURFACE_MAGIC ||
+        m.data.version != AXIO_SURFACE_VERSION || m.data.dirty_count > AXIO_SURFACE_MAX_DIRTY) {
+      failCheck(@"invalid_frame_message"); mach_msg_destroy(&buffer.header); continue;
+    }
+    IOSurfaceRef surface = IOSurfaceLookupFromMachPort(m.surface.name);
+    mach_port_deallocate(mach_task_self(), m.surface.name);
+    const auto& d = m.data;
+    if (!surface) { failCheck(@"iosurface_lookup_failed"); continue; }
+    if (options.holdUseMs) {
+      // The host must never hand out a surface we (the "compositor") still use.
+      bool inUse = displayed.surface && IOSurfaceGetID(displayed.surface) == IOSurfaceGetID(surface);
+      for (auto& item : pinned) inUse |= IOSurfaceGetID(item.surface) == IOSurfaceGetID(surface);
+      if (inUse) { std::lock_guard guard(lock); overwriteInUse++; }
+      IOSurfaceIncrementUseCount(surface);
+    }
+    if (IOSurfaceGetWidth(surface) != d.width || IOSurfaceGetHeight(surface) != d.height ||
+        IOSurfaceGetPixelFormat(surface) != 'BGRA' || d.format != AXIO_SURFACE_FORMAT_BGRA8_PREMULTIPLIED_SRGB ||
+        d.frame_id <= lastFrameId || IOSurfaceGetID(surface) != d.surface_id) failCheck(@"frame_metadata_mismatch");
+    {
+      std::lock_guard guard(lock);
+      lastFrameId = d.frame_id; framesTotal++;
+      samples.push_back({arrival, d.paint_time, d.send_time, d.begin_frame_sequence, d.width, d.height, d.device_scale, d.flags,
+                         d.document_generation, d.navigation_generation});
+      if (d.dirty_count) dirtyFrames++;
+      if (d.logical_width * d.device_scale != d.width && d.logical_width) logicalMismatch++;
+      if (d.flags & AXIO_SURFACE_FLAG_POPUP_COMPOSITED) popupFrames++;
+      if (d.flags & AXIO_SURFACE_FLAG_GLOBAL_SURFACE) globalFlagFrames++;
+      bool firstOfSize = surfaceIds.insert(d.surface_id).second && crossProcessLookups.size() < 4;
+      if (firstOfSize) crossProcessLookups.push_back(lookupInOtherProcess(d.surface_id));
+      maxPinned = std::max<uint64_t>(maxPinned, pinned.size() + 1);
+      IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nullptr);
+      inspect(static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface)), IOSurfaceGetBytesPerRow(surface),
+              int(d.width), int(d.height), d.device_scale, arrival);
+      IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nullptr);
+      changed.notify_all();
+    }
+    // Present-then-release: the previous frame is released once this one "displays".
+    if (displayed.surface) {
+      sendRelease(displayed.target, displayed.frame);
+      if (options.holdUseMs) pinned.push_back({displayed.surface, now() + holdTicks});
+      else CFRelease(displayed.surface);
+    }
+    displayed = {surface, d.native_target_id, d.frame_id};
+  }
+  unpin(true);
+  if (displayed.surface) {
+    if (options.holdUseMs) IOSurfaceDecrementUseCount(displayed.surface);
+    CFRelease(displayed.surface);
+  }
+}
+
+void tickLoop() {
+  uint64_t interval = uint64_t(1e9 / options.rate) * timebase.denom / timebase.numer, next = now() + interval, sequence = 0;
+  while (running) {
+    mach_wait_until(next);
+    next += interval;
+    uint64_t id;
+    { std::lock_guard guard(lock); id = targetId; }
+    if (!ticking || !id || hostReply == MACH_PORT_NULL) continue;
+    axio_surface_begin_frame_msg_t message{};
+    message.magic = AXIO_SURFACE_MAGIC; message.version = AXIO_SURFACE_VERSION;
+    message.native_target_id = id; message.sequence = ++sequence; message.frame_time = next - interval;
+    message.interval_ns = uint64_t(1e9 / options.rate);
+    uint64_t sent = now();
+    if (!sendSimple(&message.header, sizeof(message), AXIO_SURFACE_MSG_BEGIN_FRAME)) { failCheck(@"begin_frame_send_failed"); continue; }
+    std::lock_guard guard(lock); tickSent[sequence] = sent;
+    if (tickSent.size() > 4096) tickSent.erase(tickSent.begin());
+  }
+}
+
+// ---------- AXCF control pipe ----------
+bool readExact(uint8_t* out, size_t size, uint64_t deadline) {
+  while (size) {
+    double left = ms(deadline > now() ? deadline - now() : 0);
+    if (left <= 0) return false;
+    pollfd fd{fromHost, POLLIN, 0};
+    int ready = poll(&fd, 1, std::min(100, std::max(1, int(left))));
+    if (ready <= 0) continue;
+    ssize_t n = read(fromHost, out, size);
+    if (n <= 0) return false;
+    out += n; size -= size_t(n);
+  }
+  return true;
+}
+uint64_t deadlineIn(double seconds) { return now() + uint64_t(seconds * 1e9) * timebase.denom / timebase.numer; }
+
+void write(NSDictionary* item) {
+  NSMutableData* data = [[NSJSONSerialization dataWithJSONObject:item options:0 error:nil] mutableCopy];
+  [data appendBytes:"\n" length:1];
+  ::write(toHost, data.bytes, data.length);
+}
+NSString* command(NSString* method, NSDictionary* fields, NSDictionary* explicitTarget = nil) {
+  NSString* id = [NSString stringWithFormat:@"request-%llu", ++requestCounter];
+  NSMutableDictionary* item = [@{@"version": @1, @"method": method, @"request_id": id, @"token": token} mutableCopy];
+  if (![method isEqual:@"shutdown"]) item[@"target"] = explicitTarget ?: target;
+  [item addEntriesFromDictionary:fields];
+  write(item);
+  return id;
+}
+
+// Reads one AXCF packet (events in both modes; frames only in pipe mode).
+bool pumpOnce(uint64_t deadline) {
+  pollfd fd{fromHost, POLLIN, 0};
+  double left = ms(deadline > now() ? deadline - now() : 0);
+  if (poll(&fd, 1, std::min(10, std::max(0, int(left)))) <= 0) return true;
+  uint8_t header[16];
+  if (!readExact(header, 16, deadlineIn(5))) return false;
+  uint32_t metaSize = (uint32_t(header[8]) << 24) | (header[9] << 16) | (header[10] << 8) | header[11];
+  uint32_t size = (uint32_t(header[12]) << 24) | (header[13] << 16) | (header[14] << 8) | header[15];
+  if (memcmp(header, "AXCF", 4) || metaSize == 0 || metaSize > 8192 || size > 33554432) return false;
+  std::vector<uint8_t> meta(metaSize), pixels(size);
+  if (!readExact(meta.data(), metaSize, deadlineIn(5)) || (size && !readExact(pixels.data(), size, deadlineIn(10)))) return false;
+  uint64_t arrival = now();
+  NSDictionary* item = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:meta.data() length:metaSize] options:0 error:nil];
+  if (header[7] == 1) {
+    [events addObject:item];
+    NSDictionary* t = item[@"target"];
+    if (t[@"native_target_id"]) { target = t; std::lock_guard guard(lock); targetId = strtoull([t[@"native_target_id"] UTF8String], nullptr, 10); }
+    return true;
+  }
+  int width = [item[@"width"] intValue], height = [item[@"height"] intValue];
+  {
+    std::lock_guard guard(lock);
+    framesTotal++;
+    samples.push_back({arrival, 0, 0, 0, uint32_t(width), uint32_t(height), [item[@"device_scale"] doubleValue], 0,
+                       [item[@"target"][@"document_generation"] unsignedLongLongValue], [item[@"target"][@"navigation_generation"] unsignedLongLongValue]});
+    inspect(pixels.data(), size_t(width) * 4, width, height, [item[@"device_scale"] doubleValue], arrival);
+  }
+  command(@"frame_ack", @{@"frame_id": item[@"frame_id"]}, item[@"target"]);
+  return true;
+}
+bool pumpUntil(double seconds, const std::function<bool()>& done) {
+  uint64_t deadline = deadlineIn(seconds);
+  while (now() < deadline) {
+    if (done()) return true;
+    if (!pumpOnce(deadline)) return done();
+  }
+  return done();
+}
+NSDictionary* findEvent(const std::function<bool(NSDictionary*)>& match) {
+  for (NSDictionary* item in events) if (match(item)) return item;
+  return nil;
+}
+
+NSDictionary* percentiles(std::vector<double> values) {
+  if (values.empty()) return @{@"count": @0};
+  std::sort(values.begin(), values.end());
+  auto at = [&](double q) { return values[std::min(values.size() - 1, size_t(q * (values.size() - 1) + 0.5))]; };
+  return @{@"count": @(values.size()), @"p50_ms": @(at(.5)), @"p95_ms": @(at(.95)), @"max_ms": @(values.back()), @"min_ms": @(values.front())};
+}
+
+// CPU time (ms) of the host and of WebKit XPC helpers that appeared after we started.
+std::set<pid_t> helperBaseline;
+double rusageFactor = 0;  // proc_pid_rusage units -> ms (calibrated on ourselves)
+double cpuSelfMs() { rusage u{}; getrusage(RUSAGE_SELF, &u); return (u.ru_utime.tv_sec + u.ru_stime.tv_sec) * 1e3 + (u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e3; }
+double rawRusage(pid_t pid) { rusage_info_v2 info{}; return proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t*)&info) ? -1 : double(info.ri_user_time + info.ri_system_time); }
+// launchd's responsible pid for an XPC service (libquarantine); other runner processes use
+// WebKit too, so helpers are attributed to the host this way when the function exists.
+int responsiblePid(pid_t pid) {
+  using Function = int (*)(int);
+  static Function function = reinterpret_cast<Function>(dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid"));
+  return function ? function(pid) : -1;
+}
+std::vector<pid_t> helpers() {
+  std::vector<pid_t> pids(4096), out;
+  int count = proc_listallpids(pids.data(), int(pids.size() * sizeof(pid_t)));
+  for (int i = 0; i < count; ++i) {
+    char name[256] = {};
+    if (proc_name(pids[i], name, sizeof name) <= 0 || strncmp(name, "com.apple.WebKit", 16)) continue;
+    if (helperBaseline.count(pids[i])) continue;
+    // The host inherits our launchd responsibility: its helpers are attributed to it or to that.
+    int responsible = responsiblePid(pids[i]);
+    if (responsible <= 0 || responsible == child || responsible == responsiblePid(getpid())) out.push_back(pids[i]);
+  }
+  return out;
+}
+std::map<std::string, double> cpuNow() {
+  std::map<std::string, double> out;
+  out["host"] = rawRusage(child) * rusageFactor;
+  for (pid_t pid : helpers()) { char name[256] = {}; proc_name(pid, name, sizeof name); out[name] += rawRusage(pid) * rusageFactor; }
+  return out;
+}
+NSDictionary* cpuPercent(const std::map<std::string, double>& a, const std::map<std::string, double>& b, double seconds) {
+  NSMutableDictionary* out = [NSMutableDictionary dictionary]; double total = 0;
+  for (auto& [name, ms] : b) { double v = (ms - (a.count(name) ? a.at(name) : 0)) / seconds / 10; out[@(name.c_str())] = @(v); total += v; }
+  out[@"total"] = @(total);
+  return out;
+}
+
+NSDictionary* measure(double seconds) {
+  size_t start;
+  { std::lock_guard guard(lock); start = samples.size(); }
+  auto cpuBefore = cpuNow();
+  uint64_t begin = now();
+  pumpUntil(seconds, [] { return false; });
+  uint64_t end = now();
+  auto cpuAfter = cpuNow();
+  std::lock_guard guard(lock);
+  std::vector<double> intervals, paintToArrival, copy, tickToArrival;
+  for (size_t i = start; i < samples.size(); ++i) {
+    auto& s = samples[i];
+    if (i > start) intervals.push_back(ms(s.arrival - samples[i - 1].arrival));
+    if (s.paint) { paintToArrival.push_back(ms(s.arrival - s.paint)); copy.push_back(ms(s.send - s.paint)); }
+    auto tick = tickSent.find(s.sequence);
+    if (s.sequence && tick != tickSent.end()) tickToArrival.push_back(ms(s.arrival - tick->second));
+  }
+  size_t count = samples.size() - start;
+  return @{@"frames": @(count), @"seconds": @(ms(end - begin) / 1000), @"fps": @(count / (ms(end - begin) / 1000)),
+           @"frame_interval": percentiles(intervals), @"paint_to_receive": percentiles(paintToArrival),
+           @"host_copy_and_send": percentiles(copy), @"begin_frame_to_receive": percentiles(tickToArrival),
+           @"cpu_percent": cpuPercent(cpuBefore, cpuAfter, ms(end - begin) / 1000)};
+}
+
+int run() {
+  // Zen's part: check in a random service and make a one-time token.
+  uint8_t random[16], surfaceToken[AXIO_SURFACE_TOKEN_BYTES], streamToken[32];
+  arc4random_buf(random, sizeof(random)); arc4random_buf(surfaceToken, sizeof(surfaceToken)); arc4random_buf(streamToken, sizeof(streamToken));
+  std::string name = "dev.axiosozo.surface-test." + hex(random, sizeof(random));
+  bool surface = options.mode == "surface";
+  if (surface) {
+    if (bootstrap_check_in(bootstrap_port, name.c_str(), &service) != KERN_SUCCESS) { failCheck(@"bootstrap_check_in_failed"); return 2; }
+    mach_port_limits_t limits{MACH_PORT_QLIMIT_LARGE};
+    mach_port_set_attributes(mach_task_self(), service, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&limits, MACH_PORT_LIMITS_INFO_COUNT);
+  }
+  token = [NSString stringWithUTF8String:hex(streamToken, 32).c_str()];
+  int in[2], out[2];
+  if (pipe(in) || pipe(out)) return 2;
+  for (int fd : {in[1], out[0]}) fcntl(fd, F_SETFD, FD_CLOEXEC);
+  posix_spawn_file_actions_t actions; posix_spawn_file_actions_init(&actions);
+  posix_spawn_file_actions_adddup2(&actions, in[0], 0);
+  posix_spawn_file_actions_adddup2(&actions, out[1], 1);
+  std::string errors = options.evidence + "/host-stderr.log";
+  posix_spawn_file_actions_addopen(&actions, 2, errors.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  posix_spawnattr_t attributes; posix_spawnattr_init(&attributes);
+  posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT);
+  std::string tmp = "TMPDIR=" + options.profile;
+  const char* env[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", tmp.c_str(), nullptr};
+  const char* argv[] = {options.host.c_str(), "--stream", options.profile.c_str(), options.evidence.c_str(), nullptr};
+  if (posix_spawn(&child, options.host.c_str(), &actions, &attributes, (char* const*)argv, (char* const*)env)) { failCheck(@"spawn_failed"); return 2; }
+  close(in[0]); close(out[1]); toHost = in[1]; fromHost = out[0];
+  result[@"host_pid"] = @(child);
+  std::thread mach, ticker;
+  if (surface) { mach = std::thread([&] { machLoop(surfaceToken); }); ticker = std::thread(tickLoop); }
+  NSMutableDictionary* hello = [@{@"version": @1, @"method": @"hello", @"token": token, @"engine_instance": @"surface-test",
+                                  @"fixture_origin": [NSString stringWithUTF8String:options.origin.c_str()], @"frame_rate": @(options.rate)} mutableCopy];
+  if (surface) {
+    hello[@"surface_service"] = [NSString stringWithUTF8String:name.c_str()];
+    hello[@"surface_token"] = [NSString stringWithUTF8String:hex(surfaceToken, sizeof(surfaceToken)).c_str()];
+    if (options.beginFrames == "external") hello[@"surface_begin_frames"] = @YES;
+  }
+  write(hello);
+  auto finish = [&](int code) {
+    ticking = false;  // The reply port dies with the host.
+    close(toHost); toHost = -1;
+    int status = 0; uint64_t deadline = deadlineIn(15); pid_t done = 0;
+    uint64_t closedAt = now(); bool sampled = false;
+    while (now() < deadline && !(done = waitpid(child, &status, WNOHANG))) {
+      uint8_t sink[65536]; pollfd fd{fromHost, POLLIN, 0}; if (poll(&fd, 1, 50) > 0 && read(fromHost, sink, sizeof(sink)) <= 0) usleep(20000);
+      if (!sampled && ms(now() - closedAt) > 4000) {
+        // Diagnostic only: one bounded sample of our own child if teardown stalls.
+        sampled = true;
+        std::string pidText = std::to_string(child), file = options.evidence + "/host-teardown.sample.txt";
+        const char* sampleArgs[] = {"/usr/bin/sample", pidText.c_str(), "2", "-file", file.c_str(), nullptr};
+        pid_t sampler; if (!posix_spawn(&sampler, "/usr/bin/sample", nullptr, nullptr, (char* const*)sampleArgs, environ)) waitpid(sampler, nullptr, 0);
+      }
+    }
+    result[@"teardown_ms"] = @(ms(now() - closedAt));
+    if (!done) { kill(child, SIGTERM); waitpid(child, &status, 0); result[@"host_killed"] = @YES; }
+    result[@"host_exit_code"] = @(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status));
+    running = false;
+    if (mach.joinable()) mach.join();
+    if (ticker.joinable()) ticker.join();
+    return code;
+  };
+
+  if (options.negative == "no_connected") {
+    // The host must refuse to run when Zen never confirms the connection.
+    int status = 0; uint64_t deadline = deadlineIn(12); pid_t done = 0;
+    while (now() < deadline && !(done = waitpid(child, &status, WNOHANG))) usleep(20000);
+    result[@"host_exit_code"] = done ? @(WEXITSTATUS(status)) : @(-1);
+    if (!done) { kill(child, SIGTERM); waitpid(child, &status, 0); failCheck(@"host_did_not_exit_without_connected"); }
+    else if (WEXITSTATUS(status) != 64) failCheck(@"unexpected_exit_code");
+    running = false; if (mach.joinable()) mach.join(); if (ticker.joinable()) ticker.join();
+    return 0;
+  }
+
+  uint64_t launched = now();
+  if (!pumpUntil(60, [] { return findEvent([](NSDictionary* e) { return [e[@"event"] isEqual:@"ready"]; }) != nil; })) {
+    failCheck(@"no_ready_event"); return finish(1);
+  }
+  NSDictionary* ready = findEvent([](NSDictionary* e) { return [e[@"event"] isEqual:@"ready"]; });
+  result[@"ready_ms"] = @(ms(now() - launched));
+  result[@"render_path"] = ready[@"render_path"];
+  result[@"capabilities"] = ready[@"capabilities"];
+  if (surface && ![ready[@"render_path"] isEqual:@"wkwebview-snapshot-iosurface"]) failCheck(@"wrong_render_path");
+  if (!surface && ![ready[@"render_path"] isEqual:@"wkwebview-snapshot-bgra"]) failCheck(@"wrong_render_path");
+  if ([ready[@"capabilities"][@"surface"] boolValue] != surface) failCheck(@"wrong_surface_capability");
+  if (surface && [ready[@"capabilities"][@"external_begin_frame"] boolValue] != (options.beginFrames == "external")) failCheck(@"wrong_begin_frame_capability");
+  result[@"ready"] = ready;
+  result[@"connected"] = @(connected);
+  NSString* origin = [NSString stringWithUTF8String:options.origin.c_str()];
+  NSDictionary* pending = @{@"tab_id": @"surface-tab", @"engine_instance": @"surface-test", @"identity": origin,
+                            @"document_generation": @1, @"navigation_generation": @1, @"private_mode": @NO};
+  command(@"create", @{@"url": [origin stringByAppendingString:@"/engine.html"], @"width": @900, @"height": @650, @"device_scale": @2}, pending);
+  ticking = options.beginFrames == "external";
+  uint64_t created = now();
+  bool loaded = pumpUntil(45, [] { return findEvent([](NSDictionary* e) { return [e[@"event"] isEqual:@"load"]; }) != nil; });
+  result[@"load_event"] = findEvent([](NSDictionary* e) { return [e[@"event"] isEqual:@"load"]; }) ?: [NSNull null];
+  if (!loaded) {
+    failCheck(@"no_load_event");
+    std::lock_guard guard(lock); result[@"frames_before_load"] = @(framesTotal);
+    return finish(1);
+  }
+  bool firstFrame = pumpUntil(10, [] { std::lock_guard guard(lock); return framesTotal > 0 && samples.back().width == 1800; });
+  result[@"first_frame_ms_after_create"] = @(ms(now() - created));
+  if (!firstFrame) { failCheck(@"no_frame_after_load"); return finish(1); }
+  pumpUntil(1.0, [] { return false; });  // Let layout settle, then capture evidence.
+  { std::lock_guard guard(lock); capturePath = options.evidence + "/frame.png"; }
+  pumpUntil(3, [] { std::lock_guard guard(lock); return capturePath.empty(); });
+  {
+    std::lock_guard guard(lock);
+    auto& last = samples.back();
+    result[@"frame_size"] = @[@(last.width), @(last.height), @(last.scale)];
+    if (last.width != 1800 || last.height != 1300) [failures addObject:@"unexpected_frame_size"];
+  }
+  if (options.negative == "bogus_release") {
+    uint64_t bogus; { std::lock_guard guard(lock); bogus = lastFrameId + 1000000; }
+    sendRelease(targetId, bogus);  // Never issued: the host must fail closed.
+    pumpUntil(10, [] { return findEvent([](NSDictionary* e) { return [e[@"code"] isEqual:@"surface_failed"]; }) != nil; });
+    NSDictionary* error = findEvent([](NSDictionary* e) { return [e[@"code"] isEqual:@"surface_failed"]; });
+    result[@"surface_failed_event"] = error ?: [NSNull null];
+    if (![error[@"reason"] isEqual:@"surface_invalid_release"]) failCheck(@"bogus_release_not_rejected");
+    finish(0);
+    if ([result[@"host_exit_code"] intValue] != 64) failCheck(@"bogus_release_exit_code");
+    return 0;
+  }
+
+  result[@"animation"] = measure(options.seconds);
+
+  // Input latency: keydown toggles a 200x200 CSS px block red/blue.
+  command(@"focus", @{@"focused": @YES});
+  pumpUntil(0.3, [] { return false; });
+  NSMutableArray* inputLatency = [NSMutableArray array];
+  for (int i = 0; i < 10; ++i) {
+    int expected;
+    { std::lock_guard guard(lock); expected = probeColor == 1 ? 2 : 1; }
+    uint64_t sent = now();
+    command(@"key", @{@"type": @"down", @"native_key_code": @0, @"windows_key_code": @65, @"modifiers": @0, @"text": @"a"});
+    bool seen = pumpUntil(2, [&] { std::lock_guard guard(lock); return probeColor == expected && probeChanged > sent; });
+    uint64_t changedAt; { std::lock_guard guard(lock); changedAt = probeChanged; }
+    [inputLatency addObject:seen ? @(ms(changedAt - sent)) : [NSNull null]];
+    command(@"key", @{@"type": @"up", @"native_key_code": @0, @"windows_key_code": @65, @"modifiers": @0, @"text": @""});
+    pumpUntil(0.25, [] { return false; });
+  }
+  std::vector<double> seenLatency;
+  for (id value in inputLatency) if (value != [NSNull null]) seenLatency.push_back([value doubleValue]);
+  result[@"input_to_frame"] = percentiles(seenLatency);
+  result[@"input_to_frame_samples"] = inputLatency;
+  if (seenLatency.size() < 8) failCheck(@"input_latency_samples_missing");
+
+  // Navigation with exact generations: frames of the new document carry the target's
+  // new generations (pipe and Mach), then back restores page 1 with one more step.
+  auto generationFrame = [&](uint64_t document) {
+    return pumpUntil(10, [&] { std::lock_guard guard(lock); return !samples.empty() && samples.back().document == document && samples.back().width == 1800; });
+  };
+  NSDictionary* beforeNavigation = target;
+  uint64_t document = [target[@"document_generation"] unsignedLongLongValue];
+  command(@"navigate", @{@"url": [origin stringByAppendingString:@"/engine.html?page=2"]});
+  bool page2 = generationFrame(document + 1);
+  { std::lock_guard guard(lock); capturePath = options.evidence + "/page-2.png"; }
+  pumpUntil(3, [] { std::lock_guard guard(lock); return capturePath.empty(); });
+  bool exactAfterNavigation = [target[@"document_generation"] unsignedLongLongValue] == document + 1
+                              && [target[@"navigation_generation"] unsignedLongLongValue] == [beforeNavigation[@"navigation_generation"] unsignedLongLongValue] + 1;
+  NSString* stale = command(@"focus", @{@"focused": @YES}, beforeNavigation);
+  bool staleRejected = pumpUntil(5, [&] { return findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:stale] && [e[@"code"] isEqual:@"stale_target"]; }) != nil; });
+  command(@"back", @{});
+  bool back = generationFrame(document + 2);
+  { std::lock_guard guard(lock); capturePath = options.evidence + "/back.png"; }
+  pumpUntil(3, [] { std::lock_guard guard(lock); return capturePath.empty(); });
+  {
+    std::lock_guard guard(lock);
+    uint64_t current = [target[@"document_generation"] unsignedLongLongValue];
+    // No frame may carry a generation newer than the pipe's target (Zen holds them until confirmed).
+    for (auto& sample : samples) if (sample.document > current) { [failures addObject:@"frame_generation_from_future"]; break; }
+  }
+  result[@"navigation"] = @{@"page2_frame": @(page2), @"back_frame": @(back), @"exact_generations": @(exactAfterNavigation), @"stale_target_rejected": @(staleRejected)};
+  if (!page2 || !back || !exactAfterNavigation || !staleRejected) failCheck(@"navigation_generation_checks_failed");
+
+  // Device-scale change 2x -> 1x -> 2x.
+  command(@"resize", @{@"width": @900, @"height": @650, @"device_scale": @1});
+  bool scaled = pumpUntil(5, [] { std::lock_guard guard(lock); return samples.back().width == 900 && samples.back().height == 650; });
+  command(@"resize", @{@"width": @1000, @"height": @700, @"device_scale": @2});
+  bool resized = pumpUntil(5, [] { std::lock_guard guard(lock); return samples.back().width == 2000 && samples.back().height == 1400; });
+  result[@"scale_change_1x"] = @(scaled);
+  result[@"resize_2x"] = @(resized);
+  if (!scaled || !resized) failCheck(@"resize_or_scale_change_failed");
+
+  // Past the 32 MiB pipe payload: 1800x1200 logical at 2x is 3600x2400 BGRA
+  // (34.6 MB). Surface mode admits it (<= 4096 px/side); the pipe answers
+  // unsupported surface_limit and keeps its previous size.
+  NSString* large = command(@"resize", @{@"width": @1800, @"height": @1200, @"device_scale": @2});
+  pumpUntil(5, [&] { return findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:large] && [e[@"event"] isEqual:@"completed"]; }) != nil; });
+  NSDictionary* largeDone = findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:large] && [e[@"event"] isEqual:@"completed"]; });
+  result[@"resize_over_pipe_cap"] = largeDone ? @{@"status": largeDone[@"status"] ?: @"", @"reason": largeDone[@"reason"] ?: @""} : @"no_completion";
+  if (surface) {
+    bool big = pumpUntil(5, [] { std::lock_guard guard(lock); return samples.back().width == 3600 && samples.back().height == 2400; });
+    result[@"resize_over_pipe_cap_frame"] = @(big);
+    if (![largeDone[@"status"] isEqual:@"success"] || !big) failCheck(@"surface_resize_over_pipe_cap_failed");
+  } else if (![largeDone[@"status"] isEqual:@"unsupported"] || ![largeDone[@"reason"] isEqual:@"surface_limit"]) {
+    failCheck(@"pipe_resize_cap_not_enforced");
+  }
+  // Frame-rate renegotiation (window moved to a display with another refresh rate).
+  NSString* rate = command(@"frame_rate", @{@"frame_rate": @(options.rate == 120 ? 60 : 120)});
+  pumpUntil(3, [&] { return findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:rate] && [e[@"event"] isEqual:@"completed"]; }) != nil; });
+  NSDictionary* rateDone = findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:rate] && [e[@"event"] isEqual:@"completed"]; });
+  result[@"frame_rate_command"] = rateDone[@"status"] ?: @"no_completion";
+  if (![rateDone[@"status"] isEqual:@"success"]) failCheck(@"frame_rate_command_failed");
+  size_t framesAtRate; { std::lock_guard guard(lock); framesAtRate = framesTotal; }
+  bool framesAfterRate = pumpUntil(3, [&] { std::lock_guard guard(lock); return framesTotal > framesAtRate + 5; });
+  if (!framesAfterRate) failCheck(@"no_frames_after_frame_rate");
+
+  // Hidden targets stop producing frames.
+  command(@"visibility", @{@"visible": @NO});
+  pumpUntil(0.5, [] { return false; });
+  size_t hiddenStart; { std::lock_guard guard(lock); hiddenStart = samples.size(); }
+  pumpUntil(1.0, [] { return false; });
+  { std::lock_guard guard(lock); result[@"frames_while_hidden"] = @(samples.size() - hiddenStart); if (samples.size() != hiddenStart) [failures addObject:@"frames_while_hidden"]; }
+  command(@"visibility", @{@"visible": @YES});
+  pumpUntil(1.0, [] { return false; });
+
+  ticking = false;  // A closing target gets no more ticks (Zen contract).
+  NSString* close = command(@"close", @{});
+  pumpUntil(8, [&] { return findEvent([&](NSDictionary* e) { return [e[@"request_id"] isEqual:close] && [e[@"event"] isEqual:@"completed"]; }) != nil; });
+  finish(0);
+  if ([result[@"host_exit_code"] intValue] != 0) failCheck(@"host_exit_nonzero");
+  std::lock_guard guard(lock);
+  result[@"frames_total"] = @(framesTotal);
+  if (surface) {
+    NSMutableArray* lookups = [NSMutableArray array];
+    for (int code : crossProcessLookups) [lookups addObject:@(code)];
+    result[@"zero_copy"] = @{@"global_flag_frames": @(globalFlagFrames), @"distinct_surface_ids": @(surfaceIds.size()),
+                             @"cross_process_lookup_exit_codes": lookups, @"hold_use_ms": @(options.holdUseMs),
+                             @"overwrite_in_use": @(overwriteInUse), @"max_pinned_by_receiver": @(maxPinned)};
+    if (globalFlagFrames != framesTotal) [failures addObject:@"global_flag_missing"];
+    for (int code : crossProcessLookups) if (code != 0) { [failures addObject:@"global_lookup_failed_cross_process"]; break; }
+    if (overwriteInUse) [failures addObject:@"ring_overwrote_in_use_surface"];
+    result[@"dirty_rect_frames"] = @(dirtyFrames);
+    if (logicalMismatch) [failures addObject:@"logical_size_mismatch"];
+  }
+  result[@"non_empty_fraction"] = @(nonEmptyFraction);
+  result[@"distinct_colors_sampled"] = @(distinctColors);
+  if (nonEmptyFraction < 0.9 || distinctColors < 4) [failures addObject:@"frame_pixels_empty_or_uniform"];
+  return 0;
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+  @autoreleasepool {
+    mach_timebase_info(&timebase);
+    signal(SIGPIPE, SIG_IGN);
+    for (int i = 1; i + 1 < argc; i += 2) {
+      std::string key = argv[i], value = argv[i + 1];
+      if (key == "--host") options.host = value; else if (key == "--profile") options.profile = value;
+      else if (key == "--evidence") options.evidence = value; else if (key == "--origin") options.origin = value;
+      else if (key == "--mode") options.mode = value; else if (key == "--begin-frames") options.beginFrames = value;
+      else if (key == "--rate") options.rate = std::stoi(value); else if (key == "--seconds") options.seconds = std::stod(value);
+      else if (key == "--negative") options.negative = value;
+      else if (key == "--hold-use-ms") options.holdUseMs = std::stoi(value);
+      else if (key == "--lookup") {
+        // Child role for lookupInOtherProcess: exit 0 iff the ID resolves here.
+        IOSurfaceRef found = IOSurfaceLookup(IOSurfaceID(std::stoul(value)));
+        if (found) CFRelease(found);
+        return found ? 0 : 3;
+      }
+    }
+    {
+      std::vector<pid_t> pids(4096);
+      int count = proc_listallpids(pids.data(), int(pids.size() * sizeof(pid_t)));
+      for (int i = 0; i < count; ++i) helperBaseline.insert(pids[i]);
+      double r0 = rawRusage(getpid()), s0 = cpuSelfMs(); volatile double x = 0; for (int i = 0; i < 30000000; ++i) x = x + i * 1e-9;
+      double r1 = rawRusage(getpid()), s1 = cpuSelfMs();
+      rusageFactor = r1 > r0 ? (s1 - s0) / (r1 - r0) : 0;
+    }
+    result = [@{@"mode": @(options.mode.c_str()), @"begin_frames": @(options.beginFrames.c_str()), @"rate": @(options.rate),
+                @"negative": @(options.negative.c_str())} mutableCopy];
+    failures = [NSMutableArray array];
+    events = [NSMutableArray array];
+    int code = run();
+    result[@"failures"] = failures;
+    result[@"status"] = (code == 0 && failures.count == 0) ? @"PASS" : @"FAIL";
+    NSMutableArray* summary = [NSMutableArray array];
+    for (NSDictionary* e in events) if (![e[@"event"] isEqual:@"cursor"] && ![e[@"event"] isEqual:@"loading"]) [summary addObject:e];
+    result[@"events"] = summary.count > 60 ? [summary subarrayWithRange:NSMakeRange(0, 60)] : summary;
+    NSData* data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
+    fwrite(data.bytes, 1, data.length, stdout); fputc('\n', stdout);
+    return [result[@"status"] isEqual:@"PASS"] ? 0 : 1;
+  }
+}

@@ -71,7 +71,10 @@ class FixedSelectors(unittest.TestCase):
 class RealSyntheticProcesses(unittest.TestCase):
     def setUp(self):
         root = Path(os.environ.get("TMPDIR", ""))
-        if not str(root).startswith("/Volumes/AxioSozoBuild/workstation/"):
+        build_root = os.environ.get("AXIOSOZO_BUILD_ROOT", "")
+        linux_root = (sys.platform.startswith("linux") and build_root.startswith("/")
+                      and str(root).startswith(build_root.rstrip("/") + "/tmp/"))
+        if not str(root).startswith("/Volumes/AxioSozoBuild/workstation/") and not linux_root:
             self.fail("external workstation TMPDIR required")
         self.directory = Path(tempfile.mkdtemp(prefix="arrival-supervisor-", dir=root))
         self.children = []  # Retained Popen handles are the only signal authority.
@@ -293,8 +296,9 @@ class RealSyntheticProcesses(unittest.TestCase):
         result = self.result("env")
         self.assertEqual(result["status"], 0)
         self.assertIsNone(result["error"])
-        self.assertEqual(json.loads(result["output"]), {"keys": ["LANG", "LC_ALL", "PATH", "__CF_USER_TEXT_ENCODING"],
-                                                       "fixed_matches": True, "cwd_root": True})
+        # macOS adds __CF_USER_TEXT_ENCODING to every process environment.
+        keys = ["LANG", "LC_ALL", "PATH"] + (["__CF_USER_TEXT_ENCODING"] if sys.platform == "darwin" else [])
+        self.assertEqual(json.loads(result["output"]), {"keys": keys, "fixed_matches": True, "cwd_root": True})
 
     def test_stdout_exact_cap_and_overflow(self):
         exact = self.result("stdout", helper.STDOUT_LIMIT)

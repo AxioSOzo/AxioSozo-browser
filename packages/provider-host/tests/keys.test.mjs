@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { ProviderHost } from '../src/host.mjs';
-import { KEYCHAIN_PROVIDERS, MacKeychain, validKey } from '../src/keychain.mjs';
+import { KEYCHAIN_PROVIDERS, MacKeychain, SecretServiceKeychain, platformKeychain, validKey } from '../src/keychain.mjs';
 
 const fakeHelper = fileURLToPath(new URL('../fixtures/keychain-fake.sh', import.meta.url));
 function syntheticStores({ failing = [] } = {}) {
@@ -93,4 +93,24 @@ test('MacKeychain keeps the Jev argv and selects the OpenAI item with a fixed se
   await assert.rejects(openai.store('synthetic-store-key-jev'), { code: 'KEYCHAIN_ERROR' });
   assert.throws(() => jev.store('bad\u0001key-1234'), { code: 'INVALID_INPUT' });
   assert.equal(await jev.remove(), true); assert.equal(await openai.remove(), false);
+});
+
+test('SecretServiceKeychain keeps the same argv/exit contract on Linux (fake helper)', { skip: process.platform !== 'linux' }, async () => {
+  const jev = new SecretServiceKeychain(fakeHelper); const openai = new SecretServiceKeychain(fakeHelper, 'openai');
+  assert.equal(await jev.read(), 'argc=1 args=read');
+  assert.equal(await openai.read(), null);
+  assert.equal(await jev.exists(), true); assert.equal(await openai.exists(), false);
+  await jev.store('synthetic-store-key-jev'); await openai.store('synthetic-store-key-openai');
+  await assert.rejects(openai.store('synthetic-store-key-jev'), { code: 'KEYCHAIN_ERROR' });
+  assert.equal(await jev.remove(), true); assert.equal(await openai.remove(), false);
+  // Only the bus location reaches the helper; never HOME, tokens or other variables.
+  const names = Object.keys(SecretServiceKeychain.environment());
+  assert.deepEqual(names.filter(name => !['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR'].includes(name)), ['PATH']);
+});
+
+test('platformKeychain selects the platform store and refuses unknown providers', () => {
+  const store = platformKeychain(fakeHelper);
+  if (process.platform === 'darwin') assert.ok(store instanceof MacKeychain && !(store instanceof SecretServiceKeychain));
+  else if (process.platform === 'linux') assert.ok(store instanceof SecretServiceKeychain);
+  assert.throws(() => platformKeychain(fakeHelper, 'anthropic'), { code: 'INVALID_INPUT' });
 });

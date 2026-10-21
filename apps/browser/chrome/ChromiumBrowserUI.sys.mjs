@@ -21,6 +21,8 @@ const MEDIA_TYPES = new Set(["none", "image", "video", "audio", "canvas", "file"
 const FILE_MODES = { open: "modeOpen", open_multiple: "modeOpenMultiple", open_folder: "modeGetFolder", save: "modeSave" };
 const CLOSE_REASONS = new Set(["timeout", "navigation", "closed", "reset", "withdrawn", "answered"]);
 const DOWNLOAD_STATES = new Set(["in_progress", "complete", "canceled", "interrupted"]);
+// The device named in prompts: macOS keeps "your Mac"; Linux says "your computer".
+const DEVICE = globalThis.Services?.appinfo?.OS === "Linux" ? "computer" : "Mac";
 // [browser.properties key or null, English fallback, PopupNotifications anchor]
 const PERMISSIONS = {
   geolocation: ["geolocation.shareWithSite4", "Allow %S to access your location?", "geo-notification-icon"],
@@ -31,13 +33,13 @@ const PERMISSIONS = {
   clipboard: [null, "Allow %S to see text and images copied to the clipboard?", "default-notification-icon"],
   storage_access: [null, "Allow %S to use its cookies on this site?", "default-notification-icon"],
   top_level_storage_access: [null, "Allow %S to use its cookies on this site?", "default-notification-icon"],
-  local_fonts: [null, "Allow %S to use the fonts installed on your Mac?", "default-notification-icon"],
+  local_fonts: [null, `Allow %S to use the fonts installed on your ${DEVICE}?`, "default-notification-icon"],
   idle_detection: [null, "Allow %S to know when you are actively using this device?", "default-notification-icon"],
   multiple_downloads: [null, "Allow %S to download multiple files?", "default-notification-icon"],
   keyboard_lock: [null, "Allow %S to capture your keyboard?", "default-notification-icon"],
   pointer_lock: [null, "Allow %S to hide and lock your pointer?", "default-notification-icon"],
   window_management: [null, "Allow %S to manage windows on all your displays?", "default-notification-icon"],
-  file_system_access: [null, "Allow %S to edit files on your Mac?", "default-notification-icon"],
+  file_system_access: [null, `Allow %S to edit files on your ${DEVICE}?`, "default-notification-icon"],
   sensors: [null, "Allow %S to use motion and light sensors?", "default-notification-icon"],
 };
 const CERT_ERRORS = { [-200]: "ERR_CERT_COMMON_NAME_INVALID", [-201]: "ERR_CERT_DATE_INVALID", [-202]: "ERR_CERT_AUTHORITY_INVALID",
@@ -193,6 +195,8 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
   Object.assign(ChromiumSaver.prototype, {
     execute(setProgressBytes) {
       this.progress = setProgressBytes;
+      // A small download can finish before Firefox starts the saver.
+      if (this.ended === "complete" && !this.removed) { setProgressBytes(this.bytes ?? 0, this.bytes ?? 0, false); return Promise.resolve(); }
       if (this.ended || this.removed) return Promise.reject(new DownloadError({ message: "Chromium download ended" }));
       // A restart after pause resumes the same native download; Firefox never re-fetches it.
       if (this.paused) { this.paused = false; this.control("resume"); }
@@ -212,7 +216,7 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
     },
     update(event) {
       if (event.state === "in_progress") { this.progress?.(event.received_bytes, event.total_bytes, true); return; }
-      this.ended = event.state;
+      this.ended = event.state; this.bytes = event.received_bytes;
       if (event.state === "complete") { this.progress?.(event.received_bytes, event.received_bytes, false); this.deferred?.resolve(); }
       else this.deferred?.reject(new DownloadError({ message: `Chromium download ${event.state}` }));
       this.deferred = null;
@@ -226,37 +230,129 @@ function chromiumSaverFactory(DownloadSaver, DownloadError) {
   return ChromiumSaver;
 }
 
-/** A Firefox findbar backend (the browser.finder interface) for a Chromium tab. */
+/**
+ * A Firefox findbar backend (the browser.finder interface) for a Chromium tab.
+ *
+ * Requests go to Chromium one at a time: a newer search replaces the queued ones, and a
+ * result counts only for the request in flight (its identifier is above every one seen
+ * before it was sent). Chromium reports no active match (ordinal 0) for a new session,
+ * so a new search, and a "find again" that had to restart, takes one find-next step:
+ * that selects the match Firefox would show and gives the ordinal ("1 of 3", "2 of 3").
+ *
+ * Highlight All: Chromium always highlights every match while a find session is open.
+ * Without Firefox's "Highlight All", each result therefore ends Chromium's session
+ * keeping only the active match as the selection (stop_finding without clearing it),
+ * as Firefox shows it. The next "find again" restarts a session from that selection
+ * and steps on from it.
+ */
+const FIND_STEP_TIMEOUT_MS = 2500;
 class ChromiumFinder {
-  constructor(ui, record) {
-    this.ui = ui; this.record = record; this.listeners = new Set();
+  constructor(ui, record, highlightAll = () => false, win = null) {
+    this.ui = ui; this.record = record; this.win = win; this.listeners = new Set();
     this.searchString = ""; this.caseSensitive = false; this.entireWord = false; this.matchDiacritics = false;
-    this.pending = null; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
+    this.pending = null; this.queue = []; this.maxIdentifier = 0; this.lastActive = 0; this.lastCount = 0; this.clipboardSearchString = "";
+    this.highlightAll = !!highlightAll(); this.stopped = false; this.events = [];
   }
   addResultListener(listener) { this.listeners.add(listener); }
   removeResultListener(listener) { this.listeners.delete(listener); }
   #notify(method, ...args) { for (const listener of [...this.listeners]) { try { listener[method]?.(...args); } catch {} } }
-  #find(searchString, forward, findNext) {
+  #log(entry) { this.events.push(entry); if (this.events.length > 24) this.events.shift(); }
+  #send(request, findNext) {
+    request.phase = findNext ? "next" : "session"; request.active = 0;
+    // Results of this send carry a larger identifier than any reported so far.
+    request.floor = this.maxIdentifier + 1;
+    this.#log(["sent", request.forward, findNext]);
+    this.win?.clearTimeout?.(this.timer);
+    this.timer = this.win?.setTimeout?.(() => { if (this.pending === request) { this.pending = null; this.#next(); } }, FIND_STEP_TIMEOUT_MS);
+    this.ui.command(this.record, "find", { text: request.searchString.slice(0, 1024), forward: request.forward,
+      match_case: !!this.caseSensitive, find_next: findNext });
+  }
+  #find(searchString, forward, findNext, { keep = false } = {}) {
     this.searchString = searchString;
-    if (!searchString) { this.ui.command(this.record, "stop_finding", { clear_selection: true }); this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 }); return; }
-    this.pending = { searchString, forward, findNext };
-    this.ui.command(this.record, "find", { text: searchString.slice(0, 1024), forward, match_case: !!this.caseSensitive, find_next: findNext });
+    if (!searchString) {
+      this.queue = []; this.pending = null; this.stopped = false;
+      this.ui.command(this.record, "stop_finding", { clear_selection: true });
+      this.#notify("onMatchesCountResult", { total: 0, current: 0, limit: 1000 });
+      return;
+    }
+    const request = { searchString, forward, findNext, keep };
+    // A new search supersedes everything queued; "find again" requests queue up (bounded).
+    if (!findNext) this.queue = [request];
+    else if (this.queue.length < 8) this.queue.push(request);
+    if (!this.pending) this.#next();
+  }
+  #next() {
+    const request = this.queue.shift();
+    if (!request) return;
+    this.pending = request;
+    request.previous = this.lastActive;
+    // Find again on a live session steps on; on a stopped one (or a new search) a session
+    // restarts from the kept selection first.
+    request.restart = request.findNext && this.stopped;
+    this.stopped = false;
+    this.#send(request, request.findNext && !request.restart);
   }
   fastFind(searchString) { this.#find(searchString, true, false); }
   findAgain(searchString, findBackwards) { this.#find(searchString || this.searchString, !findBackwards, true); }
   onResult(event) {
-    if (!event.final || !this.pending) return;
-    const { searchString, forward, findNext } = this.pending;
+    // The last raw results (diagnostics for the findbar gate; counts and ordinals only).
+    this.#log([event.identifier, event.count, event.active, event.final]);
+    this.maxIdentifier = Math.max(this.maxIdentifier, event.identifier);
+    const request = this.pending;
+    if (!request || event.identifier < request.floor) return;
+    // Chromium may report the active ordinal only in an interim update: keep the last one seen.
+    if (event.active) request.active = event.active;
+    if (!event.final) return;
+    let active = request.active;
+    const { searchString, forward, findNext } = request;
+    if (request.phase === "session" && event.count && !request.keep
+        && (!active || (request.restart && active === request.previous))) {
+      // No active match yet, or the restart found the kept one again: one step on.
+      this.#send(request, true);
+      return;
+    }
+    if (!active && event.count) {
+      // Still no ordinal: keep the shown match (Highlight All refresh), else one on from it.
+      const previous = request.previous;
+      active = request.keep && previous ? previous
+        : findNext && previous && this.lastCount === event.count
+          ? (forward ? previous % event.count + 1 : (previous + event.count - 2) % event.count + 1) : 1;
+      active = Math.min(active, event.count);
+    }
     let result = event.count ? FIND_FOUND : FIND_NOTFOUND;
-    if (event.count && findNext && ((forward && event.active < this.lastActive) || (!forward && event.active > this.lastActive))) result = FIND_WRAPPED;
-    this.lastActive = event.active; this.lastCount = event.count;
+    const previous = request.previous;
+    if (event.count && findNext && previous && ((forward && active < previous) || (!forward && active > previous))) result = FIND_WRAPPED;
+    this.lastActive = event.count ? active : 0; this.lastCount = event.count;
+    this.pending = null;
+    this.win?.clearTimeout?.(this.timer);
     this.#notify("onFindResult", { result, findBackwards: !forward, searchString, storeResult: findNext, linkURL: null, findAgain: findNext, drawOutline: false });
-    this.#notify("onMatchesCountResult", { total: event.count, current: event.active, limit: 1000 });
+    this.#notify("onMatchesCountResult", { total: event.count, current: this.lastActive, limit: 1000 });
+    if (event.count && !this.highlightAll && !this.queue.length) this.#keepActiveOnly();
+    this.#next();
+  }
+  #keepActiveOnly() {
+    this.stopped = true;
+    this.#log(["stop"]);
+    this.ui.command(this.record, "stop_finding", { clear_selection: false });
   }
   requestMatchesCount() { this.#notify("onMatchesCountResult", { total: this.lastCount, current: this.lastActive, limit: 1000 }); }
-  highlight() {} onHighlightAllChange() {} onModalHighlightChange() {} enableSelection() {} keyPress() {} onFindbarOpen() {}
-  removeSelection() { this.ui.command(this.record, "stop_finding", { clear_selection: true }); }
-  onFindbarClose() { this.pending = null; this.ui.command(this.record, "stop_finding", { clear_selection: false }); }
+  /** Firefox's "Highlight All" checkbox (and the findbar's own highlight refreshes). */
+  highlight(on) { this.onHighlightAllChange(on); }
+  onHighlightAllChange(on) {
+    on = !!on;
+    if (on === this.highlightAll) return;
+    this.highlightAll = on;
+    if (!this.searchString || !this.lastCount) return;
+    // A new session from the kept selection highlights every match again; the shown match stays.
+    if (on && this.stopped && !this.pending) this.#find(this.searchString, true, false, { keep: true });
+    else if (!on && !this.stopped && !this.pending) this.#keepActiveOnly();
+  }
+  onModalHighlightChange() {} enableSelection() {} keyPress() {} onFindbarOpen() {}
+  removeSelection() { this.stopped = false; this.ui.command(this.record, "stop_finding", { clear_selection: true }); }
+  onFindbarClose() {
+    this.pending = null; this.queue = []; this.stopped = false; this.win?.clearTimeout?.(this.timer);
+    this.ui.command(this.record, "stop_finding", { clear_selection: false });
+  }
   focusContent() { this.ui.hooks.focusContent?.(this.record); }
   getInitialSelection() { this.#notify("onCurrentSelection", "", true); }
   setSearchStringToSelection() { return Promise.resolve({ searchString: "" }); }
@@ -312,7 +408,7 @@ export class ChromiumBrowserUI {
   #state(record) {
     let state = this.#states.get(record);
     if (!state) {
-      state = { prompts: new Map(), dialog: { lastClosed: 0, disabled: false }, downloads: new Map(),
+      state = { prompts: new Map(), dialog: { lastClosed: 0, disabled: false }, downloads: new Map(), earlyDownloads: new Map(),
         blockedPopups: [], finder: null, restoreFinder: null, zoom: 1, cert: null };
       this.#states.set(record, state);
       this.#installFinder(record, state);
@@ -327,7 +423,14 @@ export class ChromiumBrowserUI {
     switch (event.event) {
       case "prompt": this.#prompt(record, state, event); return true;
       case "prompt_closed": this.#closeLocal(state, event.prompt_id); return true;
-      case "download_updated": state.downloads.get(event.download_id)?.update(event); return true;
+      case "download_updated": {
+        const saver = state.downloads.get(event.download_id);
+        if (saver) saver.update(event);
+        // The host starts a download as soon as Zen answers; Firefox's entry is registered
+        // just after. Keep the latest update per download until then (bounded).
+        else if (state.earlyDownloads.size < 16 || state.earlyDownloads.has(event.download_id)) state.earlyDownloads.set(event.download_id, event);
+        return true;
+      }
       case "find_result": state.finder?.onResult(event); return true;
       case "popup_blocked": this.#popupBlocked(record, state, event.url).catch(error => this.hooks.failure?.(error)); return true;
       case "navigation":
@@ -718,8 +821,12 @@ export class ChromiumBrowserUI {
     const saver = this.#services.registerDownload
       ? await this.#services.registerDownload({ url: details.url, path, contentType: details.mime_type, control })
       : await this.#registerDownload({ url: details.url || (this.hooks.currentURL?.(record) ?? ""), path, contentType: details.mime_type, control });
-    if (saver && this.#states.get(record) === state) state.downloads.set(details.download_id, saver);
-    else saver?.detach?.();
+    const early = state.earlyDownloads.get(details.download_id);
+    state.earlyDownloads.delete(details.download_id);
+    if (saver && this.#states.get(record) === state) {
+      state.downloads.set(details.download_id, saver);
+      if (early) saver.update(early);
+    } else saver?.detach?.();
   }
   /** Shows a Chromium download in Firefox's downloads panel (not persisted across restarts). */
   async #registerDownload({ url, path, contentType, control }) {
@@ -834,7 +941,7 @@ export class ChromiumBrowserUI {
   #installFinder(record, state) {
     const browser = record.browser;
     if (!browser || typeof browser !== "object") return;
-    const finder = new ChromiumFinder(this, record);
+    const finder = new ChromiumFinder(this, record, () => this.#prefBool("findbar.highlightAll", false), this.#win);
     const gBrowser = this.#win.gBrowser, tab = record.tab;
     let findbar = null;
     try { if (gBrowser?.isFindBarInitialized?.(tab)) findbar = gBrowser.getCachedFindBar(tab); } catch {}
@@ -906,5 +1013,16 @@ export class ChromiumBrowserUI {
     }
     doc.getElementById("appMenu-zoomReset-button2")?.setAttribute("label", label);
     doc.getElementById("zoom-reset-button")?.setAttribute("label", label);
+    // Firefox enables the zoom commands from the selected browser's own zoom, which for a
+    // Chromium tab is the hidden blank Gecko browser at 100%: Ctrl+0 (cmd_fullZoomReset)
+    // would stay disabled. They follow the Chromium page's zoom instead.
+    const values = this.#zoomValues(), zoom = this.#state(record).zoom;
+    for (const [id, disabled] of [["cmd_fullZoomReset", percent === 100], ["cmd_fullZoomReduce", zoom <= values[0] + 1e-6],
+      ["cmd_fullZoomEnlarge", zoom >= values.at(-1) - 1e-6]]) {
+      const command = doc.getElementById(id);
+      if (!command) continue;
+      if (disabled) command.setAttribute("disabled", "true");
+      else command.removeAttribute("disabled");
+    }
   }
 }

@@ -92,6 +92,9 @@
   > .toolbarbutton-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 #axiosozo-actions, #axiosozo-engine-probe[engine="chromium"] { flex-shrink: 0; } /* the way back stays legible */
+/* In Zen's narrow vertical toolbar the fixture probe chip wraps under the address bar instead
+ * of overflowing onto the page (the toolbar's wrap is set by CEFPresenter's chrome style). */
+#axiosozo-engine-probe { max-width: min(16em, 100%); }
 #axiosozo-engine-indicator { max-width: 24em; } /* keep "· Experimental" readable */
 #axiosozo-engine-indicator::before {
   content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%;

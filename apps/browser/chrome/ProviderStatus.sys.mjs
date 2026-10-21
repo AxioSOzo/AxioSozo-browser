@@ -18,6 +18,7 @@ import { checkClientsForSettings, discoverForSettings } from "./ProviderSettings
 import { DECISION_KEY_CODES, DECISION_KEY_PREFS, DECISION_KEY_PROVIDERS, decisionKeyEntryEnabled, decisionKeyStatus,
   removeDecisionKey, storeDecisionKey, validateDecisionKey } from "./ProviderKeys.sys.mjs";
 import { createNativeDecisionKeyFixtureRuntime } from "./KeyFixtureNativeConfig.sys.mjs";
+import { words } from "./overview/platform-words.mjs";
 
 export const JEV_MODEL = "jev-1.13.0";
 export const DECISION_PROVIDERS = DECISION_KEY_PROVIDERS;
@@ -46,7 +47,7 @@ export const SIGN_IN_LABELS = Object.freeze({
   "client-sign-in": "Uses your existing sign-in in the official client. AxioSozo never opens a sign-in page or reads your credentials.",
   "needs-client-sign-in": "The official client is not signed in. Sign in there (in Terminal); AxioSozo never opens a sign-in page or reads your credentials.",
   "unsupported-account": "The official client is signed in with an account type Ask AI does not support.",
-  "api-key": "Uses an API key stored in the macOS Keychain.",
+  "api-key": words("Uses an API key stored in the macOS Keychain."),
   "not-applicable": "No sign-in applies.",
 });
 const LABELS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code", antigravity: "Antigravity", jev: "Jev", openai: "OpenAI" });
@@ -150,9 +151,9 @@ export function clientStatus(driver, provider) {
 
 const aKey = (label, start = false) => `${start ? "A" : "a"}${/^[AEIOU]/u.test(label) ? "n" : ""} ${label} key`;
 const UNKNOWN_REASONS = Object.freeze({
-  KEYCHAIN_REFUSED: "The macOS Keychain refused the check; it may be locked.",
-  HELPER_TIMEOUT: "The macOS Keychain did not respond in time.",
-  HELPER_OUTPUT_LIMIT: "The Keychain helper answered unexpectedly.",
+  KEYCHAIN_REFUSED: words("The macOS Keychain refused the check; it may be locked."),
+  HELPER_TIMEOUT: words("The macOS Keychain did not respond in time."),
+  HELPER_OUTPUT_LIMIT: words("The Keychain helper answered unexpectedly."),
   SETTINGS_CLOSED: "The check was cancelled.",
 });
 
@@ -160,13 +161,13 @@ function keyDetail(provider, state, entryOn, code) {
   const label = LABELS[provider];
   const pref = DECISION_KEY_PREFS[provider];
   switch (state) {
-    case "key-stored": return `${aKey(label, true)} is stored in the macOS Keychain. It has not been used or checked: decision calls are not available in this build${
+    case "key-stored": return words(`${aKey(label, true)} is stored in the macOS Keychain. It has not been used or checked: decision calls are not available in this build${
       provider === "openai" ? ", and OpenAI's decision format is not verified" : ""}.${
-      entryOn ? "" : ` Adding or replacing a key is turned off (${pref}); you can still remove it.`}`;
-    case "needs-key": return `No ${label} key is stored. A key is optional; browsing and site rules work without it. It is kept only in the macOS Keychain.`;
+      entryOn ? "" : ` Adding or replacing a key is turned off (${pref}); you can still remove it.`}`);
+    case "needs-key": return words(`No ${label} key is stored. A key is optional; browsing and site rules work without it. It is kept only in the macOS Keychain.`);
     case "disabled": return `No ${label} key is stored, and adding one is turned off in this build (${pref}).`;
-    case "unavailable": return `The Keychain helper is not available in this build, so ${aKey(label)} cannot be stored, checked or removed here.`;
-    default: return `Could not check the macOS Keychain for ${aKey(label)}. ${UNKNOWN_REASONS[code] ?? "Check again later."}`;
+    case "unavailable": return words(`The Keychain helper is not available in this build, so ${aKey(label)} cannot be stored, checked or removed here.`);
+    default: return words(`Could not check the macOS Keychain for ${aKey(label)}. ${UNKNOWN_REASONS[code] ?? "Check again later."}`);
   }
 }
 
@@ -333,15 +334,15 @@ export function keychainErrorText(code) {
     case "KEY_ENTRY_DISABLED":
     case "JEV_KEY_ENTRY_DISABLED": return "Key not stored. Adding a key is turned off in this build.";
     case "INVALID_PROVIDER": return "That provider is not supported. Nothing was changed.";
-    case "KEYCHAIN_HELPER_UNAVAILABLE": return "The Keychain helper was not available or did not finish, so the change could not be confirmed.";
-    case "KEYCHAIN_REFUSED": return "The macOS Keychain refused the change. Unlock the Keychain and try again.";
-    case "HELPER_TIMEOUT": return "The macOS Keychain did not respond in time, so the change could not be confirmed.";
-    case "HELPER_OUTPUT_LIMIT": return "The Keychain helper answered unexpectedly, so the change could not be confirmed.";
+    case "KEYCHAIN_HELPER_UNAVAILABLE": return words("The Keychain helper was not available or did not finish, so the change could not be confirmed.");
+    case "KEYCHAIN_REFUSED": return words("The macOS Keychain refused the change. Unlock the Keychain and try again.");
+    case "HELPER_TIMEOUT": return words("The macOS Keychain did not respond in time, so the change could not be confirmed.");
+    case "HELPER_OUTPUT_LIMIT": return words("The Keychain helper answered unexpectedly, so the change could not be confirmed.");
     case "SETTINGS_CLOSED": return "Cancelled before it finished, so the change could not be confirmed.";
     case "BUSY": return "A change to this key is still running. Wait for it to finish.";
     case "PRIVATE_WINDOW": return "Keys are managed from a normal window, never a private one.";
     case "NO_WINDOW": return "Open this page in a browser window first.";
-    case "DOCUMENT_GONE": return "This page changed before the Keychain answered, so the change could not be confirmed. Check again.";
-    default: return "The Keychain change could not be confirmed.";
+    case "DOCUMENT_GONE": return words("This page changed before the Keychain answered, so the change could not be confirmed. Check again.");
+    default: return words("The Keychain change could not be confirmed.");
   }
 }

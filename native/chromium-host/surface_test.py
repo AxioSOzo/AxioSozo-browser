@@ -125,6 +125,12 @@ def main():
     parser.add_argument('--seconds', type=float, default=5)
     parser.add_argument('--only', help='comma-separated case names')
     args = parser.parse_args()
+    if probe.IS_LINUX:
+        # engine-surface-v1 is Mach ports + IOSurface (macOS only). The Linux host has
+        # no surface service; its frames use the AXCF BGRA pipe (stream_test.py).
+        print(json.dumps(dict(status='SKIPPED', reason='macOS-only Mach/IOSurface transport; Linux uses the AXCF '
+                              'BGRA pipe (stream_test.py)')), flush=True)
+        return 0
     probe.check()
     build()
     directory = Path(tempfile.mkdtemp(prefix='cef-surface-', dir=probe.EVIDENCE))

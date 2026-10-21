@@ -1,0 +1,180 @@
+# Zen/Gecko "native feel" on Linux (workstream gecko-linux-feel).
+#
+# build:  this commit's Linux app through linux-zen-reusable.yml (sccache), unless
+#         .github/gecko-feel.json names an after_run_id to reuse.
+# before: scripts/gui_gecko_feel.py against the baseline artifact (baseline_run_id,
+#         an app without this branch's changes).
+# after:  the same matrix against this commit's app, with --strict: every feel check
+#         (maximized first window, WM_CLASS, visible window controls, Firefox-on-Linux
+#         prefs, theme following, no Mac wording, Zen welcome at 1x/2x, .desktop file)
+#         must pass.
+# Modes: light 1x under metacity (compositing) with XDG_CURRENT_DESKTOP=GNOME, as a
+#        GNOME session sets it, so Gecko uses client-side decorations (all scenarios);
+#        dark 1x; 2x first run (GDK_SCALE=2); 1x first run; KDE; no desktop session
+#        (server-side decorations by the WM); bare Xvfb without a window manager (as
+#        linux-gui.yml, for timing comparisons). The address bar is never typed into (WebRender crash,
+#        owned by cloud/linux-platform).
+# Results: ci-results branch, <branch>/<run>-<attempt>-feel-{before,after}-<mode>/ and
+#          <run>-<attempt>-gecko-feel-build/.
+name: linux-gecko-feel
+on:
+  push:
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/**
+      - apps/browser/tests/**
+      - scripts/gui_gecko_feel.py
+      - scripts/gui_test.py
+      - scripts/gui_engines/**
+      - scripts/linux_desktop.py
+      - patches/zen/**
+      - .github/gecko-feel.json
+      - .github/workflows/linux-gecko-feel.yml
+      - .github/workflows/linux-zen-reusable.yml
+  pull_request:
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/chrome/**
+      - apps/browser/tests/**
+      - scripts/gui_gecko_feel.py
+      - scripts/gui_test.py
+      - scripts/gui_engines/**
+      - scripts/linux_desktop.py
+      - patches/zen/**
+      - .github/gecko-feel.json
+      - .github/workflows/linux-gecko-feel.yml
+      - .github/workflows/linux-zen-reusable.yml
+
+concurrency:
+  group: linux-gecko-feel-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline: ${{ steps.read.outputs.baseline }}
+      after: ${{ steps.read.outputs.after }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: read
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          config = json.load(open('.github/gecko-feel.json'))
+          print('baseline=' + config['baseline_run_id'])
+          print('after=' + config.get('after_run_id', ''))
+          PY
+
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # publish-ci-results
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-unit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pinned Node 24.14.0 (sha256 from upstreams.lock.json)
+        run: echo "$(python3 scripts/ci_tools.py node)" >> "$GITHUB_PATH"
+      - name: Unit tests (platform wording, Linux defaults, .desktop)
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          sudo apt-get install -y --no-install-recommends desktop-file-utils >/dev/null
+          set -o pipefail
+          node --test --test-reporter=spec apps/browser/tests/platform-words.test.mjs apps/browser/tests/linux-desktop.test.mjs \
+            apps/browser/tests/provider-native-menu.test.mjs apps/browser/tests/region-capture.test.mjs \
+            apps/browser/tests/overview-model.test.mjs apps/browser/tests/about-axiosozo-page.test.mjs 2>&1 | tee "$EVIDENCE_OUT/node-unit.log"
+          python3 -m unittest -v tests/test_linux_desktop.py 2>&1 | tee "$EVIDENCE_OUT/python-unit.log"
+      - name: Whole browser node suite (informational)
+        run: |
+          node --test --test-reporter=tap $(ls apps/browser/tests/*.test.mjs | grep -v coordinator.test.mjs) > "$EVIDENCE_OUT/node-all.log" 2>&1 || true
+          grep -E "^# (tests|pass|fail)|^not ok" "$EVIDENCE_OUT/node-all.log" | tee "$EVIDENCE_OUT/node-all-summary.txt"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: gecko-feel-unit
+
+  build:
+    needs: config
+    if: needs.config.outputs.after == ''
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/linux-zen-reusable.yml
+    with:
+      gui: false
+      results_name: gecko-feel
+
+  before:
+    needs: config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download-artifact from another run
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - { id: light-1x, args: '--theme light --scale 1 --wm auto' }
+          - { id: dark-1x, args: '--theme dark --scale 1 --wm auto --scenario window,theme,strings' }
+          - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
+          - { id: firstrun-1x, args: '--theme light --scale 1 --wm auto --first-run --scenario firstrun,window,startup' }
+          - { id: bare-xvfb, args: '--theme light --scale 1 --wm none --scenario window,startup,tabs,scroll' }
+          - { id: ssd-1x, args: '--theme light --scale 1 --wm metacity --desktop none --scenario window' }
+          - { id: kde-1x, args: '--theme light --scale 1 --wm metacity --desktop KDE --scenario window,strings' }
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/feel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/gecko-feel
+        with:
+          run-id: ${{ needs.config.outputs.baseline }}
+          side: before
+          mode-id: ${{ matrix.mode.id }}
+          args: ${{ matrix.mode.args }}
+
+  after:
+    needs: [config, build]
+    if: always() && needs.config.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:  # same list as before
+          - { id: light-1x, args: '--theme light --scale 1 --wm auto' }
+          - { id: dark-1x, args: '--theme dark --scale 1 --wm auto --scenario window,theme,strings' }
+          - { id: firstrun-2x, args: '--theme light --scale 2 --wm auto --first-run --scenario firstrun,window,strings,startup' }
+          - { id: firstrun-1x, args: '--theme light --scale 1 --wm auto --first-run --scenario firstrun,window,startup' }
+          - { id: bare-xvfb, args: '--theme light --scale 1 --wm none --scenario window,startup,tabs,scroll' }
+          - { id: ssd-1x, args: '--theme light --scale 1 --wm metacity --desktop none --scenario window' }
+          - { id: kde-1x, args: '--theme light --scale 1 --wm metacity --desktop KDE --scenario window,strings' }
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/feel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/gecko-feel
+        with:
+          run-id: ${{ needs.config.outputs.after || github.run_id }}
+          side: after
+          mode-id: ${{ matrix.mode.id }}
+          args: ${{ matrix.mode.args }}

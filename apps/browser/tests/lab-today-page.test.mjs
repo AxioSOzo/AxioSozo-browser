@@ -228,7 +228,10 @@ test("#today is the sheet while its switch is on, with a Today link; off, the ad
   assert.deepEqual(off.named("getToday"), [], "nothing read for a sheet that is off");
 });
 
-test("the sheet: a date, one sentence, lines grouped by what they need, each a link, and what it is made of", async () => {
+test("the sheet: a date, one sentence, lines grouped by what they need, each a link, and what it is made of", async t => {
+  // The page labels "since" against the wall clock; pin it to the fixture's NOW
+  // so "yesterday" stays yesterday after 9 October 2026 (Date only, not timers).
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const page = await loadPage();
   const root = page.root();
   assert.equal(root.getAttribute("aria-busy"), null);

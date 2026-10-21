@@ -18,6 +18,9 @@ pub fn mint_id() -> io::Result<String> {
 pub enum Engine {
     Gecko,
     Chromium,
+    /// WebKit fixture profile (contracts/engine-stream-v1.md §8). Added in place:
+    /// readers that know only gecko/chromium never receive it from older writers.
+    Webkit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -605,6 +608,41 @@ mod tests {
                     Request::Authorize {
                         grant_id: g.id,
                         target: fake,
+                        scope: Scope::Navigate
+                    }
+                ),
+                20
+            )
+            .result["reason"],
+            "stale_target"
+        );
+    }
+    #[test]
+    fn webkit_engine_is_its_own_identity() {
+        // Wire spelling and parsing: "webkit"; a Gecko grant never authorizes a WebKit target.
+        assert_eq!(
+            serde_json::to_string(&Engine::Webkit).unwrap(),
+            "\"webkit\""
+        );
+        assert_eq!(
+            serde_json::from_str::<Engine>("\"webkit\"").unwrap(),
+            Engine::Webkit
+        );
+        assert!(serde_json::from_str::<Engine>("\"safari\"").is_err());
+        let mut c = core();
+        let t = target(&mut c, false);
+        let g = grant(&mut c, t.clone());
+        let webkit = BrowserTarget {
+            engine: Engine::Webkit,
+            ..t
+        };
+        assert_eq!(
+            c.handle(
+                msg(
+                    "webkit",
+                    Request::Authorize {
+                        grant_id: g.id,
+                        target: webkit,
                         scope: Scope::Navigate
                     }
                 ),

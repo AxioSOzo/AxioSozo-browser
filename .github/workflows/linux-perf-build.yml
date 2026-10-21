@@ -1,0 +1,44 @@
+# Linux Zen build of cloud/perf-phase2 (docs/perf/pixel-path.md, "Native receiver"): the
+# engine-view Linux frame receiver (apps/browser/native/engine-view/linux) is compiled Gecko code,
+# so its A/B needs an app built from this branch. Same reusable build as linux-zen-build.yml
+# (sccache; caches are branch scoped, so the first build of this branch is cold). The artifact
+# (axiosozo-zen-linux-x86_64) is what tools/pixel-path/ci/plan.json `zen_run_id` pins for
+# linux-perf.yml. The receiver is pref-gated (axiosozo.engines.linux.native_receiver, default
+# false): with the pref off the app behaves like cloud/integration's.
+# Results: ci-results branch, cloud_perf-phase2/<run>-<attempt>-zen-native-{build,gui-gecko}/.
+# perf-phase3 (claude/perf-phase3-uvmfis, cloud/perf-phase3) builds its native receiver changes
+# (damage-only texture writes) the same way.
+name: linux-perf-build
+
+on:
+  push:
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/native/**
+      - patches/zen/**
+      - .github/workflows/linux-perf-build.yml
+      - .github/workflows/linux-zen-reusable.yml
+  pull_request:
+    branches: [cloud/integration, dev]
+    paths:
+      - apps/browser/native/**
+      - patches/zen/**
+      - .github/workflows/linux-perf-build.yml
+      - .github/workflows/linux-zen-reusable.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-perf-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  zen:
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/linux-zen-reusable.yml
+    with:
+      engine: gecko
+      results_name: zen-native

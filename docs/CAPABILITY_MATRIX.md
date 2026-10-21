@@ -1,15 +1,171 @@
 # First-experience capability matrix
 
-| Capability | Gecko | Chromium/CEF | Provider agent | Jev |
-| --- | --- | --- | --- | --- |
-| Navigate ordinary web URL/search | Implemented; fixture UI tested | Blocked outside local GET fixture | No automatic route | Off |
-| Open/search saved pages | Implemented; fixture UI tested | Browser chrome only; fixture target not persisted privately | No access | Off |
-| Separate browser environments | Firefox container creation and current label tested in native GUI; cookie and same-URL GUI matrix pending | Distinct native profile only for fixture; cookie audit pending | No access | Suggestion not wired |
-| Read selection/page | Existing coordinator grant contract, adapter unsupported | Unsupported | No exposed tool | Off |
-| Mutating browser actions | Native user input only | Fixture native input only | No exposed tool | No authority |
-| Contextual answer/stream | Not connected | Not connected | Live auth/sandbox blocked | Off |
-| TLS, extensions, accessibility, devtools | Native Zen/Firefox inherited; this slice did not run the full regression matrix | Full safety matrix blocked | No override | No override |
+## Consolidated status per engine and platform (final-review, 20 Oct 2026)
+
+One line per engine × platform; labels as in docs/CLOUD_PROGRAM_SUMMARY.md (PASS = a cited run,
+EXPERIMENTAL = works but fixture-only or behind a developer gate, NOT_VERIFIED = not run). Not READY.
+Final-round run ids on one integration head: docs/handoff/final-review.md.
+
+| Engine | macOS (Apple silicon) | Linux x86_64 (Xvfb, software WebRender) |
+| --- | --- | --- |
+| Gecko (Zen) | Builds and runs on the owner's Mac (September baseline); macos-ci regression lane vs dev on every PR, final round 0 REGRESSION (39599306865; no Zen build in CI) | PASS: app build + GUI harness launch/chrome/about/fixture/input (39337785340; final round 39599306383 with the pixel-content gate), native feel (39346931130, 39599306558) |
+| Chromium (CEF 154) | IOSurface engine view; E0 PASS (September), live E1/E2 blocked by the Keychain gate; macOS compile check on every linux-cef-host run | PASS, EXPERIMENTAL: host E0/stream/security/input/web/damage x86_64 + aarch64 (39303367159); in Zen E1/E2 fixture + loopback web, 1× and 2×, feel matrix (39399390970); final round on product defaults with pixel gates: 39599306421 (all frame paths, web 1×/2×, AT-SPI), host 39599306391 |
+| WebKit | WKWebView host component suites PASS (39345979318, 39346635281, final round 39599306368); **in-Zen E2E NOT_VERIFIED** | PASS, EXPERIMENTAL, fixture page only: WPE 2.48.3 host (bubblewrap), in-Zen round trip + host kill (39325934205), three engines on one tab (39337226571), 21-scenario feel matrix (39384321863); final round 39599306504 (round trip, host kill, three engines, 23 feel scenarios, pixel gates) |
+
+
+| Capability | Gecko | Chromium/CEF | WebKit (WPE, Linux) | Provider agent | Jev |
+| --- | --- | --- | --- | --- | --- |
+| Navigate ordinary web URL/search | Implemented; fixture UI tested | Blocked outside local GET fixture | Blocked: loopback GET fixture only (`/engine.html`, `?page=2`); every other URL is refused by Zen and by the host | No automatic route | Off |
+| Open/search saved pages | Implemented; fixture UI tested | Browser chrome only; fixture target not persisted privately | Unsupported | No access | Off |
+| Separate browser environments | Firefox container creation and current label tested in native GUI; cookie and same-URL GUI matrix pending | Distinct native profile only for fixture; cookie audit pending | Fresh private 0700 profile per host, removed on exit; nothing shared with Gecko or CEF | No access | Suggestion not wired |
+| Read selection/page | Existing coordinator grant contract, adapter unsupported | Unsupported | Unsupported (Gecko action authority is revoked while a tab is in WebKit) | No exposed tool | Off |
+| Mutating browser actions | Native user input only | Fixture native input only | Fixture native input only (pointer, wheel, keys with XKB codes, text commit) | No exposed tool | No authority |
+| Contextual answer/stream | Not connected | Not connected | Not connected | Live auth/sandbox blocked | Off |
+| TLS, extensions, accessibility, devtools | Native Zen/Firefox inherited; this slice did not run the full regression matrix | Full safety matrix blocked | TLS errors fail closed in the host (no bypass, no TLS UI); no extensions, accessibility or devtools | No override | No override |
+| Dialogs, permissions, downloads, pop-ups, file pickers | Native Zen/Firefox | Delegated to Zen UI in web mode | Drawn by Zen (engine-stream-v1 §8.2 browser UI): alert/confirm/prompt and beforeunload in Zen's tab-modal dialogs, permission requests in Zen's doorhanger (fixture mode: nothing remembered, deny unless allowed), the file picker through Zen's nsIFilePicker; downloads and pop-ups refused with a Zen notice; see "WebKit native-feel gates" | No access | Off |
+| IME | Native | Proxy editor (macOS surface mode; Linux pipe mode with host `ime`: proxy focus verified, composition BLOCKED_ENV under Xvfb) | Composition with preedit through Zen's proxy editor and WebKitInputMethodContext (§8.2); commit, cancel; caret via `text_input` | — | — |
+| Inside Zen on Linux (GUI E2E) | Harness launch/chrome/fixture PASS | Host E0/stream/input PASS (cloud/linux-cef); inside Zen: three-engine row | PASS, EXPERIMENTAL (runs 39325934205, 39337226571): Gecko → WebKit → Gecko via Zen's tab menu with real typing, click, link, toolbar Back, wheel scroll; host SIGKILL keeps the Gecko tab | — | — |
+| Three engines on one tab (Linux GUI E2E) | Hub; same content process across all switches | PASS, EXPERIMENTAL (run 39337226571): fixture page only, beside WebKit, via Zen's "Open in" submenu | PASS, EXPERIMENTAL (run 39337226571): fixture page only | — | — |
 
 The `enabled` provider setting is an explicit local policy preference, not a
 claim of authenticated or billed access. Disabled and unverified routes cannot
 pass the admission check. No fallback retries a mutating action.
+
+## WebKit native-feel gates (Linux, fixture page, real Zen app)
+
+Label per gate: PASS (verified end to end in the real Linux Zen app under Xvfb, inspected
+screenshots), EXPERIMENTAL, NOT_VERIFIED, BLOCKED_ENV. The host-level evidence is
+`native/webkit-host/ui_test.py` on real WPE 2.48.3 (Actions run 39365113891, PASS). The Zen
+E2E is `scripts/webkit_feel_e2e.py` (linux-webkit-zen `e2e` job, `FEEL=1`). Its evidence is in
+`docs/evidence/linux/webkit-feel/` and `ci-results:cloud_webkit-feel/<run>-1-webkit-zen-e2e/feel/`.
+
+Final run: linux-webkit-zen **39384321863** (cd54e4e6, Zen app build 39337785340, WPE 2.48.3):
+roundtrip/host_failure/three_engines PASS, all 21 feel scenarios PASS. Host suites incl. `ui_test.py`:
+linux-webkit-host 39384321774 PASS. The table's measurements and the curated screenshots come from
+the previous full-green run 39376244911. Between the two, run 39381493587 failed the IME gate: the
+input method was not re-announced after returning to a tab, fixed in cd54e4e6 and covered by
+`ui_test.py` `text_input_after_refocus`.
+
+| Gate | WebKit (Linux) | Evidence / measured |
+| --- | --- | --- |
+| Renders in Zen's content area | PASS (39376244911) | first frame 516 ms; 953×678 surface |
+| Favicon + title | PASS (39376244911) | page favicon → 32 px PNG (1426 B) on the Zen tab; title follows the page (`03-favicon-indicator.png`) |
+| Engine indicator next to the URL bar | PASS (39376244911) | "WebKit" pill before the identity box, tooltip with version and "local test page only", click → Firefox; the dashed probe placeholder is hidden |
+| Tab-menu engine labels, unavailable reasons | PASS (39376244911) | "Open in" submenu: Firefox / Chromium ("Experimental · test page only") / WebKit (checked); off-fixture tabs show the reason (unit tests) |
+| Typing, Tab focus | PASS (39376244911) | typed text, Ctrl+Backspace, Tab moves page focus |
+| Selection: drag / double / triple click | PASS (39376244911) | "alpha beta" / "gamma" / whole line (drag emulated in an isolated world: WPE motion events carry no button) |
+| Clipboard Ctrl+C/X/V | PASS (39376244911) | WebKit→Zen, Zen→WebKit, Gecko↔WebKit. Ctrl+Z after cut: not observed (soft) |
+| Linux PRIMARY + middle-click paste | PASS (39376244911) | WebKit selection → PRIMARY; middle-click in WebKit pastes Gecko's PRIMARY. Gecko pasting WebKit's PRIMARY: not observed (soft) |
+| Smooth/kinetic wheel, precise vs notch | PASS (39376244911) | notch 114 px in 9 steps / 139 ms (Gecko 114 px / 11 / 221 ms); precise 120 px in one event (Gecko same) |
+| Full CSS cursor set | PASS (39376244911) | pointer, text, move, wait, crosshair, not-allowed, grab, col-resize, default (computed CSS cursor per move) |
+| `<select>` popup drawn by Zen | PASS (39376244911) | XUL menupopup; pointer pick, keyboard pick, Escape keeps (`09-select-open.png`; popups capture black under SWGL) |
+| `<datalist>` popup | NOT_VERIFIED | WPE 2.48 (libwpe API) exposes no datalist hook to the embedder; typing reaches the field |
+| alert / confirm / prompt | PASS (39376244911) | Zen tab-modal dialogs, answered by keyboard (`11-prompt.png`) |
+| beforeunload | PASS (39376244911) | Zen's "Are you sure?" dialog; Stay (Escape) keeps page 1, Leave (Enter) goes to page 2; dialog open ≥3.4 s (`12-beforeunload.png`). TEST-ONLY: driven with no Marionette session open, classic WebDriver auto-accepts beforeunload |
+| Permission requests | PASS (39376244911) | geolocation → Zen doorhanger (Allow/Block), fixture mode remembers nothing. Camera/microphone requests are refused by the host (`media_capture_unavailable`; code path, not exercised by a test) |
+| File chooser | PASS (39376244911) | GTK picker through Zen's nsIFilePicker → `feel-upload.txt` |
+| Downloads refused with a Zen notice | PASS (39376244911) | "Downloads aren't available in WebKit tabs yet. Open this page in Firefox to download." |
+| Find in page → Zen findbar | PASS (39376244911) | "1 of 3" → Enter → "2 of 3", highlight in WebKit (`16-find.png`) |
+| Page zoom ↔ Zen zoom | PASS (39376244911) | Ctrl+= 110 % (URL-bar zoom button), Ctrl+0, Ctrl+-, Ctrl+wheel; same CSS widths as Gecko ±1 % |
+| IME composition with preedit | PASS (39376244911) | nsITextInputProcessor on Zen's proxy editor → underlined preedit in WebKit, commit "日本" in input and contenteditable (`18-preedit-*.png`). No IBus/Fcitx daemon under Xvfb: a real system IM is NOT_VERIFIED |
+| Context menu (link / image / selection) | PASS (39376244911) | Zen's native menu with link, image and selection items; Copy → clipboard; input works after the menu |
+| Shortcut ownership | PASS (39376244911) | Ctrl+Enter, Escape → page; Ctrl+Tab, Ctrl+Shift+Tab, F5, Ctrl+R, Ctrl+F, Ctrl+=/−/0 → Zen (from Zen's keysets) |
+| HiDPI 1× / 2× | PASS (39376244911) | devicePixelRatio 2 surface, back to 1×, input lands (TEST-ONLY pref `layout.css.devPixelsPerPx`) |
+| Crash recovery + retry | PASS (39376244911) | host SIGKILL → Gecko tab shown, Zen notice "WebKit stopped working in this tab…" + "Try again in WebKit" → back in WebKit, notice gone (`22-crash-notice.png`, `22-retried.png`) |
+| Real macOS E1/E2 | NOT_VERIFIED | Linux-only work; macOS paths unchanged (PR #12) |
+
+Not READY: fixture page only, Linux only, no general web browsing.
+
+## WebKit gates (all must hold; otherwise the engine menu says why)
+
+WebKit is the third engine of a Zen tab (EngineRegistry `webkit`, label "WebKit";
+`apps/browser/chrome/WebKit*.sys.mjs`). It is EXPERIMENTAL and fixture-only.
+
+1. Platform: Linux x86_64 (`ready.platform` `linux-x86_64`, Debian 13 WPE 2.48.3 pins) or an
+   Apple-silicon Mac (WKWebView host, `native/webkit-host/mac`; Intel Macs: "WebKit is available on
+   Apple silicon Macs only"); other platforms: "WebKit is not available on this platform yet".
+2. Pref `axiosozo.engines.webkit.enabled` (default false): "WebKit is not enabled in this browser".
+3. Host installed: `AXIOSOZO_WEBKIT_BINARY` must equal `$AXIOSOZO_BUILD_ROOT/webkit/AxioWebKitHost`
+   (`native/webkit-host/probe.py setup`): "The WebKit engine is not installed".
+4. Fixture origin: `AXIOSOZO_ENGINE_FIXTURE_ORIGIN` = `http://127.0.0.1:<port>` and the tab shows
+   that origin's `/engine.html`: "WebKit runs only the local test page for now".
+5. Ready identity: the host must report exactly the lockfile's WebKit/libwpe/WPEBackend-fdo
+   versions, `sandbox:"bubblewrap"`, `fixture_only:true` and every web capability false.
+6. General web mode: reserved pref `axiosozo.engines.webkit.web.enabled` enables nothing. It stays
+   off until dialogs, permissions, downloads, TLS/certificate UI and a current (security-supported)
+   WebKit release exist; the 2.48.3 Debian pin has no later security fixes.
+7. Context engine preference: never moves a tab into WebKit (`UNAVAILABLE`); context-v1 cannot
+   store `webkit` (needs a contract version owned by the contexts workstream).
+
+Failure handling: a failed start, a crash or exit (codes 70, 76), a protocol violation, a fixture
+load failure or a Gecko navigation that raced the switch shows the tab's Gecko document again,
+unchanged.
+
+Linux evidence: `docs/evidence/linux/webkit-zen/STATUS.json` (Zen GUI E2E runs 39325934205 and
+39337226571, curated screenshots in `run-39325934205-e2e/` and `run-39337226571-e2e/`). In the three-engine window (WebKit controls over
+the fixture-mode Chromium probe) Chromium is offered for the local test page only (EngineRegistry
+`CHROMIUM_FIXTURE_LINEUP`); the Chromium fixture probe alone stays toolbar-only.
+
+## Chromium (CEF) inside Zen on Linux: E1/E2 and native-feel gates
+
+Chromium tabs on Linux run in the sandboxed CEF host (SUID `chrome-sandbox` on the
+runners) and are drawn by `CEFPresenter` inside Zen's own content area (AXCF BGRA pipe,
+`native-osr-bgra`). Web mode stays behind the existing developer gate
+(`AXIOSOZO_ENGINE_SWITCHING=1`); nothing here widens it. Evidence: workflow
+`linux-cef-zen` (`scripts/cef_zen_e2e.py`, page `tests/fixtures/cef-zen-feel.html`),
+Ubuntu 24.04 runner, Xvfb 1280×800 (2560×1600 for 2×), WebRender software, prebuilt
+Linux Zen artifact + this branch's chrome JS (TEST-ONLY `chrome-overlay`). Results:
+`ci-results:claude_cef-zen-feel-dx16ke/<run>-1-cef-zen-e2e/`; the copies under
+`docs/evidence/linux/cef-zen/` were inspected. "Gecko baseline" = the same page and
+input in a Gecko tab of the same session.
+
+Round 2 (workstream cef-feel-2, run 39399390970, branch `claude/cef-feel-2-xrbczc-rgjgez`): prebuilt app
+run 39362552105 + chrome overlay + the CEF host built from the branch. **Frame path:** on that app
+Chromium frames over memfd (the Linux default since perf round 2) capture 100% black in every
+screenshot, with the JS presenter as well (`nativeReceiver` null, `frameTransport: memfd`,
+`frameUpload: imagedata`); with `axiosozo.engines.linux.memfd_frames=false` (pipe frames,
+`videoframe` upload) the view has pixels (black fraction 0.001). The workflow's step 0 measures this
+per run (`framepath.json`); the matrix runs use the TEST-ONLY pref `memfd_frames=false` and say so in
+`test_only_switches`. Owner of the memfd defect: the frame path (cloud/perf-phase2). Evidence copies:
+`docs/evidence/linux/cef-zen/39399390970/`.
+
+| Gate (Chromium Linux column) | Status | Evidence (run 39359724324 unless noted; paths under `docs/evidence/linux/cef-zen/39359724324/`) |
+| --- | --- | --- |
+| E1: Chromium pixels inside Zen's content area (web switch via Zen's tab menu) | PASS | `web/02-chromium.png`; `native-osr-bgra`, Gecko browser hidden |
+| E1: fixture probe (toolbar button), typing, click, page 2, toolbar Back | PASS | `fixture/f02-chromium.png`, `f03-typed.png`, `f04-page2.png` |
+| E1 at 2× (devPixelsPerPx 2, surface `device_scale` 2) | PASS | `web-2x/03-typed.png` |
+| E2: host SIGKILL, fixture tab → its preserved Gecko document (same URL, same content pid) | PASS | `fixture/f05-gecko-after-kill.png` |
+| E2: host SIGKILL, web tab → "Chromium stopped" panel; other Gecko tabs untouched; "Open in Firefox" reopens the address | PASS | `web/19-after-kill.png`, `19-gecko-tab-after-kill.png`, `19-gecko-after-kill.png` |
+| Return to Gecko with the tab intact (tab menu "Open in Firefox", address carried) | PASS | `web/18-gecko-again.png` |
+| Window title shows the page title (X11) | PASS (fixed: `isContentTitle`) | `matrix.window_title` |
+| Typing, Backspace, Ctrl+Backspace word delete | PASS | `web/03-typed.png` |
+| Clicks, Tab/Shift+Tab focus, focus ring and caret | PASS | `web/05-focus-ring.png`, `05-caret.png` |
+| Selection by drag, double-click word, triple-click line | PASS | `web/06-drag-selection.png`, `06-double-click.png` |
+| Ctrl+C/X/V/Z via Zen's clipboard: Chromium→Gecko tab, Gecko→Chromium, Zen chrome→Chromium | PASS | `web/07-clipboard.png` |
+| Wheel: notch animates, precise pixel delta applies at once; same as Gecko | PASS | notch 12 positions/~184 ms vs Gecko 12/~179 ms; precise 1/1 |
+| Cursor shapes (pointer, text, move, wait, crosshair, not-allowed, grab, col-resize→ew-resize, default) | PASS | engine view CSS cursor (xwd has no pointer) |
+| `<select>` popup | PASS (Chromium-drawn, composited in frame) | `web/09-select-open.png` |
+| `<input type=color>` chooser | PASS (Chromium-drawn, composited) | `web/09-color.png`, `09-color-picked.png` |
+| `<datalist>` suggestions | PASS (run 39399390970; Zen draws the list from the host `datalist` event) | `39399390970/web/09-datalist-chromium.png`: "apple", "apricot" under the field; Down+Return picks "apple" as in Gecko (`09-datalist-gecko.png`) |
+| Context menu drawn by Zen with engine items (Copy, Select All, Search, Open Page in Firefox, Inspect disabled) | PASS | items/placement asserted; xwd captures menupopups black for Firefox's own menu too (`10-gecko-context-menu.png`) |
+| JS alert/confirm/prompt in Zen's dialog, answered by keyboard | PASS | `web/11-alert.png`, `11-confirm.png`, `11-prompt.png` |
+| beforeunload in Zen's "Are you sure?" dialog (Escape stays, Return leaves) | PASS | `web/17-beforeunload-1.png` |
+| Find in page via Zen's findbar | PASS (run 39399390970) | "1 of 3", Return "2 of 3", again "3 of 3", same as Firefox; without Highlight All only the active match is marked (`39399390970/web/12-find-next.png`), with it all three (`12-find-highlight-all.png`). Linux CEF reports no ordinal for a new find session, so the finder takes one find-next step |
+| Page zoom Ctrl+= / Ctrl+- / Ctrl+0 and the URL-bar indicator | PASS (fixed: zoom commands follow the Chromium zoom) | `web/13-zoomed-chromium.png` |
+| Reload F5 / Ctrl+R / reload button | PASS (fixed: reload commands re-enabled for Chromium tabs) | `matrix.reload_keys`: Chromium and Gecko baseline both reload on F5 and Ctrl+R |
+| Shortcut ownership: Ctrl+W (closes the Chromium tab), Ctrl+Tab/Ctrl+Shift+Tab, Alt+Left, F-keys never reach the page | PASS | `matrix.shortcut_ownership` |
+| Ctrl+L over a Chromium page (focus, Escape, click back types into the page; same as Gecko) | PASS (runs 39371098391, 39399390970; SWGL crash fixed) | `39399390970/web/21-ctrl-l-chromium.png` |
+| Ctrl+T over a Chromium page (and the Gecko baseline) | PASS (runs 39371098391, 39399390970) | `39399390970/web/23-ctrl-t-chromium.png`: Zen's new-tab address bar |
+| Fonts: default, serif, sans-serif, monospace, system-ui, ui-monospace as Gecko resolves them | PASS (run 39399390970) | equal CSS widths in both engines; `39399390970/web/30-fonts-chromium.png` vs `30-fonts-gecko.png` (sans/system-ui = DejaVu Sans). Host: default families are the fontconfig generics |
+| Overlay scrollbars like GTK Gecko | PASS (run 39399390970) | scrollbar layout width 0 in both; `39399390970/web/31-scrollbar-chromium.png` (`OverlayScrollbar,FluentOverlayScrollbar`) |
+| "Not secure" badge / fixture "Return to Gecko" chip never cover page content | PASS (run 39399390970) | badge inside the address bar (`39399390970/web/32-not-secure-badge.png`); the chip wraps under the address bar (`harness/fixture-chromium.png` in ci-results) |
+| Middle-click paste (PRIMARY) both ways; autoscroll | PASS (fixed: host `text_selection` → Zen PRIMARY) | Chromium selection → PRIMARY "alpha"; Gecko PRIMARY pasted in Chromium; no autoscroll in either (Linux default) |
+| Dead keys / Ctrl+Shift+U compose via the proxy editor | BLOCKED_ENV | under Xvfb + xdotool the Gecko baseline does not compose either; proxy editor focus asserted (`proxy-textarea`) |
+| Downloads in Zen's download UI (Firefox's list, panel button, download dir) | PASS (run 39399390970) | `39399390970/web/34-download-chromium.png`; 63-byte file, content checked, Gecko baseline alike. Fixed: an update before Firefox registered the entry was dropped |
+| Permission prompt in Zen's doorhanger; Block (and no answer) denies | PASS (run 39399390970) | geolocation: Zen's prompt (asserted from PopupNotifications; Xvfb captures doorhangers black, `39399390970/web/35-permission-chromium.png`), Block → page sees `denied:1`, as in Gecko. Fixed: the host rejected CEF's requesting origin `http://h:p/` and denied everything |
+| File chooser via Zen (GTK; no portal under Xvfb) | PASS (run 39399390970) | `39399390970/web/36-file-chooser-chromium.png`: the chosen file reaches the page |
+| Certificate errors fail closed with Zen's error page | PASS (run 39399390970) | `39399390970/web/37-cert-error-chromium.png` (NET::ERR_CERT_AUTHORITY_INVALID, Go back / Open in Firefox; nothing loaded) vs Firefox's `about:certerror` (`37-cert-error-gecko.png`) |
+| Accessibility: the Chromium tree on AT-SPI, assistive press | PASS (run 39399390970, GNOME_ACCESSIBILITY=1) | push button "Increment", link "Page 2", entry "Type here" as in the Gecko tab; AT-SPI press clicks the button (count 0→1). Fixed: a tab switch dropped the tree. AT-SPI *focus* follows Zen's canvas/proxy, not Chromium's focused node: NOT_VERIFIED |
+| Developer tools | PASS (run 39399390970) as "explained": Ctrl+Shift+I etc. show "Developer tools aren't available for Chromium tabs yet…" and never open Firefox's toolbox on the hidden document; Chromium DevTools are not embedded (NOT_VERIFIED as a feature) |
+
+Green runs: `linux-cef-zen` 39399390970 (round 2: verdict PASS, only the IME compose gate BLOCKED_ENV; frame-path probe chose `memfd-off`), 39359724324 (fixture-probe harness PASS, fixture E1/E2 PASS, web matrix PASS with the BLOCKED gates above, 2× subset PASS). Earlier runs and what each fixed are listed in `docs/handoff/cef-zen-feel.md`.

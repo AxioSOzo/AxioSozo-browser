@@ -1,0 +1,340 @@
+# Reusable: build the Linux AxioSozo (Zen) app from the CALLER's checkout (or reuse
+# the artifact of an earlier run), then drive it under Xvfb with the GUI harness.
+# Results (build stats, log tails, screenshots, result.json) go to the ci-results
+# branch so cloud sessions can read them; the packaged app goes to a workflow
+# artifact `axiosozo-zen-linux-x86_64` (30 days).
+#
+# Other workstreams call it from their own branch (see docs/LINUX.md):
+#
+#   jobs:
+#     zen:
+#       permissions: { contents: write, actions: read }
+#       uses: ./.github/workflows/linux-zen-reusable.yml
+#       with: { engine: webkit, prebuilt_run_id: '<green linux-zen-build run id>' }
+#
+# prebuilt_run_id = '' builds (cold ~3-4 h on a 4 vCPU runner; sccache caches are
+# branch scoped, so a new branch starts cold unless its base branch has one).
+# A run id skips the build and downloads that run's artifact (minutes); right for
+# work that does not change Gecko/chrome inputs (out-of-process engine hosts).
+name: Linux Zen build + GUI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      prebuilt_run_id:
+        description: Reuse the axiosozo-zen-linux-x86_64 artifact of this run instead of building
+        type: string
+        default: ''
+      engine:
+        description: GUI engine plug-in (scripts/gui_engines)
+        type: string
+        default: gecko
+      scenario:
+        description: GUI scenarios (all or a comma list)
+        type: string
+        default: all
+      gui:
+        description: Run the GUI harness after the build
+        type: boolean
+        default: true
+      sccache:
+        description: Use the sccache compiler cache
+        type: boolean
+        default: true
+      results_name:
+        description: Folder suffix on the ci-results branch
+        type: string
+        default: zen
+    outputs:
+      build_run_id:
+        description: Run id whose artifact the GUI job used
+        value: ${{ jobs.gui.outputs.build_run_id }}
+
+permissions:
+  contents: read   # jobs widen this where they publish results
+
+jobs:
+  build:
+    if: inputs.prebuilt_run_id == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    permissions:
+      contents: write  # publish-ci-results
+    defaults:
+      run:
+        shell: bash
+    env:
+      AXIOSOZO_SCCACHE: ${{ inputs.sccache && '1' || '0' }}
+      AXIOSOZO_SCCACHE_SIZE: 6G
+      CARGO_TERM_COLOR: never
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner resources and evidence directory
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { uname -a; nproc; free -h; df -h; } | tee "$EVIDENCE_OUT/runner.txt"
+
+      - name: Choose the build root (largest free disk, outside the checkout)
+        run: |
+          root_free=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+          mnt_free=$(df --output=avail -BG /mnt 2>/dev/null | tail -1 | tr -dc 0-9 || echo 0)
+          if [ "${mnt_free:-0}" -gt "$root_free" ]; then
+            sudo mkdir -p /mnt/axiosozo-build && sudo chown "$(id -u):$(id -g)" /mnt/axiosozo-build
+            echo "AXIOSOZO_BUILD_ROOT=/mnt/axiosozo-build" >> "$GITHUB_ENV"
+          else
+            mkdir -p /home/runner/axiosozo-build
+            echo "AXIOSOZO_BUILD_ROOT=/home/runner/axiosozo-build" >> "$GITHUB_ENV"
+          fi
+          echo "root ${root_free}G free, /mnt ${mnt_free:-0}G free" | tee -a "$EVIDENCE_OUT/runner.txt"
+
+      - name: System packages (scripts/linux_packages.py build)
+        run: |
+          start=$(date +%s)
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py build)
+          echo "APT_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          /usr/lib/llvm-19/bin/clang --version | head -1
+          python3 scripts/zen.py doctor > "$EVIDENCE_OUT/zen-doctor-before.json" 2>&1 || true
+
+      - name: Restore pinned toolchain downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/toolchains/zen/downloads
+          key: zen-toolchain-downloads-${{ runner.arch }}-${{ hashFiles('patches/zen/toolchains-linux-*.json') }}
+
+      - name: Restore the pinned Firefox source archive
+        id: firefox-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/zen/firefox-156.0.source.tar.xz
+          key: firefox-source-156.0-${{ hashFiles('upstreams.lock.json') }}
+
+      - name: Restore sccache
+        id: sccache-restore
+        if: env.AXIOSOZO_SCCACHE == '1'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/caches/sccache
+          key: zen-sccache-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: zen-sccache-${{ runner.arch }}-
+
+      - name: Pinned upstream sources (Zen, t3code)
+        run: ./dev setup --only upstreams 2>&1 | tee "$EVIDENCE_OUT/upstreams.log"
+
+      - name: Zen build (toolchain, source import, mach build)
+        timeout-minutes: 300
+        run: |
+          start=$(date +%s)
+          echo "ZEN_BUILD_START=$start" >> "$GITHUB_ENV"
+          set +e
+          /usr/bin/time -v ./dev setup --only zen > zen-setup.log 2>&1
+          status=$?
+          set -e
+          echo "ZEN_BUILD_SECONDS=$(( $(date +%s) - start ))" | tee -a "$GITHUB_ENV"
+          echo "ZEN_BUILD_EXIT=$status" >> "$GITHUB_ENV"
+          tail -n 120 zen-setup.log
+          exit $status
+
+      - name: Build statistics
+        if: always()
+        env:
+          SCCACHE_HIT: ${{ steps.sccache-restore.outputs.cache-matched-key }}
+          FIREFOX_HIT: ${{ steps.firefox-cache.outputs.cache-hit }}
+        run: |
+          tail -n 4000 zen-setup.log > "$EVIDENCE_OUT/zen-setup.tail.log" 2>/dev/null || true
+          grep -nE "^(error|ERROR)|error:|Error |FAIL|Traceback" zen-setup.log | head -200 > "$EVIDENCE_OUT/zen-setup.errors.txt" 2>/dev/null || true
+          # C/C++/IDL failures only (the list above fills up with Rust lint lines), with context.
+          grep -nE -B3 -A12 "(error: |fatal error|Error [0-9]+$|xpidl.*Error|IDLError)" zen-setup.log | grep -v "third_party/rust" | head -400 > "$EVIDENCE_OUT/zen-setup.compile-errors.txt" 2>/dev/null || true
+          for f in zen/obj/config.log zen/source/mozconfig; do
+            [ -f "$AXIOSOZO_BUILD_ROOT/$f" ] && tail -n 2000 "$AXIOSOZO_BUILD_ROOT/$f" > "$EVIDENCE_OUT/$(basename "$f").tail" || true
+          done
+          stats='{}'
+          sccache="$AXIOSOZO_BUILD_ROOT/toolchains/zen/sccache/sccache"
+          if [ -x "$sccache" ]; then
+            stats=$(SCCACHE_DIR="$AXIOSOZO_BUILD_ROOT/caches/sccache" "$sccache" --show-stats --stats-format json 2>/dev/null || echo '{}')
+            SCCACHE_DIR="$AXIOSOZO_BUILD_ROOT/caches/sccache" "$sccache" --show-stats > "$EVIDENCE_OUT/sccache-stats.txt" 2>&1 || true
+            SCCACHE_DIR="$AXIOSOZO_BUILD_ROOT/caches/sccache" "$sccache" --stop-server || true
+          fi
+          echo "$stats" > "$EVIDENCE_OUT/sccache-stats.json"
+          wall=$(grep -m1 "Elapsed (wall clock)" zen-setup.log | sed 's/.*: //' || true)
+          rss=$(grep -m1 "Maximum resident set size" zen-setup.log | sed 's/.*: //' || true)
+          python3 - "$EVIDENCE_OUT/build-stats.json" <<'PY'
+          import json, os, sys
+          env = os.environ
+          json.dump({
+              'commit': env.get('GITHUB_SHA'), 'ref': env.get('GITHUB_REF_NAME'), 'run_id': env.get('GITHUB_RUN_ID'),
+              'zen_setup_seconds': int(env['ZEN_BUILD_SECONDS']) if env.get('ZEN_BUILD_SECONDS') else None,
+              'zen_setup_exit': env.get('ZEN_BUILD_EXIT'), 'apt_seconds': env.get('APT_SECONDS'),
+              'sccache_enabled': env.get('AXIOSOZO_SCCACHE') == '1',
+              'sccache_restored_key': env.get('SCCACHE_HIT') or None,
+              'firefox_archive_cache_hit': env.get('FIREFOX_HIT') == 'true',
+          }, open(sys.argv[1], 'w'), indent=2)
+          PY
+          du -sh "$AXIOSOZO_BUILD_ROOT"/* "$AXIOSOZO_BUILD_ROOT"/caches/* 2>/dev/null | tee "$EVIDENCE_OUT/disk-usage.txt" || true
+          df -h >> "$EVIDENCE_OUT/disk-usage.txt"
+          [ -f "$AXIOSOZO_BUILD_ROOT/zen/firefox-156.0.source.tar.xz" ] && echo "FIREFOX_ARCHIVE_PRESENT=1" >> "$GITHUB_ENV" || true
+          cat "$EVIDENCE_OUT/build-stats.json"
+
+      - name: Save sccache
+        if: always() && env.AXIOSOZO_SCCACHE == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/caches/sccache
+          key: zen-sccache-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+        continue-on-error: true
+
+      - name: Save pinned toolchain downloads
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/toolchains/zen/downloads
+          key: zen-toolchain-downloads-${{ runner.arch }}-${{ hashFiles('patches/zen/toolchains-linux-*.json') }}
+        continue-on-error: true
+
+      - name: Save the pinned Firefox source archive
+        if: always() && steps.firefox-cache.outputs.cache-hit != 'true' && env.FIREFOX_ARCHIVE_PRESENT == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/zen/firefox-156.0.source.tar.xz
+          key: firefox-source-156.0-${{ hashFiles('upstreams.lock.json') }}
+        continue-on-error: true
+
+      - name: Package (mach package + axiosozo-build-info.json)
+        run: |
+          ./dev package 2>&1 | tee "$EVIDENCE_OUT/package.log"
+          cp "$AXIOSOZO_BUILD_ROOT/zen/obj/dist/axiosozo-build-info.json" "$EVIDENCE_OUT/" || true
+          ls -la "$AXIOSOZO_BUILD_ROOT/zen/obj/dist/" | grep -E "axiosozo" | tee -a "$EVIDENCE_OUT/package.log" || true
+
+      - name: Upload the Linux build artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: |
+            ${{ env.AXIOSOZO_BUILD_ROOT }}/zen/obj/dist/axiosozo-dev-*.tar.xz
+            ${{ env.AXIOSOZO_BUILD_ROOT }}/zen/obj/dist/axiosozo-build-info.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload the unstripped libxul (symbolizes GUI crash backtraces)
+        # mach package strips the shipped copy; dist/bin keeps the symbol table.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: ${{ env.AXIOSOZO_BUILD_ROOT }}/zen/obj/dist/bin/libxul.so
+          if-no-files-found: warn
+          retention-days: 14
+
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: ${{ inputs.results_name }}-build
+
+  gui:
+    needs: build
+    if: always() && inputs.gui && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.prebuilt_run_id != ''))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download-artifact from another run
+    outputs:
+      build_run_id: ${{ steps.source.outputs.run_id }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/gui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner resources
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          { uname -a; nproc; free -h; df -h /; } | tee "$EVIDENCE_OUT/runner.txt"
+
+      - name: GUI packages (scripts/linux_packages.py gui)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui)
+
+      - name: Artifact source
+        id: source
+        env:
+          PREBUILT: ${{ inputs.prebuilt_run_id }}
+        run: echo "run_id=${PREBUILT:-$GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: artifact
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Verify and unpack (same path as ./dev fetch-build)
+        run: ./dev fetch-build --from-dir artifact --run "${{ steps.source.outputs.run_id }}" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+
+      - name: Core dumps for crash backtraces (runner only)
+        run: |
+          sudo apt-get install -y --no-install-recommends gdb
+          sudo mkdir -p /tmp/cores && sudo chmod 1777 /tmp/cores
+          sudo sysctl -w kernel.core_pattern=/tmp/cores/core.%e.%p
+
+      - name: GUI harness (Xvfb, owned profile, fixture, xdotool input)
+        env:
+          ENGINE: ${{ inputs.engine }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          ulimit -c unlimited
+          ./dev gui-test --app fetched --engine "$ENGINE" --scenario "$SCENARIO" --screenshot "$EVIDENCE_OUT/linux-$ENGINE-fixture.png" --evidence-dir "$EVIDENCE_OUT/evidence"
+
+      - name: Any core dumps?
+        id: cores
+        if: always()
+        run: echo "found=$(ls /tmp/cores 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - name: Download the unstripped libxul of the same build
+        if: always() && steps.cores.outputs.found != '0'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: libxul-symbols
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Crash backtraces (if any process dumped core)
+        if: always() && steps.cores.outputs.found != '0'
+        run: |
+          app=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['directory'])" "$AXIOSOZO_BUILD_ROOT/linux-app/current.json" 2>/dev/null || true)
+          for core in /tmp/cores/core.*; do
+            [ -f "$core" ] || continue
+            exe=$(gdb -batch -c "$core" 2>/dev/null | grep -o "generated by .[^ ']*" | head -1 | cut -c15-)
+            [ -x "$exe" ] || exe="$app/axiosozo-dev-bin"
+            # Same build (same GNU build id), only the symbol table differs: let
+            # gdb map the unstripped copy where the core names the shipped one.
+            if [ -f libxul-symbols/libxul.so ] && [ -n "$app" ]; then
+              cp libxul-symbols/libxul.so "$app/libxul.so"
+              readelf -n libxul-symbols/libxul.so | grep -m1 "Build ID" | tee -a "$EVIDENCE_OUT/crash-backtraces.txt"
+            fi
+            echo "== $core ($exe)" | tee -a "$EVIDENCE_OUT/crash-backtraces.txt"
+            gdb -batch -ex "info sharedlibrary" -ex "bt 60" -ex "thread apply all bt 25" "$exe" "$core" 2>&1 | head -1500 >> "$EVIDENCE_OUT/crash-backtraces.txt"
+          done
+          ls -la /tmp/cores
+
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: ${{ inputs.results_name }}-gui-${{ inputs.engine }}

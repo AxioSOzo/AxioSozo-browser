@@ -4,7 +4,11 @@
 // >>> AxioSozo engine UI delegation: schema lives with the UI (contracts/cef-v1.md).
 import { validateDelegationEvent, validateDelegationCommand } from "./ChromiumBrowserUI.sys.mjs";
 import { validateAXTreeUpdate, validateAXLocation, validateAXCommand } from "./ChromiumAccessibility.sys.mjs";
+import { DamagePayloadAssembler, validMemfdCapability, validMemfdFrame, memfdSlotReader, memfdFramesWanted, memfdProcReadable,
+  disableMemfdFrames, MEMFD_FALLBACK_ACK, NativeFrame, isNativeFrame, NativeFrameSinks, nativeFrameRing,
+  workerFrameRing, frameWorkerWanted, frameWorkersUsable } from "./EngineFrameSurface.sys.mjs";
 // <<<
+import { SpareHost, prewarmWanted, PREWARM_STARTUP_DELAY_MS, PREWARM_AFTER_CLOSE_MS } from "./EngineHostSpare.sys.mjs";
 
 export const CEF_VERSION = "154.0.23+g062ebe4+chromium-154.0.8037.17";
 export const CHROMIUM_VERSION = "154.0.8037.17";
@@ -124,8 +128,33 @@ export function fitCEFRenderSurface({ width, height, device_scale }, { maxBytes 
 const BUILD_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?$/u;
 const CEF_ROOT = /^\/Volumes\/[A-Za-z0-9_-]+$/u;
 
-export function validCEFSessionRuntime(root, session, geckoProfile) {
-  if (typeof root !== "string" || !BUILD_ROOT.test(root)
+/** `ready.platform` labels of the pinned CEF distributions (contracts/cef-v1.md). */
+export const CEF_PLATFORMS = Object.freeze(["macosarm64", "linux64", "linuxarm64"]);
+const linuxPlatform = platform => platform === "linux64" || platform === "linuxarm64";
+/**
+ * The host label this Gecko build must see, from Services.appinfo.OS and XPCOMABI
+ * ("x86_64-gcc3", "aarch64-gcc3"); null when no pinned host exists. macOS has the
+ * one arm64 host whatever the ABI, exactly as before.
+ */
+export function expectedCEFPlatform(os, abi) {
+  if (os === "Darwin") return "macosarm64";
+  const cpu = typeof abi === "string" ? abi.split("-")[0] : "";
+  if (os === "Linux") return cpu === "x86_64" ? "linux64" : (cpu === "aarch64" ? "linuxarm64" : null);
+  return null;
+}
+// Linux has no project volume: the build root is any absolute, normalized directory
+// ($AXIOSOZO_BUILD_ROOT or <checkout>/.build), never a kernel pseudo file system.
+function validLinuxRoot(root) {
+  if (typeof root !== "string" || root.length > 1024 || !root.startsWith("/")) return false;
+  const parts = root.slice(1).split("/");
+  return parts.every(part => /^[A-Za-z0-9._-]{1,255}$/u.test(part) && part !== "." && part !== "..")
+    && !["proc", "sys", "dev"].includes(parts[0]);
+}
+const validBuildRoot = (root, platform) => linuxPlatform(platform) ? validLinuxRoot(root)
+  : typeof root === "string" && BUILD_ROOT.test(root);
+
+export function validCEFSessionRuntime(root, session, geckoProfile, platform = "macosarm64") {
+  if (!validBuildRoot(root, platform)
       || typeof session !== "string" || typeof geckoProfile !== "string") return false;
   const prefix = `${root}/runtime/`;
   if (!session.startsWith(prefix)) return false;
@@ -135,10 +164,42 @@ export function validCEFSessionRuntime(root, session, geckoProfile) {
     && geckoProfile === `${session}/gecko`;
 }
 
-/** The CEF root is the build root itself, or the volume that directly contains it. */
-export function validCEFRoot(root, cefRoot) {
-  return typeof root === "string" && typeof cefRoot === "string" && BUILD_ROOT.test(root) && CEF_ROOT.test(cefRoot)
+/** The CEF root is the build root itself, or the volume (Linux: directory) that directly contains it. */
+export function validCEFRoot(root, cefRoot, platform = "macosarm64") {
+  const cefRootValid = linuxPlatform(platform) ? validLinuxRoot(cefRoot) && cefRoot !== "/"
+    : typeof cefRoot === "string" && CEF_ROOT.test(cefRoot);
+  return typeof root === "string" && typeof cefRoot === "string" && validBuildRoot(root, platform) && cefRootValid
     && (root === cefRoot || root.slice(0, root.lastIndexOf("/")) === cefRoot);
+}
+
+/**
+ * The only host executables Zen spawns. macOS: the signed app bundle. Linux: the
+ * runtime directory probe.py setup writes (`cef/<platform>/`), or its `cef/linux`
+ * alias, beside libcef.so and the SUID chrome-sandbox.
+ */
+export function cefBinaryPaths(cefRoot, platform = "macosarm64") {
+  if (linuxPlatform(platform)) return [`${cefRoot}/cef/${platform}/AxioCEFProbe`, `${cefRoot}/cef/linux/AxioCEFProbe`];
+  return [`${cefRoot}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`];
+}
+
+const DISPLAY_VALUE = /^[A-Za-z0-9._/-]{0,200}:[0-9]{1,5}(?:\.[0-9]{1,3})?$/u;
+/**
+ * The complete environment of a host process: no inherited variables, secrets or
+ * personal paths. macOS keeps exactly PATH and TMPDIR. Linux adds HOME = the owned
+ * profile (Chromium's NSS database, fonts cache and dot-directories stay inside it)
+ * and the X display (X11 ozone: clipboard shared with the desktop, also via XWayland).
+ * `env(name)` reads Zen's own environment.
+ */
+export function cefHostEnvironment(profile, platform = "macosarm64", env = () => "") {
+  const environment = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: profile };
+  if (!linuxPlatform(platform)) return environment;
+  environment.HOME = profile;
+  const display = env("DISPLAY"), authority = env("XAUTHORITY");
+  if (typeof display === "string" && DISPLAY_VALUE.test(display)) {
+    environment.DISPLAY = display;
+    if (validLinuxRoot(authority)) environment.XAUTHORITY = authority;
+  }
+  return environment;
 }
 
 // Trackpad phases as reported by the engine-view component's NSEvent monitor.
@@ -210,7 +271,22 @@ function bufferLength(value) {
 }
 
 /** Subprocess.InputPipe.read(length) is exact, unlike readUint32's native endianness. */
-export async function readAXCF(pipe) {
+/**
+ * Optional frame damage (hello `frame_damage:true`, Linux pipe): `[[x, y, width,
+ * height]]` in physical pixels, inside the frame. Pixels outside it equal the previous
+ * frame delivered for the same target and size; the payload is still the whole frame.
+ */
+function validDamage(damage, width, height) {
+  if (!Array.isArray(damage) || damage.length !== 1 || !Array.isArray(damage[0]) || damage[0].length !== 4) return false;
+  const [x, y, w, h] = damage[0];
+  return [x, y, w, h].every(value => Number.isInteger(value) && value >= 0) && w > 0 && h > 0
+    && x + w <= width && y + h <= height;
+}
+
+function frameBytes(metadata, damage, payload) {
+  return damage && payload ? metadata.damage[0][2] * metadata.damage[0][3] * 4 : metadata.stride * metadata.height;
+}
+export async function readAXCF(pipe, { damage = false, payload = false, memfd = null } = {}) {
   const header = await pipe.read(16);
   if (bufferLength(header) !== 16) throw new Error("TRUNCATED_AXCF_HEADER");
   const view = new DataView(header);
@@ -224,12 +300,20 @@ export async function readAXCF(pipe) {
   const metadata = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
   if (!isObject(metadata) || metadata.version !== 1) throw new Error("INVALID_AXCF_METADATA");
   if (kind === 2) {
-    if (!hasKeys(metadata, ["version", "target", "frame_id", "width", "height", "stride", "device_scale", "format"])
+    const frameKeys = ["version", "target", "frame_id", "width", "height", "stride", "device_scale", "format"];
+    if (!hasKeys(metadata, [...frameKeys, ...(damage ? ["damage"] : []), ...(memfd ? ["slot", "payload_bytes"] : [])])
         || !uint(metadata.frame_id) || metadata.frame_id === 0
         || ![metadata.width, metadata.height].every(value => Number.isInteger(value) && value > 0 && value <= 4096)
-        || metadata.stride !== metadata.width * 4 || size !== metadata.stride * metadata.height
+        || metadata.stride !== metadata.width * 4
         || !Number.isFinite(metadata.device_scale) || metadata.device_scale < 1 || metadata.device_scale > 4
-        || metadata.format !== "BGRA8") throw new Error("INVALID_AXCF_FRAME");
+        || metadata.format !== "BGRA8"
+        || (damage && !validDamage(metadata.damage, metadata.width, metadata.height))
+        // `damage_payload`: the payload is exactly the damage rectangle's rows; with memfd frames
+        // (engine-stream-v1 §6.3) those bytes are in the named slot and the pipe payload is empty.
+        || !(memfd ? size === 0 && validMemfdFrame(metadata, memfd, frameBytes(metadata, damage, payload))
+          : size === frameBytes(metadata, damage, payload))) {
+      throw new Error("INVALID_AXCF_FRAME");
+    }
     validateCEFTarget(metadata.target, { browsingMode: "web" });
   }
   // Allocate/read large pixels only after both framing and metadata are checked.
@@ -249,6 +333,10 @@ const EVENT_FIELDS = {
   favicon: ["icon"],
   // Proposed with `ime`: the focused editable's kind and caret, in logical points.
   text_input: ["mode", "caret_x", "caret_y", "caret_width", "caret_height"],
+  // Linux web sessions: the page's selected text, for the desktop PRIMARY selection.
+  text_selection: ["text"],
+  // Linux web sessions: the focused field's <datalist> options (Zen draws the suggestions).
+  datalist: ["x", "y", "width", "height", "value", "options"],
   // >>> AxioSozo engine UI delegation (validated by validateDelegationEvent)
   prompt: ["prompt_id", "kind", "details", "timeout_ms"], prompt_closed: ["prompt_id", "reason"],
   download_updated: ["download_id", "state", "received_bytes", "total_bytes", "speed", "paused"],
@@ -258,6 +346,15 @@ const EVENT_FIELDS = {
   ax_tree_update: ["seq", "batch", "reset", "final", "root", "focus", "px", "events", "truncated", "nodes"],
   ax_location: ["seq", "nodes"],
 };
+export const DATALIST_LIMITS = Object.freeze({ options: 64, text: 256, value: 1024 });
+/** A host `datalist` event: geometry in logical points, page-defined options, the field's value. */
+export function validDatalist(value) {
+  const box = ["x", "y", "width", "height"].every(key => Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 16384);
+  const text = (item, max) => typeof item === "string" && item.length <= max && !item.includes("\0");
+  return box && text(value.value, DATALIST_LIMITS.value) && Array.isArray(value.options) && value.options.length <= DATALIST_LIMITS.options
+    && value.options.every(option => isObject(option) && hasKeys(option, ["value", "label"]) && text(option.value, DATALIST_LIMITS.text)
+      && option.value.length > 0 && text(option.label, DATALIST_LIMITS.text));
+}
 // Only a PNG the host encoded itself: never a remote URL Zen would fetch, never SVG.
 export const MAX_FAVICON_LENGTH = 7400;
 const FAVICON = /^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
@@ -270,7 +367,7 @@ const DELEGATION_EVENTS = new Set(["prompt", "prompt_closed", "download_updated"
 // arbitrary exception messages, pipe contents or authentication material.
 const READ_FAILURE_CODES = new Set([
   "TRUNCATED_AXCF_HEADER", "TRUNCATED_AXCF_METADATA", "TRUNCATED_AXCF_PIXELS",
-  "INVALID_AXCF_HEADER", "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME",
+  "INVALID_AXCF_HEADER", "INVALID_AXCF_LENGTH", "INVALID_AXCF_METADATA", "INVALID_AXCF_FRAME", "INVALID_DAMAGE_PAYLOAD", "MEMFD_READ_FAILED",
   "INVALID_CEF_TARGET", "FOREIGN_CEF_TARGET", "INVALID_CEF_CREATION", "UNKNOWN_CEF_TARGET",
   "INVALID_CEF_GENERATION", "STALE_CEF_EVENT", "UNEXPECTED_CEF_FRAME", "FOREIGN_CEF_FRAME",
   "FUTURE_CEF_FRAME", "INVALID_CEF_EVENT", "UNVERIFIED_CEF_RUNTIME", "UNREQUESTED_CEF_CREATION",
@@ -317,6 +414,10 @@ export function surfaceFrameRate(service) {
 /** cef-v1 `frame_rate` command values. */
 export const FRAME_RATES = Object.freeze([60, 120]);
 
+// Request lines are bounded (16 KiB of UTF-8).
+const utf8Encoder = new TextEncoder();
+const utf8Length = text => utf8Encoder.encode(text).length;
+
 /**
  * One authenticated native process. A web host serves every Chromium tab of a
  * Zen profile; each tab is a CEFEngineAdapter registered by its tab_id.
@@ -331,15 +432,31 @@ export class CEFHostConnection {
   // Heartbeat watchdog (armed by a ready capability): last accepted sequence, the time anything
   // was last heard or the watchdog last reset, the pending check timer and the wake observer.
   #heartbeatSequence = 0; #heartbeatTimeout; #heartbeatInterval = null; #heartbeatSeen = 0;
-  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers;
+  #heartbeatCheckedAt = 0; #heartbeatTimer = null; #wakeObserver = null; #now; #observers; #assembler = null; #readSlot = null; #slotReader = null; #native = null;
   constructor(process, { token, instance, identity, timers, deadline = 15000, browsingMode = "fixture",
     shared = false, onFailure = () => {}, surface = null, heartbeatTimeout = HEARTBEAT_TIMEOUT_MS,
-    now = () => Date.now(), observers = globalThis.Services?.obs ?? null }) {
+    now = () => Date.now(), observers = globalThis.Services?.obs ?? null, platform = "macosarm64", damagePayload = true,
+    frameTransport = "pipe", readSlot = null }) {
     if (!/^[0-9a-f]{64}$/u.test(token)) throw new Error("INVALID_CEF_BOOTSTRAP");
-    if (surface && (!surface.endpoint || ![60, 120].includes(surface.frameRate))) throw new Error("INVALID_CEF_BOOTSTRAP");
+    if (!CEF_PLATFORMS.includes(platform)) throw new Error("INVALID_CEF_BOOTSTRAP");
+    // The IOSurface path (engine-surface-v1) exists on macOS only.
+    if (surface && (platform !== "macosarm64" || !surface.endpoint || ![60, 120].includes(surface.frameRate))) {
+      throw new Error("INVALID_CEF_BOOTSTRAP");
+    }
     if (!["fixture", "web"].includes(browsingMode)) throw new Error("INVALID_CEF_MODE");
     if (!id(instance) || !(browsingMode === "web" ? validWebOrigin(identity) : validFixtureOrigin(identity))) throw new Error("INVALID_CEF_BOOTSTRAP");
     this.browsingMode = browsingMode; this.shared = shared; this.instance = instance; this.identity = identity;
+    this.platform = platform;
+    // Linux pipe frames name their changed rectangle so chrome uploads only that.
+    this.frameDamage = platform !== "macosarm64" && !surface;
+    // ...and carry only that rectangle (hello `damage_payload`); frames are rebuilt per target.
+    this.damagePayload = this.frameDamage && damagePayload;
+    this.#assembler = this.damagePayload ? new DamagePayloadAssembler() : null;
+    // engine-stream-v1 §6.3 memfd frames: Linux pipe mode only (EXPERIMENTAL, pref-gated by launchHost).
+    if (!["pipe", "memfd"].includes(frameTransport) || (frameTransport === "memfd" && !this.frameDamage)) {
+      throw new Error("INVALID_CEF_BOOTSTRAP");
+    }
+    this.frameTransport = frameTransport; this.#readSlot = readSlot; this.memfd = null;
     this.#process = process; this.#token = token; this.#timers = timers; this.#deadline = deadline;
     this.#heartbeatTimeout = heartbeatTimeout; this.#now = now; this.#observers = observers;
     this.onFailure = onFailure;
@@ -385,7 +502,10 @@ export class CEFHostConnection {
     }, () => this.fail("CEF_PROCESS_FAILURE"));
     const hello = { version: 1, method: "hello", token: this.#token,
       engine_instance: this.instance, fixture_origin: this.identity,
-      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}) };
+      ...(this.browsingMode === "web" ? { browsing_mode: "web" } : {}),
+      ...(this.frameDamage ? { frame_damage: true } : {}),
+      ...(this.damagePayload ? { damage_payload: true } : {}),
+      ...(this.frameTransport === "memfd" ? { frame_transport: "memfd" } : {}) };
     if (this.#endpoint) {
       const endpoint = this.#endpoint;
       try {
@@ -488,7 +608,8 @@ export class CEFHostConnection {
   }
   async #write(value) {
     const text = JSON.stringify(value) + "\n";
-    if (new TextEncoder().encode(text).length > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
+    // A UTF-16 unit is at most 3 UTF-8 bytes: only a long line is measured (frame acks, input: never).
+    if (text.length > 5461 && utf8Length(text) > 16384) throw new Error("CEF_REQUEST_TOO_LARGE");
     try { await this.#process.stdin.write(text); }
     catch (error) { this.fail("CEF_WRITE_OUTCOME_UNCERTAIN"); throw error; }
   }
@@ -533,6 +654,24 @@ export class CEFHostConnection {
     if (!adapter || (created ? adapter.target : adapter.target?.native_target_id !== target.native_target_id)) return null;
     return adapter;
   }
+  /**
+   * engine-stream-v1 §6.3 fallback: a slot could not be read. The frame is dropped (never
+   * presented), its target's assembled frame is forgotten, and its frame_ack asks the host to
+   * send every later frame through the pipe, each target's next one whole.
+   */
+  async #memfdFallback(value) {
+    this.readPhase = "frame_validate";
+    if (value.frame_id <= this.lastFrame) throw new Error("UNEXPECTED_CEF_FRAME");
+    this.lastFrame = value.frame_id;
+    this.memfd = null; this.frameTransport = "pipe";
+    this.memfdFallback = { frameId: value.frame_id, ...disableMemfdFrames("slot_read_failed") };
+    this.#assembler?.forget(value.target?.native_target_id);
+    // The native receiver takes memfd frames only: the JS path draws the pipe frames from now on.
+    if (this.#native && !this.#native.acceptsBuffers) { this.#native.close(); this.#native = null; this.nativeReceiver = false; }
+    console.warn("AXIOSOZO_MEMFD_FALLBACK", JSON.stringify({ engine: "chromium", frameId: value.frame_id }));
+    this.readPhase = "frame_ack";
+    await this.request("frame_ack", { frame_id: value.frame_id, ...MEMFD_FALLBACK_ACK }, value.target, { acknowledge: true });
+  }
   #targetFailed(adapter, error) {
     const code = READ_FAILURE_CODES.has(error?.message) ? error.message : "CEF_PROTOCOL_OR_EOF";
     if (!(error instanceof TargetError) || !this.shared || !adapter) throw new Error(code);
@@ -541,7 +680,23 @@ export class CEFHostConnection {
   async #read() {
     while (!this.#ended) {
       this.readPhase = "packet";
-      const { kind, metadata: value, pixels } = await readAXCF(this.#process.stdout);
+      const packet = await readAXCF(this.#process.stdout, { damage: this.frameDamage, payload: this.damagePayload, memfd: this.memfd });
+      const { kind, metadata: value } = packet;
+      let pixels = packet.pixels;
+      if (kind === 2 && this.memfd && !this.#endpoint) {
+        this.readPhase = "frame_memfd";
+        // Native receiver or frame worker: the slot is read off the main thread; no pixels reach JS.
+        try { pixels = this.#native ? await this.#native.apply(value) : await this.#slotReader(value.slot, value.payload_bytes); }
+        catch (error) {
+          if (error?.message !== "MEMFD_READ_FAILED") throw error;
+          await this.#memfdFallback(value);
+          continue;
+        }
+      }
+      // Every delivered frame is applied, presented or not (cef-v1 "Frame damage").
+      // After a memfd fallback, a frame worker's targets take the pipe payloads too.
+      if (kind === 2 && this.#native?.acceptsBuffers && !isNativeFrame(pixels)) pixels = await this.#native.applyBuffer(value, pixels);
+      if (kind === 2 && this.#assembler && !isNativeFrame(pixels)) pixels = this.#assembler.apply(value, pixels);
       if (kind === 2) {
         this.readPhase = "frame_validate";
         // Surface mode: the pipe carries JSON events only; frames travel over Mach.
@@ -578,9 +733,11 @@ export class CEFHostConnection {
         if (value.event === "created" && creation?.method !== "create") throw new Error("UNREQUESTED_CEF_CREATION");
         adapter = creation?.abandoned ? null : this.#adapterFor(value.target, value.event === "created");
         if (!adapter && !this.shared) throw new Error("UNKNOWN_CEF_TARGET");
+        if (value.event === "closed") { this.#assembler?.forget(value.target.native_target_id); this.#native?.forget(value.target.native_target_id); }
         // A target whose tab went away while it was being created is closed at once.
         if (creation?.abandoned) this.retire(value.target.tab_id, this.request("close", {}, value.target));
-      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "favicon"].includes(value.event)
+      } else if (["created", "navigation", "load", "loading", "title", "url", "closed", "cursor", "open_url", "text_input", "text_selection",
+          "favicon", "datalist"].includes(value.event)
           || DELEGATION_EVENTS.has(value.event) || AX_EVENTS.has(value.event)) {
         throw new Error("MISSING_CEF_TARGET");
       }
@@ -610,7 +767,7 @@ export class CEFHostConnection {
     const web = this.browsingMode === "web", capabilities = value.capabilities, surface = !!this.#endpoint;
     if (this.#ready || this.status !== "starting" || value.cef !== CEF_VERSION || value.chromium !== CHROMIUM_VERSION
         || value.runtime_cef !== CEF_VERSION.split("+")[0] || value.runtime_chromium !== CHROMIUM_VERSION
-        || value.engine_instance !== this.instance || value.platform !== "macosarm64"
+        || value.engine_instance !== this.instance || value.platform !== this.platform
         || value.render_path !== (surface ? RENDER_PATH_SURFACE : RENDER_PATH_PIPE) || value.sandbox_configured !== true
         // Surface mode must be exactly what the hello negotiated; the pipe never claims it.
         || (surface ? capabilities?.surface !== true || capabilities?.external_begin_frame !== this.#endpoint.externalBeginFrames
@@ -629,9 +786,27 @@ export class CEFHostConnection {
         || (this.shared && (capabilities?.multi_target !== true || capabilities?.stop !== true
           || capabilities?.cursor !== true || capabilities?.persistent_profile !== web || capabilities?.open_in_tab !== web))
         || capabilities?.private_mode !== false || typeof (capabilities?.ime ?? false) !== "boolean"
+        // Frame damage is exactly what the hello asked for.
+        || (capabilities?.frame_damage ?? false) !== this.frameDamage
+        || (capabilities?.damage_payload ?? false) !== this.damagePayload
+        // memfd frames (engine-stream-v1 §6.3): exactly the transport asked for, a bounded ring.
+        || (capabilities?.frame_transport ?? "pipe") !== this.frameTransport
+        || ("memfd" in (capabilities ?? {})) !== (this.frameTransport === "memfd")
+        || (this.frameTransport === "memfd" && !validMemfdCapability(capabilities.memfd, MAX_PIXELS))
         // Optional liveness announcement; a value that could never fit the 5 s rule is not trusted.
         || (capabilities?.heartbeat_interval_ms !== undefined && !(Number.isInteger(capabilities.heartbeat_interval_ms)
           && capabilities.heartbeat_interval_ms >= 100 && capabilities.heartbeat_interval_ms <= 2000))) throw new Error("UNVERIFIED_CEF_RUNTIME");
+    if (this.frameTransport === "memfd") {
+      const memfd = Object.freeze({ ...capabilities.memfd });
+      try { this.#slotReader = this.#readSlot ? (slot, bytes) => this.#readSlot(memfd, slot, bytes) : memfdSlotReader(this.#process.pid, memfd); }
+      catch { throw new Error("UNVERIFIED_CEF_RUNTIME"); }
+      this.memfd = memfd;
+      // Native receiver (pref, component): pixels never reach JS; the JS reader stays the fallback.
+      const ring = this.#readSlot ? null : nativeFrameRing(this.#process.pid, memfd) ?? workerFrameRing(this.#process.pid, memfd);
+      this.#native = ring ? new NativeFrameSinks(ring) : null;
+      this.nativeReceiver = !!this.#native;
+      this.frameRingKind = ring?.kind ?? (ring ? "native" : null);
+    }
     this.#ready = true; this.capabilities = Object.freeze({ ...capabilities });
     this.#readyWait.resolve(value);
     this.#startHeartbeatWatchdog(capabilities.heartbeat_interval_ms);
@@ -678,7 +853,7 @@ export class CEFHostConnection {
   }
   fail(reason) {
     if (this.#ended) return;
-    this.#ended = true; this.status = "failed";
+    this.#ended = true; this.status = "failed"; this.#native?.close(); this.#native = null;
     this.#stopHeartbeatWatchdog();
     // Fixed metadata only: no URLs, input, target IDs, profile paths or tokens.
     console.error("AXIOSOZO_CEF_DIAGNOSTIC", JSON.stringify({ code:reason, phase:this.readPhase,
@@ -705,7 +880,7 @@ export class CEFHostConnection {
       await done;
       const result = await this.#process.wait();
       if (result.exitCode !== 0) throw new Error("CEF_SHUTDOWN_FAILED");
-      this.#ended = true; this.status = "closed";
+      this.#ended = true; this.status = "closed"; this.#native?.close(); this.#native = null;
       this.#stopHeartbeatWatchdog();
       const unavailable = new Error("CEF_UNAVAILABLE");
       for (const waiter of this.#requests.values()) waiter.reject(unavailable);
@@ -734,6 +909,9 @@ export class CEFEngineAdapter {
   // Surface mode: the bound canvas, its endpoint target id, the generations chrome
   // confirmed to the endpoint, and whether the endpoint presented a first frame.
   #surfaceElement; #surfaceId = null; #confirmed = null; #surfacePresented = false;
+  // Frame damage: true until a frame reached onFrame, and after any frame of this
+  // target that did not (stale, old size, not yet loaded); the next one is then whole.
+  #damageGap = true;
   constructor(processOrHost, { token, pendingTarget, timers, deadline = 15000, browsingMode = "fixture",
     onEvent = () => {}, onFrame = () => {}, onFailure = () => {}, element = null, onGeometry = () => {} }) {
     this.#owned = processOrHost?.[HOST_BRAND] !== true;
@@ -758,6 +936,12 @@ export class CEFEngineAdapter {
   get nativeExitCode() { return this.#host.nativeExitCode; }
   /** GPU surface presentation (engine-surface-v1). False only in the labelled BGRA pipe fallback. */
   get surfaceMode() { return this.#host.surfaceMode === true; }
+  /** Pipe mode: "pipe", or "memfd" (engine-stream-v1 §6.3) when that was negotiated. */
+  get frameTransport() { return this.#host.frameTransport ?? "pipe"; }
+  /** memfd frames: "native" or "worker" when a frame ring reads the slots off the main thread, else null. */
+  get frameRingKind() { return this.#host.frameRingKind ?? null; }
+  /** §6.3: {frameId, reason, at} once this host fell back from memfd frames to the pipe. */
+  get memfdFallback() { return this.#host.memfdFallback ?? null; }
   get renderPath() { return this.#host.renderPath ?? RENDER_PATH_PIPE; }
   /** nsIAxioEngineSurfaceService input helpers; null in the pipe fallback. */
   get nativeInput() { return this.surfaceMode ? this.#host.nativeInput ?? null : null; }
@@ -839,10 +1023,14 @@ export class CEFEngineAdapter {
     const sizeMatches = this.surface && value.width === Math.ceil(this.surface.width * this.surface.device_scale)
       && value.height === Math.ceil(this.surface.height * this.surface.device_scale)
       && value.device_scale === this.surface.device_scale;
-    if (!same || !sizeMatches || !this.#loaded || this.#closing || this.#ended) return;
+    if (!same || !sizeMatches || !this.#loaded || this.#closing || this.#ended) { this.#damageGap = true; return; }
     this.#host.readPhase = "frame_present"; this.#host.lastFrameBytes = pixels.byteLength;
-    try { await this.onFrame(value, pixels); }
+    let frame = value;
+    if (this.#damageGap && "damage" in value) { frame = { ...value }; delete frame.damage; }
+    this.#damageGap = true;
+    try { await this.onFrame(frame, pixels); }
     catch { throw targetError("CEF_FRAME_PRESENTATION_FAILED"); }
+    this.#damageGap = false;
     this.#frameWait?.resolve(this.target);
   }
   /** onTargetGeometry from the endpoint: the first frame arrived, or its size/scale changed. */
@@ -895,6 +1083,9 @@ export class CEFEngineAdapter {
     if (value.event === "text_input" && (!this.inputFeatures.ime || !["none", "text", "password"].includes(value.mode)
         || ![value.caret_x, value.caret_y, value.caret_width, value.caret_height]
           .every(number => Number.isFinite(number) && number >= 0 && number <= 16384))) throw targetError("INVALID_CEF_TEXT_INPUT");
+    if (value.event === "text_selection" && (this.browsingMode !== "web" || typeof value.text !== "string"
+        || !value.text.length || value.text.length > 16384)) throw targetError("INVALID_CEF_TEXT_SELECTION");
+    if (value.event === "datalist" && (this.browsingMode !== "web" || !validDatalist(value))) throw targetError("INVALID_CEF_DATALIST");
     if (AX_EVENTS.has(value.event)) {
       if (this.#host.capabilities?.accessibility !== true) throw targetError("INVALID_CEF_ACCESSIBILITY");
       try { (value.event === "ax_tree_update" ? validateAXTreeUpdate : validateAXLocation)(value); }
@@ -1031,6 +1222,12 @@ export class CEFEngineAdapter {
     if (typeof focused !== "boolean") throw new Error("INVALID_FOCUS");
     return this.#request("focus", { focused });
   }
+  /** Linux web sessions: ask for the focused field's <datalist> (answered by a `datalist` event). */
+  datalistQuery(target) {
+    this.resolve(target);
+    if (this.browsingMode !== "web") return Promise.resolve({ status: "unsupported", reason: "FIXTURE_ONLY" });
+    return this.#request("datalist_query", {});
+  }
   visibility(target, visible) {
     this.resolve(target);
     if (typeof visible !== "boolean") throw new Error("INVALID_VISIBILITY");
@@ -1152,14 +1349,15 @@ export function chromiumHost() {
 async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
   const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
+  const platform = expectedCEFPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI);
   const root = Services.env.get("AXIOSOZO_BUILD_ROOT");
   const session = Services.env.get("AXIOSOZO_SESSION_RUNTIME");
   const command = Services.env.get("AXIOSOZO_CEF_BINARY");
   // The CEF host is built once at the volume root; a named sub build root
   // (e.g. /Volumes/AxioSozoBuild/workstation) shares it.
   const cefRoot = Services.env.get("AXIOSOZO_CEF_ROOT") || root;
-  if (!validCEFRoot(root, cefRoot) || command !== `${cefRoot}/cef/AxioCEFProbe.app/Contents/MacOS/AxioCEFProbe`
-      || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path)
+  if (!platform || !validCEFRoot(root, cefRoot, platform) || !cefBinaryPaths(cefRoot, platform).includes(command)
+      || !validCEFSessionRuntime(root, session, Services.dirsvc.get("ProfD", Ci.nsIFile).path, platform)
       || !(browsingMode === "web"
         ? Services.env.get("AXIOSOZO_ENGINE_SWITCHING") === "1" && origin === BLANK_IDENTITY
         : browsingMode === "fixture" && origin === Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN") && validFixtureOrigin(origin))) {
@@ -1175,7 +1373,7 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   // GPU surface path (engine-surface-v1): the endpoint exists before the host is
   // spawned, so the host can connect before CEF starts. Without the engine-view
   // component this build uses the BGRA pipe fallback, and says so.
-  const service = engineSurfaceService();
+  const service = platform === "macosarm64" ? engineSurfaceService() : null;
   let endpoint = null;
   try { endpoint = service?.createEndpoint(true) ?? null; } catch { endpoint = null; }
   if (!endpoint) {
@@ -1185,7 +1383,8 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
   let process;
   try {
     process = await Subprocess.call({ command, arguments: ["--stream", profile, profile],
-      environmentAppend: false, environment: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", TMPDIR: profile }, stderr: "pipe" });
+      environmentAppend: false, environment: cefHostEnvironment(profile, platform, name => Services.env.get(name)),
+      stderr: "pipe" });
   } catch (error) {
     try { endpoint?.close(); } catch {}
     if (browsingMode !== "web") await IOUtils.remove(profile, { recursive: true });
@@ -1197,15 +1396,56 @@ async function launchHost(browsingMode, origin = BLANK_IDENTITY) {
     const cleanup = () => IOUtils.remove(profile, { recursive: true });
     process.wait().then(cleanup, cleanup).catch(() => {});
   }
+  // engine-stream-v1 §6.3 memfd frames: Linux pipe mode only (pref, MEMFD_FRAMES_DEFAULT), and only
+  // when this child's /proc/<pid>/fd is readable; otherwise the pipe.
+  const frameTransport = !endpoint && platform !== "macosarm64" && memfdFramesWanted()
+    && await memfdProcReadable(process.pid) ? "memfd" : "pipe";
+  if (frameTransport === "memfd" && frameWorkerWanted()) await frameWorkersUsable();
   const host = new CEFHostConnection(process, { token, instance, identity: origin, timers, browsingMode,
-    shared: browsingMode === "web", surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
+    shared: browsingMode === "web", platform, frameTransport,
+    surface: endpoint ? { endpoint, service, frameRate: surfaceFrameRate(service) } : null });
   try { return await host.connect(); }
   catch (error) { await host.shutdown().catch(() => {}); throw error; }
 }
 
 /**
+ * Warm spare fixture host (EngineHostSpare.sys.mjs): one per Firefox process, held by the
+ * shared module instance (every window imports this module through its own module graph).
+ * Linux only; never the web-mode host. Returns whether a spare is (being) scheduled.
+ */
+let fixtureSpare = null;
+const SHARED_MODULE = "chrome://browser/content/axiosozo/CEFEngineAdapter.sys.mjs";
+function sharedInstance() {
+  try { return ChromeUtils.importESModule(SHARED_MODULE); } catch { return null; }
+}
+export function prewarmCEFFixtureHost(win, delayMs = PREWARM_STARTUP_DELAY_MS) {
+  const shared = sharedInstance();
+  if (shared && shared.prewarmCEFFixtureHost !== prewarmCEFFixtureHost) return shared.prewarmCEFFixtureHost(win, delayMs);
+  const origin = Services.env.get("AXIOSOZO_ENGINE_FIXTURE_ORIGIN");
+  if (expectedCEFPlatform(Services.appinfo.OS, Services.appinfo.XPCOMABI) === "macosarm64" || !validFixtureOrigin(origin)) return false;
+  if (!prewarmWanted(Services.prefs)) { fixtureSpare?.drop(); return false; }
+  fixtureSpare ??= new SpareHost(() => launchHost("fixture", origin));
+  fixtureSpare.schedule(win, delayMs);
+  return true;
+}
+/** The spare for a fixture tab of `origin`, or null (then the caller starts a host itself). */
+export async function takeCEFFixtureHost(origin) {
+  const shared = sharedInstance();
+  if (shared && shared.takeCEFFixtureHost !== takeCEFFixtureHost) return shared.takeCEFFixtureHost(origin);
+  if (!fixtureSpare || !prewarmWanted(Services.prefs)) return null;
+  return fixtureSpare.take(host => !host.ended && host.status === "connected" && host.targetCount === 0
+    && host.browsingMode === "fixture" && host.identity === origin);
+}
+export function cefFixtureSpareStats() {
+  const shared = sharedInstance();
+  if (shared && shared.cefFixtureSpareStats !== cefFixtureSpareStats) return shared.cefFixtureSpareStats();
+  return fixtureSpare?.stats ?? null;
+}
+
+/**
  * Attach one Zen tab as a Chromium target. Web tabs share the profile's host;
- * the fixture probe keeps its own strict single-origin host per tab.
+ * the fixture probe keeps its own strict single-origin host per tab (a warm spare
+ * when one is ready, see prewarmCEFFixtureHost).
  */
 export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", onEvent, onFrame, onFailure,
   element = null, onGeometry }) {
@@ -1218,12 +1458,21 @@ export async function launchCEF(win, { tabId, origin, browsingMode = "fixture", 
     return new shared.CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance, identity: origin,
       document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure, element, onGeometry });
   }
-  const host = await launchHost("fixture", origin);
-  const adapter = new CEFEngineAdapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
+  const spare = await takeCEFFixtureHost(origin);
+  const host = spare ?? await launchHost("fixture", origin);
+  // A spare comes from the shared module instance: its adapter class too (as in web mode).
+  const Adapter = (spare && sharedInstance()?.CEFEngineAdapter) || CEFEngineAdapter;
+  const adapter = new Adapter(host, { pendingTarget: { tab_id: tabId, engine_instance: host.instance,
     identity: origin, document_generation: 1, navigation_generation: 1, private_mode: false }, onEvent, onFrame, onFailure,
     element, onGeometry });
   // A fixture host exists for exactly this one tab.
   const close = adapter.close.bind(adapter);
-  adapter.close = async () => { try { await close(); } finally { await host.shutdown().catch(() => {}); } };
+  adapter.close = async () => {
+    try { await close(); } finally {
+      await host.shutdown().catch(() => {});
+      try { prewarmCEFFixtureHost(win, PREWARM_AFTER_CLOSE_MS); } catch {}
+    }
+  };
+  adapter.warmHost = !!spare;
   return adapter;
 }

@@ -1,0 +1,87 @@
+# Evaluation of a current upstream WPE WebKit release (ADR 004): discover the
+# official checksum, then (once pinned in upstreams.lock.json webkit.upstream)
+# build it in the pinned debian:13 image with a cached ccache and run the host
+# test suite against it. Not a product build; evidence only.
+name: linux-webkit-upstream
+on:
+  push:
+    branches: [cloud/integration, dev]
+    paths:
+      - native/webkit-host/upstream/**
+      - .github/workflows/linux-webkit-upstream.yml
+  # Evidence only and up to ~6 h: a PR runs it only when the upstream inputs change, not for
+  # edits of this file alone (those run on the push to cloud/integration or dev).
+  pull_request:
+    branches: [cloud/integration, dev]
+    paths:
+      - native/webkit-host/upstream/**
+
+env:
+  IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+
+permissions:
+  contents: read   # jobs widen this where they publish results
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-discover
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sh native/webkit-host/upstream/discover.sh "$EVIDENCE_OUT"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        key: ${{ fromJSON(github.ref_name == 'cloud/webkit-feel' && '["upstream"]' || '["upstream", "upstream.previous_stable"]') }}
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/../evidence-build
+      CCACHE_HOST: ${{ github.workspace }}/../ccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Free runner disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.CCACHE_HOST }}
+          key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
+          restore-keys: |
+            wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-
+            wpe-ccache-${{ matrix.key }}-
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Build upstream WPE and run the host suites
+        timeout-minutes: 330
+        run: |
+          mkdir -p "$EVIDENCE_OUT" "$CCACHE_HOST"
+          start=$(date +%s); set +e
+          docker run --rm --shm-size=1g \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$EVIDENCE_OUT:/out" -v "$CCACHE_HOST:/ccache" "$IMAGE" sh /src/native/webkit-host/upstream/build.sh "${{ matrix.key }}"
+          code=$?
+          echo "{\"key\": \"${{ matrix.key }}\", \"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start ))}" > "$EVIDENCE_OUT/job.json"
+          sudo chown -R "$(id -u)" "$CCACHE_HOST"
+          exit $code
+      - if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.CCACHE_HOST }}
+          key: wpe-ccache-${{ matrix.key }}-${{ hashFiles('upstreams.lock.json', 'native/webkit-host/upstream/build.sh') }}-${{ github.run_id }}
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: build-${{ matrix.key }}

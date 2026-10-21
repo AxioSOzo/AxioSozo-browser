@@ -1,0 +1,589 @@
+{
+  "component": "webkit-macos-host",
+  "label": "EXPERIMENTAL component evidence (never Zen E1/E2)",
+  "E1": "NOT_TESTED",
+  "E2": "NOT_TESTED",
+  "runner": "GitHub macos-15 arm64 (Apple M1 virtual, 3 cores), macOS 15.7.9, system WebKit 20621.3.11.11.3",
+  "workflow": ".github/workflows/macos-webkit-host.yml",
+  "capture_bench_run": "39342162006",
+  "runs": {
+    "39345979318": {
+      "job": "host",
+      "tests": {
+        "stream": "PASS",
+        "input": "PASS",
+        "security": "PASS"
+      },
+      "sandbox": {
+        "web_process": true,
+        "network_process": true,
+        "web_process_sandboxed": true,
+        "all_helpers_sandboxed": true,
+        "sandbox": "seatbelt"
+      },
+      "surface_cases": {
+        "negative-bogus-release": {
+          "status": "PASS",
+          "host_exit_code": 64,
+          "orphan_helpers": 0
+        },
+        "negative-no-connected": {
+          "status": "PASS",
+          "host_exit_code": 64,
+          "orphan_helpers": 0
+        },
+        "pipe-60-baseline": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 59.6,
+          "frame_interval_p50_ms": 15.2,
+          "frame_interval_p95_ms": 27.8,
+          "host_copy_send_p50_ms": 0,
+          "paint_to_receive_p50_ms": 0,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 31.3,
+            "host": 47.9,
+            "total": 79.2
+          },
+          "input_to_frame_p50_ms": 24.9,
+          "input_to_frame_p95_ms": 73.3,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": null
+        },
+        "surface-external-120": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 34.4,
+          "frame_interval_p50_ms": 25.1,
+          "frame_interval_p95_ms": 62.4,
+          "host_copy_send_p50_ms": 0.96,
+          "paint_to_receive_p50_ms": 1.01,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 37.8,
+            "host": 37.0,
+            "total": 74.9
+          },
+          "input_to_frame_p50_ms": 19.9,
+          "input_to_frame_p95_ms": 38.3,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 7,
+            "global_flag_frames": 348,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-external-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 27.2,
+          "frame_interval_p50_ms": 32.6,
+          "frame_interval_p95_ms": 75.6,
+          "host_copy_send_p50_ms": 0.98,
+          "paint_to_receive_p50_ms": 1.04,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 27.8,
+            "host": 24.6,
+            "total": 52.4
+          },
+          "input_to_frame_p50_ms": 45.2,
+          "input_to_frame_p95_ms": 121.8,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 6,
+            "global_flag_frames": 236,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-internal-120": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 56.8,
+          "frame_interval_p50_ms": 16.8,
+          "frame_interval_p95_ms": 29.1,
+          "host_copy_send_p50_ms": 0.9,
+          "paint_to_receive_p50_ms": 0.94,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 42.0,
+            "host": 48.6,
+            "total": 90.6
+          },
+          "input_to_frame_p50_ms": 11.4,
+          "input_to_frame_p95_ms": 36.9,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 7,
+            "global_flag_frames": 558,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-internal-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 59.4,
+          "frame_interval_p50_ms": 16.9,
+          "frame_interval_p95_ms": 25.5,
+          "host_copy_send_p50_ms": 0.85,
+          "paint_to_receive_p50_ms": 0.89,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 22.6,
+            "host": 25.6,
+            "total": 48.2
+          },
+          "input_to_frame_p50_ms": 19.9,
+          "input_to_frame_p95_ms": 28.6,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 10,
+            "global_flag_frames": 580,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-zero-copy-inuse-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 21.2,
+          "frame_interval_p50_ms": 36.4,
+          "frame_interval_p95_ms": 127.0,
+          "host_copy_send_p50_ms": 1.06,
+          "paint_to_receive_p50_ms": 1.09,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 27.7,
+            "host": 22.2,
+            "total": 49.9
+          },
+          "input_to_frame_p50_ms": 53.0,
+          "input_to_frame_p95_ms": 111.5,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 9,
+            "global_flag_frames": 232,
+            "hold_use_ms": 40,
+            "max_pinned_by_receiver": 4,
+            "overwrite_in_use": 0
+          }
+        }
+      },
+      "status": "PASS"
+    },
+    "39346585739": {
+      "job": "host",
+      "tests": {
+        "stream": "PASS",
+        "input": "PASS",
+        "security": "PASS"
+      },
+      "sandbox": {
+        "web_process": true,
+        "network_process": true,
+        "web_process_sandboxed": true,
+        "all_helpers_sandboxed": true,
+        "sandbox": "seatbelt"
+      },
+      "surface_cases": {
+        "negative-bogus-release": {
+          "status": "PASS",
+          "host_exit_code": 64,
+          "orphan_helpers": 0
+        },
+        "negative-no-connected": {
+          "status": "PASS",
+          "host_exit_code": 64,
+          "orphan_helpers": 0
+        },
+        "pipe-60-baseline": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 60.4,
+          "frame_interval_p50_ms": 15.4,
+          "frame_interval_p95_ms": 27.5,
+          "host_copy_send_p50_ms": 0,
+          "paint_to_receive_p50_ms": 0,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 35.3,
+            "host": 50.7,
+            "total": 86.1
+          },
+          "input_to_frame_p50_ms": 29.4,
+          "input_to_frame_p95_ms": 69.6,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": null
+        },
+        "surface-external-120": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 34.6,
+          "frame_interval_p50_ms": 22.3,
+          "frame_interval_p95_ms": 61.2,
+          "host_copy_send_p50_ms": 1.08,
+          "paint_to_receive_p50_ms": 1.13,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 44.0,
+            "host": 42.0,
+            "total": 86.1
+          },
+          "input_to_frame_p50_ms": 41.0,
+          "input_to_frame_p95_ms": 64.7,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 9,
+            "global_flag_frames": 354,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-external-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 19.6,
+          "frame_interval_p50_ms": 46.7,
+          "frame_interval_p95_ms": 131.6,
+          "host_copy_send_p50_ms": 1.08,
+          "paint_to_receive_p50_ms": 1.14,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 28.0,
+            "host": 22.6,
+            "total": 50.6
+          },
+          "input_to_frame_p50_ms": 47.1,
+          "input_to_frame_p95_ms": 133.1,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 6,
+            "global_flag_frames": 219,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-internal-120": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 58.8,
+          "frame_interval_p50_ms": 17.1,
+          "frame_interval_p95_ms": 25.0,
+          "host_copy_send_p50_ms": 1.0,
+          "paint_to_receive_p50_ms": 1.05,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 55.8,
+            "host": 59.4,
+            "total": 115.2
+          },
+          "input_to_frame_p50_ms": 22.8,
+          "input_to_frame_p95_ms": 70.6,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 9,
+            "global_flag_frames": 552,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-internal-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 46.2,
+          "frame_interval_p50_ms": 21.5,
+          "frame_interval_p95_ms": 34.4,
+          "host_copy_send_p50_ms": 0.99,
+          "paint_to_receive_p50_ms": 1.04,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 35.8,
+            "host": 34.9,
+            "total": 70.7
+          },
+          "input_to_frame_p50_ms": 11.8,
+          "input_to_frame_p95_ms": 44.3,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 9,
+            "global_flag_frames": 439,
+            "hold_use_ms": 0,
+            "max_pinned_by_receiver": 1,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-zero-copy-inuse-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 21.2,
+          "frame_interval_p50_ms": 32.8,
+          "frame_interval_p95_ms": 120.8,
+          "host_copy_send_p50_ms": 1.06,
+          "paint_to_receive_p50_ms": 1.1,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 29.5,
+            "host": 24.2,
+            "total": 53.7
+          },
+          "input_to_frame_p50_ms": 60.0,
+          "input_to_frame_p95_ms": 70.2,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 7,
+            "global_flag_frames": 234,
+            "hold_use_ms": 40,
+            "max_pinned_by_receiver": 4,
+            "overwrite_in_use": 0
+          }
+        },
+        "surface-zero-copy-inuse-internal-60": {
+          "status": "PASS",
+          "host_exit_code": 0,
+          "orphan_helpers": 0,
+          "fps": 54.6,
+          "frame_interval_p50_ms": 16.8,
+          "frame_interval_p95_ms": 30.2,
+          "host_copy_send_p50_ms": 1.01,
+          "paint_to_receive_p50_ms": 1.07,
+          "cpu_percent": {
+            "com.apple.WebKit.Networking": 0.0,
+            "com.apple.WebKit.WebContent": 37.4,
+            "host": 36.8,
+            "total": 74.2
+          },
+          "input_to_frame_p50_ms": 22.5,
+          "input_to_frame_p95_ms": 77.6,
+          "navigation": {
+            "back_frame": true,
+            "exact_generations": true,
+            "page2_frame": true,
+            "stale_target_rejected": true
+          },
+          "frame_size": [
+            1800,
+            1300,
+            2
+          ],
+          "zero_copy": {
+            "cross_process_lookup_exit_codes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "distinct_surface_ids": 10,
+            "global_flag_frames": 530,
+            "hold_use_ms": 40,
+            "max_pinned_by_receiver": 5,
+            "overwrite_in_use": 0
+          }
+        }
+      },
+      "status": "PASS"
+    }
+  }
+}

@@ -1,0 +1,572 @@
+# Pixel path: engine host → pixels in Zen (Linux pipe path)
+
+Owner: cloud/perf-pixel-path. Scope: how a Chromium (CEF) or WebKit (WPE) frame travels from
+its host process into a Zen tab's chrome `<canvas>` on Linux, what it costs, and what was changed.
+Software rendering only (GitHub runners have no GPU). Never E1/E2, never READY. The macOS
+IOSurface path (contracts/engine-surface-v1, apps/browser/native/engine-view) is untouched:
+in surface mode no frame reaches JS.
+
+Measurements: `.github/workflows/linux-perf.yml` (results on `ci-results` under
+`cloud_perf-pixel-path/<run>-1-<job>/`), methodology in docs/PERFORMANCE.md (cloud/engine-bench).
+
+## The path before this work (cloud/integration 6c05cac)
+
+1. Host renders BGRA (CEF OnPaint / WPE fdo SHM export) and copies it into its transport queue
+   (one frame in flight, newest pending frame per target replaces older ones).
+2. Writer thread writes AXCF: 16-byte header, JSON metadata, **the whole frame** (9.4 MB at
+   1800×1300) into a **64 KiB** stdout pipe, even with `frame_damage` negotiated.
+3. Zen reads it with Firefox `Subprocess` (`pipe.read(size)`). Subprocess's worker does one
+   `read(2)` per poll wakeup into a fresh `ArrayBuffer` and posts each chunk to the main
+   thread, which then asks for the rest: with a 64 KiB pipe that is ~145 worker round trips and
+   chunk allocations per 2× frame, and a final main-thread concatenation copy.
+   (toolkit/modules/subprocess: `subprocess_unix.worker.js` `readBuffer`, `subprocess_common.sys.mjs`
+   `InputPipe.fillBuffer` / `checkPendingReads`.)
+4. The presenter (`#draw`, synchronously before the `frame_ack`) converted BGRA → RGBA per byte
+   (≈7 ms Firefox / 9 ms V8 per 1800×1300 frame) — CEF whole frame in place, WebKit damage rect
+   into a new buffer — wrapped it in a new `ImageData` and called `putImageData`.
+5. Only then was the ack written, so the host could not start sending the next frame while Zen
+   painted.
+
+## What changed
+
+| # | Change | Where | Effect (mechanism) |
+| --- | --- | --- | --- |
+| 1 | **u32 swizzle** for opaque pixels, unpremultiply only for 0 < α < 255; byte-identical output | `EngineFrameSurface.sys.mjs` `convertBGRARect` | ≈2× faster conversion (V8 local: 12.8 → 6.0 ms per 1800×1300 frame; CI numbers below) |
+| 2 | **One shared surface module** for both presenters: persistent `ImageData` per canvas, damage-rect conversion into it, `putImageData(image, 0, 0, x, y, w, h)` | `EngineFrameSurface` + `CEFPresenter#draw` / `WebKitPresenter#draw` | no per-frame allocation; work ∝ damage |
+| 3 | **rAF-paced presentation**: frames are accepted (and acked) at once; conversion + upload happen once per refresh tick for the union of damage since the last paint; superseded frames cost nothing | `EngineFrameSurface.accept/paint` | ack no longer waits for paint (host pipelines the next frame); ≤ 1 upload per vsync; `supersededFrames` in diagnostics |
+| 4 | **1 MiB stdout pipe** (`F_SETPIPE_SZ`, Linux, best effort ≤ `fs.pipe-max-size`) | `native/{chromium,webkit}-host/transport.hpp` | ~16× fewer Subprocess round trips per frame |
+| 5 | **`damage_payload`** (additive hello key, needs `frame_damage`): the payload is only the damage rectangle's rows; Zen rebuilds the whole frame per target (`DamagePayloadAssembler`) before the presenter | contracts engine-stream-v1 §6.2, cef-v1; hosts; `CEFEngineAdapter`/`EngineStreamClient` readers | pipe bytes ∝ damage (rAF pages: host damage share 0.21–0.24 → ~4× fewer bytes) |
+| 7 | **memfd frames** (EXPERIMENTAL, pref `axiosozo.engines.linux.memfd_frames`, default off): pixels in a sealed host memfd slot, read by Zen with one `IOUtils.read` of `/proc/<pid>/fd/<fd>` | contracts §6.3; host transports; adapters | no pixel bytes through the Subprocess pipe (see below) |
+| 6 | Bench support: `zen_bench.py --device-scale` (TEST-ONLY `layout.css.devPixelsPerPx`), `bench.py --damage-payload`, same-job base/cand A/B (`tools/pixel-path/`) | tools | 2× in Zen measurable; A/B immune to runner variance |
+
+Host-side coalescing was already in place and is kept: one frame in flight across the host,
+the newest pending frame per target replaces the older one with merged damage (§6). With (3)
+the ack returns right after the frame is read, so the host's rate is bounded by its own render
+rate and the pipe, and Zen draws at most once per vsync. The 2× cap policy is unchanged and
+matches Gecko's (`device_scale` = the window's `devicePixelRatio`, capped by the 4096 px /
+32 MiB surface bound in `fitCEFRenderSurface` / `fitStreamSurface`).
+
+Invariants kept: the presenter never sees a partial frame (the assembler applies every
+delivered frame, presented or not, so §6.1's "previous frame delivered" stays the reference);
+a partial payload without a whole frame of its target and size is a protocol error; macOS
+never negotiates damage or payloads; no TLS, sandbox or isolation setting changes.
+
+## Measurements
+
+All in-Zen numbers: linux-perf run **39342063334**, same-job A/B on one runner per engine. Base =
+cloud/integration `5f8b1d0` chrome JS + host; cand = this branch `9833f88`; memfd = cand with the
+EXPERIMENTAL pref. The app is the prebuilt Linux Zen artifact (linux-zen-build run 39337785340,
+`b14bad7`); chrome JS is overlaid per variant (TEST-ONLY `chrome-overlay`, labelled in every
+result). 2× = TEST-ONLY `layout.css.devPixelsPerPx=2` on a 2304×1440 Xvfb screen, so the engine
+surface is 837×632 CSS px at scale 2 (1674×1264 physical), close to the component bench's 2×.
+Rounds alternate base/cand/memfd (2 rounds × 3 repetitions each); both rounds agree. Full tables:
+`docs/perf/evidence/zen-ab-{chromium,webkit}-39342063334.md`. All 24 bench runs PASS.
+
+### Inside Zen, Chromium tabs (AMD EPYC 7763)
+
+| Metric (median, round 1 / round 2) | base | cand | memfd |
+| --- | --- | --- | --- |
+| 1× rAF presented fps | 42.6 / 42.9 | **59.0 / 59.0** | 59.0 / 58.7 |
+| 1× rAF frame interval p99 | 38.5 / 39.5 ms | **19.0 / 20.8 ms** | 29.1 / 29.2 ms |
+| 1× rAF CPU, whole browser | 159 / 159 % | **75 / 75 %** | 69 / 71 % |
+| 1× key → presented frame | 29.1 / 28.8 ms | **19.9 / 18.6 ms** | 20.3 / 20.1 ms |
+| 1× static page navigate → visible | 80 / 87 ms | 48 / 61 ms | 42 / 48 ms |
+| 2× rAF presented fps | 10.5 / 10.3 | **58.0 / 57.6** | **59.0 / 59.0** |
+| 2× rAF frame interval p99 | 125 / 125 ms | 31.1 / 30.6 ms | **22.0 / 21.8 ms** |
+| 2× rAF CPU, whole browser | 165 / 165 % | 162 / 164 % (at 5.5× the fps) | 133 / 131 % |
+| 2× presenter draw per frame | 6.35 / 6.21 ms | **3.54 / 3.68 ms** | 3.58 / 3.59 ms |
+| 2× key → presented frame | 90.7 / 89.6 ms | **21.1 / 20.9 ms** | 18.7 / 21.0 ms |
+| 2× static page navigate → visible | 254 / 282 ms | 77 / 87 ms | 67 / 48 ms |
+| 2× Gecko → Chromium switch | 567 / 601 ms | 469 / 526 ms | 471 / 502 ms |
+
+### Inside Zen, WebKit tabs (debian:13, AMD EPYC 9V74)
+
+| Metric (median, round 1 / round 2) | base | cand | memfd |
+| --- | --- | --- | --- |
+| 1× rAF presented fps | 39.1 / 38.9 | **57.9 / 57.6** | 57.7 / 57.7 |
+| 1× rAF frame interval p99 | 42.3 / 45.1 ms | **22.6 / 22.8 ms** | 24.2 / 22.8 ms |
+| 1× rAF CPU, whole browser | 201 / 202 % | 123 / 125 % | **115 / 114 %** |
+| 1× presenter draw per frame | 1.50 / 1.53 ms | 0.79 / 0.81 ms | 0.82 / 0.82 ms |
+| 1× key → presented frame | 32.4 / 32.0 ms | **24.1 / 23.7 ms** | 24.4 / 24.6 ms |
+| 2× rAF presented fps | 6.0 / 6.0 | 48.7 / 48.8 | **56.6 / 56.6** |
+| 2× rAF frame interval p99 | 220 / 209 ms | 47.3 / 37.8 ms | **33.0 / 30.9 ms** |
+| 2× rAF CPU, whole browser | 302 / 303 % | 330 / 331 % (at 8× the fps) | 306 / 306 % |
+| 2× presenter draw per frame | 8.91 / 8.55 ms | **3.73 / 3.76 ms** | 4.07 / 4.02 ms |
+| 2× key → presented frame | 98.2 / 98.4 ms | **29.5 / 29.8 ms** | 29.8 / 30.2 ms |
+| 2× static page navigate → visible | 215 / 256 ms | 87 / 105 ms | **67 / 70 ms** |
+
+Reading the tables:
+
+- At 1× the pipe path alone (u32 swizzle, rAF pacing, early ack, 1 MiB pipe, damage payload)
+  takes both engines to the display rate with p99 ≈ 20 ms and halves the browser's CPU; memfd
+  adds little there (frames are 2.3 MB and mostly 24 % damage).
+- At 2× the base path was transport-bound (10 fps Chromium / 6 fps WebKit with p99 > 120 ms,
+  key → frame 90–98 ms). The candidate presents 58 / 49 fps; **memfd** brings WebKit to 56.6 fps
+  and Chromium's p99 to 22 ms, with less CPU per frame (both stay CPU-saturated on 4 vCPUs in
+  software rendering, so total CPU % is flat while fps rises 5–9×).
+- Presenter draw at 2×: 6.3 → 3.6 ms (Chromium) and 8.7 → 3.7 ms (WebKit) per frame; at 1×
+  1.6 → 1.15 ms / 1.5 → 0.8 ms.
+- Wheel scroll windows are rows of the bench too (up to +600 %) but are dominated by the known
+  xdotool pacing artefact (docs/PERFORMANCE.md bottleneck 3); not claimed.
+- Memory: unchanged within noise (RSS −0…−9 %).
+- Not measured: GPU machines, macOS (surface path untouched), multi-tab.
+
+### Component and presenter benches
+
+- Presenter same-process A/B (`presenter` job, run 39342063334, Firefox 157, 1800×1300, identical
+  output): full draw 12.42 → 7.04 ms; `bgraToRGBA` 10.74 → 5.60 ms; EngineFrameSurface paint of a
+  10 % damage band 0.90 ms. Chrome 155 and V8 the same direction (run 39340129366: Chrome full draw
+  15.07 → 7.62 ms, V8 11.57 → 4.77 ms).
+- CEF host alone at 2× (`docs/perf/evidence/component-chromium-39340129366-vs-39330954155.md`):
+  client read 15.6 → 4.4 ms (1 MiB pipe) → 0.43 ms (+damage_payload), bytes/frame 9.36 → 2.21 MB,
+  client CPU 81 → 26 → 4.9 %, key → frame 17.0 → 7.1 → 2.0 ms.
+- WPE host alone at 2×, same CPU model (`docs/perf/evidence/component-webkit-39342063334-vs-39330954155.md`):
+  rAF 46.2 → 58.0 fps, p99 36.3 → 20.0 ms, client read 17.3 → 6.6 → 1.2 ms, client CPU 73.7 → 31.8 →
+  9.5 %, key → frame 35.5 → 21.8 ms.
+
+## memfd frames (implemented, EXPERIMENTAL, pref-gated)
+
+engine-stream-v1 §6.3, pref `axiosozo.engines.linux.memfd_frames` (default **false**). No Gecko
+rebuild: chrome JS + both hosts.
+
+- Host: one sealed `memfd` ring (2 slots × 32 MiB virtual; only touched pages are resident),
+  `MFD_CLOEXEC` so CEF/WPE helpers never inherit it. The writer thread copies each frame (or,
+  with `damage_payload`, the compacted damage rows) into the next slot and writes an AXCF frame
+  with **no payload**, metadata `+{slot, payload_bytes}`. `ready.capabilities.memfd = {fd,
+  slot_bytes, slots}`.
+- Zen: `IOUtils.read("/proc/<host pid>/fd/<fd>", {offset, maxBytes})` — one positioned read on
+  IOUtils' background thread, then the same `DamagePayloadAssembler` / `EngineFrameSurface`
+  path. The read completes before the frame's `frame_ack`; with one frame in flight the ack is
+  the slot's reuse barrier. The pid is Zen's own direct child (Subprocess), the fd number comes
+  only from the authenticated ready event; `/proc/<pid>/fd` needs ptrace-read access (same uid,
+  dumpable) — granted for a direct child under Yama scope 1.
+- Pipe bytes per frame: ~200 bytes of metadata instead of 2.3 MB (1×) / 9.4 MB (2×).
+- Fallback: the pipe path is the default; a host that cannot create the ring rejects the hello.
+- Verified: `native/chromium-host/tests/transport_memfd_test.cc` (parent reads slots through
+  /proc exactly like Zen), WebKit core `memfd` scenario (fake host, rebuilt frame byte-identical
+  to a forced whole frame), adapter tests (slot read before ack, refusal of hosts without the
+  ring, never on macOS). In-Zen: linux-perf A/B variant `memfd`.
+
+### Still open: no JS pixel work at all
+
+Two further steps, in order of cost:
+
+1. **Off-main-thread conversion (no Gecko rebuild)**: a ChromeWorker with
+   `IOUtils.openFileForSyncReading` + `SyncReadFile.readBytesInto` reads the slot into a persistent
+   buffer, converts the damage into a persistent `ImageData` and draws into the presenter canvas
+   through `transferControlToOffscreen()`; the main thread only validates metadata and acks.
+   Blocker to solve first: `captureFixtureFrame()` uses `canvas.toDataURL`, which an offscreen-
+   controlled canvas refuses (the GUI/E2E evidence harness depends on it) — it would move to
+   `OffscreenCanvas.convertToBlob` in the worker.
+2. **Native receiver (Gecko rebuild)**: a Linux-only XPCOM component under
+   `apps/browser/native/engine-view/linux/` (`moz.build` branch `MOZ_WIDGET_TOOLKIT == "gtk"`,
+   IDL shape of `nsIAxioEngineSurfaceService`) maps the memfd read-only and, on its own thread,
+   copies the slot into a `gfx::DataSourceSurface` (`SurfaceFormat::B8G8R8A8` — premultiplied
+   BGRA is Gecko's native format, **no swizzle**) wrapped in a `layers::SourceSurfaceImage` and
+   set on an async `ImageContainer` bound with the already patched, platform-neutral
+   `HTMLCanvasElement::SetAxioExternalImageContainer` (patches/zen/firefox-native.json). Frames
+   then reach WebRender through the ImageBridge without the main thread, like the macOS
+   IOSurface path's copy mode. Generation holding (frames of a newer document held until chrome
+   processed the navigation) must mirror `AxioEngineEndpoint::setTargetGenerations`.
+
+### Native prototype numbers (session machine, not a runner)
+
+`tools/pixel-path/shm_proto.cc`, evidence `docs/perf/evidence/shm_proto-session-20261019.jsonl`
+(Intel Xeon @ 2.80 GHz, 4 vCPU; receiver ends with the whole frame in its memory; the pipe
+receiver models Subprocess: one `read(2)` per wakeup into a fresh buffer, then one concatenation;
+it omits Subprocess's worker→main-thread message hop, so real Zen costs are higher):
+
+| 1800×1300 frame | receive ms (median) | receiver CPU ms/frame | wakeups/frame |
+| --- | --- | --- | --- |
+| pipe, 64 KiB (before) | 15.5 | 10.5 | 143 |
+| pipe, 1 MiB | 6.8 | 4.5 | 9 |
+| pipe, 64 KiB, damage payload 24 % | 2.5 | 1.5 | 36 |
+| pipe, 1 MiB, damage payload 24 % | 1.3 | 1.0 | 3 |
+| memfd ring, whole frame | 1.36 | 1.4 | 1 |
+| memfd ring, 24 % damage | 0.24 | 0.29 | 1 |
+
+At 900×650: 64 KiB pipe 2.7 ms / 36 wakeups → 1 MiB 1.2 ms / 3 → memfd 0.17 ms / 1. The 64 KiB
+2× figure (15.5 ms) matches the component bench's measured client read time (15.6 ms, run
+39330954155), which supports the model.
+
+## Runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39342063334 | linux-perf at 9833f88: presenter A/B, component benches (both engines, 3 passes), in-Zen A/B base/cand/memfd at 1×/2× | all green; tables above |
+| 39340129366 | linux-perf at 6e08ff3: presenter A/B, CEF component bench; A/B harness bugs (fixed in d8c923c); cancelled after the component job | partial, used for the CEF component table |
+| 39341140946, 39342063401 | linux-cef-host at 3137181 / 9833f88: x86_64 + arm64 every gate PASS (E0, stream, security, input, web, damage, native tests incl. damage-payload and memfd); `zen-gui-chromium` setup step fails on the known `probe.py check` exit code (also on cloud/integration) | PASS |
+| 39341141004, 39342063286 | linux-webkit-host at 3137181 / 9833f88: real WPE unit + stream + input + security + cleanup; damage_payload and memfd scenarios byte-identical to a forced whole frame | PASS |
+| 39341141669, 39342063487 | linux-webkit-zen at 3137181 / 9833f88: unit, adapter, E2E (launch, chrome, Gecko→WebKit→Gecko round trip, host failure, three engines) | E2E PASS |
+| 39340175745 | Linux check and test (PR #10) | green |
+
+# Phase 2 (cloud/perf-phase2)
+
+Owner: cloud/perf-phase2 (PR #14). Same rules as above: software rendering on GitHub runners,
+same-job A/B, never E1/E2, never READY; macOS surface path untouched.
+
+## memfd fallback, soak, default on
+
+- **Fallback** (contracts engine-stream-v1 §6.3 "Fallback"): before the hello Zen lists
+  `/proc/<host pid>/fd` (the same ptrace-read access a slot read needs); if that fails it asks for
+  the pipe and latches the session. A slot read that fails twice (one retry) drops that frame,
+  forgets its target's assembled frame and acknowledges it with
+  `frame_ack {frame_id, frame_transport:"pipe"}`: the host switches its writer to the pipe before
+  the credit returns, makes every pending frame whole (CEF) or re-sends every target whole
+  (WebKit, from its `latest` copy), and CEF repaints every view. Tests: node (both readers),
+  `native/chromium-host/tests/transport_memfd_test.cc` (fallback scenario),
+  `native/chromium-host/damage_test.py` (real CEF: 8 memfd frames, frame 9 dropped, the next pipe
+  frame whole 1800×1300, then 80×80 damage payloads — run 39351072238), WebKit
+  `stream_test.py` `memfd_fallback` (real WPE in linux-webkit-host 39349713944: PASS).
+- **Soak** (`tools/pixel-path/soak.py`, linux-perf job `soak`, debian:13, one Zen window with a
+  WebKit tab, a Chromium tab and a Gecko tab; each cycle: rAF window, XTest wheel window, static
+  navigation, key → frame, Gecko rAF), run **39349238042**:
+
+  | | cycles / min | rAF fps WebKit / Chromium / Gecko | rAF p99 ms | scroll fps WK / Cr | key → frame ms WK / Cr | parent CPU % WK / Cr | problems |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | memfd | 30 / 10 | 56.4 / 57.5 / 59.0 | 34.9 / 34.3 | 51.6 / 55.5 | 21.6 / 16.6 | 131 / 142 | none |
+  | pipe | 13 / 4 | 56.7 / 58.4 / 59.0 | 35.2 / 33.3 | 48.0 / 50.9 | 20.5 / 15.8 | 133 / 146 | none |
+
+  memfd: no fallback, transport stayed memfd in every window, WebKit host descriptors 38 → 38,
+  Chromium host 333–339; the hosts' RSS flat (WPEWebProcess 256 MB, CEF renderer ~250 MB); the
+  Zen parent's RSS oscillates 690–1104 MB with GC (per-frame slot buffers) without a trend
+  beyond that band. These medians are also the **multi-tab** numbers (2 engine tabs + 1 Gecko
+  tab in one window, 1×).
+- **Default**: `MEMFD_FRAMES_DEFAULT = true` (Linux pipe mode only; macOS never negotiates it).
+
+## Scroll fps is claimable now
+
+`zen_bench.py` injects wheel clicks with XTest (`XTestWheel`, ctypes libXtst) on the monotonic
+clock, flushed per event, and records the pacing (`input_pacing`: span, interval p99, late events).
+`xdotool click --repeat 120 --delay 16` had taken 17 s instead of 1.9 s from the second window on
+(docs/PERFORMANCE.md bottleneck 3). The soak's 60 scroll windows per transport all had a 1.9 s
+input span.
+
+## Upload without the JS swizzle: BGRX VideoFrame
+
+`EngineFrameSurface` uploads with `drawImage(new VideoFrame(rows, {format: "BGRX"}))` where the
+window draws BGRX VideoFrames exactly (probed once per process on a 3×2 scratch canvas), else the
+JS swizzle + `putImageData` (pref `axiosozo.engines.linux.frame_upload=imagedata`). Whole damaged
+rows from a `Uint8Array` view of the frame (no JS copy): Gecko 156's
+`dom/media/webcodecs/VideoFrame.cpp` ignores `VideoFrameBufferInit.layout` and assumes a tight
+stride, so a narrower rectangle cannot be described without a copy.
+
+Presenter bench (same process, run **39352857399** `presenter`, Firefox 158 headless and Chrome 155,
+identical output checked against the per-byte reference, probe `{ok: true}` in both):
+
+| 1800×1300 | Firefox imagedata → videoframe | Chrome imagedata → videoframe |
+| --- | --- | --- |
+| EngineFrameSurface paint, 10 % damage band | 0.60 → **0.12 ms** | 0.71 → 0.85 ms |
+| EngineFrameSurface paint, whole frame | 5.92 → 5.48 ms | 6.53 → 5.72 ms |
+| 900×650, 10 % band | 0.24 → **0.08 ms** | 0.18 → 0.28 ms |
+
+In Gecko (the engine Zen runs) a damage band costs a fifth; a whole frame is bounded by the copy
+either way (allocation + copy of 9.4 MB alone: 4.3 ms).
+
+## Off the main thread: frame worker and native receiver
+
+Both implement one "sink" per native target (applyFrame / bindCanvas / present), chosen by the
+readers in this order, with the main-thread JS path as the fallback:
+
+1. **Native receiver** (pref `axiosozo.engines.linux.native_receiver`, needs an app built from this
+   branch, `.github/workflows/linux-perf-build.yml`): `apps/browser/native/engine-view/linux`
+   (`nsIAxioFrameReceiverService`, GTK only) maps the host's ring read-only (direct child only,
+   exact size, seals checked); a background task queue copies each delivered frame's rows into the
+   target's whole frame, and each presented frame into a recycled B8G8R8X8 `SharedRGBImage` set on
+   the canvas's async `ImageContainer` (`HTMLCanvasElement::SetAxioExternalImageContainer`, the
+   platform-neutral patch the macOS path already uses). No pixel crosses JS, no swizzle, and the
+   frame reaches WebRender through the ImageBridge. Capture: `copyFrame()` → PNG.
+2. **Frame worker** (pref `axiosozo.engines.linux.frame_worker`): one ChromeWorker per target
+   (`EngineFrameWorker.js` loads `runFrameWorker` from EngineFrameSurface into its own global)
+   opens the memfd with `IOUtils.openFileForSyncReading`, reads slots with `readBytesInto` into a
+   persistent buffer (no per-frame allocation), keeps the whole frame and draws into the presenter
+   canvas through `transferControlToOffscreen()`. The main thread validates metadata, posts and
+   acks. After a memfd fallback it also takes the pipe payloads. Capture: Gecko's placeholder
+   snapshot (`toDataURL`).
+
+## A/B: memfd vs the integration pipe path (run 39349238042)
+
+Same-job A/B in Zen (prebuilt app 39337785340 + TEST-ONLY chrome overlay), base = cloud/integration
+`d5cc1a8` (pipe, perf-pixel-path merged), memfd = this branch with memfd on (now its default).
+Medians, round 1 / round 2. Scroll rows of this run still contain the `mousemove --sync` artefact
+(fixed afterwards) and are not used.
+
+| | Chromium base → memfd | WebKit base → memfd |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 49.1 → 40.9 / 49.1 → 42.2 % | 50.7 → 43.9 / 52.1 → 48.1 % |
+| 1× rAF CPU, whole browser | 71.4 → 62.6 / 72.0 → 64.1 % | 125.0 → 120.2 / 127.9 → 125.1 % |
+| 1× key → presented frame | 19.9 → 18.5 / 19.6 → 18.3 ms | 23.8 → 24.6 / 23.9 → 25.2 ms |
+| 2× rAF fps | 57.7 → 59.0 / 57.7 → 59.0 | 47.8 → 56.5 / 46.7 → 55.4 |
+| 2× rAF p99 interval | 31.4 → 22.5 / 31.9 → 20.2 ms | 41.4 → 31.7 / 44.2 → 31.2 ms |
+| 2× rAF CPU, Zen parent | 122.6 → 89.5 / 121.4 → 90.5 % | 127.1 → 97.0 / 124.1 → 100.7 % |
+| 2× rAF CPU, whole browser | 165.1 → 131.0 / 166.0 → 130.7 % | 330.6 → 304.5 / 328.6 → 310.5 % |
+| 2× key → presented frame | 18.9 → 20.1 / 18.8 → 20.3 ms | 29.3 → 30.8 / 29.7 → 30.1 ms |
+| 2× static navigate → visible | 102.6 → 62.8 / 67.3 → 49.2 ms | 89.6 → 76.7 / 136.0 → 77.6 ms |
+
+At 2× memfd takes a quarter of the Zen parent's CPU away and the p99 frame interval down by
+~30 % for both engines (WebKit to 56 fps); key → frame stays within ±1.5 ms (the key path is not
+transport-bound once the pipe carries only damage). Evidence: ci-results
+`cloud_perf-phase2/39349238042-1-ab-{chromium,webkit}/ab/ab.md`.
+
+## Frame worker A/B (run 39352857399) → default on
+
+Same-job A/B, base = cloud/integration `d5cc1a8`; cand = this branch at `f467221` (memfd + BGRX
+VideoFrame upload on the main thread); worker = cand + frame worker; imagedata = cand with the JS
+swizzle upload. 2 rounds × 2 repetitions; round 1 / round 2. Scroll = fps while the XTest input is
+delivered.
+
+| Chromium | base | cand | worker | imagedata |
+| --- | --- | --- | --- | --- |
+| 1× rAF CPU, Zen parent | 45.0 / 43.1 % | 39.4 / 38.6 % | **33.2 / 30.7 %** | 39.0 / 34.2 % |
+| 1× key → presented frame | 18.5 / 18.1 ms | 17.3 / 18.3 ms | **10.3 / 10.0 ms** | 18.6 / 17.4 ms |
+| 1× scroll fps (p99 interval) | 54.9 (35.0) / 55.0 (33.7) | 57.2 (31.6) / 54.7 (51.6) | **59.4 (26.0) / 59.7 (26.2)** | 55.7 (38.5) / 56.9 (33.0) |
+| 2× rAF CPU, Zen parent | 109.4 / 108.8 % | 82.4 / 81.9 % | **64.1 / 62.5 %** | 85.4 / 80.3 % |
+| 2× rAF CPU, whole browser | 148.2 / 146.2 % | 119.4 / 119.1 % | **99.7 / 98.2 %** | 121.3 / 116.0 % |
+| 2× rAF p99 interval | 26.7 / 29.8 ms | 20.8 / 20.5 ms | 24.8 / 22.2 ms | 19.5 / 20.8 ms |
+| 2× key → presented frame | 19.3 / 19.3 ms | 18.9 / 18.6 ms | **11.0 / 10.7 ms** | 19.4 / 18.1 ms |
+| 2× scroll fps (p99 interval) | 34.8 (63.1) / 36.2 (62.9) | 51.2 (194.7) / 56.6 (34.0) | **60.0 (22.6) / 59.3 (25.6)** | 55.0 (34.9) / 54.5 (35.7) |
+| 2× presenter main-thread ms/frame | 2.98 / 3.00 | 2.50 / 2.42 | 1.76 / 1.74 | 3.02 / 2.97 |
+
+| WebKit | base | cand | worker | imagedata |
+| --- | --- | --- | --- | --- |
+| 1× rAF CPU, Zen parent | 44.3 / 45.4 % | 36.5 / 35.7 % | **33.3 / 32.9 %** | 36.7 / 36.1 % |
+| 1× key → presented frame | 25.8 / 25.0 ms | 23.7 / 23.8 ms | **18.1 / 17.8 ms** | 24.3 / 25.2 ms |
+| 1× scroll fps (p99 interval) | 49.8 (43.0) / 51.3 (42.8) | 52.1 (68.8) / 51.6 (53.4) | **56.7 (34.1) / 57.1 (31.8)** | 53.3 (71.7) / 53.7 (46.5) |
+| 2× rAF fps (p99 interval) | 55.1 (34.1) / 55.2 (36.6) | 57.5 (27.5) / 57.9 (24.8) | 58.0 (26.2) / 57.9 (26.2) | 57.7 (27.6) / 57.9 (26.8) |
+| 2× rAF CPU, Zen parent | 112.5 / 114.7 % | 82.7 / 83.4 % | **68.6 / 68.9 %** | 87.5 / 85.8 % |
+| 2× key → presented frame | 28.2 / 27.8 ms | 28.7 / 29.7 ms | 27.3 / 26.0 ms | 29.3 / 27.4 ms |
+| 2× scroll fps (p99 interval) | 24.0 (80.0) / 24.1 (79.9) | 45.2 (83.9) / 44.9 (76.7) | **52.5 (41.0) / 50.9 (57.5)** | 40.4 (71.1) / 39.2 (64.7) |
+
+Reading: the worker takes ~40 % of the Zen parent's CPU away at 2× (both engines) and ~25 % at
+1×; key → frame halves for Chromium because a frame is drawn when it arrives instead of at the
+next refresh tick (WebKit at 2× stays bound by WPE's own rendering); scroll at 2× doubles. On the
+main thread the BGRX VideoFrame upload beats the JS swizzle at 2× (2.2–2.5 vs 3.0 ms/frame) and is
+slightly slower at 1× (whole damaged rows: uploaded share 0.42 vs 0.27); it stays the default
+because the 2× case is the expensive one. "Presented" for the worker is the worker's draw
+(reported back to the presenter), like the 2D path's paint. `FRAME_WORKER_DEFAULT = true` (Linux,
+memfd frames, probe passed); `axiosozo.engines.linux.frame_worker=false` keeps the main thread
+path. WebKit 1× static navigate → visible was +8…46 % in all variants of this branch against a
+low base in round 1 (41.5 ms; 56–75 ms in other runs): NOT_VERIFIED as a regression, re-checked in
+the next A/B.
+
+## Attribution behind the phase-2 choices (engine-profile run 39340307459)
+
+The concurrent profiling session (branch `claude/engine-profile-nipd8o`, perf + Gecko profiler of
+the Zen parent; its `docs/perf/profile-findings.md` had not landed when this was written) profiled
+rAF windows on the pre-phase-2 pipe path. Zen parent, 1×:
+
+| rAF window | parent CPU | Subprocess worker (pipe I/O) | GeckoMain | of which `engine_stream_read` / `bgraToRGBA` | WebRender (Renderer + SwComposite) |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 3681 ms | 2222 ms (60 %) | 1129 ms | 190 / 117 ms | 225 ms |
+| WebKit | 3253 ms | 1931 ms (59 %) | 1038 ms | 180 / 103 ms | 195 ms |
+
+The pipe's worker was the largest parent cost; memfd frames remove the pixel bytes from it
+(A/B: parent −25 % at 2×). The main thread's reads and conversions are what the frame worker
+moves (A/B: a further −15 points at 2×). What is left is the chrome's own work, the AXCF metadata
+and events through the pipe, and software compositing (WebRender is ~6 % of the parent in these
+windows); the native receiver removes the remaining JS frame handling.
+
+## Result: phase-2 defaults vs cloud/integration (run 39355570329)
+
+Same-job A/B, 3 repetitions × 2 alternating rounds per variant, prebuilt app 39337785340 + TEST-ONLY
+chrome overlay. base = cloud/integration `d5cc1a8`; **cand = this branch's defaults** (memfd frames +
+frame worker + BGRX VideoFrame); jsmain = cand with the frame worker off. All 48 bench runs PASS.
+Round 1 / round 2 medians:
+
+| | Chromium base → cand | WebKit base → cand |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 50.9 → 37.5 / 53.1 → 37.5 % (−26/−29 %) | 43.6 → 36.1 / 49.6 → 39.7 % (−17/−20 %) |
+| 1× rAF CPU, whole browser | 74.4 → 63.0 / 78.9 → 62.3 % | 98.2 → 93.6 / 109.7 → 103.1 % |
+| 1× rAF p99 interval | 20.5 → 20.8 / 21.0 → 22.4 ms (flat, at 60 fps) | 22.3 → 21.8 / 23.7 → 22.3 ms |
+| 1× key → presented frame | 19.6 → 12.1 / 20.1 → 12.0 ms (−38/−40 %) | 24.8 → 16.4 / 24.7 → 16.6 ms (−34/−33 %) |
+| 1× scroll fps (p99) | 53.9 → 59.8 (36.4 → 23.0) / 52.4 → 59.8 (35.3 → 21.3) | 50.7 → 57.2 (38.6 → 33.1) / 51.2 → 57.1 (41.5 → 34.8) |
+| 2× rAF fps | 56.7 → 60.0 / 56.8 → 60.0 | 54.3 → 57.6 / 50.9 → 57.8 |
+| 2× rAF p99 interval | 33.2 → 24.5 / 36.2 → 27.5 ms (−26/−24 %) | 33.6 → 26.9 / 36.8 → 28.5 ms (−20/−23 %) |
+| 2× rAF CPU, Zen parent | 125.8 → 81.9 / 130.2 → 80.6 % (−35/−38 %) | 124.7 → 81.0 / 131.6 → 84.6 % (−35/−36 %) |
+| 2× rAF CPU, whole browser | 171.8 → 124.1 / 177.7 → 124.1 % | 296.0 → 260.1 / 314.3 → 273.9 % |
+| 2× key → presented frame | 20.9 → 12.4 / 21.4 → 12.2 ms (−41/−43 %) | 29.5 → 30.7 / 30.1 → 30.8 ms (+4/+2 %, NOT improved) |
+| 2× scroll fps (p99) | 24.6 → 59.7 (98 → 24) / 23.2 → 59.8 (101 → 25) | 22.6 → 49.9 (88 → 39) / 20.6 → 47.4 (85 → 42) |
+| 2× static navigate → visible | 120.3 → 49.0 / 111.0 → 60.3 ms | 102.8 → 87.6 / 91.2 → 61.1 ms |
+| 2× RSS, whole browser | 3160 → 2752 / 3030 → 2770 MB | 2410 → 2396 / 2397 → 2384 MB |
+
+jsmain (memfd, main thread) sits between: e.g. Chromium 2× parent 101.7 / 99.0 %, key → frame
+21.0 / 20.7 ms — the worker accounts for the key → frame gain (frames drawn on arrival, not at the
+next refresh tick) and about half the CPU gain. WebKit key → frame at 2× is bound by WPE's own
+software rendering on the 4-vCPU runner (WPE ~150 % CPU), not by Zen; it is the one acceptance
+row that did not improve. 1× rAF p99 for Chromium was already at the 60 fps floor (≈ 20 ms).
+
+Soak with these defaults (same run, `soak` job): 30 cycles / 10 min, WebKit + Chromium + Gecko tabs,
+PASS, transport memfd + worker in every window, no fallback, Zen parent RSS 698–778 MB with no
+trend (−2.8 MB from cycle 2 to 30; the per-frame slot buffers of the main-thread path are gone),
+host descriptors flat; medians WebKit 57.8 fps / p99 23.4 ms / scroll 56.0 fps / key 21.1 ms,
+Chromium 60.0 fps / 21.4 ms / 59.0 fps / 12.9 ms, Gecko 59.0 fps.
+
+## Native receiver A/B (run 39364874251) → default on where built
+
+App: this branch's build (linux-perf-build **39362552105**, `35782ef`, Gecko GUI smoke PASS) for all
+variants. base = cloud/integration chrome JS + hosts; cand = this branch's defaults at the time
+(memfd + frame worker; the native receiver off); native = cand + `axiosozo.engines.linux.native_receiver`
+(diagnostics `frameUpload: "native"`, `frameTransport: "memfd"`). 2 reps × 2 rounds, 24/24 PASS per engine.
+
+| | Chromium base → cand → native | WebKit base → cand → native |
+| --- | --- | --- |
+| 1× rAF CPU, Zen parent | 55.5 → 39.6 → **31.6** / 51.6 → 38.7 → **31.8 %** | 42.8 → 28.7 → **24.2** / 40.7 → 27.5 → **23.4 %** |
+| 1× key → presented frame | 20.9 → 12.4 → 11.9 / 20.0 → 12.0 → 11.7 ms | 24.7 → 17.1 → 15.9 / 23.5 → 15.9 → 16.3 ms |
+| 2× rAF CPU, Zen parent | 121.9 → 73.6 → **62.8** / 126.3 → 73.3 → **59.3 %** | 115.1 → 68.4 → **53.6** / 109.0 → 68.8 → **51.8 %** |
+| 2× rAF CPU, whole browser | 166.2 → 115.6 → 106.2 / 172.1 → 115.3 → 101.8 % | 268.0 → 218.9 → 198.2 / 254.6 → 217.5 → 189.6 % |
+| 2× rAF p99 interval | 31.4 → 23.4 → 22.2 / 28.8 → 23.2 → 23.5 ms | 28.4 → 27.9 → **23.2** / 28.7 → 28.0 → **24.6 ms** |
+| 2× key → presented frame | 19.9 → 12.3 → 12.4 / 21.5 → 12.7 → 12.1 ms | 26.7 → 26.2 → **21.9** / 28.9 → 27.6 → **23.1 ms** |
+| 2× scroll fps (p99) | 28.5 → 58.8 → 59.9 (76 → 31 → 22) / 29.2 → 60.0 → 59.5 | 26.8 → 54.2 → 56.0 (75 → 33 → 33) / 26.4 → 53.5 → 56.0 |
+| main-thread ms per presented frame (2×) | 3.6 → 2.3 → **0.02** | 3.4 → 2.5 → **0.015** |
+
+The native receiver halves the Zen parent's CPU at 2× against cloud/integration for both engines
+and is the first variant that also improves WebKit's 2× key → frame (−18…−20 %); the main thread
+spends ~20 µs per frame on presentation. `NATIVE_RECEIVER_DEFAULT = true`: apps that contain the
+component (built from this branch on) use it; older app builds have no component and use the frame
+worker; the pref `axiosozo.engines.linux.native_receiver=false` returns to the worker.
+
+Functional checks with the native receiver as the default on that app: linux-webkit-zen **39366816642**
+E2E PASS (launch, chrome, Gecko → WebKit → Gecko round trip with typing/click/page 2/Back/scroll,
+host failure, three engines; diagnostics `frameUpload: "native"`, captures through `copyFrame()`);
+soak **39366862243** (`native`): 30 cycles / 10 min, WebKit + Chromium + Gecko tabs, PASS, no
+problems, host descriptors flat, medians WebKit 56.1 fps / key → frame 15.7 ms / scroll 52.4 fps,
+Chromium 60.0 fps / 11.0 ms / 59.8 fps, presenter main-thread time 0.01 ms per frame.
+
+## Phase 2 runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39349238042 | linux-perf: soak memfd/pipe; A/B base vs memfd | soak PASS; A/B 24+36 PASS |
+| 39352857399 | linux-perf: presenter bench (VideoFrame); A/B base/cand/worker/imagedata | all PASS |
+| 39355570329 | linux-perf: A/B base/cand(defaults)/jsmain 3×2; soak with defaults | 48/48 PASS, soak PASS |
+| 39362552105 | linux-perf-build: Zen app with the native receiver (after 39350827997 cold fail, 39360822222 error capture) | build + GUI smoke PASS |
+| 39364874251 | linux-perf: A/B base/cand/native on that app | 48/48 PASS |
+| 39366816642 | linux-webkit-zen with native default | E2E PASS |
+| 39366862243 | linux-perf: soak with native default | PASS |
+| 39351791880, 39355570129 | linux-cef-host (x86_64, arm64, macOS compile) incl. real-CEF memfd fallback | PASS (zen-gui-chromium: known setup failure) |
+| 39349713944, 39351146838 | linux-webkit-host incl. real-WPE memfd fallback | PASS |
+| 39349714010, 39355570147 | linux-webkit-zen (VideoFrame; worker default) | E2E PASS |
+
+# Phase 3 (perf-phase3, branch claude/perf-phase3-uvmfis)
+
+Driven by docs/perf/profile-findings.md (engine-profile run 39379600003). All numbers: GitHub
+`ubuntu-24.04` runners (4 vCPU, no GPU, software WebRender), real Linux Zen app + TEST-ONLY chrome
+overlay of this branch, sandboxes on. CPU claims use zen_bench's `raf-nosampler` window (the 2 ms
+chrome sampler off) and, for attribution, the Gecko profiler pass. Same-job A/B: every engine job of
+`linux-engine-profile.yml` runs `zen_profile.py` twice on one runner — phase 3 defaults, then the
+control `--pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false`.
+
+## Direct compositing of the engine canvas
+
+**Why it was expensive.** TEST-ONLY `zen_profile.py --wr-promotion-log`
+(`gfx.webrender.debug.surface-promotion-logging` + `RUST_LOG=webrender::tile_cache=warn`, summarized
+from stderr; run 39382362542): WebRender never promoted the engine image to a compositor surface —
+`Surface promotion of prim at Box2D((382, 68), (2056, 1280)) failed with: overlay not allowed for prim
+with mask`, every frame. The canvas itself was already right (1674×1212 device px at an integral
+device origin at 2×: no scaling; B8G8R8X8, opaque). The mask is Zen's: every tab panel
+(`.browserSidebarContainer`) has `overflow: clip` with a 5 px `border-radius`. Unpromoted, each
+engine frame was re-rasterized into picture-cache tiles through that rounded clip
+(`blendTextureNearestFast`, `draw_quad_spans`) and the tiles then copied (`scale_blit<true>`).
+
+**Change** (`EngineFrameSurface.sys.mjs` `directComposite`, pref
+`axiosozo.engines.linux.direct_composite`, default on; Linux native receiver only — macOS surface
+mode is untouched). While an engine view covers its whole panel, the panel's clip is lifted
+(`overflow: visible`; its rounded shadow stays) and the four 5 px corners are drawn on top by caps:
+Zen's window background (`-moz-element(#zen-browser-background)` over the ancestors' composited
+colour), the panel's own `box-shadow` (from a transparent copy of the panel box) and a radial mask
+for the arc. Only that tab's panel changes, only while the view fills it (ResizeObserver; a view that
+no longer covers the panel gives the clip back); `restore()` on teardown. Result: 0 promotion
+failures in every engine job; real-screen captures (xwd of the X root, 0.3 s apart) change while the
+rAF fixture runs, so frames reach the display.
+
+**Profiler, same job (run 39385314455, 2×, rAF fixture, sampler off, ms of CPU per ~3 s window):**
+
+| function / thread | Chromium control → phase 3 | WebKit control → phase 3 |
+| --- | --- | --- |
+| `blendTextureNearestFast` | 153 → **0** | 143 → **0** |
+| `draw_quad_spans` | 84 → **0** | 49 → **0** |
+| `scale_blit<true>` (Renderer + SwComposite) | 269 → **20** | 301 → **4** |
+| Renderer thread | 569 → 164 | 583 → 185 |
+| SwComposite thread | 520 → 125 | 497 → 114 |
+| Zen parent, all threads | 2 062 → 1 228 | — |
+
+## Warm spare hosts (engine switch)
+
+`EngineHostSpare.sys.mjs` + the adapters' launch paths: one warm spare host per engine and Firefox
+process, started at browser idle through the engine's own launcher (same binary, sandbox, private
+per-host profile, fixture origin and hello). Fixture mode only (never the shared web-mode Chromium
+host), never on macOS; one use (a spare serves exactly one tab); refilled ~1 s after a tab's host
+closes; dropped on `memory-pressure` and at `quit-application-granted`; pref
+`axiosozo.engines.prewarm` (default on). The GUI harness (`scripts/gui_test.py`) turns it off so
+the E2Es' "exactly one host per tab" assertions stay deterministic; `zen_profile.py` turns it on.
+The WPE host additionally starts its sandboxed web process right after `ready` (a hidden
+`about:blank` view; the first target's view is created with `related-view` to it and the warm view is
+dropped; `AXIO_WEBKIT_NO_PREWARM=1` disables it).
+
+A spare is launched through the shared (system-global) module instance while `CEFPresenter` lives in
+the window's module graph: native frames are therefore recognised by a `Symbol.for` brand
+(`isNativeFrame`), not `instanceof` (run 39384485852 showed the failure: Chromium fell back to the
+2D path with one frame).
+
+Gecko → engine switch, same job (run 39385314455, zen_bench switch ms):
+
+| tab | control | phase 3 |
+| --- | ---: | ---: |
+| Chromium 1× / 2× | 471 / 495 ms | **136 / 156 ms** |
+| WebKit 1× / 2× | 507 / 529 ms | **193 / 207 ms** |
+
+## Result: phase 3 vs control, same job (run 39396635363)
+
+App: linux-perf-build **39383407870** (this branch: damage-only native receiver compiled in), chrome
+overlay of this branch. Per engine job, `zen_profile.py` runs phase 3 (defaults) and then the control
+(`direct_composite=false`, `prewarm=false`) on the same runner; two plain passes each (median), plus
+a profiler pass. Gecko rows are the same job's Gecko control tab (no engine involved).
+
+| tab | Zen parent CPU, rAF (sampler off) | Renderer + SwComposite | parent CPU, wheel scroll | Gecko → engine switch | key → frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Chromium 1× | 24.5 → **16.6 %** | 11.0 → 3.5 | 42.6 → 35.2 % | 425 → **122 ms** | 12.1 → 12.2 ms |
+| Chromium 2× | 36.0 → **18.7 %** | 23.3 → 6.0 | 58.9 → 36.5 % | 316 → **166 ms** | 8.6 → 9.0 ms |
+| WebKit 1× | 27.2 → **18.6 %** | 11.7 → 3.2 | 44.0 → 36.7 % | 500 → **227 ms** | 16.4 → 17.2 ms |
+| WebKit 2× | 55.8 → **33.1 %** | 38.0 → 9.9 | 82.4 → 47.8 % | 525 → **237 ms** | 27.0 → 27.9 ms |
+| Gecko 1× / 2× (control tab) | 17.4 / 17.8 % | 9.4 / 11.2 | 42.6 / 76.7 % | — | — |
+
+- Engine tabs now cost the parent about what a Gecko tab running the same rAF fixture costs (16.6–18.7 %
+  vs 17.4–17.8 %), except WebKit 2× (33 %; the native receiver's task queue ~6–8 % and the main thread ~7 % of it).
+- Scroll: the parent no longer re-rasterizes the canvas, so wheel scrolling is cheaper too (−7…−35
+  points); scroll fps unchanged (60 Chromium, 55–57 WebKit). The main thread while scrolling stays
+  13–18 % (Gecko's own wheel dispatch + the per-frame host message), in phase 3 and control alike.
+- Key → frame is unchanged within noise (it is host-bound, profile-findings §b).
+- The rest of the switch (122–237 ms) is the target's creation + first navigation/paint in the warm
+  host; the parent's share stays ~35–50 ms.
+- Damage-only native presents (both variants run the new receiver): present 0.24 ms/frame at 2×
+  Chromium, 0.37–0.42 ms WebKit 2× (perf-phase2: 0.78 ms whole-frame); 98 % of presents are partial
+  (`partialCopies` 178/181), the rest are new/stale textures.
+
+## Smaller changes
+
+- Native receiver (`engine-view/linux`): presents write only what changed into the recycled
+  SharedRGBImage (TextureClient serial → last frame generation it holds; union of the damage since,
+  from a 16-frame history; whole frame for a new or stale texture); counters `partialCopies`,
+  `wholeCopies`, `copiedPixels` in `statsJSON`. Hidden-tab re-present: a frame applied while the tab
+  was hidden is posted when it is shown (`representNativeFrame`).
+- Request writes: no `TextEncoder` per message (frame acks, input) — a line is measured only when it
+  could exceed 16 KiB; CEF wheel coalescing keys are plain strings. Wheel events were already
+  coalesced to one `wheel` message per frame in both presenters; zen_bench's XTest wheel sends one
+  notch per 16 ms, so per-frame coalescing has nothing more to merge.
+
+## Phase 3 runs
+
+| Run | What | Result |
+| --- | --- | --- |
+| 39382362542 | linux-engine-profile, TEST-ONLY `--wr-promotion-log` + canvas ancestor chain | diagnosis: "overlay not allowed for prim with mask" (Zen panel radius) |
+| 39383407784 | first direct-compositing run (no spare host) | 0 promotion failures; Chromium 2× rAF parent 17.4 % |
+| 39384485852 | same-job A/B with spare hosts | WebKit PASS; Chromium FAIL (cross-module `instanceof`, fixed in c22eb86) |
+| 39385314455 | same-job A/B + profiler | all PASS; blend/scale paths gone (tables above) |
+| 39383407870 | linux-perf-build: phase-3 app (damage-only receiver) | build + GUI smoke PASS |
+| 39396635363 | final same-job A/B on that app (plain×2 + profile) | all PASS (result table) |
+| 39384485896 | linux-webkit-host (WPE warm web process) | PASS |
+| 39387902084, 39385246366 | linux-webkit-zen E2E | PASS |
+| 39387902076 | linux-cef-zen (Chromium-in-Zen E2E/feel) | PASS |
+| 39387902105 | linux-cef-host: x86_64, arm64, macOS compile | PASS; `zen-gui-chromium` FAIL (see handoff) |
+| 39385246466, 39387902382 | linux-perf soak (old app) | PASS |
+| 39396635366 | linux-perf soak (phase-3 app) | attempt 1: one transient CEF helper sample (fds 335→368→335), see handoff |

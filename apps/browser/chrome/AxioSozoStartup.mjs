@@ -245,13 +245,26 @@ async function initialize() {
   const aboutRegistered = registerOverview();
   await window.gZenStartup.promiseInitialized;
   if (disposed) return;
+  // Linux: Firefox-on-Linux scrolling and visible window controls (default
+  // branch only, once per process), and Firefox's first-window size once Zen's
+  // welcome ends. Nothing happens on macOS.
+  const linuxDesktop = optionalModule("LinuxDesktop.sys.mjs");
+  guarded("linux desktop defaults", () => linuxDesktop?.applyLinuxDesktopDefaults());
+  const linuxWindowSizing = guarded("linux window sizing", () => linuxDesktop?.installLinuxWindowSizing(window));
+  const linuxStyles = guarded("linux styles", () => linuxDesktop?.installLinuxStyles(window));
   const adapter = new GeckoEngineAdapter(window);
   // Per-tab engine switching in `./dev` and `./dev web-probe`; the fixture probe
   // (`./dev engine-probe`) adds its own explicit toolbar action.
-  const engineProbe = installEngineProbeControls(window, adapter, {
+  const chromiumProbe = installEngineProbeControls(window, adapter, {
     Presenter: CEFPresenter,
     onFailure: () => console.error("AxioSozo Chromium switch unavailable; Firefox tab retained"),
   });
+  // A configured WebKit host (Linux WPE, or macOS WKWebView with axiosozo.engines.webkit.enabled
+  // and AXIOSOZO_WEBKIT_BINARY): three-engine switching over the Chromium probe. Null otherwise
+  // (the macOS default), and then the Chromium probe is used as before.
+  const engineProbe = guarded("webkit engine", () => optionalModule("WebKitEngineControls.sys.mjs")?.installWebKitEngine(window, adapter, {
+    chromium: chromiumProbe, onFailure: () => console.error("AxioSozo WebKit switch unavailable; Firefox tab retained"),
+  })) ?? chromiumProbe;
   // The engine glyph on hovered tabs; the selected tab's glyph is the switch.
   const engineTabs = engineProbe ? guarded("engine tabs", () => optionalModule("EngineTabs.sys.mjs")?.installEngineTabs(window, { engineProbe })) : null;
   // Bottom space switcher; axiosozo.ui.spaceSwitcher.enabled=false is stock Zen.
@@ -307,6 +320,8 @@ async function initialize() {
     disposeContexts();
     engineTabs?.dispose();
     spaceSwitcher?.dispose();
+    linuxWindowSizing?.();
+    linuxStyles?.();
     engineProbe?.dispose().catch(() => {});
     adapter.dispose();
   }, { once: true });

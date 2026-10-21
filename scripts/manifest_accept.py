@@ -17,7 +17,7 @@ import storage
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_RELATIVE = Path('tools/axiosozo-manifest/manifest_accept.py')
 CONFIG_RELATIVE = Path('apps/browser/chrome/ProjectManifestAccept.sys.mjs')
-PYTHON = Path('/Volumes/AxioSozoBuild/toolchains/zen/python/bin/python3.11')
+PYTHON = storage.VOLUME / 'toolchains/zen/python/bin/python3.11'
 EXPECTED_DIGEST = '53b0768151ec6ac403fa5ef3e8119dd25ee6c569e5db55acdc60580e3772df86'
 MAX_HELPER_BYTES = 128 * 1024
 

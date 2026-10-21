@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Audited Zen source adapter. Never substitutes a stock app for a missing build."""
 import argparse
+import configparser
+import datetime
 import hashlib
 import json
 import os
@@ -31,6 +33,69 @@ FIREFOX_REVISION = 'a80bd15ddee3b4bf3679aeba340e9d2db933c467'
 FIREFOX_SHA512 = '0463304a0898670d248114f66f7c235166ae2397c3989a7c878c96f0c589fbbba1f1c87432daa22633b9fadd94394adf1dc37f0e67d22b066c75efe5eead75ce'
 FIREFOX_URL = 'https://archive.mozilla.org/pub/firefox/candidates/156.0-candidates/build1/source/firefox-156.0.source.tar.xz'
 BUNDLE_ID = 'nl.axiosozo.browser.dev'
+LINUX = storage.LINUX
+# Linux executable and remoting identity: surfer.json binaryName (overlay) becomes
+# --with-app-name; the stage mozconfig exports MOZ_APP_REMOTINGNAME. Together with
+# -no-remote and an owned profile they keep this build apart from stock Zen/Firefox.
+LINUX_APP_NAME = 'axiosozo-dev'
+REMOTING_NAME = 'AxioSozoDev'
+# Linux build-time prerequisites (system packages, see docs/LINUX.md). Checked
+# read-only by doctor; nothing is installed by this script.
+LINUX_COMMANDS = ['clang', 'clang++', 'ld.lld', 'llvm-config', 'pkg-config', 'm4', 'unzip', 'zip',
+                  'nasm', 'xz', 'make', 'git', 'curl', 'patch']
+LINUX_LLVM_PACKAGES = 'clang-19 lld-19 llvm-19 libclang-19-dev' 
+LINUX_PKG_CONFIG = ['gtk+-3.0', 'x11-xcb', 'xt', 'dbus-1', 'libpulse', 'alsa', 'libdrm', 'xkbcommon']
+# Mozilla's configure refuses older clang (toolchain.configure: 19.0 or newer).
+LINUX_MIN_CLANG = zen_toolchain.LINUX_MIN_LLVM
+
+
+def application_bundle():
+    """macOS: the .app bundle. Linux: dist/bin (the unpackaged development layout)."""
+    return OBJECT / 'dist/bin' if LINUX else OBJECT / 'dist/AxioSozo Dev.app'
+
+
+def resources_root(app=None):
+    """Where packaged chrome lives: Contents/Resources (macOS) or dist/bin (Linux)."""
+    app = application_bundle() if app is None else app
+    return app if LINUX else app / 'Contents/Resources'
+
+
+def clang_major():
+    """Major version of the clang the build uses (the selected LLVM on Linux)."""
+    output = capture(['clang', '--version'], env=zen_toolchain.environment() if LINUX else None)
+    match = re.search(r'clang version (\d+)\.', output or '')
+    return int(match.group(1)) if match else None
+
+
+def linux_libclang_dir():
+    """libclang of the selected LLVM (bindgen), or None to let configure search."""
+    llvm = zen_toolchain.linux_llvm()
+    if llvm is None:
+        return None
+    directory = llvm[1] / 'lib'
+    return directory if any(directory.glob('libclang.so*')) else None
+
+
+def linux_prerequisites():
+    """Missing Linux build prerequisites (read-only probes of PATH and pkg-config)."""
+    path = zen_toolchain.environment()['PATH']
+    missing = [name for name in LINUX_COMMANDS if not shutil.which(name, path=path)]
+    if shutil.which('pkg-config', path=path):
+        missing += ['pkg-config:' + module for module in LINUX_PKG_CONFIG
+                    if subprocess.run(['pkg-config', '--exists', module], capture_output=True).returncode]
+    if zen_toolchain.linux_llvm() is None:
+        missing.append(f'LLVM/clang >= {LINUX_MIN_CLANG} under /usr/lib/llvm-<N> ({LINUX_LLVM_PACKAGES})')
+    elif linux_libclang_dir() is None:
+        missing.append('libclang for bindgen (' + LINUX_LLVM_PACKAGES + ')')
+    major = clang_major()
+    if major is not None and major < LINUX_MIN_CLANG:
+        missing.append(f'clang>={LINUX_MIN_CLANG} (found {major})')
+    return missing
+
+
+def sccache_enabled():
+    """Linux only, explicit opt-in (CI and repeat builds); never on macOS."""
+    return LINUX and os.environ.get('AXIOSOZO_SCCACHE') == '1'
 
 
 def capture(args, cwd=None, env=None):
@@ -258,9 +323,20 @@ def unexpected_source_changes(destination=UPSTREAM):
 
 def doctor():
     issues = []
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
+    if LINUX:
+        if not zen_toolchain.PIN_FILE.is_file():
+            issues.append('Linux ' + zen_toolchain.host_tag() + ' has no pinned toolchain (x86_64/aarch64 only)')
+        missing = linux_prerequisites()
+        if missing:
+            issues.append('LINUX_PREREQUISITES_MISSING: ' + ', '.join(missing) + ' (see docs/LINUX.md)')
+    elif platform.system() != 'Darwin' or platform.machine() != 'arm64':
         issues.append('macOS Apple Silicon required for this build')
-    if not Path('/Volumes/DevStorage').is_mount() or not storage.mounted():
+    if LINUX and not storage.mounted():
+        issues.append('Linux build root ' + str(BUILD_ROOT) + ' does not exist yet; ./dev setup creates it')
+        free = storage.linux_free_gib()
+        if free < 30:
+            issues.append(f'Build root disk has {free} GiB free; Zen requires at least 30 GB')
+    elif not LINUX and (not Path('/Volumes/DevStorage').is_mount() or not storage.mounted()):
         issues.append('Project APFS build storage is not mounted')
         free = 0
     else:
@@ -287,8 +363,12 @@ def doctor():
         issues.append('Project-local cbindgen0.29.4 required by pinned Firefox')
     if not versions['python3'] or not versions['python3'].startswith('Python 3.11.'):
         issues.append('Project-local Python3.11 required by pinned upstream')
+    if sccache_enabled():
+        versions['sccache'] = capture(['sccache', '--version'], ROOT, tool_environment)
+        if not versions['sccache'] or not versions['sccache'].startswith('sccache 0.18.0'):
+            issues.append('AXIOSOZO_SCCACHE=1 needs the pinned sccache 0.18.0 (zen_toolchain setup)')
     sdk_roots = [Path('/Library/Developer/CommandLineTools/SDKs'), Path('/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs')]
-    if not any(list(path.glob('MacOSX*.sdk')) for path in sdk_roots):
+    if not LINUX and not any(list(path.glob('MacOSX*.sdk')) for path in sdk_roots):
         issues.append('macOS SDK unavailable')
     native_build_verified = False
     stamp = BUILD / 'build-stamp.json'
@@ -299,11 +379,18 @@ def doctor():
                                      and saved.get('executable') == str(validate_application()))
         except (OSError, ValueError, KeyError, RuntimeError):
             pass
-    return {'status': 'BLOCKED_ENV' if issues else 'PASS', 'issues': issues,
-            'free_gib': free, 'versions': versions, 'upstream_sha': actual,
-            'upstream_python': '3.11', 'build_jobs': build_jobs(), 'build_root': str(BUILD),
-            'application': str(OBJECT / 'dist/AxioSozo Dev.app'),
-            'bundle_id': BUNDLE_ID, 'native_build_verified': native_build_verified}
+    result = {'status': 'BLOCKED_ENV' if issues else 'PASS', 'issues': issues,
+              'free_gib': free, 'versions': versions, 'upstream_sha': actual,
+              'upstream_python': '3.11', 'build_jobs': build_jobs(), 'build_root': str(BUILD),
+              'application': str(application_bundle()),
+              'bundle_id': BUNDLE_ID, 'native_build_verified': native_build_verified}
+    if LINUX:
+        result.update(platform='linux', host=zen_toolchain.host_tag(), bundle_id=None,
+                      executable=str(application_bundle() / LINUX_APP_NAME), remoting_name=REMOTING_NAME,
+                      clang_major=clang_major(), libclang=str(linux_libclang_dir() or ''),
+                      llvm=str((zen_toolchain.linux_llvm() or (None, ''))[1]),
+                      sccache=sccache_enabled())
+    return result
 
 
 def overlay(destination):
@@ -375,7 +462,7 @@ def materialize_axiosozo_resources(stage, app):
     file must be present; unknown files or links are never replaced.
     """
     source_root = stage / MIRROR
-    bundle_root = app / 'Contents/Resources/browser/chrome/browser/content/browser/axiosozo'
+    bundle_root = resources_root(app) / 'browser/chrome/browser/content/browser/axiosozo'
     if not source_root.is_dir() or not bundle_root.is_dir():
         raise RuntimeError('AXIOSOZO_BUNDLE_MISSING')
     replacements = []
@@ -497,6 +584,12 @@ def build_jobs():
 def build_environment():
     env = zen_toolchain.environment()
     jobs = str(build_jobs())
+    if sccache_enabled():
+        # Only the cache location and size; the compiler wrapper itself is
+        # selected by the stage mozconfig (--with-ccache), never by RUSTC_WRAPPER.
+        env.update({'SCCACHE_DIR': str(BUILD_ROOT / 'caches/sccache'),
+                    'SCCACHE_CACHE_SIZE': os.environ.get('AXIOSOZO_SCCACHE_SIZE', '8G'),
+                    'SCCACHE_IDLE_TIMEOUT': '0'})
     env.update({'MOZBUILD_STATE_PATH': str(BUILD / 'mozbuild'), 'npm_config_cache': str(BUILD / 'npm-cache'),
                 'PIP_CACHE_DIR': str(BUILD / 'pip-cache'), 'PYTHONDONTWRITEBYTECODE': '1',
                 'MACHRC': '/dev/null', 'DISABLE_TELEMETRY': '1',
@@ -511,8 +604,8 @@ def build_environment():
 
 def run_command(args, cwd=STAGE, env=None):
     print('+ ' + ' '.join(str(arg) for arg in args), flush=True)
-    subprocess.run([EXTERNAL, sys.executable, str(ROOT / 'scripts/storage.py'), 'exec', '--', *map(str, args)],
-                   cwd=cwd, env=env or zen_toolchain.environment(), check=True)
+    # macOS: dev-external + storage exec; Linux: storage exec (zen_toolchain.wrapped).
+    subprocess.run(zen_toolchain.wrapped(args), cwd=cwd, env=env or zen_toolchain.environment(), check=True)
 
 
 def fetch_firefox(env=None):
@@ -531,7 +624,7 @@ def fetch_firefox(env=None):
 
 def stage_mozconfig(jobs):
     """The exact build-stage mozconfig written by setup (an ignored upstream input)."""
-    return f'''# AxioSozo development configuration, MPL-2.0.
+    config = f'''# AxioSozo development configuration, MPL-2.0.
 mk_add_options MOZ_OBJDIR={OBJECT}
 mk_add_options MOZ_MAKE_FLAGS="-j{jobs}"
 ac_add_options --disable-gtest-in-build
@@ -542,10 +635,28 @@ ac_add_options --disable-debug-symbols
 export MOZ_MACBUNDLE_ID=browser.dev
 export MOZ_APP_REMOTINGNAME=AxioSozoDev
 '''
+    if not LINUX:
+        return config
+    # Linux: system clang with lld (much faster links than BFD ld). Wasm-sandboxed
+    # libraries stay enabled (pinned WASI SDK); content/GPU sandboxes are untouched.
+    config += '# Linux development build (scripts/zen.py, docs/LINUX.md).\nac_add_options --enable-linker=lld\n'
+    # MOZ_AUTOMATION (set only to keep mach from bootstrapping downloads) would also
+    # turn compiler warnings into errors; distribution clang differs from Mozilla's
+    # pinned clang, so keep warnings visible but not fatal. No runtime effect.
+    config += 'ac_add_options --disable-warnings-as-errors\n'
+    libclang = linux_libclang_dir()
+    if libclang:
+        config += f'ac_add_options --with-libclang-path={libclang}\n'
+    if sccache_enabled():
+        config += f'ac_add_options --with-ccache={zen_toolchain.TOOLS / "sccache/sccache"}\n'
+    return config
 
 
 def setup(build_native=True):
-    subprocess.run([MOUNT], check=True)
+    if LINUX:
+        storage.ensure()
+    else:
+        subprocess.run([MOUNT], check=True)
     if not storage.mounted():
         raise RuntimeError('PROJECT_STORAGE_NOT_MOUNTED')
     unexpected = unexpected_source_changes()
@@ -654,9 +765,9 @@ def setup(build_native=True):
         return 0
     run_command(['npm', 'run', 'build', '--', '--jobs', jobs], env=env)
     materialized = zen_import.materialize_zen_content_resources(
-        STAGE, OBJECT / 'dist/AxioSozo Dev.app')
+        STAGE, application_bundle(), resources_root())
     print(f'PASS: verified 9 sandbox-readable Zen content resources ({materialized} materialized)', flush=True)
-    axiosozo_materialized = materialize_axiosozo_resources(STAGE, OBJECT / 'dist/AxioSozo Dev.app')
+    axiosozo_materialized = materialize_axiosozo_resources(STAGE, application_bundle())
     print(f'PASS: verified {len(packaged_files())} packaged AxioSozo chrome files ({axiosozo_materialized} materialized)', flush=True)
     executable = validate_application()
     (BUILD / 'build-stamp.json').write_text(json.dumps({'zen_sha': ZEN_SHA, 'firefox_revision': FIREFOX_REVISION,
@@ -670,7 +781,10 @@ def setup(build_native=True):
 def native_build():
     """Fast path for edits under apps/browser/native only: mirror, then rebuild just the
     changed native directories and relink libxul. Anything else needs a full setup."""
-    subprocess.run([MOUNT], check=True)
+    if LINUX:
+        storage.ensure()
+    else:
+        subprocess.run([MOUNT], check=True)
     if not storage.mounted():
         raise RuntimeError('PROJECT_STORAGE_NOT_MOUNTED')
     stamp_path = BUILD / 'build-stamp.json'
@@ -716,6 +830,8 @@ def native_build():
 
 
 def validate_application():
+    if LINUX:
+        return validate_linux_application(application_bundle())
     app = OBJECT / 'dist/AxioSozo Dev.app'
     with (app / 'Contents/Info.plist').open('rb') as source:
         info = plistlib.load(source)
@@ -725,6 +841,64 @@ def validate_application():
     if not executable.is_file():
         raise RuntimeError('APP_EXECUTABLE_MISSING')
     return executable
+
+
+def validate_linux_application(directory):
+    """dist/bin (or an unpacked package): our executable and remoting identity."""
+    executable = directory / LINUX_APP_NAME
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError('APP_EXECUTABLE_MISSING')
+    ini = configparser.ConfigParser(interpolation=None)
+    if not ini.read(directory / 'application.ini') or not ini.has_section('App'):
+        raise RuntimeError('APPLICATION_INI_MISSING')
+    if ini['App'].get('RemotingName') != REMOTING_NAME:
+        raise RuntimeError('REMOTING_NAME_NOT_ISOLATED')
+    return executable
+
+
+def package():
+    """Linux: `mach package` the verified build into a relocatable tar.xz plus a
+    build-info record (CI uploads both). No signing, upload or release."""
+    if not LINUX:
+        raise RuntimeError('PACKAGE_LINUX_ONLY: macOS packaging is scripts/release/preview.py')
+    result = describe()
+    if result['status'] != 'PASS':
+        raise RuntimeError('BUILD_NOT_READY: ' + json.dumps(result))
+    engine = STAGE / 'engine'
+    dist = OBJECT / 'dist'
+    for old in dist.glob(LINUX_APP_NAME + '-*.tar.xz'):
+        old.unlink()
+    env = {**build_environment(), 'ACCEPTED_MAR_CHANNEL_IDS': 'axiosozo-dev', 'MAR_CHANNEL_ID': 'axiosozo-dev'}
+    # MOZ_AUTOMATION=1 (set only to stop mach bootstrapping) also turns on the
+    # release-automation steps of packager.mk (`RUN_X ?= $(MOZ_AUTOMATION)`):
+    # find-dupes, which rejects Zen's duplicated icons, and the mozharness zip.
+    # Defined-but-empty values skip both for this development package.
+    env.update({'RUN_FIND_DUPES': '', 'RUN_MOZHARNESS_ZIP': ''})
+    # The same flag makes `make-package` write buildhub/buildinfo metadata
+    # (informulate.py), which reads these two from the automation environment:
+    # the build's own id (obj/buildid.h, so nothing is rebuilt) and a tree name.
+    buildid = re.search(r'#define MOZ_BUILDID (\d{14})', (OBJECT / 'buildid.h').read_text())
+    if not buildid:
+        raise RuntimeError('BUILDID_MISSING: ' + str(OBJECT / 'buildid.h'))
+    env.update({'MOZ_BUILD_DATE': buildid.group(1), 'MH_BRANCH': 'axiosozo-dev'})
+    run_command(['./mach', 'package'], engine, env)
+    archives = sorted(dist.glob(LINUX_APP_NAME + '-*.tar.xz'))
+    if len(archives) != 1:
+        raise RuntimeError('PACKAGE_OUTPUT_UNEXPECTED: ' + ', '.join(path.name for path in archives))
+    archive = archives[0]
+    commit = capture(['git', 'rev-parse', 'HEAD'], ROOT)
+    dirty = capture(['git', 'status', '--porcelain', '--untracked-files=no'], ROOT)
+    info = {'version': 1, 'kind': 'axiosozo-zen-linux-development-build', 'host': zen_toolchain.host_tag(),
+            'archive': archive.name, 'archive_sha256': file_hash(archive, 'sha256'),
+            'archive_bytes': archive.stat().st_size, 'executable': LINUX_APP_NAME + '/' + LINUX_APP_NAME,
+            'remoting_name': REMOTING_NAME, 'zen_sha': ZEN_SHA, 'firefox_revision': FIREFOX_REVISION,
+            'fingerprint': result['fingerprint'], 'repository_commit': commit,
+            'repository_tracked_changes': bool(dirty), 'sccache': sccache_enabled(),
+            'packaged_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+            'note': 'Development build; unsigned; updater disabled. Not a release.'}
+    (dist / 'axiosozo-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
+    print(json.dumps(info, indent=2), flush=True)
+    return 0
 
 
 def describe():
@@ -737,7 +911,7 @@ def describe():
     saved = json.loads(stamp.read_text())
     if saved.get('fingerprint') != fingerprint():
         return {'status': 'BLOCKED_ENV', 'reason': 'NATIVE_REBUILD_REQUIRED', 'setup': './dev setup'}
-    return {'status': 'PASS', 'executable': str(validate_application()), 'bundle_id': BUNDLE_ID,
+    return {'status': 'PASS', 'executable': str(validate_application()), 'bundle_id': None if LINUX else BUNDLE_ID,
             'engine': 'gecko', 'cef_embedding': 'experimental_web_mode_unverified',
             'fingerprint': saved['fingerprint']}
 
@@ -828,9 +1002,27 @@ def validate_run_profile(profile):
     return path
 
 
+def source_check():
+    """Syntax of every packaged module plus the browser's DOM-free suites."""
+    # Every packaged module, including overview/ and the contexts core, must parse.
+    for _, path in packaged_files():
+        if path.suffix == '.mjs':
+            subprocess.run(['node', '--check', path], check=True)
+    # Keep new browser surfaces in the root check automatically. The actual
+    # Rust process tests run separately only after its build is verified.
+    tests = sorted(path for path in (ROOT / 'apps/browser/tests').glob('*.test.mjs')
+                   if not path.name.startswith('._') and path.name != 'coordinator.test.mjs')
+    # Linux: the suites run through storage exec, so their TMPDIR is inside the
+    # build root, the Linux counterpart of the macOS external-wrapper TMPDIR.
+    command = ['node', '--test', *tests]
+    subprocess.run(zen_toolchain.wrapped(command) if LINUX else command, check=True)
+    subprocess.run([sys.executable, '-B', ROOT / 'apps/browser/tests/test_bootstrap.py'], check=True)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['doctor', 'setup', 'setup-source', 'native-build', 'prepare', 'check', 'describe', 'ready', 'run', 'smoke'])
+    parser.add_argument('command', choices=['doctor', 'setup', 'setup-source', 'native-build', 'prepare', 'check', 'describe', 'ready', 'run', 'smoke', 'package'])
     parser.add_argument('--profile')
     parser.add_argument('--url', default='about:blank')
     args = parser.parse_args()
@@ -840,6 +1032,8 @@ def main():
         return setup(build_native=False)
     if args.command == 'native-build':
         return native_build()
+    if args.command == 'package':
+        return package()
     if args.command == 'prepare':
         unexpected = unexpected_source_changes()
         if unexpected:
@@ -848,17 +1042,13 @@ def main():
         print('PASS: privileged chrome overlay applied to pinned Zen source; native build not performed')
         return 0
     if args.command == 'check':
-        # Every packaged module, including overview/ and the contexts core, must parse.
-        for _, path in packaged_files():
-            if path.suffix == '.mjs':
-                subprocess.run(['node', '--check', path], check=True)
-        # Keep new browser surfaces in the root check automatically. The actual
-        # Rust process tests run separately only after its build is verified.
-        tests = sorted(path for path in (ROOT / 'apps/browser/tests').glob('*.test.mjs')
-                       if not path.name.startswith('._') and path.name != 'coordinator.test.mjs')
-        subprocess.run(['node', '--test', *tests], check=True)
-        subprocess.run([sys.executable, '-B', ROOT / 'apps/browser/tests/test_bootstrap.py'], check=True)
-        return 0
+        try:
+            return source_check()
+        except subprocess.CalledProcessError as error:
+            # A failing test is a FAIL, never an environment block.
+            print(json.dumps({'status': 'FAIL', 'error': f'check step exited {error.returncode}',
+                              'step': ' '.join(str(item) for item in error.cmd[:3])}), file=sys.stderr)
+            return 1
     if args.command == 'smoke':
         result = describe()
         if result['status'] == 'PASS':

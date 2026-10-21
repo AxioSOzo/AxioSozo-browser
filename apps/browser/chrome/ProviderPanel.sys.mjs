@@ -2,6 +2,7 @@
  * License, v. 2.0. https://mozilla.org/MPL/2.0/ */
 import { ProviderConversation, composeProviderPrompt } from "./ProviderConversation.sys.mjs";
 import { ProviderInstances, openProviderSettings } from "./ProviderSettings.sys.mjs";
+import { accelAria, accelKey, words } from "./overview/platform-words.mjs";
 
 const NS = "http://www.w3.org/1999/xhtml";
 const PROVIDERS = Object.freeze({ codex: "Codex", "claude-code": "Claude Code", antigravity: "Antigravity" });
@@ -173,7 +174,7 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
     contextPreview.id = "axiosozo-assistant-context"; attach.setAttribute("aria-describedby", contextPreview.id);
     const actions = html(doc, "div", "", "axiosozo-assistant-controls");
     send = html(doc, "button", "Send", "primary"); send.type = "button";
-    send.title = "Send (⌘↩)"; send.setAttribute("aria-keyshortcuts", "Meta+Enter");
+    send.title = words("Send (⌘↩)"); send.setAttribute("aria-keyshortcuts", `${accelAria()}+Enter`);
     stop = html(doc, "button", "Stop"); stop.type = "button"; stop.hidden = true;
     const reset = html(doc, "button", "New conversation", "axiosozo-assistant-quiet"); reset.type = "button";
     reset.addEventListener("click", async () => { await disconnect(); setBusy(false); clearAnswer(); setStatus("New conversation. Nothing is sent until you press Send."); question.focus(); });
@@ -202,7 +203,7 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
     });
     panel.addEventListener("keydown", event => {
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
-      if (event.key === "Enter" && event.metaKey && !event.isComposing) { event.preventDefault(); submit(); }
+      if (event.key === "Enter" && accelKey(event) && !event.isComposing) { event.preventDefault(); submit(); }
       if (event.key === "Tab") {
         // Only what can take focus now: an empty answer region is not shown.
         const controls = [...panel.querySelectorAll("button, input, textarea, select, [tabindex='0']")]
@@ -220,7 +221,7 @@ export function installProviderPanel(win, { engineProbe = null, Conversation = P
     previouslyFocused = doc.activeElement;
     try { const policy = store.state(); const preferred = policy.instances.find(item => item.instance_id === policy.defaultId); if (preferred) select.value = preferred.driver; } catch { /* Send presents invalid configuration without overwriting it. */ }
     attachedPage = null; attach.checked = false; contextPreview.textContent = "Only your question is sent.";
-    setBusy(false); setStatus("Nothing is sent until you press Send. ⌘Enter to send.");
+    setBusy(false); setStatus(words("Nothing is sent until you press Send. ⌘Enter to send."));
     panel.hidden = false; question.focus();
   }
   return Object.freeze({ open, close, diagnostics: () => ({ open: Boolean(panel && !panel.hidden), busy: pending, connected: Boolean(connection && !connection.closed) }),

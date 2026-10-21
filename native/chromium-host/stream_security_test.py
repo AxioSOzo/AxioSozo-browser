@@ -17,7 +17,7 @@ probe = stream.probe
 
 
 def run():
-    probe.check()
+    stream.require_host()
     directory = Path(tempfile.mkdtemp(prefix='cef-stream-security-', dir=probe.EVIDENCE))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), probe.FixtureHandler)
     server.request_log = directory / 'fixture-requests.jsonl'

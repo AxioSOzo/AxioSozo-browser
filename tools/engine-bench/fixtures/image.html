@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:image</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). Image-heavy: 96 procedurally generated 256x256 bitmaps.
+     The fixture policy of both hosts admits no image subresources (only /engine.html), so the bitmaps are
+     generated in the page (ImageData noise + gradients) instead of decoded from files. -->
+<style>body{margin:0;background:#1d232a;color:#e8eef2;font:16px system-ui,sans-serif}.badge{font:14px ui-monospace,monospace;color:#9fb0bd;padding:16px}
+#g{display:grid;grid-template-columns:repeat(auto-fill,256px);gap:8px;padding:8px}canvas{width:256px;height:256px;display:block}</style>
+<p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · IMAGE-HEAVY (generated bitmaps) · NO ACCOUNTS</p><div id="g"></div>
+<script>const g=document.getElementById('g');let seed=1;const rnd=()=>(seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff;
+for(let k=0;k<96;k++){const c=document.createElement('canvas');c.width=c.height=256;const x=c.getContext('2d');
+const img=x.createImageData(256,256);const d=img.data;const h=k*37;
+for(let i=0;i<d.length;i+=4){const p=i>>2,px=p&255,py=p>>8;const v=rnd()*80;d[i]=(px+h)&255;d[i+1]=(py*2+v)&255;d[i+2]=(px^py)+v&255;d[i+3]=255;}
+x.putImageData(img,0,0);const gr=x.createRadialGradient(128,128,8,128,128,128);gr.addColorStop(0,`hsla(${h},80%,60%,.7)`);gr.addColorStop(1,'transparent');
+x.fillStyle=gr;x.fillRect(0,0,256,256);g.appendChild(c);}
+document.title='bench:image|page='+(new URLSearchParams(location.search).get('page')||'1');</script></html>

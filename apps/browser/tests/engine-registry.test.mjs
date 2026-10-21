@@ -16,8 +16,8 @@ const windowWith = ({ web = true, probe = false, prefs = {} } = {}) => ({ Servic
 
 test("the registry lists gecko, chromium and webkit with technical ids and separate labels", () => {
   assert.deepEqual(engineIds(), ["gecko", "chromium", "webkit"]);
-  assert.deepEqual(listEngines().map(e => e.label), ["Firefox", "Chromium", "Safari"]);
-  assert.deepEqual(listEngines().map(e => e.devLabel), ["Firefox (Gecko)", "Chromium (Blink)", "WebKit"]);
+  assert.deepEqual(listEngines().map(e => e.label), ["Firefox", "Chromium", "WebKit"]);
+  assert.deepEqual(listEngines().map(e => e.devLabel), ["Firefox (Gecko)", "Chromium (Blink)", "WebKit (WPE)"]);
   for (const engine of listEngines()) {
     assert.match(engine.icon, /^chrome:\/\/browser\/content\/axiosozo\/icons\/engine-[a-z]+\.svg$/u);
     assert.equal(typeof engine.available, "function");
@@ -28,14 +28,21 @@ test("the registry lists gecko, chromium and webkit with technical ids and separ
   assert.throws(() => { listEngines().push({}); }, TypeError, "the list is frozen");
 });
 
-test("gecko is always available; chromium follows the web-mode flag; webkit says it is not yet available", () => {
+test("gecko is always available; chromium follows the web-mode flag; webkit says why it is unavailable here", () => {
   assert.deepEqual(engineAvailability("gecko", {}), { available: true, reason: null });
   assert.equal(engineAvailability("chromium", windowWith()).available, true);
   assert.equal(engineAvailability("chromium", windowWith({ web: false })).available, false);
   assert.match(engineAvailability("chromium", windowWith({ web: false })).reason, /not enabled/u);
   assert.equal(engineAvailability("chromium", windowWith({ probe: true })).available, false, "the fixture probe is not web mode");
+  const lineup = windowWith({ web: false, probe: true });
+  lineup[registry.CHROMIUM_FIXTURE_LINEUP] = true;
+  assert.deepEqual({ ...engineAvailability("chromium", lineup) }, { available: true, reason: null, fixtureOnly: true },
+    "inside the three-engine lineup the fixture probe offers Chromium for the test page");
+  const stale = windowWith({ web: false });
+  stale[registry.CHROMIUM_FIXTURE_LINEUP] = true;
+  assert.equal(engineAvailability("chromium", stale).available, false, "the lineup marker alone, without the fixture probe, is not enough");
   assert.equal(engineAvailability("chromium", {}).available, false, "no Services: unavailable, never a throw");
-  assert.deepEqual(engineAvailability("webkit", windowWith()), { available: false, reason: "not yet available" });
+  assert.deepEqual(engineAvailability("webkit", windowWith()), { available: false, reason: "WebKit is not available on this platform yet" });
   assert.equal(engineAvailability("servo", windowWith()).available, false);
   assert.deepEqual(availableEngines(windowWith()).map(e => e.id), ["gecko", "chromium"]);
   assert.deepEqual(availableEngines(windowWith({ web: false })).map(e => e.id), ["gecko"]);
@@ -45,7 +52,7 @@ test("webkit is hidden from menus unless the developer pref is set, then shown d
   assert.deepEqual(menuEngines(windowWith()).map(e => e.engine.id), ["gecko", "chromium"]);
   const shown = menuEngines(windowWith({ prefs: { [SHOW_UNAVAILABLE_PREF]: true } }));
   assert.deepEqual(shown.map(e => [e.engine.id, e.disabled]), [["gecko", false], ["chromium", false], ["webkit", true]]);
-  assert.equal(shown[2].reason, "not yet available");
+  assert.equal(shown[2].reason, "WebKit is not available on this platform yet");
 });
 
 test("ids normalize: contract `firefox` reads as gecko, legacy values still restore, unknown ids are rejected", () => {
@@ -89,7 +96,8 @@ test("presenter factories are registered by the owning workstream, never built b
 test("with two available engines the tab menu is the single toggle item, as today", () => {
   const w = windowWith();
   assert.deepEqual(tabMenuModel("gecko", w), { mode: "toggle", label: "Open in Chromium",
-    items: [{ id: "chromium", label: "Chromium", checked: false, disabled: false, reason: null }] });
+    items: [{ id: "chromium", label: "Chromium", checked: false, disabled: false, reason: null, note: "Experimental" }] });
+  assert.equal(tabMenuModel("chromium", w).items[0].note, "", "Firefox is not experimental");
   assert.equal(tabMenuModel("chromium", w).label, "Open in Firefox");
   assert.equal(tabMenuModel("firefox", w).label, "Open in Chromium", "legacy spelling");
   assert.equal(nextEngine("gecko", w), "chromium");
@@ -115,7 +123,7 @@ test("the developer pref lists webkit disabled in a submenu; it is never a selec
   assert.equal(model.mode, "submenu");
   const webkit = model.items.find(i => i.id === "webkit");
   assert.equal(webkit.disabled, true);
-  assert.equal(webkit.reason, "not yet available");
+  assert.equal(webkit.reason, "WebKit is not available on this platform yet");
 });
 
 // A minimal XUL-like tree for the menu installer.
@@ -188,7 +196,7 @@ test("with the developer pref the tab menu is an Open in submenu; the disabled e
   assert.equal(submenu.getAttribute("label"), "Open in");
   const popup = submenu.children[0];
   assert.deepEqual(popup.children.map(c => [c.getAttribute("label"), c.getAttribute("checked"), c.getAttribute("disabled")]),
-    [["Firefox", "true", "true"], ["Chromium", null, null], ["Safari", null, "true"]]);
+    [["Firefox", "true", "true"], ["Chromium", null, null], ["WebKit", null, "true"]]);
   popup.fire("command", { target: popup.children[0] });
   popup.fire("command", { target: popup.children[1] });
   assert.deepEqual(f.calls, ["chromium"], "the checked engine is not re-selected");
@@ -206,4 +214,71 @@ test("a failed switch from the menu is reported, not thrown", async () => {
 
 test("no tab menu, no installer", () => {
   assert.equal(installEngineTabMenu({ document: { getElementById: () => null } }, { engineOf: () => "gecko", setTabEngine() {} }), null);
+});
+
+// WebKit (Linux, fixture profile): availability is platform, pref, host, fixture page — in that order.
+const ROOT = "/home/runner/axiosozo-build";
+const linuxWindow = ({ os = "Linux", abi = "x86_64-gcc3", enabled = true, binary = `${ROOT}/webkit/AxioWebKitHost`,
+  origin = "http://127.0.0.1:41231", web = false, root = ROOT } = {}) => ({ Services: {
+  appinfo: { OS: os, XPCOMABI: abi },
+  env: { get: key => ({ AXIOSOZO_ENGINE_SWITCHING: web ? "1" : "", AXIOSOZO_BUILD_ROOT: root, AXIOSOZO_WEBKIT_BINARY: binary,
+    AXIOSOZO_ENGINE_FIXTURE_ORIGIN: origin })[key] ?? "" },
+  prefs: { getBoolPref: (name, fallback) => ({ "axiosozo.engines.webkit.enabled": enabled })[name] ?? fallback } } });
+
+test("webkit availability names the reason: macOS, other platforms, pref, host, fixture page", () => {
+  // macOS arm64 has the WKWebView host; a Linux build root or binary path is not it.
+  assert.deepEqual(engineAvailability("webkit", linuxWindow({ os: "Darwin", abi: "aarch64-gcc3" })),
+    { available: false, reason: "The WebKit engine is not installed" });
+  assert.equal(engineAvailability("webkit", linuxWindow({ os: "Darwin", abi: "x86_64-gcc3" })).reason,
+    "WebKit is available on Apple silicon Macs only");
+  const mac = { os: "Darwin", abi: "aarch64-gcc3", root: "/Volumes/AxioSozoBuild", binary: "/Volumes/AxioSozoBuild/webkit/AxioWebKitMacHost" };
+  assert.deepEqual(engineAvailability("webkit", linuxWindow(mac)), { available: true, reason: null, fixtureOnly: true });
+  assert.equal(engineAvailability("webkit", linuxWindow({ ...mac, binary: "/Volumes/AxioSozoBuild/webkit/AxioWebKitHost" })).reason,
+    "The WebKit engine is not installed", "the Linux host name is not the macOS host");
+  assert.equal(engineAvailability("webkit", linuxWindow({ ...mac, enabled: false })).reason, "WebKit is not enabled in this browser");
+  assert.equal(engineAvailability("webkit", linuxWindow({ abi: "aarch64-gcc3" })).reason, "WebKit is not available on this platform yet");
+  assert.equal(engineAvailability("webkit", linuxWindow({ os: "WINNT" })).reason, "WebKit is not available on this platform yet");
+  assert.equal(engineAvailability("webkit", linuxWindow({ enabled: false })).reason, "WebKit is not enabled in this browser");
+  assert.equal(engineAvailability("webkit", linuxWindow({ binary: "/usr/bin/AxioWebKitHost" })).reason, "The WebKit engine is not installed");
+  assert.equal(engineAvailability("webkit", linuxWindow({ binary: "" })).reason, "The WebKit engine is not installed");
+  assert.equal(engineAvailability("webkit", linuxWindow({ origin: "http://example.com:80" })).reason, "WebKit runs only the local test page for now");
+  assert.deepEqual(engineAvailability("webkit", linuxWindow()), { available: true, reason: null, fixtureOnly: true });
+});
+
+test("three available engines: the tab menu is an Open in submenu and the glyph cycles gecko → chromium → webkit → gecko", () => {
+  const w = linuxWindow({ web: true });
+  assert.deepEqual(availableEngines(w).map(e => e.id), ["gecko", "chromium", "webkit"]);
+  const model = tabMenuModel("webkit", w);
+  assert.equal(model.mode, "submenu");
+  assert.deepEqual(model.items.map(i => [i.label, i.checked, i.disabled]),
+    [["Firefox", false, false], ["Chromium", false, false], ["WebKit", true, true]]);
+  assert.equal(nextEngine("gecko", w), "chromium");
+  assert.equal(nextEngine("chromium", w), "webkit");
+  assert.equal(nextEngine("webkit", w), "gecko");
+  // Gecko + WebKit only (the Linux fixture setup): a single toggle.
+  const pair = linuxWindow();
+  assert.deepEqual(tabMenuModel("gecko", pair).items.map(i => i.id), ["webkit"]);
+  assert.equal(tabMenuModel("gecko", pair).label, "Open in WebKit");
+  assert.equal(tabMenuModel("webkit", pair).label, "Open in Firefox");
+  assert.equal(toContextEngine("webkit"), null, "context-v1 still cannot store webkit");
+});
+
+test("a later tab-menu installer takes the menu over until it disposes; the earlier one is then in charge again", async () => {
+  const f = menuFixture();
+  const calls = [];
+  const later = installEngineTabMenu(f.window, { engineOf: () => "webkit", setTabEngine: async (tab, id) => calls.push(id) });
+  assert.equal(f.menu.children.length, 3, "one set of items per window");
+  f.menu.fire("popupshowing");
+  assert.equal(f.menu.children[1].getAttribute("label"), "Open in Firefox", "the later installer's engine state");
+  f.menu.children[1].fire("command");
+  await Promise.resolve();
+  assert.deepEqual(calls, ["gecko"]); assert.deepEqual(f.calls, []);
+  later.dispose();
+  f.menu.fire("popupshowing");
+  assert.equal(f.menu.children[1].getAttribute("label"), "Open in Chromium");
+  f.installed.dispose();
+  assert.equal(f.menu.children.length, 1);
+  const again = installEngineTabMenu(f.window, { engineOf: () => "gecko", setTabEngine() {} });
+  assert.equal(f.menu.children.length, 3, "a fresh installer after full disposal builds the items again");
+  again.dispose();
 });

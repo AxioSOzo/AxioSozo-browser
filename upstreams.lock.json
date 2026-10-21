@@ -36,7 +36,33 @@
     "sha256": "5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777",
     "bytes": 132223579,
     "sandbox_compat": "265fca9293e6b6ef",
-    "license": "BSD-3-Clause plus Chromium third-party notices"
+    "license": "BSD-3-Clause plus Chromium third-party notices",
+    "platforms": {
+      "macosarm64": {
+        "distribution": "macosarm64_minimal",
+        "url": "https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_macosarm64_minimal.tar.bz2",
+        "sha1": "9fdef241a8c682d98743c9fc6b27f5e54045551e",
+        "sha256": "5b9c248b30db8d41dd2cf5c6f920ef4991c60e514f863413db542d0448ddf777",
+        "bytes": 132223579
+      },
+      "linux64": {
+        "distribution": "linux64_minimal",
+        "url": "https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_linux64_minimal.tar.bz2",
+        "sha1": "01c4df39ce79c441950cd8bf2f385c0b886bd5d3",
+        "sha256": "8beed3410b79aa4ae964bb7f955f08ac550eb2a377a6d12090be8bdb7de1369d",
+        "bytes": 326915001,
+        "checksum_source": "sha1 from https://cef-builds.spotifycdn.com/index.json (stable channel, last_modified 2026-09-22T03:47:08Z); sha256 computed 2026-10-19 from the archive whose sha1 matched",
+        "uncompressed_libcef_bytes": 1454127408
+      },
+      "linuxarm64": {
+        "distribution": "linuxarm64_minimal",
+        "url": "https://cef-builds.spotifycdn.com/cef_binary_154.0.23%2Bg062ebe4%2Bchromium-154.0.8037.17_linuxarm64_minimal.tar.bz2",
+        "sha1": "08c08229946992685b90b50ee08e7a59e192b601",
+        "sha256": "0d52ceed3ec40244ad2d330a370968cd1fa1442191edb762cd8e3f2dd20e045f",
+        "bytes": 424499168,
+        "checksum_source": "sha1 from https://cef-builds.spotifycdn.com/index.json (stable channel, last_modified 2026-09-22T06:37:43Z); sha256 computed 2026-10-19 from the archive whose sha1 matched"
+      }
+    }
   },
   "t3code": {
     "repository": "https://github.com/pingdotgg/t3code.git",
@@ -97,6 +123,328 @@
       "url": "https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz",
       "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
       "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html"
+    }
+  },
+  "zen_toolchain_linux_x86_64": {
+    "node": {
+      "version": "22.22.3",
+      "filename": "node-v22.22.3-linux-x64.tar.xz",
+      "url": "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-x64.tar.xz",
+      "sha256": "2e5d13569282d016861fae7c8f935e741693c269101a5bebcf761a5376d1f99f",
+      "checksum_source": "https://nodejs.org/dist/v22.22.3/SHASUMS256.txt"
+    },
+    "rust": {
+      "version": "1.95.0",
+      "filename": "rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "url": "https://static.rust-lang.org/dist/rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "2e0338f18ecbaa4a0f631b9e80e8b8e26bb6fe77dd5454fba8a70cf96c1e84a1",
+      "checksum_source": "https://static.rust-lang.org/dist/rust-1.95.0-x86_64-unknown-linux-gnu.tar.xz.sha256",
+      "audited_installer_sha256": "3d5a09d2e414c74e2bb6df12b233c4f8ccc8af4e3dfc9fe38401947a1a1acadd",
+      "std_component": "rust-std-x86_64-unknown-linux-gnu"
+    },
+    "python": {
+      "version": "3.11.16",
+      "distribution": "astral-sh/python-build-standalone",
+      "release": "20260901",
+      "filename": "cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16%2B20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "faa0758583a63f14c5eee516af82738403b59c13edda6fc0a21d953febd89eed",
+      "checksum_source": "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+    },
+    "tar": {
+      "version": "1.35",
+      "filename": "tar-1.35.tar.xz",
+      "url": "https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz",
+      "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
+      "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html",
+      "audited_installer_sha256": "c01446d5f9e51df7754dbd9ea8a4b14f93ed876d27a319fe429633db3d7de7e5"
+    },
+    "wasi": {
+      "version": "34.0",
+      "filename": "wasi-sdk-34.0-x86_64-linux.tar.gz",
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz",
+      "sha256": "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4",
+      "checksum_source": "https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34",
+      "asset_id": 528366474,
+      "size": 192383077
+    },
+    "sccache": {
+      "version": "0.18.0",
+      "optional": true,
+      "note": "Compiler cache; downloaded and used only when AXIOSOZO_SCCACHE=1 (CI, repeat builds).",
+      "filename": "sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz",
+      "url": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89",
+      "checksum_source": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz.sha256"
+    }
+  },
+  "zen_toolchain_linux_aarch64": {
+    "node": {
+      "version": "22.22.3",
+      "filename": "node-v22.22.3-linux-arm64.tar.xz",
+      "url": "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-arm64.tar.xz",
+      "sha256": "1c4a9933a5e45bc88f54f70b5f91232c127ec49f1a5989d23fb85824c7adf9b7",
+      "checksum_source": "https://nodejs.org/dist/v22.22.3/SHASUMS256.txt"
+    },
+    "rust": {
+      "version": "1.95.0",
+      "filename": "rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz",
+      "url": "https://static.rust-lang.org/dist/rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "094c9c36531911c5cc7dd6ab2d3069ab8dcd744d6239b0bda1387b243dfc391e",
+      "checksum_source": "https://static.rust-lang.org/dist/rust-1.95.0-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "audited_installer_sha256": "3d5a09d2e414c74e2bb6df12b233c4f8ccc8af4e3dfc9fe38401947a1a1acadd",
+      "audit_note": "install.sh hash read from the x86_64 Linux archive (the same rust-installer script as the macOS pin); setup refuses to run this archive's install.sh if it differs.",
+      "std_component": "rust-std-aarch64-unknown-linux-gnu"
+    },
+    "python": {
+      "version": "3.11.16",
+      "distribution": "astral-sh/python-build-standalone",
+      "release": "20260901",
+      "filename": "cpython-3.11.16+20260901-aarch64-unknown-linux-gnu-install_only.tar.gz",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16%2B20260901-aarch64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "c1cca4af741e33d47871b298842e6c3272cd9e8f57daf8085359fcbfe2d1a5aa",
+      "checksum_source": "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+    },
+    "tar": {
+      "version": "1.35",
+      "filename": "tar-1.35.tar.xz",
+      "url": "https://ftp.gnu.org/gnu/tar/tar-1.35.tar.xz",
+      "sha256": "4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16",
+      "checksum_source": "https://lists.gnu.org/archive/html/info-gnu/2023-07/msg00005.html",
+      "audited_installer_sha256": "c01446d5f9e51df7754dbd9ea8a4b14f93ed876d27a319fe429633db3d7de7e5"
+    },
+    "wasi": {
+      "version": "34.0",
+      "filename": "wasi-sdk-34.0-arm64-linux.tar.gz",
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-arm64-linux.tar.gz",
+      "sha256": "f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971",
+      "checksum_source": "https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34",
+      "asset_id": 528366381,
+      "size": 192255247
+    },
+    "sccache": {
+      "version": "0.18.0",
+      "optional": true,
+      "note": "Compiler cache; downloaded and used only when AXIOSOZO_SCCACHE=1 (CI, repeat builds).",
+      "filename": "sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz",
+      "url": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz",
+      "sha256": "2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a",
+      "checksum_source": "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-aarch64-unknown-linux-musl.tar.gz.sha256"
+    }
+  },
+  "ci_node": {
+    "version": "24.14.0",
+    "purpose": "Node for ./dev check and ./dev test on Linux CI (matches provider_host.node); installed by scripts/ci_tools.py",
+    "linux-x86_64": {
+      "filename": "node-v24.14.0-linux-x64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.xz",
+      "sha256": "41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df",
+      "checksum_source": "https://nodejs.org/dist/v24.14.0/SHASUMS256.txt"
+    },
+    "linux-aarch64": {
+      "filename": "node-v24.14.0-linux-arm64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-arm64.tar.xz",
+      "sha256": "e7adfca03d9173276114a6f2219df1a7d25e1bfd6bbd771d3f839118a2053094",
+      "checksum_source": "https://nodejs.org/dist/v24.14.0/SHASUMS256.txt"
+    },
+    "darwin-arm64": {
+      "filename": "node-v24.14.0-darwin-arm64.tar.xz",
+      "url": "https://nodejs.org/dist/v24.14.0/node-v24.14.0-darwin-arm64.tar.xz",
+      "sha256": "448f01d4dfa5a21d280cfbacf00abc22b51aad52f38db0f4886e0e5d00df541d",
+      "checksum_source": "https://nodejs.org/dist/v24.14.0/SHASUMS256.txt",
+      "purpose": "macOS CI lane (scripts/macos_ci.py node, .github/workflows/macos-ci.yml)"
+    }
+  },
+  "ci_rust": {
+    "version": "1.94.0",
+    "purpose": "Coordinator cargo fmt/clippy/test on Linux CI (matches coordinator.rust)",
+    "installer": "rustup toolchain install 1.94.0 --profile minimal; rustup verifies every component against the signed official channel manifest",
+    "channel_manifest": "https://static.rust-lang.org/dist/channel-rust-1.94.0.toml"
+  },
+  "ci_github_actions": {
+    "actions/checkout": {
+      "version": "v7.0.1",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    "actions/cache": {
+      "version": "v6.1.0",
+      "commit": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+    },
+    "actions/upload-artifact": {
+      "version": "v7.0.2",
+      "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+    },
+    "actions/download-artifact": {
+      "version": "v8.0.2",
+      "commit": "9000827ccba6bdab643e8b6fd33ac0654aef8333"
+    }
+  },
+  "webkit": {
+    "port": "wpe",
+    "version": "2.48.3",
+    "api": "wpe-webkit-2.0",
+    "platform": "linux-x86_64",
+    "status": "PINNED_PASS_LINUX_FIXTURE (Actions run 39297810722)",
+    "render_path": "libwpe + WPEBackend-fdo exportable SHM (ARGB8888 in CPU memory)",
+    "license": "WebKit: LGPL-2.1-or-later and BSD-2-Clause; libwpe and WPEBackend-fdo: BSD-2-Clause",
+    "source_tarball": {
+      "url": "https://wpewebkit.org/releases/wpewebkit-2.48.3.tar.xz",
+      "sha256": "807571f07e87823b8fb79564692c9b1ef81ee62edbf51345a15bd0e7e1f2e07b",
+      "bytes": 42211124,
+      "checksums": "https://wpewebkit.org/releases/wpewebkit-2.48.3.tar.xz.sums",
+      "downloaded": false
+    },
+    "libwpe": {
+      "version": "1.16.2",
+      "url": "https://wpewebkit.org/releases/libwpe-1.16.2.tar.xz",
+      "sha256": "960bdd11c3f2cf5bd91569603ed6d2aa42fd4000ed7cac930a804eac367888d7"
+    },
+    "wpebackend_fdo": {
+      "version": "1.16.0",
+      "url": "https://wpewebkit.org/releases/wpebackend-fdo-1.16.0.tar.xz",
+      "sha256": "beddf321232d5bd08106c179dbc600f8ce88eb3620b4a59a6329063b78f64635"
+    },
+    "debian": {
+      "release": "Debian 13 (trixie) 13.7, main, amd64",
+      "inrelease": "https://deb.debian.org/debian/dists/trixie/InRelease",
+      "inrelease_date": "2026-09-12T07:55:41Z",
+      "index": "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
+      "index_sha256": "7778d3e3f303b7ddb8ce0fe7c8d57473a076c6bf2e8f241f75421d2396352498",
+      "pool": "https://deb.debian.org/debian/",
+      "archive_fallback": "https://snapshot.debian.org/ keeps these exact versions after a point release",
+      "snapshot": "20261018T000000Z",
+      "packages": {
+        "runtime": {
+          "libwpewebkit-2.0-1": "2.48.3-1",
+          "libwpe-1.0-1": "1.16.2-1",
+          "libwpebackend-fdo-1.0-1": "1.16.0-1",
+          "bubblewrap": "0.12.0-1~deb13u1",
+          "xdg-dbus-proxy": "0.1.6-1+deb13u3",
+          "libegl1": "1.7.0-1+b2",
+          "libegl-mesa0": "25.0.7-2+deb13u1",
+          "libgl1-mesa-dri": "25.0.7-2+deb13u1"
+        },
+        "build": {
+          "libwpewebkit-2.0-dev": "2.48.3-1",
+          "libwpe-1.0-dev": "1.16.2-1",
+          "libwpebackend-fdo-1.0-dev": "1.16.0-1",
+          "libwayland-dev": "1.23.1-3",
+          "g++": "4:14.2.0-1",
+          "pkg-config": "1.8.1-4"
+        }
+      },
+      "files": {
+        "libwpewebkit-2.0-1": {
+          "version": "2.48.3-1",
+          "filename": "pool/main/w/wpewebkit/libwpewebkit-2.0-1_2.48.3-1_amd64.deb",
+          "sha256": "35c11e59afd836a36b14cb22b08c5c41ed139d56514bb1974930d6fc1171fbc8",
+          "bytes": 33732696
+        },
+        "libwpe-1.0-1": {
+          "version": "1.16.2-1",
+          "filename": "pool/main/libw/libwpe/libwpe-1.0-1_1.16.2-1_amd64.deb",
+          "sha256": "8f07005fc74b2ff54e593c71d7bc2528315c085a64659ef25f9e122db538347e",
+          "bytes": 20168
+        },
+        "libwpebackend-fdo-1.0-1": {
+          "version": "1.16.0-1",
+          "filename": "pool/main/w/wpebackend-fdo/libwpebackend-fdo-1.0-1_1.16.0-1_amd64.deb",
+          "sha256": "8f571e0752981400586ba5aeb3d9939c2d23819e536b8d921f27f2bf93a5fcad",
+          "bytes": 33752
+        },
+        "bubblewrap": {
+          "version": "0.12.0-1~deb13u1",
+          "filename": "pool/main/b/bubblewrap/bubblewrap_0.12.0-1~deb13u1_amd64.deb",
+          "sha256": "70aca4fa8daeacb677ec00e8063eb586f08ae3d94b1f11e684370b5524c43431",
+          "bytes": 56876
+        },
+        "xdg-dbus-proxy": {
+          "version": "0.1.6-1+deb13u3",
+          "filename": "pool/updates/main/x/xdg-dbus-proxy/xdg-dbus-proxy_0.1.6-1+deb13u3_amd64.deb",
+          "archive": "https://security.debian.org/debian-security/ (trixie-security)",
+          "sha256": "29bd2f3e1172640ce40289fadfcb632bc3fed33a6bf342c3976b25ad9026da0f",
+          "bytes": 26060,
+          "pinned_from": "apt-cache show from apt's signed trixie-security index, Actions run 39319667574 (pin-drift.txt); supersedes 0.1.6-1+deb13u2"
+        },
+        "libegl1": {
+          "version": "1.7.0-1+b2",
+          "filename": "pool/main/libg/libglvnd/libegl1_1.7.0-1+b2_amd64.deb",
+          "sha256": "62e7bc8ccd47a60e55aad17f83d8d474310d782eb8589bbce2ab714c31712406",
+          "bytes": 34588
+        },
+        "libegl-mesa0": {
+          "version": "25.0.7-2+deb13u1",
+          "filename": "pool/main/m/mesa/libegl-mesa0_25.0.7-2+deb13u1_amd64.deb",
+          "sha256": "0ddebd7e91b048aac812611d6bd008343386cb140b51e5e66df74c6b6263be65",
+          "bytes": 128456
+        },
+        "libgl1-mesa-dri": {
+          "version": "25.0.7-2+deb13u1",
+          "filename": "pool/main/m/mesa/libgl1-mesa-dri_25.0.7-2+deb13u1_amd64.deb",
+          "sha256": "722fad9944bdfd29eb6421576331a2697f83bc4b3551d693edb7aefdde6bb198",
+          "bytes": 46240
+        },
+        "libwpewebkit-2.0-dev": {
+          "version": "2.48.3-1",
+          "filename": "pool/main/w/wpewebkit/libwpewebkit-2.0-dev_2.48.3-1_amd64.deb",
+          "sha256": "831cf433370316ecc393fd090c1b27d37f596dd1b92921a6797b0dd4e43a597a",
+          "bytes": 73280
+        },
+        "libwpe-1.0-dev": {
+          "version": "1.16.2-1",
+          "filename": "pool/main/libw/libwpe/libwpe-1.0-dev_1.16.2-1_amd64.deb",
+          "sha256": "4824dbf3829160c1531cf8ac9c31b6aa5dbc1da899cdb3496dfb7f4ed5f7344a",
+          "bytes": 36292
+        },
+        "libwpebackend-fdo-1.0-dev": {
+          "version": "1.16.0-1",
+          "filename": "pool/main/w/wpebackend-fdo/libwpebackend-fdo-1.0-dev_1.16.0-1_amd64.deb",
+          "sha256": "46aae973004753682464d170666d16150fae6175303d2b8bf6bfb6108c02d7cf",
+          "bytes": 9088
+        },
+        "libwayland-dev": {
+          "version": "1.23.1-3",
+          "filename": "pool/main/w/wayland/libwayland-dev_1.23.1-3_amd64.deb",
+          "sha256": "66055b7df9a6c4b15fe0b52a42a76680bb4d0f4d1083800e7cd7ba26e59e68ed",
+          "bytes": 73892
+        },
+        "g++": {
+          "version": "4:14.2.0-1",
+          "filename": "pool/main/g/gcc-defaults/g++_14.2.0-1_amd64.deb",
+          "sha256": "f86661c021ab2acb39ceb87315e7c2d4d420fdadc19945d5d589f3953410445c",
+          "bytes": 1344
+        },
+        "pkg-config": {
+          "version": "1.8.1-4",
+          "filename": "pool/main/p/pkgconf/pkg-config_1.8.1-4_amd64.deb",
+          "sha256": "385209ba52e5c97808bbdc2fc4da22aea9020f96fbab6fbfb144921c4a31d400",
+          "bytes": 13968
+        }
+      }
+    },
+    "security_note": "Debian trixie ships wpewebkit 2.48.3 without later security updates (trixie-security had none on 2026-10-18). Acceptable only for the loopback fixture profile; any web browsing first requires a current upstream stable release built from a pinned wpewebkit.org tarball.",
+    "ci_image": {
+      "image": "docker.io/library/debian:trixie-20261005",
+      "index_digest": "sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5",
+      "amd64_manifest_digest": "sha256:bcf83fd8af414eda0c0a99d25a4e61dedd88e7aac7f7bc519d04555ff0c40ec5",
+      "note": "Debian 13.7; same digest as debian:13 and debian:13.7 on 2026-10-19. Used by .github/workflows/linux-webkit-host.yml."
+    },
+    "upstream": {
+      "purpose": "EVALUATION (ADR 004): current upstream stable WPE WebKit built in CI from the official tarball; not yet the product pin",
+      "version": "2.54.1",
+      "url": "https://wpewebkit.org/releases/wpewebkit-2.54.1.tar.xz",
+      "sha256": "0de8bdfba011f9cd63ba9a9171fa6038dd2c08237894f4082abbb821f29d3fe9",
+      "bytes": 46206356,
+      "checksums": "https://wpewebkit.org/releases/wpewebkit-2.54.1.tar.xz.sums",
+      "released": "2026-10-06",
+      "previous_stable": {
+        "version": "2.52.6",
+        "url": "https://wpewebkit.org/releases/wpewebkit-2.52.6.tar.xz",
+        "sha256": "b2bafef2751625b7fdf530f230ff0f542ff0eeba3590c3a989d931b2a55c858e",
+        "bytes": 65541800
+      },
+      "pinned_from": "official .sums files fetched by linux-webkit-upstream discover job, Actions run 39295390702 (published at ci-results:cloud_webkit-host/39295390702-1-discover)",
+      "libwpe_and_fdo": "Debian 13 packages (webkit.debian), whose upstream tarball sha256 match the official .sums in the same run"
     }
   }
 }

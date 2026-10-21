@@ -1,0 +1,329 @@
+# Where the Zen parent process spends its time in Chromium/WebKit tabs vs a Gecko tab
+# (tools/engine-bench/profile, docs/perf/profile-findings.md). MEASUREMENT ONLY.
+#
+#   profile (gecko, chromium)   zen_profile.py on a prebuilt Linux Zen app on the runner
+#   profile-webkit              zen_profile.py --engine webkit + gecko-debian in debian:13 (pinned)
+#   report                      one profile-report.md/json over all jobs
+#
+# Same app/CI setup as linux-engine-bench.yml (prebuilt axiosozo-zen-linux-x86_64 artifact,
+# TEST-ONLY chrome overlay of this checkout, CEF from this checkout, pinned WPE in debian:13).
+# Each engine runs three passes (plain, trace = chrome timing hooks, profile = hooks + Gecko
+# profiler). Raw profiles are summarized in the job (report.py process) and published trimmed
+# (gzip, <= 4.5 MiB) to ci-results; full raw profiles go to a 14-day artifact.
+# The WebKit sandbox (bubblewrap) and CEF's SUID sandbox stay on.
+name: linux-engine-profile
+on:
+  push:
+    branches: [cloud/integration, dev]
+    paths:
+      - tools/engine-bench/profile/**
+      - .github/workflows/linux-engine-profile.yml
+  pull_request:
+    branches: [cloud/integration, dev]
+    paths:
+      - tools/engine-bench/profile/**
+      - .github/workflows/linux-engine-profile.yml
+  workflow_call:
+    inputs:
+      zen_build_run_id:
+        type: string
+        default: ''
+      passes:
+        type: string
+        default: plain,trace,profile
+      extra:
+        type: string
+        default: ''
+      control:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-engine-profile-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # upstreams.lock.json webkit.ci_image
+  WEBKIT_IMAGE: docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+  # Default: the newest prebuilt app with the perf-phase2 native frame receiver compiled in
+  # (linux-perf-build 39362552105, cloud/perf-phase2, merged into cloud/integration; it also
+  # published the unstripped libxul used to symbolize profiles). With this checkout's chrome JS
+  # (TEST-ONLY overlay) and hosts, the defaults are memfd frames + native receiver.
+  ZEN_BUILD_RUN_ID: ${{ inputs.zen_build_run_id || '39430325744' }}  # final-review: linux-perf-build 39430325744 (cloud/final-review 28fe484); was 39383407870
+  PROFILE_PASSES: ${{ inputs.passes || 'plain,trace,profile' }}
+  # Same-job control (perf-phase3): when set, every engine job runs zen_profile a second time with these
+  # options (label <label>-control), e.g. the phase-3 features off, on the same runner.
+  # (perf-phase3 used: --pref axiosozo.engines.linux.direct_composite=false --pref axiosozo.engines.prewarm=false)
+  PROFILE_CONTROL: ${{ inputs.control || '' }}
+  # Extra zen_profile.py options, e.g. --wr-promotion-log (TEST-ONLY WebRender surface-promotion log).
+  PROFILE_EXTRA: ${{ inputs.extra || '' }}
+
+jobs:
+  zen-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run_id: ${{ steps.pick.outputs.run_id }}
+      artifact: ${{ steps.pick.outputs.artifact }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ZEN_BUILD_RUN_ID/artifacts" \
+            --jq '[.artifacts[] | select(.name=="axiosozo-zen-linux-x86_64" and (.expired|not))][0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          if [ -z "$artifact" ]; then
+            artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=axiosozo-zen-linux-x86_64&per_page=30" \
+              --jq '[.artifacts[] | select(.expired | not) | select((.workflow_run.head_repository_id == .workflow_run.repository_id and (.workflow_run.head_branch == "cloud/integration" or .workflow_run.head_branch == "dev")))] | sort_by(.created_at) | reverse | .[0] // empty | {id, run_id: .workflow_run.id, branch: .workflow_run.head_branch, sha: .workflow_run.head_sha, created_at}')
+          fi
+          echo "$artifact"
+          echo "artifact=$(echo "$artifact" | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(echo "$artifact" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d)["run_id"] if d else "")')" >> "$GITHUB_OUTPUT"
+
+  profile:
+    needs: zen-source
+    if: needs.zen-source.outputs.run_id != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [gecko, chromium]
+        scale: ['1', '2']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download the build artifact of another run
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AXIOSOZO_BUILD_ROOT: /home/runner/axiosozo-build
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-profile-${{ matrix.engine }}-${{ matrix.scale }}x
+      RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+      ENGINE: ${{ matrix.engine }}
+      SCALE: ${{ matrix.scale }}
+      # 1x: zen_bench's default window; 2x: TEST-ONLY layout.css.devPixelsPerPx=2 on a 2304x1440
+      # screen (the docs/perf/pixel-path.md 2x setup).
+      LABEL: ${{ matrix.scale == '2' && format('{0}-2x', matrix.engine) || matrix.engine }}
+      AXIOSOZO_PROFILE_SYMBOLS: /home/runner/libxul-symbols
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: GUI packages (scripts/linux_packages.py gui) and the CEF runtime
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
+        run: |
+          mkdir -p "$EVIDENCE_OUT/$LABEL" "$AXIOSOZO_BUILD_ROOT"
+          printf '%s\n' "$ZEN_ARTIFACT_JSON" > "$EVIDENCE_OUT/zen-artifact.json"
+          sudo apt-get update -qq
+          extra="binutils libc6-dbg"
+          [ "$ENGINE" = chromium ] && extra="$extra cmake ninja-build g++ zlib1g-dev bzip2 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libatspi2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 \
+            libx11-6 libxcb1 libxshmfence1 libpango-1.0-0 libcairo2 libglib2.0-0t64 libdbus-1-3 libexpat1"
+          sudo apt-get install -y --no-install-recommends $(python3 scripts/linux_packages.py gui) $extra
+          { uname -a; nproc; lscpu | head -20; free -m; ls -la /dev/dri 2>&1 || true; git rev-parse HEAD; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: artifact
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Download the unstripped libxul of the same build (profile symbols)
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: /home/runner/libxul-symbols
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Verify and unpack (./dev fetch-build), TEST-ONLY chrome overlay
+        run: |
+          set -o pipefail
+          ./dev fetch-build --from-dir artifact --run "$RUN_ID" 2>&1 | tee "$EVIDENCE_OUT/fetch-build.log"
+          app=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$AXIOSOZO_BUILD_ROOT/linux-app/current.json")
+          python3 scripts/webkit_package.py overlay-chrome --app "$app" --out "$EVIDENCE_OUT/chrome-overlay.json" > "$EVIDENCE_OUT/chrome-overlay.log"
+          # What the profiler can resolve natively in this package (stripped or not).
+          { file "$app"/libxul.so; nm -D --defined-only "$app"/libxul.so | wc -l; nm --defined-only "$app"/libxul.so 2>&1 | wc -l; } > "$EVIDENCE_OUT/libxul-symbols.txt" 2>&1 || true
+          # The unstripped copy is used only if its GNU build id is the shipped library's.
+          sym="$AXIOSOZO_PROFILE_SYMBOLS/libxul.so"
+          if [ -f "$sym" ]; then
+            a=$(readelf -n "$app/libxul.so" | grep -m1 'Build ID'); b=$(readelf -n "$sym" | grep -m1 'Build ID')
+            { echo "shipped: $a"; echo "unstripped: $b"; nm --defined-only "$sym" | wc -l; } >> "$EVIDENCE_OUT/libxul-symbols.txt"
+            [ "$a" = "$b" ] || { echo "build id mismatch: not used" >> "$EVIDENCE_OUT/libxul-symbols.txt"; rm -f "$sym"; }
+          else echo "no unstripped libxul artifact" >> "$EVIDENCE_OUT/libxul-symbols.txt"; fi
+      - name: Restore pinned CEF archive
+        if: matrix.engine == 'chromium'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/axiosozo-build/cef/*.tar.bz2
+          key: cef-154.0.23-g062ebe4-${{ runner.arch }}-minimal-bench
+      - name: CEF host (probe.py setup, install-sandbox, check)
+        if: matrix.engine == 'chromium'
+        run: |
+          python3 native/chromium-host/probe.py setup 2>&1 | tail -n 5 | tee "$EVIDENCE_OUT/cef-setup.log"
+          python3 native/chromium-host/probe.py install-sandbox 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
+          python3 native/chromium-host/probe.py check 2>&1 | tee -a "$EVIDENCE_OUT/cef-setup.log" || true
+      - name: Zen profile (${{ matrix.engine }} tabs, ${{ matrix.scale }}x)
+        run: |
+          set -o pipefail
+          scale=(); [ "$SCALE" = 2 ] && scale=(--device-scale 2 --size 2304x1440)
+          timeout 2700 python3 tools/engine-bench/profile/zen_profile.py --engine "$ENGINE" --label "$LABEL" "${scale[@]}" --app fetched \
+            --out "$EVIDENCE_OUT/$LABEL" --passes "$PROFILE_PASSES" $PROFILE_EXTRA --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
+      - name: Same-job control (${{ matrix.engine }} tabs, ${{ matrix.scale }}x, PROFILE_CONTROL)
+        if: env.PROFILE_CONTROL != '' && matrix.engine != 'gecko'
+        run: |
+          set -o pipefail
+          scale=(); [ "$SCALE" = 2 ] && scale=(--device-scale 2 --size 2304x1440)
+          timeout 2700 python3 tools/engine-bench/profile/zen_profile.py --engine "$ENGINE" --label "$LABEL-control" "${scale[@]}" --app fetched \
+            --out "$EVIDENCE_OUT/$LABEL-control" --passes "$PROFILE_PASSES" $PROFILE_EXTRA $PROFILE_CONTROL \
+            --chrome-overlay "$EVIDENCE_OUT/chrome-overlay.json" 2>&1 | tail -n 40
+      - name: Upload raw profiles (14 days)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: raw-profiles-${{ matrix.engine }}-${{ matrix.scale }}x
+          path: ${{ env.EVIDENCE_OUT }}/${{ env.LABEL }}/profiles/*.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Summarize profiles (report.py process)
+        if: always()
+        run: |
+          python3 tools/engine-bench/profile/report.py process "$EVIDENCE_OUT/$LABEL" 2>&1 | tee "$EVIDENCE_OUT/report.log"
+          [ -d "$EVIDENCE_OUT/$LABEL-control" ] && python3 tools/engine-bench/profile/report.py process "$EVIDENCE_OUT/$LABEL-control" 2>&1 | tee -a "$EVIDENCE_OUT/report.log"
+          cat "$EVIDENCE_OUT/$LABEL"/report-*.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: Keep evidence small
+        if: always()
+        run: find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete; true
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: profile-${{ matrix.engine }}-${{ matrix.scale }}x
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: report-${{ matrix.engine }}-${{ matrix.scale }}x
+          path: ${{ env.EVIDENCE_OUT }}/**/report-*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  profile-webkit:
+    needs: zen-source
+    if: needs.zen-source.outputs.run_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write  # publish-ci-results
+      actions: read    # download the build artifact of another run
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-profile-webkit
+      ZEN_RUN_ID: ${{ needs.zen-source.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runner resources
+        env:
+          # Branch names in the JSON never reach the script text (no ${{ }} in run:).
+          ZEN_ARTIFACT_JSON: ${{ needs.zen-source.outputs.artifact }}
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          printf '%s\n' "$ZEN_ARTIFACT_JSON" > "$EVIDENCE_OUT/zen-artifact.json"
+          { uname -a; nproc; lscpu | head -20; free -m; } > "$EVIDENCE_OUT/runner.txt"
+      - name: Download the build artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64
+          path: ${{ github.workspace }}/../artifact
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: Download the unstripped libxul of the same build (profile symbols)
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: axiosozo-zen-linux-x86_64-libxul-symbols
+          path: ${{ github.workspace }}/../libxul-symbols
+          run-id: ${{ env.ZEN_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+      - name: CI environment - allow unprivileged user namespaces (bubblewrap)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Zen + WebKit host + zen_profile in debian:13 (pinned)
+        run: |
+          docker pull -q "$WEBKIT_IMAGE"
+          start=$(date +%s); set +e
+          mkdir -p "$GITHUB_WORKSPACE/../libxul-symbols"
+          docker run --rm --shm-size=2g -e ZEN_RUN_ID -e PROFILE_PASSES -e PROFILE_EXTRA -e PROFILE_CONTROL \
+            -v "$GITHUB_WORKSPACE/../libxul-symbols:/symbols:ro" \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined \
+            -v "$PWD:/src:ro" -v "$GITHUB_WORKSPACE/../artifact:/artifact:ro" -v "$EVIDENCE_OUT:/out" \
+            "$WEBKIT_IMAGE" sh /src/tools/engine-bench/profile/ci/webkit_container.sh
+          code=$?
+          echo "{\"container_exit\": $code, \"wall_seconds\": $(( $(date +%s) - start )), \"zen_run_id\": \"$ZEN_RUN_ID\"}" > "$EVIDENCE_OUT/job.json"
+          tail -n 40 "$EVIDENCE_OUT/steps.log" 2>/dev/null
+          cat "$EVIDENCE_OUT"/*/report-*.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit $code
+      - name: Keep evidence small
+        if: always()
+        run: |
+          sudo find "$EVIDENCE_OUT" -name '*.png' -size +3M -delete; sudo find "$EVIDENCE_OUT" -name 'browser-std*.log' -size +2M -delete
+          sudo find "$EVIDENCE_OUT" -name '*.deb' -delete; sudo chmod -R a+rX "$EVIDENCE_OUT"; true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: raw-profiles-webkit
+          path: ${{ env.EVIDENCE_OUT }}/*/profiles/*.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: profile-webkit
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: report-webkit
+          path: ${{ env.EVIDENCE_OUT }}/**/report-*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  report:
+    if: always()
+    needs: [profile, profile-webkit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      EVIDENCE_OUT: ${{ github.workspace }}/.local/evidence-profile-report
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: report-*
+          path: ${{ github.workspace }}/.local/reports
+      - name: Combined report
+        run: |
+          mkdir -p "$EVIDENCE_OUT"
+          python3 tools/engine-bench/profile/report.py combine "${{ github.workspace }}/.local/reports" --out "$EVIDENCE_OUT" >> "$GITHUB_STEP_SUMMARY"
+          echo '{"profile":"${{ needs.profile.result }}","profile-webkit":"${{ needs.profile-webkit.result }}"}' > "$EVIDENCE_OUT/jobs.json"
+      - if: always()
+        uses: ./.github/actions/publish-ci-results
+        with:
+          path: ${{ env.EVIDENCE_OUT }}
+          name: report

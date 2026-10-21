@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bench:raf</title>
+<!-- SYNTHETIC LOCAL BENCH FIXTURE (tools/engine-bench). requestAnimationFrame animation: one 120x120 CSS px box
+     moves on every animation frame and a counter changes, so every rAF tick produces new pixels in a small region. -->
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#edf2f5;font:18px system-ui,sans-serif;color:#163247}
+#box{position:absolute;left:0;top:200px;width:120px;height:120px;background:linear-gradient(135deg,#c0392b,#2471a3);border-radius:12px}
+#n{position:absolute;left:40px;top:40px;font:28px ui-monospace,monospace}.badge{position:absolute;left:40px;top:100px;font:14px ui-monospace,monospace;color:#596772}</style>
+<div id="n">0</div><p class="badge">SYNTHETIC LOCAL BENCH FIXTURE · rAF · NO ACCOUNTS</p><div id="box"></div>
+<script>const box=document.getElementById('box'),n=document.getElementById('n');let frames=0,t0=0;
+function tick(t){if(!t0)t0=t;frames++;const w=innerWidth-120;const x=(frames*6)%(2*w);box.style.transform=`translateX(${x<w?x:2*w-x}px)`;
+n.textContent=frames;requestAnimationFrame(tick);}
+requestAnimationFrame(tick);document.title='bench:raf|page='+(new URLSearchParams(location.search).get('page')||'1');</script></html>
